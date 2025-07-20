@@ -65,7 +65,20 @@
         "xstddef": "cpp",
         "xstring": "cpp",
         "xtr1common": "cpp",
-        "xutility": "cpp"
+        "xutility": "cpp",
+        "condition_variable": "cpp",
+        "random": "cpp",
+        "array": "cpp",
+        "fstream": "cpp",
+        "any": "cpp",
+        "csignal": "cpp",
+        "deque": "cpp",
+        "map": "cpp",
+        "set": "cpp",
+        "span": "cpp",
+        "unordered_set": "cpp",
+        "variant": "cpp",
+        "xtree": "cpp"
     },
     "makefile.makefilePath": "C:\\Users\\kianb\\Projects\\cpp-rt-car\\Makefile"
 }

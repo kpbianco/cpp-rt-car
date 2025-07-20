@@ -1,36 +1,38 @@
-# Project Name
 TARGET = simcore
 
-# Compiler and flags
 CXX = g++
-CXXFLAGS = -std=c++20 -O3 -Wall -Wextra -Wpedantic -march=native
+BASEFLAGS = -std=c++20 -Wall -Wextra -Wpedantic -pthread -march=native
+RELFLAGS = -O3
+DBGFLAGS = -O0 -g
 
-# Source files
+LOGFLAGS_INFO  = -DLOG_ENABLED -DLOG_DEFAULT_LEVEL=2
+LOGFLAGS_TRACE = -DLOG_ENABLED -DLOG_DEFAULT_LEVEL=0
+PROFFLAG = -DPROF_ENABLED
+
 SRCS = $(wildcard *.cpp)
 OBJS = $(SRCS:.cpp=.o)
-
-# Output directory (optional)
 BIN_DIR = bin
-OBJ_DIR = obj
 
-# Default rule
+all: CXXFLAGS = $(BASEFLAGS) $(RELFLAGS)
 all: $(BIN_DIR)/$(TARGET)
 
-# Compile and link
+debug: CXXFLAGS = $(BASEFLAGS) $(DBGFLAGS) $(LOGFLAGS_INFO) $(PROFFLAG)
+debug: clean $(BIN_DIR)/$(TARGET)
+
+trace: CXXFLAGS = $(BASEFLAGS) $(DBGFLAGS) $(LOGFLAGS_TRACE) $(PROFFLAG)
+trace: clean $(BIN_DIR)/$(TARGET)
+
 $(BIN_DIR)/$(TARGET): $(OBJS) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Ensure bin/ exists
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
-
-# Clean
 clean:
 	rm -f *.o
 	rm -rf $(BIN_DIR)
 
-# Phony targets
-.PHONY: all clean
+.PHONY: all clean debug trace

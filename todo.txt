@@ -1,0 +1,19 @@
+Component	Deeper Rationale
+googleTest/mock test
+Doublecheck logger/profiler are made best
+
+See if I can add these:
+
+ECS SoA Layout	You will process tens of thousands of homogeneous primitives (wheels, tyre contact nodes). SoA ensures each pass streams a single component array, enabling wide SIMD loads and minimizing cache line pollution from unrelated fields.
+Persistent Lock-Free Job Queue	As tasks become dynamic (contact generation, sleeping bodies waking), fixed wave dispatch via fetch_add on a monolithic range loses flexibility. A queue decouples production (system enumerating jobs) from consumption (workers). This reduces barriers and lets you inject tasks mid-frame for better load smoothing.
+Phase Dependency Graph	Some systems can proceed in parallel if you formalize data dependencies (e.g., Powertrain & Aero can run before Chassis integration, but Contacts depend on updated transforms). A graph avoids unnecessary sequentialization and prevents subtle ordering bugs.
+Chunk Auto-Tuning	Optimal chunk size is hardware & workload dependent. Too small: scheduling overhead dominates; too large: load imbalance and tail latency. Runtime tuning keeps each task in a “Goldilocks” window (e.g., 50–150 µs) maximizing parallel efficiency.
+Deterministic Reduction Strategy	Non-deterministic floating-point summation (due to parallel order) breaks replay sync and network authoritative reconciliation. A fixed binary tree or per-chunk local sum → deterministic fold sequence yields bit-stable results across thread counts.
+Running Time Budget Monitor	A physics rate higher than sustainable produces perpetual catch-up loops (soft spiral of death). Monitoring frame compute/period ratio lets you adapt rate or degrade fidelity before jitter becomes visible.
+NUMA / Core Affinity	Ensures memory allocated for per-thread hot data stays close to its executing core’s memory controller, reducing latency spikes and variance (important for consistent haptics / FFB output or VR).
+SIMD	Physics is arithmetic heavy. Explicit vectorization (e.g., position += velocity * dt) across large arrays is “free money” for throughput. Prepare data (alignment, contiguous arrays) now to exploit later.
+Memory Pools	Frame-transient allocations (contacts) cause allocator contention & fragmentation. Using linear arenas with frame reset yields O(1) path and deterministic performance; also avoids page faults mid-frame.
+Binary Event Trace	For fine-grained profiling at high frequencies, text logging is too expensive. A ring buffer of fixed-size binary events can be exported post-run, minimizing perturbation (Heisenberg effect).
+Predictive / Feed-Forward Adaptive	Instead of reacting after drift occurs, you raise catch-up capacity preemptively when the moving average compute time trends upward, reducing worst-case deviation.
+Fewer large outlier frame times	Pin threads to cores (affinity) + pre-touch data arrays (warm-up) before starting loop.	Lowers max frame spikes.
+Better chunk balance in small arrays	Auto-tune chunk size based on elementCount / threads at phase start.	Avoid over-partitioning.

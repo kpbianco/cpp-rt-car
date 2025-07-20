@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/mnt/c/Users/kianb/Projects/cpp-rt-car/build/cmake_install.cmake",
+		"/mnt/c/Users/kianb/Projects/cpp-rt-car/build/external/googletest/cmake_install.cmake",
+		"/mnt/c/Users/kianb/Projects/cpp-rt-car/build/external/googletest/googlemock/cmake_install.cmake",
+		"/mnt/c/Users/kianb/Projects/cpp-rt-car/build/external/googletest/googletest/cmake_install.cmake",
+		"/mnt/c/Users/kianb/Projects/cpp-rt-car/build/tests/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
