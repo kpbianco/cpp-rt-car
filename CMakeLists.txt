@@ -28,6 +28,7 @@ target_include_directories(simcore INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+
 if (ENABLE_LOG)
     target_compile_definitions(simcore INTERFACE -DLOG_ENABLED -DLOG_DEFAULT_LEVEL=2)
 endif()
@@ -47,3 +48,11 @@ if (ENABLE_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+add_custom_target(tests
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/build      # wipe  ▸ optional
+    COMMAND ${CMAKE_COMMAND} -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug ${CMAKE_SOURCE_DIR}
+    COMMAND ${CMAKE_COMMAND} --build . -- -j
+    COMMAND ctest --output-on-failure
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Configure, build and run all tests")

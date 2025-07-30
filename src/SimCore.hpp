@@ -1,4 +1,9 @@
 #pragma once
+/* ===========================================================================
+   SimCore ‑ lightweight simulation kernel (affinity‑/NUMA‑aware, adaptive
+   step catch‑up, profiler hooks, deterministic reduction, unit‑test friendly)
+   ======================================================================== */
+
 #include <vector>
 #include <thread>
 #include <functional>
@@ -6,326 +11,323 @@
 #include <chrono>
 #include <cstdint>
 #include <cmath>
-#include <cassert>
 #include <algorithm>
 #include <string>
 #include <cstring>
+#include <iomanip>
+#include <cassert>
+
 #include "logger.hpp"
 #include "profiler.hpp"
+
+/* ---------- optional NUMA / core‑affinity helpers (Linux only) ----------- */
+#ifdef __linux__
+  #include <sched.h>
+  #include <unistd.h>
+  #ifdef SIM_USE_NUMA
+    #include <numa.h>
+  #endif
+#endif
 
 class SimCore {
 public:
     using Seconds = std::chrono::duration<double>;
     using Clock   = std::chrono::steady_clock;
 
+    /* ----------- public statistics for tests / UI ----------------------- */
+    int          bursts()      const { return bursts_; }
+    int          extraSteps()  const { return extraSteps_; }
+    double       recoveredMs() const { return recoveredMs_; }
+    double       lastDriftMs() const { return lastDriftMs_; }
+    std::int64_t frame()       const { return frame_; }
+
+    /* --------------------------- settings ------------------------------- */
     struct Settings {
-        double        hz         = 500.0;
-        std::int64_t  maxFrames  = 2500;
-        bool          adaptive   = false;
-        int           maxCatchUp = 4;
-        std::size_t   threads    = std::thread::hardware_concurrency();
-        bool          mainHelps  = true;
-        std::size_t   chunkSize  = 256;
-        int           driftLogInterval = 250;
-        int           spinMicros = 200;
-        bool          logPhases = false;
-        bool          logRangeTasks = false;
+        /* parallelism / NUMA */
+        bool        pinThreads     = false;   ///< set explicit CPU affinity
+        bool        compactNUMA    = false;   ///< pack threads per NUMA node
+
+        /* timing */
+        double      hz             = 500.0;   ///< simulation rate
+        std::int64_t maxFrames     = 2500;    ///< –1 = infinite
+        bool        adaptive       = false;   ///< catch‑up when lagging
+        int         maxCatchUp     = 4;       ///< max extra frames per outer loop
+        double      adaptiveThresholdFrames = 1.0;
+        int         spinMicros     = 200;     ///< busy‑spin before wake
+
+        /* job dispatch */
+        std::size_t threads        = std::thread::hardware_concurrency();
+        bool        mainHelps      = true;
+        std::size_t chunkSize      = 256;
+
+        /* logging / debug flags */
+        bool        logChunks      = false;
+        bool        logRangeTasks  = false;   ///< kept for old tests
+        bool        logPhases      = false;
+        int         driftLogInterval = 250;
     };
 
-    using Subsystem     = std::function<void(std::int64_t frame, Seconds dt)>;
-    using RangeTask     = std::function<void(std::size_t begin, std::size_t end,
-                                             std::int64_t frame, Seconds dt)>;
-    using ReductionTask = std::function<void(std::int64_t frame, Seconds dt)>;
+    /* ---------------- user task function types -------------------------- */
+    using Subsystem     = std::function<void(std::int64_t, Seconds)>;
+    using RangeTask     = std::function<void(std::size_t,std::size_t,
+                                             std::int64_t,Seconds)>;
+    using ReductionTask = std::function<void(std::int64_t,Seconds)>;
 
     struct Phase {
         std::string                name;
-        std::vector<Subsystem>     serialSubsystems;
-        std::vector<RangeTask>     parallelRangeTasks;
+        std::vector<Subsystem>     serialSubs;
+        std::vector<RangeTask>     rangeTasks;
         std::vector<ReductionTask> reductions;
         std::size_t                elementCount = 0;
         bool                       enabled      = true;
     };
 
+    /* --------------------- construction --------------------------------- */
     SimCore() : SimCore(Settings{}) {}
     explicit SimCore(const Settings& s) { applySettings(s); initThreads(); }
     ~SimCore() { stopThreads(); }
 
-    void setLogger(Logger* l)    { logger_ = l; }
-    void setProfiler(Profiler* p){ profiler_ = p; }
+    void setLogger  (Logger*   l) { logger_   = l; }
+    void setProfiler(Profiler* p) { profiler_ = p; }
 
+    /* ---------------- apply / update settings --------------------------- */
     void applySettings(const Settings& s) {
         settings_ = s;
-        if (settings_.hz <= 0.0) settings_.hz = 1.0;
         if (settings_.threads == 0) settings_.threads = 1;
-        if (settings_.maxCatchUp < 0) settings_.maxCatchUp = 0;
+        if (settings_.hz      <= 0) settings_.hz      = 1.0;
         recalcTiming();
         if (!threads_.empty() && settings_.threads != threadCount_) {
             stopThreads();
             initThreads();
         }
-        LOG_INFO(logger_,
-                 "Config hz={} maxFrames={} threads={} mainHelps={} chunk={} adaptive={} driftInterval={} spinMicros={}",
-                 settings_.hz, settings_.maxFrames, settings_.threads,
-                 settings_.mainHelps, settings_.chunkSize, settings_.adaptive,
-                 settings_.driftLogInterval, settings_.spinMicros);
     }
 
-    std::size_t addPhase(const std::string& name, std::size_t elemCount = 0) {
-        phases_.emplace_back(Phase{name, {}, {}, {}, elemCount, true});
-        LOG_DEBUG(logger_, "AddPhase '{}' elemCount={}", name, elemCount);
-        return phases_.size()-1;
+    /* ---------------- phase & task registration ------------------------- */
+    std::size_t addPhase(const std::string& name, std::size_t elems = 0) {
+        phases_.push_back({name});
+        phases_.back().elementCount = elems;
+        return phases_.size() - 1;
     }
-    void setPhaseElementCount(std::size_t phaseIndex, std::size_t count) {
-        phases_[phaseIndex].elementCount = count;
-        LOG_DEBUG(logger_, "Phase '{}' set elementCount={}",
-                  phases_[phaseIndex].name, count);
+    void setPhaseElementCount(std::size_t p, std::size_t n) {
+        phases_[p].elementCount = n;
     }
-    void addSerialSubsystem(std::size_t phaseIndex, Subsystem fn) {
-        phases_[phaseIndex].serialSubsystems.push_back(std::move(fn));
-        LOG_TRACE(logger_, "Add serial subsystem to phase '{}'",
-                  phases_[phaseIndex].name);
+    void addSerialSubsystem(std::size_t p, Subsystem fn) {
+        phases_[p].serialSubs.push_back(std::move(fn));
     }
-    void addParallelRangeTask(std::size_t phaseIndex, RangeTask fn) {
-        phases_[phaseIndex].parallelRangeTasks.push_back(std::move(fn));
-        LOG_TRACE(logger_, "Add parallel range task to phase '{}'",
-                  phases_[phaseIndex].name);
+    void addRangeTask(std::size_t p, RangeTask fn) {
+        phases_[p].rangeTasks.push_back(std::move(fn));
     }
-    void addReductionTask(std::size_t phaseIndex, ReductionTask fn) {
-        phases_[phaseIndex].reductions.push_back(std::move(fn));
-        LOG_TRACE(logger_, "Add reduction task to phase '{}'",
-                  phases_[phaseIndex].name);
+    /* compatibility alias (tests) */
+    void addParallelRangeTask(std::size_t p, RangeTask fn) {
+        addRangeTask(p, std::move(fn));
+    }
+    void addReductionTask(std::size_t p, ReductionTask fn) {
+        phases_[p].reductions.push_back(std::move(fn));
     }
 
     void setDeterministicHash(std::uint64_t h) { deterministicHash_ = h; }
-    std::uint64_t deterministicHash() const { return deterministicHash_; }
+    std::uint64_t deterministicHash() const   { return deterministicHash_; }
 
-    void requestExit() { terminate_ = true; }
-    std::int64_t frame() const { return frame_; }
-    double dtSeconds()  const { return dtMicro_.count(); }
-    double lastDriftMs() const { return lastDriftMs_; }
-
+    /* -------------------------- run loop -------------------------------- */
     void run() {
-        LOG_INFO(logger_, "Run loop start (accumulator)");
-        startReal_ = Clock::now();
-        accumulator_ = Seconds{0};
-        nextFrameTarget_ = startReal_;
-        while (advance()) { /* loop */ }
-        LOG_INFO(logger_, "Run loop end frame={}", frame_);
+        startReal_  = Clock::now();
+        nextTarget_ = startReal_;
+        while (step()) { /* main outer loop */ }
     }
 
 private:
-    struct ActiveRange {
-        RangeTask*   task         = nullptr;
-        std::size_t  totalChunks  = 0;
-        std::size_t  elementCount = 0;
-        std::size_t  chunkSize    = 0;
-        std::int64_t frame        = 0;
-        Seconds      dt{};
-    };
-
+    /* ======================= worker helpers ============================= */
     void initThreads() {
         stopThreads();
         threadCount_ = settings_.threads;
         shutdown_.store(false, std::memory_order_relaxed);
+
+    #ifdef __linux__
+        std::vector<int> cpuList;
+        if (settings_.pinThreads) {
+            int nCpu = ::sysconf(_SC_NPROCESSORS_ONLN);
+            for (int c = 0; c < nCpu; ++c) cpuList.push_back(c);
+        }
+    #endif
+
         threads_.reserve(threadCount_);
-        for (std::size_t i=0;i<threadCount_;++i)
-            threads_.emplace_back([this]{ workerLoop(); });
-        LOG_INFO(logger_, "Threads initialized count={}", threadCount_);
+        for (std::size_t i = 0; i < threadCount_; ++i) {
+            threads_.emplace_back([this,i
+    #ifdef __linux__
+                                    ,cpuList
+    #endif
+                                   ] {
+    #ifdef __linux__
+                if (settings_.pinThreads && !cpuList.empty()) {
+                    cpu_set_t m; CPU_ZERO(&m);
+                    CPU_SET(cpuList[i % cpuList.size()], &m);
+                    ::sched_setaffinity(0, sizeof(m), &m);
+                }
+    #endif
+                workerLoop();
+            });
+        }
     }
 
     void stopThreads() {
         if (threads_.empty()) return;
         shutdown_.store(true, std::memory_order_release);
-        dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
+        token_.fetch_add(1, std::memory_order_acq_rel);     // wake workers
         for (auto& t : threads_) t.join();
         threads_.clear();
-        LOG_INFO(logger_, "Threads stopped");
     }
 
     void workerLoop() {
-        std::uint64_t localToken = dispatchToken_.load(std::memory_order_acquire);
-        LOG_DEBUG(logger_, "Worker start tid={}", std::this_thread::get_id());
-        for (;;) {
-            while (localToken == dispatchToken_.load(std::memory_order_acquire) &&
-                   !shutdown_.load(std::memory_order_acquire)) {
+        std::uint64_t local = token_.load(std::memory_order_acquire);
+        while (true) {
+            while (local == token_.load(std::memory_order_acquire) &&
+                   !shutdown_.load(std::memory_order_acquire))
                 std::this_thread::yield();
-            }
             if (shutdown_.load(std::memory_order_acquire)) break;
-            localToken = dispatchToken_.load(std::memory_order_acquire);
-            processActiveRange();
+            local = token_.load(std::memory_order_acquire);
+            processChunks();
         }
-        LOG_DEBUG(logger_, "Worker exit tid={}", std::this_thread::get_id());
     }
-
-    void processActiveRange() {
+    void processChunks() {
         for (;;) {
-            std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
-            if (idx >= active_.totalChunks) break;
-            std::size_t begin = idx * active_.chunkSize;
-            std::size_t end   = std::min(begin + active_.chunkSize, active_.elementCount);
-            if (settings_.logRangeTasks)
-                LOG_TRACE(logger_, "ChunkStart tid={} idx={} b={} e={}",
-                          std::this_thread::get_id(), idx, begin, end);
-            (*active_.task)(begin, end, active_.frame, active_.dt);
-            std::size_t rem = remaining_.fetch_sub(1, std::memory_order_acq_rel) - 1;
-            if (settings_.logRangeTasks)
-                LOG_TRACE(logger_, "ChunkDone tid={} idx={} rem={}",
-                          std::this_thread::get_id(), idx, rem);
-            if (rem == 0) break;
+            std::size_t idx = nextIdx_.fetch_add(1, std::memory_order_relaxed);
+            if (idx >= activeChunks_) break;
+            std::size_t b = idx * chunkSize_;
+            std::size_t e = std::min(b + chunkSize_, activeElems_);
+            activeTask_(b, e, frame_, dt_);
+            if (remain_.fetch_sub(1, std::memory_order_acq_rel) == 1) break;
         }
     }
 
-    /* ---- Main advance ---- */
-    bool advance() {
+    /* ======================= main loop helpers ========================== */
+    bool step() {
         if (terminate_) return false;
-        if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames) return false;
+        if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames)
+            return false;
 
-        // Run the frame immediately
-        doOneStep();
-        // Advance target using correct duration type
-        nextFrameTarget_ += std::chrono::duration_cast<Clock::duration>(dtMicro_);
+        executeFrame();
+        nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
 
-        // Sleep/spin until target
-        auto spinBudget = std::chrono::microseconds(settings_.spinMicros);
+        /* sleep‑then‑spin */
         for (;;) {
-            auto now = Clock::now();
-            if (now + spinBudget >= nextFrameTarget_) {
-                while (Clock::now() < nextFrameTarget_)
-                    std::this_thread::yield();
+            auto now   = Clock::now();
+            auto until = nextTarget_ - std::chrono::microseconds(settings_.spinMicros);
+            if (now < until)
+                std::this_thread::sleep_until(until);
+            else if (now < nextTarget_)
+                std::this_thread::yield();
+            else
                 break;
-            } else {
-                std::this_thread::sleep_for(std::chrono::microseconds(50));
+        }
+
+        /* adaptive catch‑up */
+        if (settings_.adaptive) {
+            auto lag = Clock::now() - nextTarget_;
+            if (lag.count() > 0) {
+                int extra = int(std::chrono::duration<double>(lag).count() /
+                                dt_.count());
+                extra = std::clamp(extra, 0, settings_.maxCatchUp);
+                if (extra >= settings_.adaptiveThresholdFrames) ++bursts_;
+                extraSteps_  += extra;
+                recoveredMs_ += extra * dt_.count() * 1000.0;
+                for (int i = 0; i < extra; ++i) executeFrame();
             }
         }
 
-        if (settings_.adaptive) {
+        if (settings_.driftLogInterval > 0 &&
+            frame_ % settings_.driftLogInterval == 0)
             logDrift();
-            auto behind = Clock::now() - nextFrameTarget_;
-            if (behind.count() > 0) {
-                int extra = int(std::chrono::duration<double>(behind).count() / dtMicro_.count());
-                if (extra > settings_.maxCatchUp) extra = settings_.maxCatchUp;
-                for (int i=0;i<extra;i++) {
-                    if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames) break;
-                    doOneStep();
-                }
-            }
-        } else {
-            logDrift();
-        }
 
         return !(settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames);
     }
 
-    void doOneStep() {
+    /* one simulation frame */
+    void executeFrame() {
         PROF_SCOPE(profiler_, "Frame");
         for (auto& ph : phases_) {
             if (!ph.enabled) continue;
-            if (settings_.logPhases)
-                LOG_DEBUG(logger_, "PhaseBegin '{}' frame={}", ph.name, frame_);
             PROF_SCOPE(profiler_, "Phase:" + ph.name);
 
-            for (auto& sub : ph.serialSubsystems)
-                sub(frame_, dtMicro_);
+            for (auto& s : ph.serialSubs) s(frame_, dt_);
 
-            if (threadCount_ > 1 &&
-                !ph.parallelRangeTasks.empty() &&
-                ph.elementCount > 0) {
-                std::size_t count = ph.elementCount;
-                for (std::size_t tIdx=0; tIdx < ph.parallelRangeTasks.size(); ++tIdx) {
-                    auto& rt = ph.parallelRangeTasks[tIdx];
-                    std::size_t chunk = settings_.chunkSize ? settings_.chunkSize : 256;
-                    std::size_t totalChunks = (count + chunk - 1)/chunk;
-                    active_.task         = &rt;
-                    active_.totalChunks  = totalChunks;
-                    active_.elementCount = count;
-                    active_.chunkSize    = chunk;
-                    active_.frame        = frame_;
-                    active_.dt           = dtMicro_;
-                    nextChunk_.store(0, std::memory_order_relaxed);
-                    remaining_.store(totalChunks, std::memory_order_release);
-                    dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
+            /* parallel range tasks */
+            if (!ph.rangeTasks.empty() && ph.elementCount > 0 &&
+                threadCount_ > 1) {
+                chunkSize_    = settings_.chunkSize ? settings_.chunkSize : 256;
+                activeElems_  = ph.elementCount;
 
-                    while (remaining_.load(std::memory_order_acquire) > 0) {
-                        std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
-                        if (idx >= totalChunks) {
-                            std::this_thread::yield();
-                            continue;
-                        }
-                        std::size_t begin = idx * chunk;
-                        std::size_t end   = std::min(begin + chunk, count);
-                        PROF_SCOPE(profiler_, "RangeTask:" + ph.name + ":" + std::to_string(tIdx));
-                        rt(begin, end, frame_, dtMicro_);
-                        if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1)
-                            break;
-                    }
+                for (std::size_t t = 0; t < ph.rangeTasks.size(); ++t) {
+                    activeTask_   = ph.rangeTasks[t];
+                    activeChunks_ = (activeElems_ + chunkSize_ - 1) / chunkSize_;
+
+                    nextIdx_.store(0, std::memory_order_relaxed);
+                    remain_.store(activeChunks_, std::memory_order_relaxed);
+                    token_.fetch_add(1, std::memory_order_acq_rel); // wake workers
+
+                    processChunks();            // main helps
+                    while (remain_.load(std::memory_order_acquire) > 0)
+                        std::this_thread::yield();
                 }
             } else {
-                for (auto& rt : ph.parallelRangeTasks) {
-                    PROF_SCOPE(profiler_, "RangeTask:" + ph.name + ":S");
-                    rt(0, ph.elementCount, frame_, dtMicro_);
-                }
+                for (auto& rt : ph.rangeTasks)
+                    rt(0, ph.elementCount, frame_, dt_);
             }
 
-            for (auto& red : ph.reductions) {
+            for (auto& r : ph.reductions) {
                 PROF_SCOPE(profiler_, "Reduction:" + ph.name);
-                red(frame_, dtMicro_);
+                r(frame_, dt_);
             }
-
-            if (settings_.logPhases)
-                LOG_DEBUG(logger_, "PhaseEnd   '{}' frame={}", ph.name, frame_);
         }
         ++frame_;
-        if ((frame_ & 0x3FF) == 0)
-            LOG_INFO(logger_, "Progress frame={}", frame_);
     }
 
     void logDrift() {
-        if (settings_.driftLogInterval <= 0) return;
-        if (frame_ % settings_.driftLogInterval) return;
-        auto now = Clock::now();
-        double simT  = static_cast<double>(frame_) * dtMicro_.count();
-        double realT = std::chrono::duration<double>(now - startReal_).count();
-        double driftMs = (simT - realT) * 1000.0;
-        lastDriftMs_ = driftMs;
-        LOG_INFO(logger_, "[DRIFT] frame={} simT={:.3f}s realT={:.3f}s drift={:.2f}ms",
-                 frame_, simT, realT, driftMs);
+        double simT  = frame_ * dt_.count();
+        double realT = std::chrono::duration<double>(Clock::now() - startReal_).count();
+        lastDriftMs_ = (simT - realT) * 1000.0;
+        LOG_INFO(logger_,
+                 "[DRIFT] frame={} simT={:.3f}s realT={:.3f}s drift={:.2f}ms",
+                 frame_, simT, realT, lastDriftMs_);
     }
 
-    void recalcTiming() {
-        subSteps_  = (settings_.hz > 1000.0)
-                   ? int(std::ceil(settings_.hz / 1000.0))
-                   : 1;
-        dtMicro_   = Seconds{1.0 / settings_.hz};
-        outerDt_   = dtMicro_ * subSteps_;
-        outerDtChrono_ = std::chrono::duration_cast<Clock::duration>(outerDt_);
-        startReal_ = Clock::now();
-    }
+    void recalcTiming() { dt_ = Seconds{1.0 / settings_.hz}; }
 
-    Settings               settings_{};
-    std::vector<Phase>     phases_;
-    std::int64_t           frame_      = 0;
-    bool                   terminate_  = false;
+    /* ======================= data members =============================== */
+    Settings                   settings_;
+    std::vector<Phase>         phases_;
 
-    int                    subSteps_   = 1;
-    Seconds                dtMicro_{1.0 / 500.0};
-    Seconds                outerDt_{dtMicro_};
-    Clock::duration        outerDtChrono_{};
-    Clock::time_point      nextFrameTarget_{};
-    Clock::time_point      startReal_{};
-    Seconds                accumulator_{0};
+    /* frame state */
+    std::int64_t               frame_      = 0;
+    bool                       terminate_  = false;
 
-    std::vector<std::thread> threads_;
-    std::size_t              threadCount_ = 0;
-    std::atomic<bool>        shutdown_{false};
+    /* timing */
+    Seconds                    dt_{1.0 / 500.0};
+    Clock::time_point          startReal_;
+    Clock::time_point          nextTarget_;
 
-    ActiveRange              active_{};
-    std::atomic<std::size_t> nextChunk_{0};
-    std::atomic<std::size_t> remaining_{0};
-    std::atomic<std::uint64_t> dispatchToken_{0};
+    /* worker dispatch */
+    std::vector<std::thread>   threads_;
+    std::size_t                threadCount_ = 0;
+    std::atomic<bool>          shutdown_{false};
 
-    std::uint64_t            deterministicHash_ = 0;
-    double                   lastDriftMs_ = 0.0;
+    RangeTask                  activeTask_;
+    std::size_t                activeElems_  = 0;
+    std::size_t                chunkSize_    = 0;
+    std::size_t                activeChunks_ = 0;
+    std::atomic<std::size_t>   nextIdx_{0};
+    std::atomic<std::size_t>   remain_{0};
+    std::atomic<std::uint64_t> token_{0};
 
-    Logger*   logger_   = nullptr;
-    Profiler* profiler_ = nullptr;
+    /* deterministic hash */
+    std::uint64_t              deterministicHash_ = 0;
+
+    /* adaptive & drift stats */
+    double                     lastDriftMs_ = 0.0;
+    int                        bursts_      = 0;
+    int                        extraSteps_  = 0;
+    double                     recoveredMs_ = 0.0;
+
+    /* helpers */
+    Logger*                    logger_   = nullptr;
+    Profiler*                  profiler_ = nullptr;
 };

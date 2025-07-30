@@ -1,0 +1,59 @@
+Start testing: Jul 29 19:10 MST
+----------------------------------------------------------
+1/1 Testing: simcore_all
+1/1 Test: simcore_all
+Command: "/mnt/c/Users/kianb/Projects/cpp-rt-car/tests/simcore_tests"
+Directory: /mnt/c/Users/kianb/Projects/cpp-rt-car/tests
+"simcore_all" start time: Jul 29 19:10 MST
+Output:
+----------------------------------------------------------
+Running main() from /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest/src/gtest_main.cc
+[==========] Running 7 tests from 7 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from SimCoreBasic
+[ RUN      ] SimCoreBasic.RunsExactFrames
+[       OK ] SimCoreBasic.RunsExactFrames (1200 ms)
+[----------] 1 test from SimCoreBasic (1200 ms total)
+
+[----------] 1 test from SimCoreDeterminism
+[ RUN      ] SimCoreDeterminism.HashSameAcrossThreadCounts
+[       OK ] SimCoreDeterminism.HashSameAcrossThreadCounts (3001 ms)
+[----------] 1 test from SimCoreDeterminism (3001 ms total)
+
+[----------] 1 test from Logger
+[ RUN      ] Logger.RespectsLevel
+[       OK ] Logger.RespectsLevel (0 ms)
+[----------] 1 test from Logger (0 ms total)
+
+[----------] 1 test from ProfilerIntegration
+[ RUN      ] ProfilerIntegration.CollectsPhaseAndFrame
+[       OK ] ProfilerIntegration.CollectsPhaseAndFrame (500 ms)
+[----------] 1 test from ProfilerIntegration (500 ms total)
+
+[----------] 1 test from AdaptiveParamTest
+[ RUN      ] AdaptiveParamTest.DriftBounded
+[       OK ] AdaptiveParamTest.DriftBounded (1500 ms)
+[----------] 1 test from AdaptiveParamTest (1500 ms total)
+
+[----------] 1 test from SoAData
+[ RUN      ] SoAData.ContiguousAndCorrect
+[       OK ] SoAData.ContiguousAndCorrect (0 ms)
+[----------] 1 test from SoAData (0 ms total)
+
+[----------] 1 test from JobQueue
+[ RUN      ] JobQueue.ExecutesEveryJob
+[       OK ] JobQueue.ExecutesEveryJob (467 ms)
+[----------] 1 test from JobQueue (467 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 7 test suites ran. (6669 ms total)
+[  PASSED  ] 7 tests.
+<end of output>
+Test time =   6.70 sec
+----------------------------------------------------------
+Test Passed.
+"simcore_all" end time: Jul 29 19:10 MST
+"simcore_all" time elapsed: 00:00:06
+----------------------------------------------------------
+
+End testing: Jul 29 19:10 MST

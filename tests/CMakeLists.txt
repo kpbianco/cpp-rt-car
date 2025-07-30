@@ -4,6 +4,8 @@ set(TEST_SOURCES
     test_logging.cpp
     test_profiler.cpp
     test_adaptive_param.cpp
+    test_soa.cpp
+    test_jobqueue.cpp
 )
 
 add_executable(simcore_tests ${TEST_SOURCES})
@@ -14,3 +16,13 @@ target_include_directories(simcore_tests PRIVATE
 )
 
 add_test(NAME simcore_all COMMAND simcore_tests)
+
+# --- affinity test -------------------------------------------------
+if (UNIX AND NOT APPLE)   # linux
+    list(APPEND TEST_SOURCES tests/test_affinity.cpp)
+    find_library(LIBNUMA numa)
+    if (LIBNUMA)
+        target_compile_definitions(simcore_tests PRIVATE SIM_USE_NUMA)
+        target_link_libraries(simcore_tests PRIVATE ${LIBNUMA})
+    endif()
+endif()

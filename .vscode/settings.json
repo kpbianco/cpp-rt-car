@@ -78,7 +78,15 @@
         "span": "cpp",
         "unordered_set": "cpp",
         "variant": "cpp",
-        "xtree": "cpp"
+        "xtree": "cpp",
+        "cstdarg": "cpp",
+        "cwctype": "cpp",
+        "memory_resource": "cpp",
+        "numeric": "cpp",
+        "string_view": "cpp",
+        "numbers": "cpp",
+        "semaphore": "cpp",
+        "cinttypes": "cpp"
     },
     "makefile.makefilePath": "C:\\Users\\kianb\\Projects\\cpp-rt-car\\Makefile"
 }
