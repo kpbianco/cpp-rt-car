@@ -9,6 +9,9 @@ simcore_tests: \
   CMakeFiles/simcore_tests.dir/test_adaptive_param.cpp.o \
   CMakeFiles/simcore_tests.dir/test_soa.cpp.o \
   CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o \
+  CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o \
+  CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o \
+  CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o \
   ../lib/libgtest.a \
   ../lib/libgtest_main.a \
   ../lib/libgmock.a \
@@ -61,6 +64,12 @@ CMakeFiles/simcore_tests.dir/test_adaptive_param.cpp.o:
 CMakeFiles/simcore_tests.dir/test_soa.cpp.o:
 
 CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o:
+
+CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o:
+
+CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o:
+
+CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o:
 
 ../lib/libgtest.a:
 

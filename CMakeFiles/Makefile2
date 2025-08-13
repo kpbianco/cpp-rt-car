@@ -210,7 +210,7 @@ CMakeFiles/simcore_app.dir/clean:
 CMakeFiles/tests.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tests.dir/build.make CMakeFiles/tests.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tests.dir/build.make CMakeFiles/tests.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=19 "Built target tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=22 "Built target tests"
 .PHONY : CMakeFiles/tests.dir/all
 
 # Build rule for subdir invocation for target.
@@ -227,7 +227,7 @@ tests: CMakeFiles/tests.dir/rule
 # codegen rule for target.
 CMakeFiles/tests.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tests.dir/build.make CMakeFiles/tests.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=19 "Finished codegen for target tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=22 "Finished codegen for target tests"
 .PHONY : CMakeFiles/tests.dir/codegen
 
 # clean rule for target.
@@ -373,12 +373,12 @@ tests/CMakeFiles/simcore_tests.dir/all: external/googletest/googletest/CMakeFile
 tests/CMakeFiles/simcore_tests.dir/all: external/googletest/googletest/CMakeFiles/gtest_main.dir/all
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=11,12,13,14,15,16,17,18 "Built target simcore_tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=11,12,13,14,15,16,17,18,19,20,21 "Built target simcore_tests"
 .PHONY : tests/CMakeFiles/simcore_tests.dir/all
 
 # Build rule for subdir invocation for target.
 tests/CMakeFiles/simcore_tests.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles 14
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles 17
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/simcore_tests.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles 0
 .PHONY : tests/CMakeFiles/simcore_tests.dir/rule
@@ -390,7 +390,7 @@ simcore_tests: tests/CMakeFiles/simcore_tests.dir/rule
 # codegen rule for target.
 tests/CMakeFiles/simcore_tests.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=11,12,13,14,15,16,17,18 "Finished codegen for target simcore_tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=11,12,13,14,15,16,17,18,19,20,21 "Finished codegen for target simcore_tests"
 .PHONY : tests/CMakeFiles/simcore_tests.dir/codegen
 
 # clean rule for target.

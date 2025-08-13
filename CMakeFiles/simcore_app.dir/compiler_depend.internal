@@ -5,9 +5,11 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/main.cpp
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/arena.hpp
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/car_soa.hpp
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/src/job_queue.hpp
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/logger.hpp
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/profiler.hpp
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/simcore.hpp
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/src/worker_pool.hpp
  /usr/include/alloca.h
  /usr/include/asm-generic/bitsperlong.h
  /usr/include/asm-generic/errno-base.h

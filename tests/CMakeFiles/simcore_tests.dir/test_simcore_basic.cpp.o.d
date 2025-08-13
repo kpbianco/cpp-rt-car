@@ -318,4 +318,6 @@ tests/CMakeFiles/simcore_tests.dir/test_simcore_basic.cpp.o: \
  /usr/include/c++/15.1.1/x86_64-pc-linux-gnu/bits/c++io.h \
  /usr/include/c++/15.1.1/bits/fstream.tcc \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/profiler.hpp \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/src/worker_pool.hpp \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/src/job_queue.hpp \
  /usr/include/numa.h

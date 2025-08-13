@@ -246,13 +246,13 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o: \
  /usr/include/c++/15.1.1/tr1/poly_hermite.tcc \
  /usr/include/c++/15.1.1/tr1/poly_laguerre.tcc \
  /usr/include/c++/15.1.1/tr1/riemann_zeta.tcc \
+ /usr/include/c++/15.1.1/cassert /usr/include/assert.h \
  /usr/include/c++/15.1.1/algorithm \
  /usr/include/c++/15.1.1/bits/ranges_algo.h \
  /usr/include/c++/15.1.1/pstl/glue_algorithm_defs.h \
  /usr/include/c++/15.1.1/pstl/execution_defs.h \
  /usr/include/c++/15.1.1/cstring /usr/include/string.h \
- /usr/include/strings.h /usr/include/c++/15.1.1/cassert \
- /usr/include/assert.h \
+ /usr/include/strings.h \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/logger.hpp \
  /usr/include/c++/15.1.1/memory \
  /usr/include/c++/15.1.1/bits/stl_raw_storage_iter.h \
@@ -267,5 +267,7 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o: \
  /usr/include/c++/15.1.1/bits/fstream.tcc \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/profiler.hpp \
  /usr/include/c++/15.1.1/iostream \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/src/worker_pool.hpp \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/src/job_queue.hpp \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/arena.hpp \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/src/car_soa.hpp

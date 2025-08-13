@@ -209,6 +209,54 @@ test_adaptive_param.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_adaptive_param.cpp.s
 .PHONY : test_adaptive_param.cpp.s
 
+test_chunk_autotune.o: test_chunk_autotune.cpp.o
+.PHONY : test_chunk_autotune.o
+
+# target to build an object file
+test_chunk_autotune.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o
+.PHONY : test_chunk_autotune.cpp.o
+
+test_chunk_autotune.i: test_chunk_autotune.cpp.i
+.PHONY : test_chunk_autotune.i
+
+# target to preprocess a source file
+test_chunk_autotune.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.i
+.PHONY : test_chunk_autotune.cpp.i
+
+test_chunk_autotune.s: test_chunk_autotune.cpp.s
+.PHONY : test_chunk_autotune.s
+
+# target to generate assembly for a file
+test_chunk_autotune.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.s
+.PHONY : test_chunk_autotune.cpp.s
+
+test_deterministic_reduction.o: test_deterministic_reduction.cpp.o
+.PHONY : test_deterministic_reduction.o
+
+# target to build an object file
+test_deterministic_reduction.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o
+.PHONY : test_deterministic_reduction.cpp.o
+
+test_deterministic_reduction.i: test_deterministic_reduction.cpp.i
+.PHONY : test_deterministic_reduction.i
+
+# target to preprocess a source file
+test_deterministic_reduction.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.i
+.PHONY : test_deterministic_reduction.cpp.i
+
+test_deterministic_reduction.s: test_deterministic_reduction.cpp.s
+.PHONY : test_deterministic_reduction.s
+
+# target to generate assembly for a file
+test_deterministic_reduction.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.s
+.PHONY : test_deterministic_reduction.cpp.s
+
 test_jobqueue.o: test_jobqueue.cpp.o
 .PHONY : test_jobqueue.o
 
@@ -256,6 +304,30 @@ test_logging.s: test_logging.cpp.s
 test_logging.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_logging.cpp.s
 .PHONY : test_logging.cpp.s
+
+test_phase_graph.o: test_phase_graph.cpp.o
+.PHONY : test_phase_graph.o
+
+# target to build an object file
+test_phase_graph.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o
+.PHONY : test_phase_graph.cpp.o
+
+test_phase_graph.i: test_phase_graph.cpp.i
+.PHONY : test_phase_graph.i
+
+# target to preprocess a source file
+test_phase_graph.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.i
+.PHONY : test_phase_graph.cpp.i
+
+test_phase_graph.s: test_phase_graph.cpp.s
+.PHONY : test_phase_graph.s
+
+# target to generate assembly for a file
+test_phase_graph.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.s
+.PHONY : test_phase_graph.cpp.s
 
 test_profiler.o: test_profiler.cpp.o
 .PHONY : test_profiler.o
@@ -370,12 +442,21 @@ help:
 	@echo "... test_adaptive_param.o"
 	@echo "... test_adaptive_param.i"
 	@echo "... test_adaptive_param.s"
+	@echo "... test_chunk_autotune.o"
+	@echo "... test_chunk_autotune.i"
+	@echo "... test_chunk_autotune.s"
+	@echo "... test_deterministic_reduction.o"
+	@echo "... test_deterministic_reduction.i"
+	@echo "... test_deterministic_reduction.s"
 	@echo "... test_jobqueue.o"
 	@echo "... test_jobqueue.i"
 	@echo "... test_jobqueue.s"
 	@echo "... test_logging.o"
 	@echo "... test_logging.i"
 	@echo "... test_logging.s"
+	@echo "... test_phase_graph.o"
+	@echo "... test_phase_graph.i"
+	@echo "... test_phase_graph.s"
 	@echo "... test_profiler.o"
 	@echo "... test_profiler.i"
 	@echo "... test_profiler.s"

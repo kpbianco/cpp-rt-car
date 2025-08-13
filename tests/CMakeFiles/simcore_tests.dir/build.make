@@ -170,6 +170,48 @@ tests/CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.s"
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_jobqueue.cpp -o CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.s
 
+tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o: tests/CMakeFiles/simcore_tests.dir/flags.make
+tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o: tests/test_phase_graph.cpp
+tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o: tests/CMakeFiles/simcore_tests.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o -MF CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o.d -o CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o -c /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_phase_graph.cpp
+
+tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.i"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_phase_graph.cpp > CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.i
+
+tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.s"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_phase_graph.cpp -o CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.s
+
+tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o: tests/CMakeFiles/simcore_tests.dir/flags.make
+tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o: tests/test_chunk_autotune.cpp
+tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o: tests/CMakeFiles/simcore_tests.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o -MF CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o.d -o CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o -c /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_chunk_autotune.cpp
+
+tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.i"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_chunk_autotune.cpp > CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.i
+
+tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.s"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_chunk_autotune.cpp -o CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.s
+
+tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o: tests/CMakeFiles/simcore_tests.dir/flags.make
+tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o: tests/test_deterministic_reduction.cpp
+tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o: tests/CMakeFiles/simcore_tests.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o -MF CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o.d -o CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o -c /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_deterministic_reduction.cpp
+
+tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.i"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_deterministic_reduction.cpp > CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.i
+
+tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.s"
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && /usr/sbin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_deterministic_reduction.cpp -o CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.s
+
 # Object files for target simcore_tests
 simcore_tests_OBJECTS = \
 "CMakeFiles/simcore_tests.dir/test_simcore_basic.cpp.o" \
@@ -178,7 +220,10 @@ simcore_tests_OBJECTS = \
 "CMakeFiles/simcore_tests.dir/test_profiler.cpp.o" \
 "CMakeFiles/simcore_tests.dir/test_adaptive_param.cpp.o" \
 "CMakeFiles/simcore_tests.dir/test_soa.cpp.o" \
-"CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o"
+"CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o" \
+"CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o" \
+"CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o" \
+"CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o"
 
 # External object files for target simcore_tests
 simcore_tests_EXTERNAL_OBJECTS =
@@ -190,6 +235,9 @@ tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/test_profiler.cpp.o
 tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/test_adaptive_param.cpp.o
 tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/test_soa.cpp.o
 tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o
+tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o
+tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o
+tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o
 tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/build.make
 tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/compiler_depend.ts
 tests/simcore_tests: lib/libgtest.a
@@ -198,7 +246,7 @@ tests/simcore_tests: lib/libgmock.a
 tests/simcore_tests: /usr/lib/libnuma.so
 tests/simcore_tests: lib/libgtest.a
 tests/simcore_tests: tests/CMakeFiles/simcore_tests.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Linking CXX executable simcore_tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Linking CXX executable simcore_tests"
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car/tests && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/simcore_tests.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

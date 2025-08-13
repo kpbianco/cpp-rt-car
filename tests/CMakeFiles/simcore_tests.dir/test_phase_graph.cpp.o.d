@@ -1,5 +1,5 @@
-tests/CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o: \
- /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_jobqueue.cpp \
+tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o: \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/test_phase_graph.cpp \
  /usr/include/stdc-predef.h \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest/include/gtest/gtest.h \
  /usr/include/c++/15.1.1/cstddef \
@@ -277,9 +277,7 @@ tests/CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o: \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest/include/gtest/gtest-typed-test.h \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest/include/gtest/gtest_pred_impl.h \
  /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest/include/gtest/gtest_prod.h \
- /mnt/c/Users/kianb/Projects/cpp-rt-car/src/worker_pool.hpp \
- /usr/include/c++/15.1.1/thread /usr/include/c++/15.1.1/chrono \
- /usr/include/c++/15.1.1/bits/stl_algo.h \
+ /usr/include/c++/15.1.1/chrono /usr/include/c++/15.1.1/bits/stl_algo.h \
  /usr/include/c++/15.1.1/bits/algorithmfwd.h \
  /usr/include/c++/15.1.1/bits/stl_heap.h \
  /usr/include/c++/15.1.1/bits/uniform_int_dist.h \
@@ -289,4 +287,37 @@ tests/CMakeFiles/simcore_tests.dir/test_jobqueue.cpp.o: \
  /usr/include/c++/15.1.1/bits/formatfwd.h \
  /usr/include/c++/15.1.1/bits/unicode.h \
  /usr/include/c++/15.1.1/bits/unicode-data.h \
- /mnt/c/Users/kianb/Projects/cpp-rt-car/src/job_queue.hpp
+ /usr/include/c++/15.1.1/thread \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/../src/simcore.hpp \
+ /usr/include/c++/15.1.1/cmath /usr/include/math.h \
+ /usr/include/bits/math-vector.h /usr/include/bits/libm-simd-decl-stubs.h \
+ /usr/include/bits/flt-eval-method.h /usr/include/bits/fp-logb.h \
+ /usr/include/bits/fp-fast.h /usr/include/bits/mathcalls-macros.h \
+ /usr/include/bits/mathcalls-helper-functions.h \
+ /usr/include/bits/mathcalls.h /usr/include/bits/mathcalls-narrow.h \
+ /usr/include/bits/iscanonical.h /usr/include/c++/15.1.1/bits/specfun.h \
+ /usr/include/c++/15.1.1/tr1/gamma.tcc \
+ /usr/include/c++/15.1.1/tr1/special_function_util.h \
+ /usr/include/c++/15.1.1/tr1/bessel_function.tcc \
+ /usr/include/c++/15.1.1/tr1/beta_function.tcc \
+ /usr/include/c++/15.1.1/tr1/ell_integral.tcc \
+ /usr/include/c++/15.1.1/tr1/exp_integral.tcc \
+ /usr/include/c++/15.1.1/tr1/hypergeometric.tcc \
+ /usr/include/c++/15.1.1/tr1/legendre_function.tcc \
+ /usr/include/c++/15.1.1/tr1/modified_bessel_func.tcc \
+ /usr/include/c++/15.1.1/tr1/poly_hermite.tcc \
+ /usr/include/c++/15.1.1/tr1/poly_laguerre.tcc \
+ /usr/include/c++/15.1.1/tr1/riemann_zeta.tcc \
+ /usr/include/c++/15.1.1/algorithm \
+ /usr/include/c++/15.1.1/bits/ranges_algo.h \
+ /usr/include/c++/15.1.1/pstl/glue_algorithm_defs.h \
+ /usr/include/c++/15.1.1/cstring \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/../src/logger.hpp \
+ /usr/include/c++/15.1.1/fstream \
+ /usr/include/c++/15.1.1/x86_64-pc-linux-gnu/bits/basic_file.h \
+ /usr/include/c++/15.1.1/x86_64-pc-linux-gnu/bits/c++io.h \
+ /usr/include/c++/15.1.1/bits/fstream.tcc \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/../src/profiler.hpp \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/../src/worker_pool.hpp \
+ /mnt/c/Users/kianb/Projects/cpp-rt-car/tests/../src/job_queue.hpp \
+ /usr/include/numa.h

@@ -4,9 +4,11 @@
 CMakeFiles/simcore_app.dir/src/main.cpp.o: src/main.cpp \
   src/arena.hpp \
   src/car_soa.hpp \
+  src/job_queue.hpp \
   src/logger.hpp \
   src/profiler.hpp \
   src/simcore.hpp \
+  src/worker_pool.hpp \
   /usr/include/alloca.h \
   /usr/include/asm-generic/bitsperlong.h \
   /usr/include/asm-generic/errno-base.h \
@@ -518,17 +520,9 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o:
 
 /usr/include/c++/15.1.1/limits:
 
-/usr/include/c++/15.1.1/bits/chrono.h:
+/usr/include/c++/15.1.1/iosfwd:
 
-/usr/include/c++/15.1.1/bits/charconv.h:
-
-/usr/lib/libc.so.6:
-
-/usr/include/c++/15.1.1/bits/align.h:
-
-/usr/include/sys/syscall.h:
-
-/usr/include/c++/15.1.1/bits/cpp_type_traits.h:
+/usr/include/c++/15.1.1/ios:
 
 /usr/include/c++/15.1.1/bits/basic_ios.tcc:
 
@@ -559,8 +553,6 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o:
 /usr/include/bits/timesize.h:
 
 /usr/include/c++/15.1.1/bits/std_function.h:
-
-/usr/include/c++/15.1.1/iosfwd:
 
 /usr/include/bits/unistd_ext.h:
 
@@ -660,6 +652,50 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o:
 
 /usr/include/c++/15.1.1/concepts:
 
+/usr/include/bits/types/error_t.h:
+
+/usr/include/libintl.h:
+
+/usr/include/bits/endianness.h:
+
+/usr/include/bits/libm-simd-decl-stubs.h:
+
+/usr/include/bits/mathcalls-helper-functions.h:
+
+/usr/include/bits/uintn-identity.h:
+
+/usr/include/c++/15.1.1/bits/basic_ios.h:
+
+/usr/include/bits/typesizes.h:
+
+/usr/include/bits/cpu-set.h:
+
+/usr/include/c++/15.1.1/bits/stl_bvector.h:
+
+/usr/include/c++/15.1.1/ext/string_conversions.h:
+
+/usr/include/bits/confname.h:
+
+/usr/include/c++/15.1.1/ostream:
+
+/usr/include/c++/15.1.1/iomanip:
+
+/usr/include/assert.h:
+
+/usr/include/c++/15.1.1/debug/assertions.h:
+
+/usr/include/bits/stdint-intn.h:
+
+/usr/include/bits/types/clockid_t.h:
+
+/usr/include/c++/15.1.1/vector:
+
+/usr/include/bits/posix2_lim.h:
+
+/usr/include/c++/15.1.1/bits/monostate.h:
+
+/usr/include/c++/15.1.1/bits/semaphore_base.h:
+
 /usr/include/c++/15.1.1/bits/alloc_traits.h:
 
 /usr/include/bits/atomic_wide_counter.h:
@@ -677,44 +713,6 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o:
 /usr/include/bits/iscanonical.h:
 
 /usr/include/bits/locale.h:
-
-/usr/include/libintl.h:
-
-/usr/include/bits/endianness.h:
-
-/usr/include/bits/libm-simd-decl-stubs.h:
-
-/usr/include/bits/mathcalls-helper-functions.h:
-
-/usr/include/bits/uintn-identity.h:
-
-/usr/include/c++/15.1.1/bits/basic_ios.h:
-
-/usr/include/bits/typesizes.h:
-
-/usr/include/c++/15.1.1/vector:
-
-/usr/include/bits/posix2_lim.h:
-
-/usr/include/c++/15.1.1/bits/semaphore_base.h:
-
-/usr/include/c++/15.1.1/bits/monostate.h:
-
-/usr/include/bits/cpu-set.h:
-
-/usr/include/c++/15.1.1/bits/stl_bvector.h:
-
-/usr/include/c++/15.1.1/ext/string_conversions.h:
-
-/usr/include/bits/confname.h:
-
-/usr/include/c++/15.1.1/ostream:
-
-/usr/include/c++/15.1.1/iomanip:
-
-/usr/include/assert.h:
-
-/usr/include/c++/15.1.1/debug/assertions.h:
 
 /usr/include/c++/15.1.1/cstdlib:
 
@@ -742,11 +740,51 @@ CMakeFiles/simcore_app.dir/src/main.cpp.o:
 
 /usr/include/c++/15.1.1/bits/stl_iterator.h:
 
+/usr/include/asm-generic/errno-base.h:
+
+/usr/include/bits/math-vector.h:
+
+/usr/include/bits/uio_lim.h:
+
+/usr/include/bits/stdint-least.h:
+
+/usr/include/stdint.h:
+
+/usr/include/endian.h:
+
+/usr/include/c++/15.1.1/bits/stl_algo.h:
+
+src/main.cpp:
+
 /usr/include/bits/floatn.h:
 
 /usr/include/bits/types/struct_timeval.h:
 
 /usr/include/c++/15.1.1/bits/locale_classes.h:
+
+/usr/include/bits/stdlib-float.h:
+
+src/arena.hpp:
+
+/usr/lib/gcc/x86_64-pc-linux-gnu/15.1.1/include/limits.h:
+
+/usr/include/bits/types/__sigset_t.h:
+
+/usr/include/c++/15.1.1/cerrno:
+
+/usr/include/asm-generic/posix_types.h:
+
+src/job_queue.hpp:
+
+/usr/lib/libc.so.6:
+
+/usr/include/c++/15.1.1/bits/align.h:
+
+/usr/include/c++/15.1.1/bits/charconv.h:
+
+/usr/include/sys/syscall.h:
+
+/usr/include/c++/15.1.1/bits/cpp_type_traits.h:
 
 /usr/include/c++/15.1.1/semaphore:
 
@@ -772,43 +810,15 @@ src/profiler.hpp:
 
 /usr/include/c++/15.1.1/cmath:
 
-/usr/include/bits/environments.h:
+/usr/include/c++/15.1.1/fstream:
+
+/usr/include/asm/types.h:
 
 src/logger.hpp:
 
 /usr/include/bits/types/struct_FILE.h:
 
-/usr/include/c++/15.1.1/fstream:
-
-/usr/include/asm/types.h:
-
-src/main.cpp:
-
-/usr/include/bits/stdint-least.h:
-
-/usr/include/stdint.h:
-
-/usr/include/endian.h:
-
-/usr/include/c++/15.1.1/bits/stl_algo.h:
-
-/usr/include/asm-generic/errno-base.h:
-
-/usr/include/bits/stdlib-float.h:
-
-src/arena.hpp:
-
-/usr/lib/gcc/x86_64-pc-linux-gnu/15.1.1/include/limits.h:
-
-/usr/include/bits/types/__sigset_t.h:
-
-/usr/include/c++/15.1.1/cerrno:
-
-/usr/include/asm-generic/posix_types.h:
-
-/usr/include/bits/math-vector.h:
-
-/usr/include/bits/uio_lim.h:
+/usr/include/bits/environments.h:
 
 /usr/include/asm/unistd.h:
 
@@ -823,6 +833,8 @@ src/arena.hpp:
 /usr/include/c++/15.1.1/stop_token:
 
 /usr/include/c++/15.1.1/bits/exception_defines.h:
+
+src/worker_pool.hpp:
 
 /usr/include/errno.h:
 
@@ -914,11 +926,7 @@ src/car_soa.hpp:
 
 /usr/include/bits/setjmp.h:
 
-/usr/include/bits/types/error_t.h:
-
-/usr/include/bits/types/clockid_t.h:
-
-/usr/include/bits/stdint-intn.h:
+/usr/include/c++/15.1.1/bits/chrono.h:
 
 /usr/include/bits/timex.h:
 
@@ -973,8 +981,6 @@ src/car_soa.hpp:
 /usr/include/c++/15.1.1/ratio:
 
 /usr/include/c++/15.1.1/bits/locale_conv.h:
-
-/usr/include/c++/15.1.1/ios:
 
 /usr/include/c++/15.1.1/bits/locale_facets.h:
 
