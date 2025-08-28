@@ -301,6 +301,12 @@ INSTALL_GTEST:BOOL=ON
 //Path to a library.
 LIBNUMA:FILEPATH=/usr/lib/libnuma.so
 
+//Enable AVX2/FMA for SIMD kernels
+SIM_ENABLE_AVX2:BOOL=ON
+
+//No help, variable specified on the command line.
+SIM_USE_NUMA:UNINITIALIZED=ON
+
 //Value Computed by CMake
 car_sim_core_BINARY_DIR:STATIC=/mnt/c/Users/kianb/Projects/cpp-rt-car
 

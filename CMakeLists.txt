@@ -37,6 +37,12 @@ if (ENABLE_PROF)
     target_compile_definitions(simcore INTERFACE -DPROF_ENABLED)
 endif()
 
+option(SIM_ENABLE_AVX2 "Enable AVX2/FMA for SIMD kernels" ON)
+
+if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  add_compile_options(-mavx2 -mfma)
+endif()
+
 target_compile_features(simcore INTERFACE cxx_std_20)
 
 # Main executable

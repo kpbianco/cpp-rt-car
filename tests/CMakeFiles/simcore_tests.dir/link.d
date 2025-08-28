@@ -12,6 +12,8 @@ simcore_tests: \
   CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o \
   CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o \
   CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o \
+  CMakeFiles/simcore_tests.dir/test_budget_monitor.cpp.o \
+  CMakeFiles/simcore_tests.dir/test_simd.cpp.o \
   ../lib/libgtest.a \
   ../lib/libgtest_main.a \
   ../lib/libgmock.a \
@@ -70,6 +72,10 @@ CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.o:
 CMakeFiles/simcore_tests.dir/test_chunk_autotune.cpp.o:
 
 CMakeFiles/simcore_tests.dir/test_deterministic_reduction.cpp.o:
+
+CMakeFiles/simcore_tests.dir/test_budget_monitor.cpp.o:
+
+CMakeFiles/simcore_tests.dir/test_simd.cpp.o:
 
 ../lib/libgtest.a:
 

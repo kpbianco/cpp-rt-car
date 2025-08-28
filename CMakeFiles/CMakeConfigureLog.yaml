@@ -1922,3 +1922,153 @@ events:
         
       exitCode: 1
 ...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/sbin/c++ 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is GNU, found in:
+        /mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/3.28.3/CompilerIdCXX/a.out
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:57 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-4lv5Xz"
+      binary: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-4lv5Xz"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-4lv5Xz'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/sbin/make -f Makefile cmTC_957ed/fast
+        No such file or directory
+        
+      exitCode: 1
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake:49 (try_compile)"
+      - "CMakeLists.txt:3 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/sbin/c++"
+    directories:
+      source: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-6RNJpg"
+      binary: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-6RNJpg"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-6RNJpg'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/sbin/make -f Makefile cmTC_f85bb/fast
+        No such file or directory
+        
+      exitCode: 1
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:3 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/sbin/c++ 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is GNU, found in:
+        /mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/3.28.3/CompilerIdCXX/a.out
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerABI.cmake:57 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:3 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-3cs0wZ"
+      binary: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-3cs0wZ"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-3cs0wZ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/sbin/make -f Makefile cmTC_18ffb/fast
+        No such file or directory
+        
+      exitCode: 1
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake:49 (try_compile)"
+      - "CMakeLists.txt:3 (project)"
+    checks:
+      - "Check for working CXX compiler: /usr/sbin/c++"
+    directories:
+      source: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-XEAAJW"
+      binary: "/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-XEAAJW"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/c/Users/kianb/Projects/cpp-rt-car/CMakeFiles/CMakeScratch/TryCompile-XEAAJW'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/sbin/make -f Makefile cmTC_649eb/fast
+        No such file or directory
+        
+      exitCode: 1
+...

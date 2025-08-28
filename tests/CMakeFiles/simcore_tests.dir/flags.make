@@ -4,7 +4,7 @@
 # compile CXX with /usr/sbin/c++
 CXX_DEFINES = -DLOG_DEFAULT_LEVEL=2 -DLOG_ENABLED -DPROF_ENABLED -DSIM_USE_NUMA
 
-CXX_INCLUDES = -I/mnt/c/Users/kianb/Projects/cpp-rt-car/src -I/mnt/c/Users/kianb/Projects/cpp-rt-car/tests -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest/include -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googlemock/include -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googlemock
+CXX_INCLUDES = -I/mnt/c/Users/kianb/Projects/cpp-rt-car/src -I/mnt/c/Users/kianb/Projects/cpp-rt-car/tests -I/mnt/c/Users/kianb/Projects/cpp-rt-car -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest/include -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googletest -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googlemock/include -isystem /mnt/c/Users/kianb/Projects/cpp-rt-car/external/googletest/googlemock
 
-CXX_FLAGS = -g -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wnon-virtual-dtor
+CXX_FLAGS = -g -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wnon-virtual-dtor -mavx2 -mfma
 

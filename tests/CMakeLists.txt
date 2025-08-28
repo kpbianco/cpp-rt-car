@@ -9,6 +9,8 @@ set(TEST_SOURCES
     test_phase_graph.cpp
     test_chunk_autotune.cpp
     test_deterministic_reduction.cpp
+    test_budget_monitor.cpp
+    test_simd.cpp
 )
 
 add_executable(simcore_tests ${TEST_SOURCES})
@@ -19,6 +21,14 @@ target_include_directories(simcore_tests PRIVATE
 )
 
 add_test(NAME simcore_all COMMAND simcore_tests)
+
+option(SIM_ENABLE_AVX2 "Enable AVX2/FMA for SIMD kernels" ON)
+if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  add_compile_options(-mavx2 -mfma)
+endif()
+
+# Make sure tests see the headers
+target_include_directories(simcore_tests PRIVATE ${CMAKE_SOURCE_DIR})
 
 # --- affinity test -------------------------------------------------
 if (UNIX AND NOT APPLE)   # linux

@@ -209,6 +209,30 @@ test_adaptive_param.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_adaptive_param.cpp.s
 .PHONY : test_adaptive_param.cpp.s
 
+test_budget_monitor.o: test_budget_monitor.cpp.o
+.PHONY : test_budget_monitor.o
+
+# target to build an object file
+test_budget_monitor.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_budget_monitor.cpp.o
+.PHONY : test_budget_monitor.cpp.o
+
+test_budget_monitor.i: test_budget_monitor.cpp.i
+.PHONY : test_budget_monitor.i
+
+# target to preprocess a source file
+test_budget_monitor.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_budget_monitor.cpp.i
+.PHONY : test_budget_monitor.cpp.i
+
+test_budget_monitor.s: test_budget_monitor.cpp.s
+.PHONY : test_budget_monitor.s
+
+# target to generate assembly for a file
+test_budget_monitor.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_budget_monitor.cpp.s
+.PHONY : test_budget_monitor.cpp.s
+
 test_chunk_autotune.o: test_chunk_autotune.cpp.o
 .PHONY : test_chunk_autotune.o
 
@@ -401,6 +425,30 @@ test_simcore_determinism.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_simcore_determinism.cpp.s
 .PHONY : test_simcore_determinism.cpp.s
 
+test_simd.o: test_simd.cpp.o
+.PHONY : test_simd.o
+
+# target to build an object file
+test_simd.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_simd.cpp.o
+.PHONY : test_simd.cpp.o
+
+test_simd.i: test_simd.cpp.i
+.PHONY : test_simd.i
+
+# target to preprocess a source file
+test_simd.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_simd.cpp.i
+.PHONY : test_simd.cpp.i
+
+test_simd.s: test_simd.cpp.s
+.PHONY : test_simd.s
+
+# target to generate assembly for a file
+test_simd.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_simd.cpp.s
+.PHONY : test_simd.cpp.s
+
 test_soa.o: test_soa.cpp.o
 .PHONY : test_soa.o
 
@@ -442,6 +490,9 @@ help:
 	@echo "... test_adaptive_param.o"
 	@echo "... test_adaptive_param.i"
 	@echo "... test_adaptive_param.s"
+	@echo "... test_budget_monitor.o"
+	@echo "... test_budget_monitor.i"
+	@echo "... test_budget_monitor.s"
 	@echo "... test_chunk_autotune.o"
 	@echo "... test_chunk_autotune.i"
 	@echo "... test_chunk_autotune.s"
@@ -466,6 +517,9 @@ help:
 	@echo "... test_simcore_determinism.o"
 	@echo "... test_simcore_determinism.i"
 	@echo "... test_simcore_determinism.s"
+	@echo "... test_simd.o"
+	@echo "... test_simd.i"
+	@echo "... test_simd.s"
 	@echo "... test_soa.o"
 	@echo "... test_soa.i"
 	@echo "... test_soa.s"
