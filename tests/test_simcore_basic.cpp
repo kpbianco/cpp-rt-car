@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "simcore.hpp"
+#include "SimCore.hpp"
 #include "logger.hpp"
 
 TEST(SimCoreBasic, RunsExactFrames) {

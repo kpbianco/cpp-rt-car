@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "src/simcore.hpp"
+#include "src/SimCore.hpp"
 #include <atomic>
 #include <thread>
 

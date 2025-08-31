@@ -1,4 +1,4 @@
-#include "simcore.hpp"
+#include "SimCore.hpp"
 #include "logger.hpp"
 #include "arena.hpp"
 #include "car_soa.hpp"

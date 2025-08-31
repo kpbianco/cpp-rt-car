@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../src/simcore.hpp"
+#include "src/SimCore.hpp"
 
 static double run_sum_with_threads(std::size_t threads)
 {

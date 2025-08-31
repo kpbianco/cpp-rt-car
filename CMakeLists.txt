@@ -28,6 +28,24 @@ target_include_directories(simcore INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+# In your top-level CMakeLists.txt
+
+# Ensure asserts are ON for tests (avoid -DNDEBUG)
+if (CMAKE_BUILD_TYPE MATCHES "Release")
+  message(WARNING "Tests are more useful with assertions; consider Debug or RelWithDebInfo.")
+endif()
+
+add_library(rt_memory INTERFACE)
+target_include_directories(rt_memory INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# Optional toggles:
+# target_compile_definitions(rt_memory INTERFACE RT_ARENA_PRETOUCH=1)
+# target_compile_definitions(rt_memory INTERFACE RT_ARENA_MLOCK=1)
+# target_compile_definitions(rt_memory INTERFACE RT_ARENA_MADVISE_HUGEPAGE=1)
+
+# --- Tests ---
+
+
 
 if (ENABLE_LOG)
     target_compile_definitions(simcore INTERFACE -DLOG_ENABLED -DLOG_DEFAULT_LEVEL=2)

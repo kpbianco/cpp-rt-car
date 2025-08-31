@@ -1,3 +1,4 @@
+// SimCore.hpp — predictive priming + correct headroom math + frame PROF_SCOPE
 #pragma once
 #include <vector>
 #include <thread>
@@ -11,25 +12,29 @@
 #include <string>
 #include <cstring>
 #include <iomanip>
+#include <memory>
+#include <memory_resource>
+#include <limits>
 
 #include "logger.hpp"
 #include "profiler.hpp"
-#include "worker_pool.hpp"   // for optional phase-level parallelism
+#include "worker_pool.hpp"
+#include "frame_arena.hpp"
+#include "bintrace.hpp"
 
-#include <sched.h>              // CPU affinity (Linux/POSIX)
+#include <sched.h>
 #ifdef __linux__
 #  include <unistd.h>
 #  include <sys/syscall.h>
 #  include <sys/types.h>
 #  ifdef SIM_USE_NUMA
-#    include <numa.h>           // libnuma (optional)
+#    include <numa.h>
 #  endif
 #endif
 
-// --- Deterministic helpers ---------------------------------------------------
 namespace simcore_det {
-    // In-place fixed-order pairwise sum: bit-stable across thread counts.
-    inline double pairwise_sum(std::vector<double>& vals) {
+    template <class Vec>
+    inline double pairwise_sum(Vec& vals) {
         std::size_t len = vals.size();
         if (len == 0) return 0.0;
         while (len > 1) {
@@ -41,7 +46,32 @@ namespace simcore_det {
         }
         return vals[0];
     }
-} // namespace simcore_det
+}
+
+// PMR adaptor for FrameArena
+struct ArenaResource : std::pmr::memory_resource {
+    FrameArena* arena;
+    explicit ArenaResource(FrameArena& a) : arena(&a) {}
+private:
+    void* do_allocate(std::size_t bytes, std::size_t align) override {
+        return arena->allocate(bytes, align);
+    }
+    void do_deallocate(void*, std::size_t, std::size_t) override {}
+    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+        return this == &other;
+    }
+};
+
+// Erased call refs
+struct SerialFnRef { void (*fn)(void*, std::int64_t, std::chrono::duration<double>); void* ctx{}; };
+struct RangeFnRef  { void (*fn)(void*, std::size_t, std::size_t, std::int64_t, std::chrono::duration<double>); void* ctx{}; };
+struct RedFnRef    { void (*fn)(void*, std::int64_t, std::chrono::duration<double>); void* ctx{}; };
+struct DetRangeReductionRef {
+    double (*leaf)(void*, std::size_t, std::size_t, std::int64_t, std::chrono::duration<double>);
+    void*   leafCtx{};
+    void  (*sink)(void*, double, std::int64_t, std::chrono::duration<double>);
+    void*   sinkCtx{};
+};
 
 class SimCore {
 public:
@@ -50,7 +80,11 @@ public:
 
     int    bursts()      const { return bursts_; }
     int    extraSteps()  const { return extraSteps_; }
+    int    preSteps()    const { return preSteps_; }
     double recoveredMs() const { return recoveredMs_; }
+    double precoveredMs() const { return precoveredMs_; }
+    FrameArena& frameArena() { return frameArenas_->tls(); }
+    bintrace::Trace& bintrace() { return bintrace_; }
 
     struct Settings {
         // Affinity / NUMA
@@ -61,14 +95,14 @@ public:
         double        hz         = 500.0;
         std::int64_t  maxFrames  = 2500;
 
-        // Catch-up (adaptive accumulator)
+        // Reactive catch-up
         bool          adaptive   = false;
         int           maxCatchUp = 4;
 
-        // Worker / chunking
+        // Workers / chunking
         std::size_t   threads    = std::thread::hardware_concurrency();
         bool          mainHelps  = true;
-        std::size_t   chunkSize  = 256;     // used when autoTuneChunks=false
+        std::size_t   chunkSize  = 256;
 
         // Logging / profiling
         int           driftLogInterval = 250;
@@ -76,6 +110,7 @@ public:
         bool          logPhases = false;
         bool          logRangeTasks = false;
         bool          logChunks = false;
+        std::size_t   arenaPerThreadBytes = 1u << 20;
 
         // Adaptive burst accounting
         double        adaptiveThresholdFrames = 1.0;
@@ -86,41 +121,52 @@ public:
         std::size_t   minChunk = 64;
         std::size_t   maxChunk = 8192;
 
-        // Deterministic reduction leaf size (in elements)
+        // Deterministic reduction leaf size (elements)
         std::size_t   detReduceLeaf = 2048;
 
         // Time Budget Monitor
         bool          budgetMonitor = true;
-        int           budgetWindow  = 120;     // moving avg over N frames
-        double        budgetWarnRatio = 0.85;  // compute_ms / period_ms
-        double        budgetCritRatio = 1.00;  // >= 1.0 means over budget
-        bool          autoAdaptHz    = false;  // optional: reduce hz if critical
-        double        adaptDownFactor = 0.95;  // multiply hz by this on adapt
-        double        minHz           = 60.0;  // floor when adapting
-        int           adaptCooldownFrames = 600; // frames between adaptations
+        int           budgetWindow  = 120;
+        double        budgetWarnRatio = 0.85;
+        double        budgetCritRatio = 1.00;
+        bool          autoAdaptHz    = false;
+        double        adaptDownFactor = 0.95;
+        double        minHz           = 60.0;
+        int           adaptCooldownFrames = 600;
+
+        // Binary event trace
+        bool          bintraceEnable = false;
+        std::size_t   bintraceEventsPerThread = 1u << 18;
+
+        // Predictive / Feed-Forward
+        bool          predictiveEnable = true;
+        int           predictiveWindow = 60;            // samples for slope
+        int           predictiveWarmup = 20;            // min samples to act
+        int           predictiveLookaheadFrames = 8;    // forecast horizon
+        double        predictiveSlopeMsPerFrame = 0.005;// slope trigger
+        int           predictivePreStepLimit = 2;       // max per outer frame
+        double        predictiveMinAvgRatio = 0.70;     // require some load
+        bool          predictiveDebugLog = false;       // optional logging
     };
 
-    using Subsystem     = std::function<void(std::int64_t frame, Seconds dt)>;
-    using RangeTask     = std::function<void(std::size_t begin, std::size_t end,
-                                             std::int64_t frame, Seconds dt)>;
-    using ReductionTask = std::function<void(std::int64_t frame, Seconds dt)>;
+    using Subsystem     = std::function<void(std::int64_t, Seconds)>;
+    using RangeTask     = std::function<void(std::size_t, std::size_t, std::int64_t, Seconds)>;
+    using ReductionTask = std::function<void(std::int64_t, Seconds)>;
 
     struct DetRangeReduction {
-        // Return a stable partial for [begin,end)
-        std::function<double(std::size_t, std::size_t,
-                             std::int64_t, Seconds)> fn;
-        // Consume the deterministic total
+        std::function<double(std::size_t, std::size_t, std::int64_t, Seconds)> fn;
         std::function<void(double, std::int64_t, Seconds)> sink;
     };
 
     struct Phase {
-        std::string                name;
-        std::vector<Subsystem>     serialSubsystems;
-        std::vector<RangeTask>     parallelRangeTasks;
-        std::vector<ReductionTask> reductions;
-        std::vector<DetRangeReduction> detRangeReductions; // NEW
-        std::size_t                elementCount = 0;
-        bool                       enabled      = true;
+        std::string  name;
+        std::vector<SerialFnRef>          serials;
+        std::vector<RangeFnRef>           ranges;
+        std::vector<RedFnRef>             reductions;
+        std::vector<DetRangeReductionRef> detRanges;
+        std::vector<std::shared_ptr<void>> keep;
+        std::size_t  elementCount = 0;
+        bool         enabled      = true;
     };
 
     struct BudgetSample {
@@ -136,14 +182,10 @@ public:
     explicit SimCore(const Settings& s) { applySettings(s); initThreads(); }
     ~SimCore() { stopThreads(); }
 
-    void setLogger(Logger* l)    { logger_ = l; }
-    void setProfiler(Profiler* p){ profiler_ = p; }
+    void setLogger(Logger* l)     { logger_ = l; }
+    void setProfiler(Profiler* p) { profiler_ = p; }
     void setWorkerPool(WorkerPool* pool) { pool_ = pool; }
-
-    // Optional: receive budget monitor samples each frame
-    void setBudgetCallback(std::function<void(const BudgetSample&)> cb) {
-        budgetCb_ = std::move(cb);
-    }
+    void setBudgetCallback(std::function<void(const BudgetSample&)> cb) { budgetCb_ = std::move(cb); }
 
     void applySettings(const Settings& s) {
         settings_ = s;
@@ -151,25 +193,28 @@ public:
         if (settings_.threads == 0) settings_.threads = 1;
         if (settings_.maxCatchUp < 0) settings_.maxCatchUp = 0;
 
+        if (settings_.predictiveWindow <= 0) settings_.predictiveWindow = 1;
+        if (settings_.predictiveWindow > settings_.budgetWindow)
+            settings_.predictiveWindow = settings_.budgetWindow;
+
         recalcTiming();
 
-        // Resize monitor window on settings change
         costWindow_.assign(std::max(0, settings_.budgetWindow), 0.0);
         costHead_  = 0;
         costCount_ = 0;
         costSumMs_ = 0.0;
+        predictivePrimed_ = false;
 
-        if (!threads_.empty() && settings_.threads != threadCount_) {
+        if (!threads_.empty() && settings_.threads != workerCount_) {
             stopThreads();
             initThreads();
         }
         LOG_INFO(logger_,
-                 "Config hz={} maxFrames={} threads={} mainHelps={} chunk={} "
-                 "adaptive={} driftInterval={} spinMicros={} autoTuneChunks={} minChunk={} maxChunk={}",
+                 "Config hz={} maxFrames={} threads={} predictive={} lookahead={} slope={}ms/f preLimit={}",
                  settings_.hz, settings_.maxFrames, settings_.threads,
-                 settings_.mainHelps, settings_.chunkSize, settings_.adaptive,
-                 settings_.driftLogInterval, settings_.spinMicros,
-                 settings_.autoTuneChunks, settings_.minChunk, settings_.maxChunk);
+                 settings_.predictiveEnable, settings_.predictiveLookaheadFrames,
+                 settings_.predictiveSlopeMsPerFrame, settings_.predictivePreStepLimit);
+        graphDirty_ = true;
     }
 
 #ifdef __linux__
@@ -182,49 +227,64 @@ public:
     }
 #endif
 
+    // Phase API
     std::size_t addPhase(const std::string& name, std::size_t elemCount = 0) {
-        phases_.emplace_back(Phase{name, {}, {}, {}, {}, elemCount, true});
+        phases_.emplace_back(Phase{name, {}, {}, {}, {}, {}, elemCount, true});
         succ_.push_back({});
         indegree_.push_back(0);
         graphDirty_ = true;
-
         LOG_DEBUG(logger_, "AddPhase '{}' elemCount={}", name, elemCount);
         return phases_.size() - 1;
     }
-
     void setPhaseElementCount(std::size_t phaseIndex, std::size_t count) {
         phases_[phaseIndex].elementCount = count;
-        LOG_DEBUG(logger_, "Phase '{}' set elementCount={}",
-                  phases_[phaseIndex].name, count);
+        graphDirty_ = true;
+        LOG_DEBUG(logger_, "Phase '{}' set elementCount={}", phases_[phaseIndex].name, count);
     }
     void addSerialSubsystem(std::size_t phaseIndex, Subsystem fn) {
-        phases_[phaseIndex].serialSubsystems.push_back(std::move(fn));
-        LOG_TRACE(logger_, "Add serial subsystem to phase '{}'",
-                  phases_[phaseIndex].name);
+        using F = std::function<void(std::int64_t, Seconds)>;
+        auto sp = std::make_shared<F>(std::move(fn));
+        phases_[phaseIndex].keep.push_back(sp);
+        SerialFnRef ref{[](void* c, std::int64_t fr, Seconds dt){ (*static_cast<F*>(c))(fr, dt); }, sp.get()};
+        phases_[phaseIndex].serials.push_back(ref);
     }
     void addParallelRangeTask(std::size_t phaseIndex, RangeTask fn) {
-        phases_[phaseIndex].parallelRangeTasks.push_back(std::move(fn));
-        LOG_TRACE(logger_, "Add parallel range task to phase '{}'",
-                  phases_[phaseIndex].name);
+        using F = std::function<void(std::size_t, std::size_t, std::int64_t, Seconds)>;
+        auto sp = std::make_shared<F>(std::move(fn));
+        phases_[phaseIndex].keep.push_back(sp);
+        RangeFnRef ref{[](void* c, std::size_t b, std::size_t e, std::int64_t fr, Seconds dt){ (*static_cast<F*>(c))(b, e, fr, dt); }, sp.get()};
+        phases_[phaseIndex].ranges.push_back(ref);
     }
     void addReductionTask(std::size_t phaseIndex, ReductionTask fn) {
-        phases_[phaseIndex].reductions.push_back(std::move(fn));
-        LOG_TRACE(logger_, "Add reduction task to phase '{}'",
-                  phases_[phaseIndex].name);
+        using F = std::function<void(std::int64_t, Seconds)>;
+        auto sp = std::make_shared<F>(std::move(fn));
+        phases_[phaseIndex].keep.push_back(sp);
+        RedFnRef ref{[](void* c, std::int64_t fr, Seconds dt){ (*static_cast<F*>(c))(fr, dt); }, sp.get()};
+        phases_[phaseIndex].reductions.push_back(ref);
     }
-    // Deterministic range reduction
     void addDeterministicRangeReduction(
         std::size_t phaseIndex,
         std::function<double(std::size_t,std::size_t,std::int64_t,Seconds)> leaf,
         std::function<void(double,std::int64_t,Seconds)> sink)
     {
-        phases_[phaseIndex].detRangeReductions.push_back(
-            DetRangeReduction{std::move(leaf), std::move(sink)});
-        LOG_TRACE(logger_, "Add deterministic reduction to phase '{}'",
-                  phases_[phaseIndex].name);
+        using LeafF = std::function<double(std::size_t,std::size_t,std::int64_t,Seconds)>;
+        using SinkF = std::function<void(double,std::int64_t,Seconds)>;
+        auto leafSp = std::make_shared<LeafF>(std::move(leaf));
+        auto sinkSp = std::make_shared<SinkF>(std::move(sink));
+        phases_[phaseIndex].keep.push_back(leafSp);
+        phases_[phaseIndex].keep.push_back(sinkSp);
+        DetRangeReductionRef ref;
+        ref.leafCtx = leafSp.get();
+        ref.sinkCtx = sinkSp.get();
+        ref.leaf = [](void* c, std::size_t b, std::size_t e, std::int64_t fr, Seconds dt)->double {
+            return (*static_cast<LeafF*>(c))(b, e, fr, dt);
+        };
+        ref.sink = [](void* c, double total, std::int64_t fr, Seconds dt) {
+            (*static_cast<SinkF*>(c))(total, fr, dt);
+        };
+        phases_[phaseIndex].detRanges.push_back(ref);
     }
 
-    // "before -> after" (after depends on before).
     bool addDependency(std::size_t before, std::size_t after) {
         if (before >= phases_.size() || after >= phases_.size() || before == after) return false;
         auto& s = succ_[before];
@@ -232,7 +292,6 @@ public:
         s.push_back(after);
         indegree_[after] += 1;
         graphDirty_ = true;
-        LOG_DEBUG(logger_, "Dep: '{}' -> '{}'", phases_[before].name, phases_[after].name);
         return true;
     }
 
@@ -245,17 +304,15 @@ public:
     double lastDriftMs() const { return lastDriftMs_; }
 
     void run() {
-        LOG_INFO(logger_, "Run loop start (accumulator)");
         startReal_ = Clock::now();
         accumulator_ = Seconds{0};
         nextTarget_ = startReal_;
-        while (step()) { /* loop */ }
-        LOG_INFO(logger_, "Run loop end frame={}", frame_);
+        while (step()) {}
     }
 
 private:
     struct ActiveRange {
-        RangeTask*   task         = nullptr;
+        RangeFnRef*  fn = nullptr;
         std::size_t  totalChunks  = 0;
         std::size_t  elementCount = 0;
         std::size_t  chunkSize    = 0;
@@ -263,17 +320,26 @@ private:
         Seconds      dt{};
     };
 
-    // ------------------ thread helpers (range-level) ------------------
     void initThreads()
     {
         stopThreads();
-        threadCount_ = settings_.threads;
+        workerCount_ = settings_.threads;
+
+        frameArenas_ = std::make_unique<FrameArenaPool>(workerCount_ + 1,
+                                                        settings_.arenaPerThreadBytes, 64);
+
+        bintrace_.init(workerCount_ + 1, settings_.bintraceEventsPerThread,
+                       settings_.bintraceEnable);
+
         shutdown_.store(false, std::memory_order_relaxed);
 
 #ifdef __linux__
         std::vector<int> cpuList;
         if (settings_.pinThreads) {
-            const int nCpus = ::sysconf(_SC_NPROCESSORS_ONLN);
+            const long nCpusL = ::sysconf(_SC_NPROCESSORS_ONLN);
+            const int  nCpus  = (nCpusL > static_cast<long>(std::numeric_limits<int>::max()))
+                                ? std::numeric_limits<int>::max()
+                                : static_cast<int>(nCpusL);
 #   ifdef SIM_USE_NUMA
             if (settings_.compactNUMA && numa_available() != -1) {
                 const int maxNode = numa_max_node();
@@ -292,8 +358,8 @@ private:
         }
 #endif
 
-        threads_.reserve(threadCount_);
-        for (std::size_t i = 0; i < threadCount_; ++i) {
+        threads_.reserve(workerCount_);
+        for (std::size_t i = 0; i < workerCount_; ++i) {
             threads_.emplace_back([this, i,
 #ifdef __linux__
                                    cpuList
@@ -303,20 +369,25 @@ private:
                 if (settings_.pinThreads && !cpuList.empty())
                     set_affinity(std::size_t(cpuList[i % cpuList.size()]));
 #endif
+                frameArenas_->bindCurrentThread(i);
+                bintrace_.bindThread(i);
                 workerLoop();
             });
         }
-        LOG_INFO(logger_, "Threads initialised count={} pin={} compactNUMA={}",
-                 threadCount_, settings_.pinThreads, settings_.compactNUMA);
+        frameArenas_->bindCurrentThread(workerCount_); // main
+        bintrace_.bindThread(workerCount_);
     }
 
     void stopThreads() {
-        if (threads_.empty()) return;
+        if (threads_.empty()) {
+            bintrace_.shutdown();
+            return;
+        }
         shutdown_.store(true, std::memory_order_release);
         dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
         for (auto& t : threads_) t.join();
         threads_.clear();
-        LOG_INFO(logger_, "Threads stopped");
+        bintrace_.shutdown();
     }
 
     void workerLoop() {
@@ -341,14 +412,15 @@ private:
             std::size_t b = idx * active_.chunkSize;
             std::size_t e = std::min(b + active_.chunkSize, active_.elementCount);
 
-            if (settings_.logChunks)
-                LOG_TRACE(logger_, "ChunkStart tid={} idx={} b={} e={}",
-                          std::this_thread::get_id(), idx, b, e);
+            bintrace_.log(bintrace::EV_ChunkStart,
+                          static_cast<std::uint32_t>(active_.chunkSize),
+                          (static_cast<std::uint64_t>(active_.frame) << 32) | static_cast<std::uint64_t>(idx));
 
-            (*active_.task)(b, e, active_.frame, active_.dt);
+            active_.fn->fn(active_.fn->ctx, b, e, active_.frame, active_.dt);
 
-            if (settings_.logChunks)
-                LOG_TRACE(logger_, "ChunkDone  tid={} idx={}", std::this_thread::get_id(), idx);
+            bintrace_.log(bintrace::EV_ChunkDone,
+                          static_cast<std::uint32_t>(e - b),
+                          (static_cast<std::uint64_t>(active_.frame) << 32) | static_cast<std::uint64_t>(idx));
 
             if (remaining_.fetch_sub(1,std::memory_order_acq_rel) == 1) break;
         }
@@ -358,7 +430,7 @@ private:
         if (!settings_.autoTuneChunks) {
             return std::max<std::size_t>(1, settings_.chunkSize ? settings_.chunkSize : 256);
         }
-        const std::size_t threads = std::max<std::size_t>(1, threadCount_);
+        const std::size_t threads = std::max<std::size_t>(1, workerCount_);
         const std::size_t targetChunks =
             std::max<std::size_t>(1, threads * static_cast<std::size_t>(std::max(1, settings_.targetChunksPerThread)));
 
@@ -369,41 +441,151 @@ private:
         return chunk;
     }
 
-    // ------------------ main step / frame ------------------
+    // --- Predictive helpers -------------------------------------------------
+
+    double computeSlopeMsPerFrame() const {
+        const int N = std::min<int>(static_cast<int>(costCount_), settings_.predictiveWindow);
+        if (N <= 1) return 0.0;
+
+        double sumY = 0.0, sumIY = 0.0;
+        long long sumI = 0, sumI2 = 0;
+
+        int start = static_cast<int>(costHead_) - N;
+        if (start < 0) start += static_cast<int>(costWindow_.size());
+
+        for (int k = 0; k < N; ++k) {
+            int idx = start + k;
+            if (idx >= (int)costWindow_.size()) idx -= (int)costWindow_.size();
+            double y = costWindow_[idx];
+            int i = k;
+            sumY  += y;
+            sumI  += i;
+            sumI2 += 1LL * i * i;
+            sumIY += (double)i * y;
+        }
+
+        const double denom = (double)N * (double)sumI2 - (double)sumI * (double)sumI;
+        if (denom <= 0.0) return 0.0;
+        return ((double)N * sumIY - (double)sumI * sumY) / denom; // ms/frame
+    }
+
+    int trendUpCount(int M) const {
+        const int available = std::min<int>(static_cast<int>(costCount_), settings_.predictiveWindow);
+        if (available <= 1) return 0;
+        M = std::clamp(M, 1, available - 1);
+
+        int up = 0;
+        int idxNew = static_cast<int>(costHead_) - 1;
+        if (idxNew < 0) idxNew += static_cast<int>(costWindow_.size());
+        double prev = costWindow_[idxNew];
+
+        for (int k = 1; k <= M; ++k) {
+            int idx = idxNew - k;
+            if (idx < 0) idx += static_cast<int>(costWindow_.size());
+            double val = costWindow_[idx];
+            if (prev > val) ++up; // increasing towards present
+            prev = val;
+        }
+        return up;
+    }
+
+    int decidePreSteps(double slopeMsPerFrame) const {
+        // warmup
+        if (costCount_ < std::max(settings_.predictiveWarmup, 2)) return 0;
+
+        // If trend isn't strong, do nothing
+        if (slopeMsPerFrame < settings_.predictiveSlopeMsPerFrame) return 0;
+
+        // Only block if we're already at/over critical budget (don’t use predictiveMinAvgRatio here)
+        const double periodMs = 1000.0 / settings_.hz;
+        const double avgComputeMs = (costCount_ ? (costSumMs_ / double(costCount_)) : 0.0);
+        const double avgRatio = (periodMs > 0.0) ? (avgComputeMs / periodMs) : 0.0;
+        if (avgRatio >= settings_.budgetCritRatio) return 0;
+
+        // Heuristic: 1 step by default, up to your configured limit
+        return std::clamp(1, 0, settings_.predictivePreStepLimit);
+    }
+
+
+    // --- main step ----------------------------------------------------------
     bool step()
     {
         if (terminate_) return false;
         if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames) return false;
 
-        // Measure compute cost for budget monitor
+        // Frame-level profiler scope
+        PROF_SCOPE(profiler_, "Frame");
+
         auto computeStart = Clock::now();
-
         executeFrame();
-
         auto computeEnd = Clock::now();
-        double computeMs = std::chrono::duration<double, std::milli>(computeEnd - computeStart).count();
+
+        const double computeMs = std::chrono::duration<double, std::milli>(computeEnd - computeStart).count();
         updateBudget(computeMs);
+
+        // feed-forward: build headroom
+       // --- Predictive pre-steps (do BEFORE sleeping) --------------------
+if (settings_.predictiveEnable) {
+    // headroom to the *next* frame target (not the current frame we just finished)
+    auto nowBeforePre = Clock::now();
+    const auto nextFrameTarget = nextTarget_ + std::chrono::duration_cast<Clock::duration>(dt_);
+    const auto aheadDur = nextFrameTarget - nowBeforePre;
+    const double aheadFr = std::chrono::duration<double>(aheadDur).count() / dt_.count();
+
+    // decide desired number (based on slope, warmup, etc.)
+    const double slope = computeSlopeMsPerFrame(); // your existing function
+    int desired = decidePreSteps(slope);           // your existing function, see #2 below
+
+    // cap to remaining lookahead budget (e.g., 6 frames in your test)
+    int cap = settings_.predictiveLookaheadFrames
+            - static_cast<int>(std::floor(std::max(0.0, aheadFr)));
+    if (cap < 0) cap = 0;
+    int n = std::min(desired, cap);
+
+    for (int i = 0; i < n; ++i) {
+        // Execute one extra frame right now
+        auto cs = Clock::now();
+        executeFrame();
+        auto ce = Clock::now();
+
+        // keep all your existing budget accounting for each pre-step
+        double cm = std::chrono::duration<double, std::milli>(ce - cs).count();
+        updateBudget(cm);
+
+        // each pre-step moves the schedule forward by dt
+        nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
+        ++preSteps_;
+
+        // re-check headroom before another pre-step
+        nowBeforePre = Clock::now();
+        const auto nfTarget = nextTarget_ + std::chrono::duration_cast<Clock::duration>(dt_);
+        const auto aDur = nfTarget - nowBeforePre;
+        const double aFr = std::chrono::duration<double>(aDur).count() / dt_.count();
+        int newCap = settings_.predictiveLookaheadFrames
+                   - static_cast<int>(std::floor(std::max(0.0, aFr)));
+        if (i+1 >= std::min(desired, newCap)) break;
+    }
+}
+
 
         nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
 
-        // sleep/spin to aim for cadence
         auto now = Clock::now();
         if (now < nextTarget_) {
             auto remain = std::chrono::duration_cast<std::chrono::microseconds>(nextTarget_ - now);
             if (remain.count() > settings_.spinMicros)
                 std::this_thread::sleep_for(remain - std::chrono::microseconds(settings_.spinMicros));
-            else
-                ; /* busy */
+            else { /* busy */ }
         }
 
+        // reactive fallback
         if (settings_.adaptive)
         {
             logDrift();
             auto behind = Clock::now() - nextTarget_;
             if (behind.count() > 0)
             {
-                int extra = int(std::chrono::duration<double>(behind).count()
-                                / dt_.count());
+                int extra = int(std::chrono::duration<double>(behind).count() / dt_.count());
                 if (extra > settings_.maxCatchUp) extra = settings_.maxCatchUp;
 
                 if (double(extra) >= settings_.adaptiveThresholdFrames)
@@ -417,7 +599,6 @@ private:
                     if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames)
                         break;
 
-                    // Measure compute time for each catch-up step too
                     auto cs = Clock::now();
                     executeFrame();
                     auto ce = Clock::now();
@@ -432,17 +613,15 @@ private:
         return !(settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames);
     }
 
-    // Build topo levels (Kahn’s algorithm levels)
+    // --- topo, phase execution, logging, budget -----------------------------
     std::vector<std::vector<std::size_t>> buildTopoLevels() {
         const std::size_t n = phases_.size();
         std::vector<int> indeg = indegree_;
         std::vector<char> enabled(n, 0);
         for (std::size_t i=0; i<n; ++i) enabled[i] = phases_[i].enabled ? 1 : 0;
 
-        std::vector<std::size_t> q;
-        q.reserve(n);
-        for (std::size_t i=0;i<n;++i)
-            if (enabled[i] && indeg[i]==0) q.push_back(i);
+        std::vector<std::size_t> q; q.reserve(n);
+        for (std::size_t i=0;i<n;++i) if (enabled[i] && indeg[i]==0) q.push_back(i);
 
         std::vector<std::vector<std::size_t>> levels;
         std::size_t head = 0;
@@ -453,48 +632,35 @@ private:
             if (level.empty()) break;
             levels.push_back(level);
 
-            for (auto u : level) {
-                for (auto v : succ_[u]) {
-                    if (!enabled[v]) continue;
-                    if (--indeg[v] == 0) q.push_back(v);
-                }
-            }
+            for (auto u : level) for (auto v : succ_[u]) if (enabled[v]) if (--indeg[v] == 0) q.push_back(v);
         }
-        // Fallback for cycles/disabled artifacts: ensure all enabled appear
-        for (std::size_t i=0;i<n;++i) {
-            if (enabled[i]) {
-                bool listed = false;
-                for (auto& L : levels)
-                    if (std::find(L.begin(), L.end(), i) != L.end()) { listed = true; break; }
-                if (!listed) levels.push_back({i});
-            }
+        for (std::size_t i=0;i<n;++i) if (enabled[i]) {
+            bool listed = false;
+            for (auto& L : levels) if (std::find(L.begin(), L.end(), i) != L.end()) { listed = true; break; }
+            if (!listed) levels.push_back({i});
         }
         return levels;
     }
 
-    // Factor: execute a single phase’s content (serial, range tasks, reductions)
     void executePhase(std::size_t phaseIndex) {
         auto& ph = phases_[phaseIndex];
         if (!ph.enabled) return;
 
-        if (settings_.logPhases)
-            LOG_DEBUG(logger_, "PhaseBegin '{}' frame={}", ph.name, frame_);
+        bintrace_.log(bintrace::EV_PhaseBegin,
+                      static_cast<std::uint32_t>(phaseIndex),
+                      static_cast<std::uint64_t>(frame_));
+
         PROF_SCOPE(profiler_, "Phase:" + ph.name);
+        for (auto& s : ph.serials) s.fn(s.ctx, frame_, dt_);
 
-        for (auto& sub : ph.serialSubsystems)
-            sub(frame_, dt_);
-
-        // Parallel range tasks
-        if (threadCount_ > 1 &&
-            !ph.parallelRangeTasks.empty() &&
-            ph.elementCount > 0) {
+        if (workerCount_ > 1 && !ph.ranges.empty() && ph.elementCount > 0) {
             std::size_t count = ph.elementCount;
-            for (std::size_t tIdx=0; tIdx < ph.parallelRangeTasks.size(); ++tIdx) {
-                auto& rt = ph.parallelRangeTasks[tIdx];
+            for (std::size_t tIdx=0; tIdx < ph.ranges.size(); ++tIdx) {
+                auto& rt = ph.ranges[tIdx];
                 std::size_t chunk = pickChunk(count);
                 std::size_t totalChunks = (count + chunk - 1)/chunk;
 
-                active_.task         = &rt;
+                active_.fn           = &rt;
                 active_.totalChunks  = totalChunks;
                 active_.elementCount = count;
                 active_.chunkSize    = chunk;
@@ -507,54 +673,44 @@ private:
 
                 while (remaining_.load(std::memory_order_acquire) > 0) {
                     std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
-                    if (idx >= totalChunks) {
-                        std::this_thread::yield();
-                        continue;
-                    }
+                    if (idx >= totalChunks) { std::this_thread::yield(); continue; }
                     std::size_t begin = idx * chunk;
                     std::size_t end   = std::min(begin + chunk, count);
-                    PROF_SCOPE(profiler_, "RangeTask:" + ph.name + ":" + std::to_string(tIdx));
-                    rt(begin, end, frame_, dt_);
-                    if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1)
-                        break;
+                    rt.fn(rt.ctx, begin, end, frame_, dt_);
+                    if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) break;
                 }
             }
         } else {
-            for (auto& rt : ph.parallelRangeTasks) {
-                PROF_SCOPE(profiler_, "RangeTask:" + ph.name + ":S");
-                rt(0, ph.elementCount, frame_, dt_);
-            }
+            for (auto& rt : ph.ranges) rt.fn(rt.ctx, 0, ph.elementCount, frame_, dt_);
         }
 
-        // Serial reductions
-        for (auto& red : ph.reductions) {
-            PROF_SCOPE(profiler_, "Reduction:" + ph.name);
-            red(frame_, dt_);
-        }
+        for (auto& red : ph.reductions) red.fn(red.ctx, frame_, dt_);
 
-        // Deterministic range reductions (parallel leaf partials + fixed fold)
-        for (auto& rr : ph.detRangeReductions) {
-            if (ph.elementCount == 0) {
-                rr.sink(0.0, frame_, dt_);
-                continue;
-            }
-
+        for (auto& rr : ph.detRanges) {
+            if (ph.elementCount == 0) { rr.sink(rr.sinkCtx, 0.0, frame_, dt_); continue; }
             const std::size_t count = ph.elementCount;
             const std::size_t leaf  = std::max<std::size_t>(1, settings_.detReduceLeaf);
             const std::size_t chunk = std::min<std::size_t>(leaf, count);
             const std::size_t totalChunks = (count + chunk - 1) / chunk;
 
-            std::vector<double> partials(totalChunks, 0.0);
+            ArenaResource res(frameArenas_->tls());
+            std::pmr::vector<double> partials(&res);
+            partials.resize(totalChunks, 0.0);
 
-            // lambda that computes one partial for [b,e)
-            RangeTask leafTask = [&](std::size_t b, std::size_t e, std::int64_t f, Seconds dt){
-                const std::size_t idx = b / chunk; // stable mapping
-                double v = rr.fn(b, e, f, dt);
-                partials[idx] = v;
+            struct LeafCtx { DetRangeReductionRef rr; std::pmr::vector<double>* partials; std::size_t chunk; };
+            void* mem = frameArenas_->tls().allocate(sizeof(LeafCtx), alignof(LeafCtx));
+            auto* leafCtx = new (mem) LeafCtx{ rr, &partials, chunk };
+
+            auto leafThunk = [](void* c, std::size_t b, std::size_t e, std::int64_t f, Seconds dt) {
+                auto* LC = static_cast<LeafCtx*>(c);
+                const std::size_t idx = b / LC->chunk;
+                double v = LC->rr.leaf(LC->rr.leafCtx, b, e, f, dt);
+                (*(LC->partials))[idx] = v;
             };
+            RangeFnRef leafRef{ leafThunk, leafCtx };
 
-            if (threadCount_ > 1) {
-                active_.task         = &leafTask;
+            if (workerCount_ > 1) {
+                active_.fn           = &leafRef;
                 active_.totalChunks  = totalChunks;
                 active_.elementCount = count;
                 active_.chunkSize    = chunk;
@@ -570,34 +726,31 @@ private:
                     if (idx >= totalChunks) { std::this_thread::yield(); continue; }
                     const std::size_t b = idx * chunk;
                     const std::size_t e = std::min(b + chunk, count);
-                    leafTask(b, e, frame_, dt_);
-                    if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1)
-                        break;
+                    leafThunk(leafCtx, b, e, frame_, dt_);
+                    if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) break;
                 }
             } else {
                 for (std::size_t idx = 0; idx < totalChunks; ++idx) {
                     const std::size_t b = idx * chunk;
                     const std::size_t e = std::min(b + chunk, count);
-                    leafTask(b, e, frame_, dt_);
+                    leafThunk(leafCtx, b, e, frame_, dt_);
                 }
             }
-
             double total = simcore_det::pairwise_sum(partials);
-            rr.sink(total, frame_, dt_);
+            rr.sink(rr.sinkCtx, total, frame_, dt_);
         }
 
-        if (settings_.logPhases)
-            LOG_DEBUG(logger_, "PhaseEnd   '{}' frame={}", ph.name, frame_);
+        bintrace_.log(bintrace::EV_PhaseEnd,
+                      static_cast<std::uint32_t>(phaseIndex),
+                      static_cast<std::uint64_t>(frame_));
     }
 
     void executeFrame() {
-        PROF_SCOPE(profiler_, "Frame");
-
-        auto levels = buildTopoLevels();
-
+        if (frameArenas_) frameArenas_->beginFrame();
+        if (graphDirty_) { levels_ = buildTopoLevels(); graphDirty_ = false; }
+        const auto& levels = levels_;
         for (const auto& level : levels) {
             if (level.empty()) continue;
-
             if (!pool_ || level.size() == 1) {
                 for (auto idx : level) executePhase(idx);
             } else {
@@ -608,15 +761,10 @@ private:
                         remaining.fetch_sub(1, std::memory_order_acq_rel);
                     });
                 }
-                while (remaining.load(std::memory_order_acquire) != 0) {
-                    std::this_thread::yield();
-                }
+                while (remaining.load(std::memory_order_acquire) != 0) std::this_thread::yield();
             }
         }
-
         ++frame_;
-        if ((frame_ & 0x3FF) == 0)
-            LOG_INFO(logger_, "Progress frame={}", frame_);
     }
 
     void logDrift() {
@@ -625,27 +773,21 @@ private:
         auto now = Clock::now();
         double simT  = static_cast<double>(frame_) * dt_.count();
         double realT = std::chrono::duration<double>(now - startReal_).count();
-        double driftMs = (simT - realT) * 1000.0;
-        lastDriftMs_ = driftMs;
-        LOG_INFO(logger_, "[DRIFT] frame={} simT={:.3f}s realT={:.3f}s drift={:.2f}ms",
-                 frame_, simT, realT, driftMs);
+        lastDriftMs_ = (simT - realT) * 1000.0;
+        if (logger_) LOG_INFO(logger_, "[DRIFT] frame={} drift={:.2f}ms", frame_, lastDriftMs_);
     }
 
     void recalcTiming() {
-        subSteps_  = (settings_.hz > 1000.0)
-                   ? int(std::ceil(settings_.hz / 1000.0))
-                   : 1;
+        subSteps_  = (settings_.hz > 1000.0) ? int(std::ceil(settings_.hz / 1000.0)) : 1;
         dt_        = Seconds{1.0 / settings_.hz};
         outerDt_   = dt_ * subSteps_;
         outerDtChrono_ = std::chrono::duration_cast<Clock::duration>(outerDt_);
         startReal_ = Clock::now();
     }
 
-    // -------- Time Budget Monitor ------------------------------------
     void updateBudget(double computeMs) {
         if (!settings_.budgetMonitor || settings_.budgetWindow <= 0) return;
 
-        // Update moving average ring
         if (!costWindow_.empty()) {
             if (costCount_ < costWindow_.size()) {
                 costWindow_[costHead_] = computeMs;
@@ -653,7 +795,6 @@ private:
                 ++costCount_;
                 costHead_ = (costHead_ + 1) % costWindow_.size();
             } else {
-                // replace oldest
                 double& slot = costWindow_[costHead_];
                 costSumMs_ += computeMs - slot;
                 slot = computeMs;
@@ -666,23 +807,18 @@ private:
         const double avgComputeMs = (costCount_ ? (costSumMs_ / double(costCount_)) : computeMs);
         const double avgRatio = avgComputeMs / periodMs;
 
-        // Optional callback
-        if (budgetCb_) {
-            budgetCb_(BudgetSample{computeMs, periodMs, ratio, avgComputeMs, avgRatio, frame_});
+        if (budgetCb_) budgetCb_(BudgetSample{computeMs, periodMs, ratio, avgComputeMs, avgRatio, frame_});
+
+        if (logger_) {
+            if (ratio >= settings_.budgetCritRatio || avgRatio >= settings_.budgetCritRatio) {
+                LOG_WARN(logger_, "[BUDGET] CRIT frame={} c={:.3f}ms r={:.2f} avg={:.3f}ms avgR={:.2f}",
+                         frame_, computeMs, ratio, avgComputeMs, avgRatio);
+            } else if (ratio >= settings_.budgetWarnRatio || avgRatio >= settings_.budgetWarnRatio) {
+                LOG_INFO(logger_, "[BUDGET] WARN frame={} c={:.3f}ms r={:.2f} avg={:.3f}ms avgR={:.2f}",
+                         frame_, computeMs, ratio, avgComputeMs, avgRatio);
+            }
         }
 
-        // Log sparingly on threshold crossings
-        if (ratio >= settings_.budgetCritRatio || avgRatio >= settings_.budgetCritRatio) {
-            LOG_WARN(logger_,
-                     "[BUDGET] CRIT frame={} compute={:.3f}ms period={:.3f}ms ratio={:.2f} avg={:.3f}ms avgR={:.2f}",
-                     frame_, computeMs, periodMs, ratio, avgComputeMs, avgRatio);
-        } else if (ratio >= settings_.budgetWarnRatio || avgRatio >= settings_.budgetWarnRatio) {
-            LOG_INFO(logger_,
-                     "[BUDGET] WARN frame={} compute={:.3f}ms period={:.3f}ms ratio={:.2f} avg={:.3f}ms avgR={:.2f}",
-                     frame_, computeMs, periodMs, ratio, avgComputeMs, avgRatio);
-        }
-
-        // Optional auto-adapt hz downward on critical overrun
         if (settings_.autoAdaptHz) {
             if (adaptCooldown_ > 0) --adaptCooldown_;
             if ((avgRatio >= settings_.budgetCritRatio || ratio >= settings_.budgetCritRatio) &&
@@ -690,7 +826,7 @@ private:
             {
                 const double newHz = std::max(settings_.minHz, settings_.hz * settings_.adaptDownFactor);
                 if (newHz < settings_.hz) {
-                    LOG_WARN(logger_, "[BUDGET] autoAdaptHz: lowering hz {} -> {}", settings_.hz, newHz);
+                    if (logger_) LOG_WARN(logger_, "[BUDGET] autoAdaptHz: {} -> {}", settings_.hz, newHz);
                     settings_.hz = newHz;
                     recalcTiming();
                     adaptCooldown_ = settings_.adaptCooldownFrames;
@@ -699,13 +835,13 @@ private:
         }
     }
 
-    // ------------------ state ------------------
+    // ---- state ----
     Settings               settings_{};
     std::vector<Phase>     phases_;
-    // dependency graph (static across frames)
-    std::vector<std::vector<std::size_t>> succ_;     // adjacency list
+    std::vector<std::vector<std::size_t>> succ_;
     std::vector<int>       indegree_;
     bool                   graphDirty_ = false;
+    std::vector<std::vector<std::size_t>> levels_;
 
     std::int64_t           frame_      = 0;
     bool                   terminate_  = false;
@@ -718,9 +854,8 @@ private:
     Clock::time_point      startReal_{};
     Seconds                accumulator_{0};
 
-    // internal thread team for range tasks
     std::vector<std::thread> threads_;
-    std::size_t              threadCount_ = 0;
+    std::size_t              workerCount_ = 0;
     std::atomic<bool>        shutdown_{false};
 
     ActiveRange                active_{};
@@ -728,7 +863,6 @@ private:
     std::atomic<std::size_t>   remaining_{0};
     std::atomic<std::uint64_t> dispatchToken_{0};
 
-    // Time budget monitor state
     std::vector<double>        costWindow_;
     std::size_t                costHead_  = 0;
     std::size_t                costCount_ = 0;
@@ -742,7 +876,14 @@ private:
     int                      extraSteps_    = 0;
     double                   recoveredMs_   = 0.0;
 
+    int                      preSteps_      = 0;
+    double                   precoveredMs_  = 0.0;
+    bool                     predictivePrimed_ = false;
+
+    std::unique_ptr<FrameArenaPool> frameArenas_;
+    bintrace::Trace                  bintrace_;
+
     Logger*     logger_   = nullptr;
     Profiler*   profiler_ = nullptr;
-    WorkerPool* pool_     = nullptr;   // optional: for phase-level parallelism
+    WorkerPool* pool_     = nullptr;
 };
