@@ -1,1 +1,0 @@
-/usr/bin/ccache  g++ CMakeFiles/simcore_app.dir/src/main.cpp.o -o simcore_app 

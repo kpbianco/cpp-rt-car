@@ -1,4 +1,5 @@
-// SimCore.hpp — predictive priming + correct headroom math + frame PROF_SCOPE
+// SimCore.hpp — baseline w/ predictive priming, headroom math, frame PROF_SCOPE,
+// and small-array parallel cut-off (minParallelElems / minParallelChunks).
 #pragma once
 #include <vector>
 #include <thread>
@@ -121,6 +122,11 @@ public:
         std::size_t   minChunk = 64;
         std::size_t   maxChunk = 8192;
 
+        // Small-array parallel cut-offs (avoid over-partitioning)
+        // If minParallelElems==0 -> auto = max(2*minChunk, minChunk)
+        std::size_t   minParallelElems  = 0;
+        std::size_t   minParallelChunks = 1;
+
         // Deterministic reduction leaf size (elements)
         std::size_t   detReduceLeaf = 2048;
 
@@ -210,10 +216,11 @@ public:
             initThreads();
         }
         LOG_INFO(logger_,
-                 "Config hz={} maxFrames={} threads={} predictive={} lookahead={} slope={}ms/f preLimit={}",
+                 "Config hz={} maxFrames={} threads={} predictive={} lookahead={} slope={}ms/f preLimit={} minParElems={} minParChunks={}",
                  settings_.hz, settings_.maxFrames, settings_.threads,
                  settings_.predictiveEnable, settings_.predictiveLookaheadFrames,
-                 settings_.predictiveSlopeMsPerFrame, settings_.predictivePreStepLimit);
+                 settings_.predictiveSlopeMsPerFrame, settings_.predictivePreStepLimit,
+                 settings_.minParallelElems, settings_.minParallelChunks);
         graphDirty_ = true;
     }
 
@@ -412,6 +419,11 @@ private:
             std::size_t b = idx * active_.chunkSize;
             std::size_t e = std::min(b + active_.chunkSize, active_.elementCount);
 
+            if (settings_.logChunks) {
+                // lightweight binary log already present; text under flag only
+                LOG_TRACE(logger_, "ChunkStart idx={} b={} e={}", idx, b, e);
+            }
+
             bintrace_.log(bintrace::EV_ChunkStart,
                           static_cast<std::uint32_t>(active_.chunkSize),
                           (static_cast<std::uint64_t>(active_.frame) << 32) | static_cast<std::uint64_t>(idx));
@@ -523,50 +535,39 @@ private:
         const double computeMs = std::chrono::duration<double, std::milli>(computeEnd - computeStart).count();
         updateBudget(computeMs);
 
-        // feed-forward: build headroom
-       // --- Predictive pre-steps (do BEFORE sleeping) --------------------
-if (settings_.predictiveEnable) {
-    // headroom to the *next* frame target (not the current frame we just finished)
-    auto nowBeforePre = Clock::now();
-    const auto nextFrameTarget = nextTarget_ + std::chrono::duration_cast<Clock::duration>(dt_);
-    const auto aheadDur = nextFrameTarget - nowBeforePre;
-    const double aheadFr = std::chrono::duration<double>(aheadDur).count() / dt_.count();
+        // feed-forward: build headroom (do BEFORE sleeping)
+        if (settings_.predictiveEnable) {
+            // headroom to the *next* frame target (not just-finished frame)
+            auto nowBeforePre = Clock::now();
+            const auto nextFrameTarget = nextTarget_ + std::chrono::duration_cast<Clock::duration>(dt_);
+            const auto aheadDur = nextFrameTarget - nowBeforePre;
+            const double aheadFr = std::chrono::duration<double>(aheadDur).count() / dt_.count();
 
-    // decide desired number (based on slope, warmup, etc.)
-    const double slope = computeSlopeMsPerFrame(); // your existing function
-    int desired = decidePreSteps(slope);           // your existing function, see #2 below
+            // decide desired number (based on slope, warmup, etc.)
+            const double slope = computeSlopeMsPerFrame();
+            int desired = decidePreSteps(slope);
 
-    // cap to remaining lookahead budget (e.g., 6 frames in your test)
-    int cap = settings_.predictiveLookaheadFrames
-            - static_cast<int>(std::floor(std::max(0.0, aheadFr)));
-    if (cap < 0) cap = 0;
-    int n = std::min(desired, cap);
+            // cap to remaining lookahead budget (e.g., 6–8 frames)
+            int cap = settings_.predictiveLookaheadFrames
+                    - static_cast<int>(std::floor(std::max(0.0, aheadFr)));
+            if (cap < 0) cap = 0;
+            int n = std::min(desired, cap);
 
-    for (int i = 0; i < n; ++i) {
-        // Execute one extra frame right now
-        auto cs = Clock::now();
-        executeFrame();
-        auto ce = Clock::now();
+            for (int i = 0; i < n; ++i) {
+                // Execute one extra frame right now
+                auto cs = Clock::now();
+                executeFrame();
+                auto ce = Clock::now();
 
-        // keep all your existing budget accounting for each pre-step
-        double cm = std::chrono::duration<double, std::milli>(ce - cs).count();
-        updateBudget(cm);
+                // keep budget accounting for each pre-step
+                double cm = std::chrono::duration<double, std::milli>(ce - cs).count();
+                updateBudget(cm);
 
-        // each pre-step moves the schedule forward by dt
-        nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
-        ++preSteps_;
-
-        // re-check headroom before another pre-step
-        nowBeforePre = Clock::now();
-        const auto nfTarget = nextTarget_ + std::chrono::duration_cast<Clock::duration>(dt_);
-        const auto aDur = nfTarget - nowBeforePre;
-        const double aFr = std::chrono::duration<double>(aDur).count() / dt_.count();
-        int newCap = settings_.predictiveLookaheadFrames
-                   - static_cast<int>(std::floor(std::max(0.0, aFr)));
-        if (i+1 >= std::min(desired, newCap)) break;
-    }
-}
-
+                // each pre-step moves the schedule forward by dt
+                nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
+                ++preSteps_;
+            }
+        }
 
         nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
 
@@ -653,39 +654,58 @@ if (settings_.predictiveEnable) {
         PROF_SCOPE(profiler_, "Phase:" + ph.name);
         for (auto& s : ph.serials) s.fn(s.ctx, frame_, dt_);
 
-        if (workerCount_ > 1 && !ph.ranges.empty() && ph.elementCount > 0) {
-            std::size_t count = ph.elementCount;
-            for (std::size_t tIdx=0; tIdx < ph.ranges.size(); ++tIdx) {
-                auto& rt = ph.ranges[tIdx];
-                std::size_t chunk = pickChunk(count);
-                std::size_t totalChunks = (count + chunk - 1)/chunk;
+ // ---- Parallel range tasks with small-array cut-off ----
+if (workerCount_ > 1 && !ph.ranges.empty() && ph.elementCount > 0) {
+    const std::size_t count = ph.elementCount;
 
-                active_.fn           = &rt;
-                active_.totalChunks  = totalChunks;
-                active_.elementCount = count;
-                active_.chunkSize    = chunk;
-                active_.frame        = frame_;
-                active_.dt           = dt_;
+    for (std::size_t tIdx = 0; tIdx < ph.ranges.size(); ++tIdx) {
+        auto& rt = ph.ranges[tIdx];
 
-                nextChunk_.store(0, std::memory_order_relaxed);
-                remaining_.store(totalChunks, std::memory_order_release);
-                dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
+        const std::size_t chunk = pickChunk(count);
+        const std::size_t totalChunks = (count + chunk - 1) / chunk;
 
-                while (remaining_.load(std::memory_order_acquire) > 0) {
-                    std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
-                    if (idx >= totalChunks) { std::this_thread::yield(); continue; }
-                    std::size_t begin = idx * chunk;
-                    std::size_t end   = std::min(begin + chunk, count);
-                    rt.fn(rt.ctx, begin, end, frame_, dt_);
-                    if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) break;
-                }
-            }
-        } else {
-            for (auto& rt : ph.ranges) rt.fn(rt.ctx, 0, ph.elementCount, frame_, dt_);
+        // Inclusive thresholds: serialize when at/below the limits
+        const bool tooFewElems  = (settings_.minParallelElems  > 0) &&
+                                  (count <= settings_.minParallelElems);
+        const bool tooFewChunks = (settings_.minParallelChunks > 1) &&
+                                  (totalChunks <= settings_.minParallelChunks);
+
+        if (tooFewElems || tooFewChunks) {
+            // Run exactly once, serial, over the full range
+            rt.fn(rt.ctx, 0, count, frame_, dt_);
+            continue;
         }
+
+        // parallel path…
+        active_.fn           = &rt;
+        active_.totalChunks  = totalChunks;
+        active_.elementCount = count;
+        active_.chunkSize    = chunk;
+        active_.frame        = frame_;
+        active_.dt           = dt_;
+
+        nextChunk_.store(0, std::memory_order_relaxed);
+        remaining_.store(totalChunks, std::memory_order_release);
+        dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
+
+        while (remaining_.load(std::memory_order_acquire) > 0) {
+            std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
+            if (idx >= totalChunks) { std::this_thread::yield(); continue; }
+            std::size_t begin = idx * active_.chunkSize;
+            std::size_t end   = std::min(begin + active_.chunkSize, count);
+            rt.fn(rt.ctx, begin, end, frame_, dt_);
+            if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) break;
+        }
+    }
+} else {
+    for (auto& rt : ph.ranges) rt.fn(rt.ctx, 0, ph.elementCount, frame_, dt_);
+}
+
+
 
         for (auto& red : ph.reductions) red.fn(red.ctx, frame_, dt_);
 
+        // Deterministic range reductions (parallel leaves + pairwise fold)
         for (auto& rr : ph.detRanges) {
             if (ph.elementCount == 0) { rr.sink(rr.sinkCtx, 0.0, frame_, dt_); continue; }
             const std::size_t count = ph.elementCount;

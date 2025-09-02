@@ -209,6 +209,30 @@ test_adaptive_param.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_adaptive_param.cpp.s
 .PHONY : test_adaptive_param.cpp.s
 
+test_bintrace.o: test_bintrace.cpp.o
+.PHONY : test_bintrace.o
+
+# target to build an object file
+test_bintrace.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_bintrace.cpp.o
+.PHONY : test_bintrace.cpp.o
+
+test_bintrace.i: test_bintrace.cpp.i
+.PHONY : test_bintrace.i
+
+# target to preprocess a source file
+test_bintrace.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_bintrace.cpp.i
+.PHONY : test_bintrace.cpp.i
+
+test_bintrace.s: test_bintrace.cpp.s
+.PHONY : test_bintrace.s
+
+# target to generate assembly for a file
+test_bintrace.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_bintrace.cpp.s
+.PHONY : test_bintrace.cpp.s
+
 test_budget_monitor.o: test_budget_monitor.cpp.o
 .PHONY : test_budget_monitor.o
 
@@ -353,6 +377,30 @@ test_phase_graph.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_phase_graph.cpp.s
 .PHONY : test_phase_graph.cpp.s
 
+test_predictive_adaptive.o: test_predictive_adaptive.cpp.o
+.PHONY : test_predictive_adaptive.o
+
+# target to build an object file
+test_predictive_adaptive.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_predictive_adaptive.cpp.o
+.PHONY : test_predictive_adaptive.cpp.o
+
+test_predictive_adaptive.i: test_predictive_adaptive.cpp.i
+.PHONY : test_predictive_adaptive.i
+
+# target to preprocess a source file
+test_predictive_adaptive.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_predictive_adaptive.cpp.i
+.PHONY : test_predictive_adaptive.cpp.i
+
+test_predictive_adaptive.s: test_predictive_adaptive.cpp.s
+.PHONY : test_predictive_adaptive.s
+
+# target to generate assembly for a file
+test_predictive_adaptive.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_predictive_adaptive.cpp.s
+.PHONY : test_predictive_adaptive.cpp.s
+
 test_profiler.o: test_profiler.cpp.o
 .PHONY : test_profiler.o
 
@@ -376,6 +424,78 @@ test_profiler.s: test_profiler.cpp.s
 test_profiler.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_profiler.cpp.s
 .PHONY : test_profiler.cpp.s
+
+test_rt_arena.o: test_rt_arena.cpp.o
+.PHONY : test_rt_arena.o
+
+# target to build an object file
+test_rt_arena.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_arena.cpp.o
+.PHONY : test_rt_arena.cpp.o
+
+test_rt_arena.i: test_rt_arena.cpp.i
+.PHONY : test_rt_arena.i
+
+# target to preprocess a source file
+test_rt_arena.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_arena.cpp.i
+.PHONY : test_rt_arena.cpp.i
+
+test_rt_arena.s: test_rt_arena.cpp.s
+.PHONY : test_rt_arena.s
+
+# target to generate assembly for a file
+test_rt_arena.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_arena.cpp.s
+.PHONY : test_rt_arena.cpp.s
+
+test_rt_overflow_death.o: test_rt_overflow_death.cpp.o
+.PHONY : test_rt_overflow_death.o
+
+# target to build an object file
+test_rt_overflow_death.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_overflow_death.cpp.o
+.PHONY : test_rt_overflow_death.cpp.o
+
+test_rt_overflow_death.i: test_rt_overflow_death.cpp.i
+.PHONY : test_rt_overflow_death.i
+
+# target to preprocess a source file
+test_rt_overflow_death.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_overflow_death.cpp.i
+.PHONY : test_rt_overflow_death.cpp.i
+
+test_rt_overflow_death.s: test_rt_overflow_death.cpp.s
+.PHONY : test_rt_overflow_death.s
+
+# target to generate assembly for a file
+test_rt_overflow_death.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_overflow_death.cpp.s
+.PHONY : test_rt_overflow_death.cpp.s
+
+test_rt_pool.o: test_rt_pool.cpp.o
+.PHONY : test_rt_pool.o
+
+# target to build an object file
+test_rt_pool.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_pool.cpp.o
+.PHONY : test_rt_pool.cpp.o
+
+test_rt_pool.i: test_rt_pool.cpp.i
+.PHONY : test_rt_pool.i
+
+# target to preprocess a source file
+test_rt_pool.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_pool.cpp.i
+.PHONY : test_rt_pool.cpp.i
+
+test_rt_pool.s: test_rt_pool.cpp.s
+.PHONY : test_rt_pool.s
+
+# target to generate assembly for a file
+test_rt_pool.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_rt_pool.cpp.s
+.PHONY : test_rt_pool.cpp.s
 
 test_simcore_basic.o: test_simcore_basic.cpp.o
 .PHONY : test_simcore_basic.o
@@ -449,6 +569,30 @@ test_simd.cpp.s:
 	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_simd.cpp.s
 .PHONY : test_simd.cpp.s
 
+test_small_array_balance.o: test_small_array_balance.cpp.o
+.PHONY : test_small_array_balance.o
+
+# target to build an object file
+test_small_array_balance.cpp.o:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_small_array_balance.cpp.o
+.PHONY : test_small_array_balance.cpp.o
+
+test_small_array_balance.i: test_small_array_balance.cpp.i
+.PHONY : test_small_array_balance.i
+
+# target to preprocess a source file
+test_small_array_balance.cpp.i:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_small_array_balance.cpp.i
+.PHONY : test_small_array_balance.cpp.i
+
+test_small_array_balance.s: test_small_array_balance.cpp.s
+.PHONY : test_small_array_balance.s
+
+# target to generate assembly for a file
+test_small_array_balance.cpp.s:
+	cd /mnt/c/Users/kianb/Projects/cpp-rt-car && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simcore_tests.dir/build.make tests/CMakeFiles/simcore_tests.dir/test_small_array_balance.cpp.s
+.PHONY : test_small_array_balance.cpp.s
+
 test_soa.o: test_soa.cpp.o
 .PHONY : test_soa.o
 
@@ -490,6 +634,9 @@ help:
 	@echo "... test_adaptive_param.o"
 	@echo "... test_adaptive_param.i"
 	@echo "... test_adaptive_param.s"
+	@echo "... test_bintrace.o"
+	@echo "... test_bintrace.i"
+	@echo "... test_bintrace.s"
 	@echo "... test_budget_monitor.o"
 	@echo "... test_budget_monitor.i"
 	@echo "... test_budget_monitor.s"
@@ -508,9 +655,21 @@ help:
 	@echo "... test_phase_graph.o"
 	@echo "... test_phase_graph.i"
 	@echo "... test_phase_graph.s"
+	@echo "... test_predictive_adaptive.o"
+	@echo "... test_predictive_adaptive.i"
+	@echo "... test_predictive_adaptive.s"
 	@echo "... test_profiler.o"
 	@echo "... test_profiler.i"
 	@echo "... test_profiler.s"
+	@echo "... test_rt_arena.o"
+	@echo "... test_rt_arena.i"
+	@echo "... test_rt_arena.s"
+	@echo "... test_rt_overflow_death.o"
+	@echo "... test_rt_overflow_death.i"
+	@echo "... test_rt_overflow_death.s"
+	@echo "... test_rt_pool.o"
+	@echo "... test_rt_pool.i"
+	@echo "... test_rt_pool.s"
 	@echo "... test_simcore_basic.o"
 	@echo "... test_simcore_basic.i"
 	@echo "... test_simcore_basic.s"
@@ -520,6 +679,9 @@ help:
 	@echo "... test_simd.o"
 	@echo "... test_simd.i"
 	@echo "... test_simd.s"
+	@echo "... test_small_array_balance.o"
+	@echo "... test_small_array_balance.i"
+	@echo "... test_small_array_balance.s"
 	@echo "... test_soa.o"
 	@echo "... test_soa.i"
 	@echo "... test_soa.s"

@@ -16,6 +16,7 @@ set(TEST_SOURCES
     test_rt_overflow_death.cpp
     test_bintrace.cpp
     test_predictive_adaptive.cpp
+    test_small_array_balance.cpp
 )
 
 add_executable(simcore_tests ${TEST_SOURCES})
