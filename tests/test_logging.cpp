@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include "logger.hpp"
+#include <simcore/logger.hpp>
 #include "mocks/mock_sink.hpp"
 
 using ::testing::_;

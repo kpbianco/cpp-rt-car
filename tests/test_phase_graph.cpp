@@ -4,9 +4,9 @@
 #include <thread>
 
 // NOTE: include via a path relative to /tests
-#include "src/SimCore.hpp"
-#include "src/logger.hpp"
-#include "src/worker_pool.hpp"
+#include <simcore/SimCore.hpp>
+#include <simcore/logger.hpp>
+#include <simcore/worker_pool.hpp>
 
 using Clock = std::chrono::steady_clock;
 

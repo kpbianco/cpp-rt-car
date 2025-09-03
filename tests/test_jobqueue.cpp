@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <atomic>
-#include "worker_pool.hpp"
+#include <simcore/worker_pool.hpp>
 
 TEST(JobQueue, ExecutesEveryJob) {
     // 4 workers, 2048-capacity queue (power-of-two)

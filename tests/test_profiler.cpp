@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "SimCore.hpp"
-#include "logger.hpp"
-#include "profiler.hpp"
+#include <simcore/SimCore.hpp>
+#include <simcore/logger.hpp>
+#include <simcore/profiler.hpp>
 
 TEST(ProfilerIntegration, CollectsPhaseAndFrame) {
 #ifdef PROF_ENABLED

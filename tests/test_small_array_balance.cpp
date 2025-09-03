@@ -1,5 +1,5 @@
-#include "gtest/gtest.h"
-#include "SimCore.hpp"
+#include <gtest/gtest.h>
+#include <simcore/SimCore.hpp>
 #include <atomic>
 
 TEST(SmallArrayBalance, SerialOnTinyArrays) {

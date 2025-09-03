@@ -1,0 +1,25 @@
+# Build directories and files
+/build/
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+Makefile
+cmake_install.cmake
+
+# Compiled artifacts
+*.o
+*.a
+simcore_app
+
+# Local binaries and libraries
+/bin/
+/lib/
+
+# Test build outputs
+/tests/CMakeFiles/
+/tests/CTestTestfile.cmake
+/tests/Makefile
+/tests/cmake_install.cmake
+/tests/simcore_tests
+/tests/trace.btrc

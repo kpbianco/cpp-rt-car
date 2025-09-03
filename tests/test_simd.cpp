@@ -4,7 +4,7 @@
 #include <random>
 #include <cstddef>
 
-#include "src/soa_simd.hpp"
+#include <simcore/soa_simd.hpp>
 
 TEST(SIMD, SoAAxpy3MatchesScalar)
 {

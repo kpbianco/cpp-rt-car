@@ -2,7 +2,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
-#include "frame_arena.hpp" // shim
+#include <simcore/frame_arena.hpp> // shim
 
 TEST(RtPool, DeterministicBindingAndUse) {
     const std::size_t N = 4;

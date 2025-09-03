@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "SimCore.hpp"
+#include <simcore/SimCore.hpp>
 #ifdef __linux__
 #include <sched.h>
 
