@@ -21,6 +21,11 @@ public:
         long double maxNs = 0;
     };
 
+    struct CounterEntry {
+        std::string name;
+        long double value = 0;
+    };
+
     class ScopeGuard {
     public:
         ScopeGuard(Profiler* p, std::string n)
@@ -50,6 +55,21 @@ public:
         }
         e.totalNs += ns;
         ++e.count;
+    }
+
+    void setCounter(const std::string& n, long double v) {
+        std::lock_guard<std::mutex> lk(cm_);
+        counters_[n] = v;
+    }
+
+    std::vector<CounterEntry> counters() const {
+        std::lock_guard<std::mutex> lk(cm_);
+        std::vector<CounterEntry> out;
+        out.reserve(counters_.size());
+        for (auto& kv : counters_) out.push_back({kv.first, kv.second});
+        std::sort(out.begin(), out.end(),
+                  [](auto& a, auto& b){ return a.name < b.name; });
+        return out;
     }
 
     std::vector<Entry> summary() const {
@@ -91,6 +111,8 @@ public:
 private:
     mutable std::mutex m_;
     std::unordered_map<std::string, Entry> map_;
+    mutable std::mutex cm_;
+    std::unordered_map<std::string, long double> counters_;
 };
 
 #define PROF_CONCAT_INNER(a,b) a##b
@@ -108,8 +130,11 @@ private:
 class Profiler {
 public:
     struct Entry { std::string name; std::uint64_t count=0; long double totalNs=0,minNs=0,maxNs=0; };
+    struct CounterEntry { std::string name; long double value=0; };
     class ScopeGuard { public: ScopeGuard(Profiler*, std::string) {} };
     std::vector<Entry> summary() const { return {}; }
+    void setCounter(const std::string&, long double) {}
+    std::vector<CounterEntry> counters() const { return {}; }
     void dump() {}
 };
 

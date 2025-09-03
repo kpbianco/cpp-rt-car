@@ -116,6 +116,7 @@ public:
     template<typename... A> void info (std::string_view f, A&&... a){ log(Level::Info ,f,std::forward<A>(a)...);}
     template<typename... A> void warn (std::string_view f, A&&... a){ log(Level::Warn ,f,std::forward<A>(a)...);}
     template<typename... A> void error(std::string_view f, A&&... a){ log(Level::Error,f,std::forward<A>(a)...);}
+    template<typename... A> void telemetry(std::string_view f, A&&... a){ log(Level::Info,f,std::forward<A>(a)...);}
 
 private:
     template<typename... Args>
@@ -159,10 +160,12 @@ private:
 #define LOG_INFO(L,  ...) do{ if(L) (L)->info (__VA_ARGS__); }while(0)
 #define LOG_WARN(L,  ...) do{ if(L) (L)->warn (__VA_ARGS__); }while(0)
 #define LOG_ERROR(L, ...) do{ if(L) (L)->error(__VA_ARGS__); }while(0)
+#define LOG_TELEMETRY(L, ...) do{ if(L) (L)->telemetry(__VA_ARGS__); }while(0)
 #else
 #define LOG_TRACE(L, ...) do{}while(0)
 #define LOG_DEBUG(L, ...) do{}while(0)
 #define LOG_INFO(L,  ...) do{}while(0)
 #define LOG_WARN(L,  ...) do{}while(0)
 #define LOG_ERROR(L, ...) do{}while(0)
+#define LOG_TELEMETRY(L, ...) do{}while(0)
 #endif

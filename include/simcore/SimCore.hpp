@@ -75,6 +75,123 @@ struct SerialFnRef {
 
 enum class TaskHint { Throughput, Latency };
 
+class SimCore {
+public:
+    using Seconds = std::chrono::duration<double>;
+    using Clock   = std::chrono::steady_clock;
+
+    int    bursts()      const { return bursts_; }
+    int    extraSteps()  const { return extraSteps_; }
+    int    preSteps()    const { return preSteps_; }
+    double recoveredMs() const { return recoveredMs_; }
+    double precoveredMs() const { return precoveredMs_; }
+    FrameArena& frameArena() { return frameArenas_->tls(); }
+    bintrace::Trace& bintrace() { return bintrace_; }
+
+    struct Settings {
+        // Affinity / NUMA
+        bool          pinThreads   = false;
+        bool          compactNUMA  = false;
+
+        // Cadence
+        double        hz         = 500.0;
+        std::int64_t  maxFrames  = 2500;
+
+        // Reactive catch-up
+        bool          adaptive   = false;
+        int           maxCatchUp = 4;
+
+        // Workers / chunking
+        std::size_t   threads    = std::thread::hardware_concurrency();
+        bool          mainHelps  = true;
+        std::size_t   chunkSize  = 256;
+
+        // Logging / profiling
+        int           driftLogInterval = 250;
+        int           spinMicros = 200;
+        bool          logPhases = false;
+        bool          logRangeTasks = false;
+        bool          logChunks = false;
+        std::size_t   arenaPerThreadBytes = 1u << 20;
+
+        // Adaptive burst accounting
+        double        adaptiveThresholdFrames = 1.0;
+
+        // Auto chunk tuning
+        bool          autoTuneChunks = true;
+        int           targetChunksPerThread = 2;
+        std::size_t   minChunk = 64;
+        std::size_t   maxChunk = 8192;
+
+        // Small-array parallel cut-offs (avoid over-partitioning)
+        // If minParallelElems==0 -> auto = max(2*minChunk, minChunk)
+        std::size_t   minParallelElems  = 0;
+        std::size_t   minParallelChunks = 1;
+
+        // Deterministic reduction leaf size (elements)
+        std::size_t   detReduceLeaf = 2048;
+
+        // Time Budget Monitor
+        bool          budgetMonitor = true;
+        int           budgetWindow  = 120;
+        double        budgetWarnRatio = 0.85;
+        double        budgetCritRatio = 1.00;
+        bool          autoAdaptHz    = false;
+        double        adaptDownFactor = 0.95;
+        double        minHz           = 60.0;
+        int           adaptCooldownFrames = 600;
+
+        // Binary event trace
+        bool          bintraceEnable = false;
+        std::size_t   bintraceEventsPerThread = 1u << 18;
+
+        // Predictive / Feed-Forward
+        bool          predictiveEnable = true;
+        int           predictiveWindow = 60;            // samples for slope
+        int           predictiveWarmup = 20;            // min samples to act
+        int           predictiveLookaheadFrames = 8;    // forecast horizon
+        double        predictiveSlopeMsPerFrame = 0.005;// slope trigger
+        int           predictivePreStepLimit = 2;       // max per outer frame
+        double        predictiveMinAvgRatio = 0.70;     // require some load
+        bool          predictiveDebugLog = false;       // optional logging
+    };
+
+    using Subsystem     = std::function<void(std::int64_t, Seconds)>;
+    using RangeTask     = std::function<void(std::size_t, std::size_t, std::int64_t, Seconds)>;
+    using ReductionTask = std::function<void(std::int64_t, Seconds)>;
+
+    struct DetRangeReduction {
+        std::function<double(std::size_t, std::size_t, std::int64_t, Seconds)> fn;
+        std::function<void(double, std::int64_t, Seconds)> sink;
+    };
+
+    struct Phase {
+        std::string  name;
+        std::vector<SerialFnRef>          serials;
+        std::vector<RangeFnRef>           ranges;
+        std::vector<RedFnRef>             reductions;
+        std::vector<DetRangeReductionRef> detRanges;
+        std::vector<std::shared_ptr<void>> keep;
+        std::size_t  elementCount = 0;
+        bool         enabled      = true;
+        std::size_t  chosenChunk  = 0;
+        std::size_t  totalChunks  = 0;
+        std::size_t  chunkSkew    = 0;
+    };
+
+    struct BudgetSample {
+        double computeMs = 0.0;
+        double periodMs  = 0.0;
+        double ratio     = 0.0;
+        double avgComputeMs = 0.0;
+        double avgRatio  = 0.0;
+        std::int64_t frame = 0;
+    };
+
+    SimCore() : SimCore(Settings{}) {}
+    explicit SimCore(const Settings& s) { applySettings(s); initThreads(); }
+    ~SimCore() { stopThreads(); }
+
 struct RangeFnRef {
   void (*fn)(void *, std::size_t, std::size_t, std::int64_t,
              std::chrono::duration<double>);
@@ -730,6 +847,7 @@ private:
             if (--indeg[v] == 0)
               q.push_back(v);
     }
+
     for (std::size_t i = 0; i < n; ++i)
       if (enabled[i]) {
         bool listed = false;
@@ -809,6 +927,73 @@ private:
         rt.fn(rt.ctx, 0, ph.elementCount, frame_, dt_);
     }
 
+    void executePhase(std::size_t phaseIndex) {
+        auto& ph = phases_[phaseIndex];
+        if (!ph.enabled) return;
+
+        bintrace_.log(bintrace::EV_PhaseBegin,
+                      static_cast<std::uint32_t>(phaseIndex),
+                      static_cast<std::uint64_t>(frame_));
+
+        PROF_SCOPE(profiler_, "Phase:" + ph.name);
+        for (auto& s : ph.serials) s.fn(s.ctx, frame_, dt_);
+
+ // ---- Parallel range tasks with small-array cut-off ----
+if (workerCount_ > 1 && !ph.ranges.empty() && ph.elementCount > 0) {
+    const std::size_t count = ph.elementCount;
+    const std::size_t chunk = pickChunk(count);
+    const std::size_t totalChunks = (count + chunk - 1) / chunk;
+    const std::size_t threads = workerCount_ + 1; // include main thread
+    const std::size_t skew = threads ? (totalChunks % threads) : 0;
+
+    ph.chosenChunk = chunk;
+    ph.totalChunks = totalChunks;
+    ph.chunkSkew   = skew;
+
+    LOG_TELEMETRY(logger_, "phase {}: chunk={} total={} skew={}", ph.name, chunk, totalChunks, skew);
+    if (profiler_) {
+        profiler_->setCounter("phase." + ph.name + ".chunk", static_cast<long double>(chunk));
+        profiler_->setCounter("phase." + ph.name + ".total", static_cast<long double>(totalChunks));
+        profiler_->setCounter("phase." + ph.name + ".skew", static_cast<long double>(skew));
+    }
+
+    const bool tooFewElems  = (settings_.minParallelElems  > 0) &&
+                              (count <= settings_.minParallelElems);
+    const bool tooFewChunks = (settings_.minParallelChunks > 1) &&
+                              (totalChunks <= settings_.minParallelChunks);
+
+    for (std::size_t tIdx = 0; tIdx < ph.ranges.size(); ++tIdx) {
+        auto& rt = ph.ranges[tIdx];
+
+        if (tooFewElems || tooFewChunks) {
+            rt.fn(rt.ctx, 0, count, frame_, dt_);
+            continue;
+        }
+
+        active_.fn           = &rt;
+        active_.totalChunks  = totalChunks;
+        active_.elementCount = count;
+        active_.chunkSize    = chunk;
+        active_.frame        = frame_;
+        active_.dt           = dt_;
+
+        nextChunk_.store(0, std::memory_order_relaxed);
+        remaining_.store(totalChunks, std::memory_order_release);
+        dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
+
+        while (remaining_.load(std::memory_order_acquire) > 0) {
+            std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
+            if (idx >= totalChunks) { std::this_thread::yield(); continue; }
+            std::size_t begin = idx * active_.chunkSize;
+            std::size_t end   = std::min(begin + active_.chunkSize, count);
+            rt.fn(rt.ctx, begin, end, frame_, dt_);
+            if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) break;
+        }
+    }
+} else {
+    for (auto& rt : ph.ranges) rt.fn(rt.ctx, 0, ph.elementCount, frame_, dt_);
+}
+
     for (auto &red : ph.reductions)
       red.fn(red.ctx, frame_, dt_);
 
@@ -869,6 +1054,74 @@ private:
           leafThunk(leafCtx, b, e, frame_, dt_);
           if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1)
             break;
+        for (auto& red : ph.reductions) red.fn(red.ctx, frame_, dt_);
+
+        // Deterministic range reductions (parallel leaves + pairwise fold)
+        for (auto& rr : ph.detRanges) {
+            if (ph.elementCount == 0) { rr.sink(rr.sinkCtx, 0.0, frame_, dt_); continue; }
+            const std::size_t count = ph.elementCount;
+            const std::size_t leaf  = std::max<std::size_t>(1, settings_.detReduceLeaf);
+            const std::size_t chunk = std::min<std::size_t>(leaf, count);
+            const std::size_t totalChunks = (count + chunk - 1) / chunk;
+            const std::size_t threads = workerCount_ + 1;
+            const std::size_t skew = threads ? (totalChunks % threads) : 0;
+
+            ph.chosenChunk = chunk;
+            ph.totalChunks = totalChunks;
+            ph.chunkSkew   = skew;
+
+            LOG_TELEMETRY(logger_, "phase {}: chunk={} total={} skew={}", ph.name, chunk, totalChunks, skew);
+            if (profiler_) {
+                profiler_->setCounter("phase." + ph.name + ".chunk", static_cast<long double>(chunk));
+                profiler_->setCounter("phase." + ph.name + ".total", static_cast<long double>(totalChunks));
+                profiler_->setCounter("phase." + ph.name + ".skew", static_cast<long double>(skew));
+            }
+
+            ArenaResource res(frameArenas_->tls());
+            std::pmr::vector<double> partials(&res);
+            partials.resize(totalChunks, 0.0);
+
+            struct LeafCtx { DetRangeReductionRef rr; std::pmr::vector<double>* partials; std::size_t chunk; };
+            void* mem = frameArenas_->tls().allocate(sizeof(LeafCtx), alignof(LeafCtx));
+            auto* leafCtx = new (mem) LeafCtx{ rr, &partials, chunk };
+
+            auto leafThunk = [](void* c, std::size_t b, std::size_t e, std::int64_t f, Seconds dt) {
+                auto* LC = static_cast<LeafCtx*>(c);
+                const std::size_t idx = b / LC->chunk;
+                double v = LC->rr.leaf(LC->rr.leafCtx, b, e, f, dt);
+                (*(LC->partials))[idx] = v;
+            };
+            RangeFnRef leafRef{ leafThunk, leafCtx };
+
+            if (workerCount_ > 1) {
+                active_.fn           = &leafRef;
+                active_.totalChunks  = totalChunks;
+                active_.elementCount = count;
+                active_.chunkSize    = chunk;
+                active_.frame        = frame_;
+                active_.dt           = dt_;
+
+                nextChunk_.store(0, std::memory_order_relaxed);
+                remaining_.store(totalChunks, std::memory_order_release);
+                dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
+
+                while (remaining_.load(std::memory_order_acquire) > 0) {
+                    std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
+                    if (idx >= totalChunks) { std::this_thread::yield(); continue; }
+                    const std::size_t b = idx * chunk;
+                    const std::size_t e = std::min(b + chunk, count);
+                    leafThunk(leafCtx, b, e, frame_, dt_);
+                    if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) break;
+                }
+            } else {
+                for (std::size_t idx = 0; idx < totalChunks; ++idx) {
+                    const std::size_t b = idx * chunk;
+                    const std::size_t e = std::min(b + chunk, count);
+                    leafThunk(leafCtx, b, e, frame_, dt_);
+                }
+            }
+            double total = simcore_det::pairwise_sum(partials);
+            rr.sink(rr.sinkCtx, total, frame_, dt_);
         }
       } else {
         for (std::size_t idx = 0; idx < totalChunks; ++idx) {
