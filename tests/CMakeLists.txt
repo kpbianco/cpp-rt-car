@@ -17,6 +17,7 @@ set(TEST_SOURCES
     test_bintrace.cpp
     test_predictive_adaptive.cpp
     test_small_array_balance.cpp
+    test_phase_telemetry.cpp
 )
 
 add_executable(simcore_tests ${TEST_SOURCES})
