@@ -87,14 +87,25 @@ public:
 
     void* allocate(std::size_t size, std::size_t align = alignof(std::max_align_t)) noexcept {
         align = normalize_align(align);
-        const auto base = reinterpret_cast<std::uintptr_t>(buffer_);
-        const std::uintptr_t p       = base + head_;
-        const std::uintptr_t aligned = (p + (align - 1)) & ~(static_cast<std::uintptr_t>(align) - 1);
-        const std::size_t    newHead = static_cast<std::size_t>(aligned - base) + size;
+        const auto            base   = reinterpret_cast<std::uintptr_t>(buffer_);
+        const std::uintptr_t  p      = base + head_;
+        const std::uintptr_t  aligned = (p + (align - 1)) & ~(static_cast<std::uintptr_t>(align) - 1);
+        const std::size_t     alignedHead = static_cast<std::size_t>(aligned - base);
 
-        // STRICT: never fallback mid-frame
-        assert(newHead <= capacity_ && "FrameArena overflow: increase capacity or refactor allocations");
-        head_ = newHead;
+        // Bound check before modifying state to keep behavior deterministic even under sanitizers
+        if (alignedHead > capacity_ || size > capacity_ - alignedHead) {
+            const std::size_t avail = alignedHead <= capacity_ ? (capacity_ - alignedHead) : 0u;
+            std::fprintf(stderr,
+                         "[RtArena] overflow: req=%zu avail=%zu cap=%zu off=%zu\n",
+                         size,
+                         avail,
+                         capacity_,
+                         alignedHead);
+            std::fflush(stderr);
+            std::abort();
+        }
+
+        head_ = alignedHead + size;
         return reinterpret_cast<void*>(aligned);
     }
 
