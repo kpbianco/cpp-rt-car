@@ -195,6 +195,9 @@ public:
     std::vector<std::shared_ptr<void>> keep;
     std::size_t elementCount = 0;
     bool enabled = true;
+    std::size_t chosenChunk = 0;
+    std::size_t totalChunks = 0;
+    std::size_t chunkSkew = 0;
   };
 
   struct BudgetSample {
@@ -766,6 +769,22 @@ private:
 
         const std::size_t chunk = pickChunk(count, rt.hint);
         const std::size_t totalChunks = (count + chunk - 1) / chunk;
+        const std::size_t threads = workerCount_ + 1; // include main thread
+        const std::size_t skew = threads ? (totalChunks % threads) : 0;
+
+        ph.chosenChunk = chunk;
+        ph.totalChunks = totalChunks;
+        ph.chunkSkew = skew;
+        LOG_TELEMETRY(logger_, "phase {}: chunk={} total={} skew={}", ph.name,
+                      chunk, totalChunks, skew);
+        if (profiler_) {
+          profiler_->setCounter("phase." + ph.name + ".chunk",
+                                static_cast<long double>(chunk));
+          profiler_->setCounter("phase." + ph.name + ".total",
+                                static_cast<long double>(totalChunks));
+          profiler_->setCounter("phase." + ph.name + ".skew",
+                                static_cast<long double>(skew));
+        }
 
         // Inclusive thresholds: serialize when at/below the limits
         const bool tooFewElems = (settings_.minParallelElems > 0) &&
@@ -823,6 +842,22 @@ private:
           std::max<std::size_t>(1, settings_.detReduceLeaf);
       const std::size_t chunk = std::min<std::size_t>(leaf, count);
       const std::size_t totalChunks = (count + chunk - 1) / chunk;
+      const std::size_t threads = workerCount_ + 1;
+      const std::size_t skew = threads ? (totalChunks % threads) : 0;
+
+      ph.chosenChunk = chunk;
+      ph.totalChunks = totalChunks;
+      ph.chunkSkew = skew;
+      LOG_TELEMETRY(logger_, "phase {}: chunk={} total={} skew={}", ph.name,
+                    chunk, totalChunks, skew);
+      if (profiler_) {
+        profiler_->setCounter("phase." + ph.name + ".chunk",
+                              static_cast<long double>(chunk));
+        profiler_->setCounter("phase." + ph.name + ".total",
+                              static_cast<long double>(totalChunks));
+        profiler_->setCounter("phase." + ph.name + ".skew",
+                              static_cast<long double>(skew));
+      }
 
       ArenaResource res(frameArenas_->tls());
       std::pmr::vector<double> partials(&res);
