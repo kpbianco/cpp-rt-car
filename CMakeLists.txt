@@ -7,9 +7,24 @@ option(ENABLE_LOG "Enable logging" ON)
 option(ENABLE_PROF "Enable profiler" ON)
 option(ENABLE_TESTS "Build tests" ON)
 
+# Sanitizer toggles (semicolons to enable multiple: address;thread;leak;memory;hwaddress;safe-stack;cfi)
+set(SIM_SANITIZERS "" CACHE STRING "Sanitizers to enable for all targets")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Sanitizers
+if (SIM_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  message(STATUS "Enabling sanitizers: ${SIM_SANITIZERS}")
+  string(REPLACE ";" "," _san_flags "${SIM_SANITIZERS}")
+  add_compile_options(-fsanitize=${_san_flags} -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=${_san_flags} -fno-omit-frame-pointer)
+  if (SIM_SANITIZERS MATCHES "cfi")
+    add_compile_options(-flto)
+    add_link_options(-flto)
+  endif()
+endif()
 
 # Recommended warnings (clang/gcc)
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
