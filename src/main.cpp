@@ -79,8 +79,8 @@ int main(int argc, char** argv)
                                           int64_t, SimCore::Seconds dt) {
         double dts = dt.count();
         for (std::size_t i = b; i < e; ++i) {
-            cars.vel[i] += (force[i] / 1200.0) * dts;
-            cars.pos[i] += cars.vel[i] * dts;
+            cars.velocity(i) += (force[i] / 1200.0) * dts;
+            cars.position(i) += cars.velocity(i) * dts;
         }
     });
 
@@ -88,7 +88,8 @@ int main(int argc, char** argv)
     sim.addReductionTask(physics, [&](int64_t f, SimCore::Seconds){
         if (f % 1000 == 0) {
             double sum = 0.0;
-            for (double v : cars.vel) sum += v;
+            for (std::size_t i = 0; i < cars.size(); ++i)
+                sum += cars.velocity(i);
             double avg = sum / cars.size();
             LOG_INFO(&logger, "[REDUCE] frame={} avgVel={:.4f}", f, avg);
         }
@@ -96,6 +97,6 @@ int main(int argc, char** argv)
 
     sim.run();
 
-    std::cout << "Final pos0=" << cars.pos[0] << "\n";
+    std::cout << "Final pos0=" << cars.position(0) << "\n";
     return 0;
 }
