@@ -25,7 +25,7 @@ endif()
 # Header-only core library
 add_library(simcore INTERFACE)
 target_include_directories(simcore INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # In your top-level CMakeLists.txt

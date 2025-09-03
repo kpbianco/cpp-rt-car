@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "SimCore.hpp"
-#include "logger.hpp"
+#include <simcore/SimCore.hpp>
+#include <simcore/logger.hpp>
 
 TEST(AdaptiveParamTest, DriftBounded) {
     SimCore::Settings s;

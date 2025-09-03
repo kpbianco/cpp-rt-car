@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/SimCore.hpp"
+#include <simcore/SimCore.hpp>
 #include <atomic>
 
 static std::size_t expectedTotalChunks(std::size_t elems,

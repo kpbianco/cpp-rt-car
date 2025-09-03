@@ -22,7 +22,7 @@ set(TEST_SOURCES
 add_executable(simcore_tests ${TEST_SOURCES})
 target_link_libraries(simcore_tests PRIVATE simcore gtest gtest_main gmock)
 target_include_directories(simcore_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/tests
 )
 
@@ -33,8 +33,6 @@ if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYST
   add_compile_options(-mavx2 -mfma)
 endif()
 
-# Make sure tests see the headers
-target_include_directories(simcore_tests PRIVATE ${CMAKE_SOURCE_DIR})
 
 # --- affinity test -------------------------------------------------
 if (UNIX AND NOT APPLE)   # linux

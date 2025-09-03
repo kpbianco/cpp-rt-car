@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "frame_arena.hpp"  // shim -> rt_memory.hpp
+#include <simcore/frame_arena.hpp>  // shim -> rt_memory.hpp
 
 TEST(RtArena, BasicAllocAndReset) {
     FrameArena a(1024, 64); // 1KB arena

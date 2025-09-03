@@ -1,5 +1,5 @@
 #pragma once
-#include "logger.hpp"
+#include <simcore/logger.hpp>
 #include <gmock/gmock.h>
 
 class MockSink : public Logger::Sink {

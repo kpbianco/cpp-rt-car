@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "frame_arena.hpp"
+#include <simcore/frame_arena.hpp>
 
 // This test relies on assertions being enabled (no -DNDEBUG)
 TEST(RtArena, DeathOnOverflow) {

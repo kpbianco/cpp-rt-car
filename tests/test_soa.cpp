@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "car_soa.hpp"
+#include <simcore/car_soa.hpp>
 
 TEST(SoAData, ContiguousAndCorrect)
 {
