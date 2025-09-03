@@ -31,10 +31,20 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wnon-virtual-dtor)
 endif()
 
-# --- GoogleTest submodule ---
-# Expect it at external/googletest (git submodule add ...)
+# --- GoogleTest integration ---
+# Use FetchContent to obtain googletest at configure time instead of
+# expecting a checked out submodule. This keeps the repository light and
+# avoids build failures when the submodule is missing.
 if (ENABLE_TESTS)
-    add_subdirectory(external/googletest)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+    )
+    # For Windows: Prevent overriding the parent project's compiler/linker
+    # settings on MSVC.
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
 endif()
 
 # Header-only core library
