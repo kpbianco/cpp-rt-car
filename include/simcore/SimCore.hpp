@@ -173,6 +173,9 @@ public:
         std::vector<std::shared_ptr<void>> keep;
         std::size_t  elementCount = 0;
         bool         enabled      = true;
+        std::size_t  chosenChunk  = 0;
+        std::size_t  totalChunks  = 0;
+        std::size_t  chunkSkew    = 0;
     };
 
     struct BudgetSample {
@@ -657,26 +660,35 @@ private:
  // ---- Parallel range tasks with small-array cut-off ----
 if (workerCount_ > 1 && !ph.ranges.empty() && ph.elementCount > 0) {
     const std::size_t count = ph.elementCount;
+    const std::size_t chunk = pickChunk(count);
+    const std::size_t totalChunks = (count + chunk - 1) / chunk;
+    const std::size_t threads = workerCount_ + 1; // include main thread
+    const std::size_t skew = threads ? (totalChunks % threads) : 0;
+
+    ph.chosenChunk = chunk;
+    ph.totalChunks = totalChunks;
+    ph.chunkSkew   = skew;
+
+    LOG_TELEMETRY(logger_, "phase {}: chunk={} total={} skew={}", ph.name, chunk, totalChunks, skew);
+    if (profiler_) {
+        profiler_->setCounter("phase." + ph.name + ".chunk", static_cast<long double>(chunk));
+        profiler_->setCounter("phase." + ph.name + ".total", static_cast<long double>(totalChunks));
+        profiler_->setCounter("phase." + ph.name + ".skew", static_cast<long double>(skew));
+    }
+
+    const bool tooFewElems  = (settings_.minParallelElems  > 0) &&
+                              (count <= settings_.minParallelElems);
+    const bool tooFewChunks = (settings_.minParallelChunks > 1) &&
+                              (totalChunks <= settings_.minParallelChunks);
 
     for (std::size_t tIdx = 0; tIdx < ph.ranges.size(); ++tIdx) {
         auto& rt = ph.ranges[tIdx];
 
-        const std::size_t chunk = pickChunk(count);
-        const std::size_t totalChunks = (count + chunk - 1) / chunk;
-
-        // Inclusive thresholds: serialize when at/below the limits
-        const bool tooFewElems  = (settings_.minParallelElems  > 0) &&
-                                  (count <= settings_.minParallelElems);
-        const bool tooFewChunks = (settings_.minParallelChunks > 1) &&
-                                  (totalChunks <= settings_.minParallelChunks);
-
         if (tooFewElems || tooFewChunks) {
-            // Run exactly once, serial, over the full range
             rt.fn(rt.ctx, 0, count, frame_, dt_);
             continue;
         }
 
-        // parallel path…
         active_.fn           = &rt;
         active_.totalChunks  = totalChunks;
         active_.elementCount = count;
@@ -712,6 +724,19 @@ if (workerCount_ > 1 && !ph.ranges.empty() && ph.elementCount > 0) {
             const std::size_t leaf  = std::max<std::size_t>(1, settings_.detReduceLeaf);
             const std::size_t chunk = std::min<std::size_t>(leaf, count);
             const std::size_t totalChunks = (count + chunk - 1) / chunk;
+            const std::size_t threads = workerCount_ + 1;
+            const std::size_t skew = threads ? (totalChunks % threads) : 0;
+
+            ph.chosenChunk = chunk;
+            ph.totalChunks = totalChunks;
+            ph.chunkSkew   = skew;
+
+            LOG_TELEMETRY(logger_, "phase {}: chunk={} total={} skew={}", ph.name, chunk, totalChunks, skew);
+            if (profiler_) {
+                profiler_->setCounter("phase." + ph.name + ".chunk", static_cast<long double>(chunk));
+                profiler_->setCounter("phase." + ph.name + ".total", static_cast<long double>(totalChunks));
+                profiler_->setCounter("phase." + ph.name + ".skew", static_cast<long double>(skew));
+            }
 
             ArenaResource res(frameArenas_->tls());
             std::pmr::vector<double> partials(&res);
