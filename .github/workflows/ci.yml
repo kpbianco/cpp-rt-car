@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: [Debug, RelWithDebInfo]
+        include:
+          - build_type: Debug
+            sanitizers: address;undefined
+          - build_type: RelWithDebInfo
+            sanitizers: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DSIM_SANITIZERS='${{matrix.sanitizers}}'
+      - name: Build
+        run: cmake --build build --config ${{matrix.build_type}} -- -j2
+      - name: Test
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          GTEST_DEATH_TEST_STYLE: threadsafe
+        run: ctest --test-dir build -C ${{matrix.build_type}} --output-on-failure
