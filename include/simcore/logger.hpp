@@ -19,6 +19,7 @@
 #endif
 #include <io.h>
 #include <fcntl.h>
+#include <share.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -75,7 +76,11 @@ public:
                                    std::chrono::milliseconds syncEvery = std::chrono::milliseconds(100))
             : fd_(-1), cap_(cap), syncEvery_(syncEvery) {
 #ifdef _WIN32
-            fd_ = _open(path.c_str(), _O_CREAT | _O_APPEND | _O_WRONLY, _S_IREAD | _S_IWRITE);
+            int tmp = -1;
+            if (_sopen_s(&tmp, path.c_str(), _O_CREAT | _O_APPEND | _O_WRONLY, _SH_DENYNO,
+                          _S_IREAD | _S_IWRITE) == 0) {
+                fd_ = tmp;
+            }
 #else
             fd_ = ::open(path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0644);
 #endif
