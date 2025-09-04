@@ -30,9 +30,9 @@ static double run_sum_with_threads(std::size_t threads)
         p,
         // per-chunk local sum
         [&](std::size_t b, std::size_t e, std::int64_t, SimCore::Seconds) -> double {
-            double s = 0.0;
-            for (std::size_t i = b; i < e; ++i) s += values[i];
-            return s;
+            double sum = 0.0;
+            for (std::size_t i = b; i < e; ++i) sum += values[i];
+            return sum;
         },
         // sink receives pairwise-folded total in a fixed order
         [&](double total, std::int64_t, SimCore::Seconds){
