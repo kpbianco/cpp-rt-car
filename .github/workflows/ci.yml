@@ -50,10 +50,7 @@ jobs:
           path: .
           format: spdx-json
           output-file: sbom-${{matrix.compiler}}-${{matrix.build_type}}.spdx.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom-${{matrix.compiler}}-${{matrix.build_type}}
-          path: sbom-${{matrix.compiler}}-${{matrix.build_type}}.spdx.json
+          artifact-name: sbom-${{matrix.compiler}}-${{matrix.build_type}}
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
@@ -80,10 +77,7 @@ jobs:
           path: .
           format: spdx-json
           output-file: sbom-windows-${{matrix.build_type}}.spdx.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom-windows-${{matrix.build_type}}
-          path: sbom-windows-${{matrix.build_type}}.spdx.json
+          artifact-name: sbom-windows-${{matrix.build_type}}
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'

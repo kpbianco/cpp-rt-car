@@ -44,6 +44,7 @@ TEST(WorkerPoolSched, WorkStealing) {
   std::mutex m;
   for (int i = 0; i < 50; ++i) {
     pool.enqueueOn(0, [&] {
+      std::this_thread::sleep_for(1ms); // give other threads time to steal
       std::lock_guard<std::mutex> lk(m);
       threads.insert(std::this_thread::get_id());
     });
