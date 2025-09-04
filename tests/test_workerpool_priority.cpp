@@ -14,14 +14,18 @@ TEST(WorkerPoolSched, HighPriorityRunsFirst) {
   WorkerPool pool(1);
   std::vector<int> order;
   std::mutex m;
-  pool.enqueue([&] {
-    std::lock_guard<std::mutex> lk(m);
-    order.push_back(1);
-  }, WorkerPool::Priority::Low);
-  pool.enqueue([&] {
-    std::lock_guard<std::mutex> lk(m);
-    order.push_back(2);
-  }, WorkerPool::Priority::High);
+  pool.enqueue(
+      [&] {
+        std::lock_guard<std::mutex> lk(m);
+        order.push_back(1);
+      },
+      WorkerPool::Priority::Low);
+  pool.enqueue(
+      [&] {
+        std::lock_guard<std::mutex> lk(m);
+        order.push_back(2);
+      },
+      WorkerPool::Priority::High);
   pool.drain();
   pool.stop();
   ASSERT_EQ(order.size(), 2u);
@@ -50,13 +54,14 @@ TEST(WorkerPoolSched, TailLatencyUnderSkew) {
                WorkerPool::Priority::Low);
   std::this_thread::sleep_for(10ms); // ensure low job starts
   auto start = std::chrono::steady_clock::now();
-  pool.enqueue([&] { highDone.store(true, std::memory_order_relaxed); },
+  pool.enqueue([&] { highDone.store(true, std::memory_order_release); },
                WorkerPool::Priority::High);
-  pool.drain();
+  while (!highDone.load(std::memory_order_acquire))
+    std::this_thread::yield();
   auto elapsed = std::chrono::steady_clock::now() - start;
+  pool.drain();
   pool.stop();
-  EXPECT_TRUE(highDone.load());
-  EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
-                .count(),
-            50);
+  EXPECT_LT(
+      std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(),
+      50);
 }

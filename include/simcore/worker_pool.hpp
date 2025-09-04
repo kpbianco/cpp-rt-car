@@ -51,8 +51,8 @@ public:
   // round-robin across worker-local deques.
   void enqueue(JobFn fn, Priority pr = Priority::Normal,
                Category cat = Category::CPU) {
-    std::size_t idx = nextWorker_.fetch_add(1, std::memory_order_relaxed) %
-                       threads_.size();
+    std::size_t idx =
+        nextWorker_.fetch_add(1, std::memory_order_relaxed) % threads_.size();
     enqueueOn(idx, std::move(fn), pr, cat);
   }
 
@@ -77,6 +77,21 @@ public:
       outstanding_.fetch_add(1, std::memory_order_acq_rel);
     }
     Job job{std::move(fn), pr, cat};
+    // If all worker threads are busy and this is a high-priority job,
+    // spawn a detached helper thread so the work isn't blocked behind
+    // lower priority tasks.
+    if (pr == Priority::High &&
+        active_.load(std::memory_order_acquire) >= threads_.size()) {
+      std::thread([this, job = std::move(job)]() mutable {
+        active_.fetch_add(1, std::memory_order_acq_rel);
+        if (job.fn)
+          job.fn();
+        active_.fetch_sub(1, std::memory_order_acq_rel);
+        outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+      }).detach();
+      return;
+    }
+
     auto &qd = *queues_[idx];
     {
       std::lock_guard<std::mutex> lock(qd.m);
@@ -91,13 +106,26 @@ public:
     if (maxOutstanding_ > 0) {
       std::size_t cur = outstanding_.load(std::memory_order_acquire);
       while (cur < maxOutstanding_) {
-        if (outstanding_.compare_exchange_weak(
-                cur, cur + 1, std::memory_order_acq_rel,
-                std::memory_order_relaxed)) {
+        if (outstanding_.compare_exchange_weak(cur, cur + 1,
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_relaxed)) {
           std::size_t idx =
               nextWorker_.fetch_add(1, std::memory_order_relaxed) %
               threads_.size();
           Job job{std::move(fn), pr, cat};
+          // Same high-priority helper thread logic as enqueueOn
+          if (pr == Priority::High &&
+              active_.load(std::memory_order_acquire) >= threads_.size()) {
+            std::thread([this, job = std::move(job)]() mutable {
+              active_.fetch_add(1, std::memory_order_acq_rel);
+              if (job.fn)
+                job.fn();
+              active_.fetch_sub(1, std::memory_order_acq_rel);
+              outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+            }).detach();
+            return true;
+          }
+
           auto &qd = *queues_[idx];
           {
             std::lock_guard<std::mutex> lock(qd.m);
@@ -109,9 +137,20 @@ public:
       return false;
     } else {
       outstanding_.fetch_add(1, std::memory_order_acq_rel);
-      std::size_t idx = nextWorker_.fetch_add(1, std::memory_order_relaxed) %
-                        threads_.size();
+      std::size_t idx =
+          nextWorker_.fetch_add(1, std::memory_order_relaxed) % threads_.size();
       Job job{std::move(fn), pr, cat};
+      if (pr == Priority::High &&
+          active_.load(std::memory_order_acquire) >= threads_.size()) {
+        std::thread([this, job = std::move(job)]() mutable {
+          active_.fetch_add(1, std::memory_order_acq_rel);
+          if (job.fn)
+            job.fn();
+          active_.fetch_sub(1, std::memory_order_acq_rel);
+          outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+        }).detach();
+        return true;
+      }
       auto &qd = *queues_[idx];
       {
         std::lock_guard<std::mutex> lock(qd.m);
