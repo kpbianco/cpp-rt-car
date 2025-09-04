@@ -6,6 +6,7 @@ set(TEST_SOURCES
     test_adaptive_param.cpp
     test_soa.cpp
     test_jobqueue.cpp
+    test_workerpool_priority.cpp
     test_phase_graph.cpp
     test_chunk_autotune.cpp
     test_deterministic_reduction.cpp
