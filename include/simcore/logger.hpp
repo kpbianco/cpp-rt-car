@@ -10,6 +10,15 @@
 #include <fstream>
 #include <sstream>
 #include <atomic>
+#include <deque>
+#include <condition_variable>
+#include <utility>
+#include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #ifndef LOG_DEFAULT_LEVEL
 #define LOG_DEFAULT_LEVEL 2   // Info
@@ -53,6 +62,96 @@ public:
     private:
         std::ofstream f_;
         std::mutex m_;
+    };
+
+    class AsyncRingFileSink : public Sink {
+    public:
+        explicit AsyncRingFileSink(const std::string& path,
+                                   std::size_t cap = 1024,
+                                   std::chrono::milliseconds syncEvery = std::chrono::milliseconds(100))
+            : fd_(-1), cap_(cap), syncEvery_(syncEvery) {
+#ifdef _WIN32
+            fd_ = _open(path.c_str(), _O_CREAT | _O_APPEND | _O_WRONLY, _S_IREAD | _S_IWRITE);
+#else
+            fd_ = ::open(path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0644);
+#endif
+            if (fd_ >= 0) {
+                worker_ = std::thread([this]{ run(); });
+            }
+        }
+        ~AsyncRingFileSink() override {
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                stop_ = true;
+            }
+            cv_.notify_all();
+            if (worker_.joinable()) worker_.join();
+            flush();
+            if (fd_ >= 0) {
+#ifdef _WIN32
+                _close(fd_);
+#else
+                ::close(fd_);
+#endif
+            }
+        }
+
+        void write(const Record& r) override {
+            if (fd_ < 0) return;
+            std::lock_guard<std::mutex> lk(m_);
+            if (queue_.size() >= cap_) queue_.pop_front();
+            queue_.push_back(r.msg);
+            cv_.notify_one();
+        }
+
+    private:
+        void flush() {
+            if (fd_ >= 0) {
+#ifdef _WIN32
+                _commit(fd_);
+#else
+                ::fsync(fd_);
+#endif
+            }
+        }
+
+        void run() {
+            std::unique_lock<std::mutex> lk(m_);
+            lastSync_ = std::chrono::steady_clock::now();
+            while (!stop_ || !queue_.empty()) {
+                if (queue_.empty()) {
+                    cv_.wait(lk, [this]{ return stop_ || !queue_.empty(); });
+                    if (queue_.empty()) continue;
+                }
+                auto msg = std::move(queue_.front());
+                queue_.pop_front();
+                lk.unlock();
+#ifdef _WIN32
+                _write(fd_, msg.data(), static_cast<unsigned int>(msg.size()));
+                _write(fd_, "\n", 1);
+#else
+                ::write(fd_, msg.data(), msg.size());
+                ::write(fd_, "\n", 1);
+#endif
+                auto now = std::chrono::steady_clock::now();
+                if (now - lastSync_ >= syncEvery_) {
+                    flush();
+                    lastSync_ = now;
+                }
+                lk.lock();
+            }
+            flush();
+        }
+
+        int fd_;
+        std::deque<std::string> queue_;
+        std::size_t cap_;
+        std::chrono::milliseconds syncEvery_;
+        std::chrono::steady_clock::time_point lastSync_{};
+        std::mutex m_;
+        std::condition_variable cv_;
+        bool stop_ = false;
+        std::thread worker_;
     };
 
     class RingBufferSink : public Sink {
