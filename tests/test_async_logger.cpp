@@ -19,10 +19,16 @@ TEST(Logger, AsyncRingFileSinkFlushes)
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    std::ifstream in(path);
     std::string line;
     int count = 0;
-    while(std::getline(in,line)) ++count;
+    // polling loop to account for slower flushes on some platforms
+    for (int i = 0; i < 100 && count < 10; ++i) {
+        std::ifstream in(path);
+        count = 0;
+        while (std::getline(in, line)) ++count;
+        if (count == 10) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     EXPECT_EQ(count,10);
     fs::remove(path);
 }
