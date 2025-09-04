@@ -8,6 +8,8 @@ TEST(Logger, AsyncRingFileSinkFlushes)
 {
     namespace fs = std::filesystem;
     auto path = fs::temp_directory_path() / "async_log_test.log";
+    std::error_code ec;
+    fs::remove(path, ec); // ensure clean slate
     {
         Logger log;
         auto sink = std::make_shared<Logger::AsyncRingFileSink>(path.string(), 16, std::chrono::milliseconds(10));
