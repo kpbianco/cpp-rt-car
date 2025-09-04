@@ -28,8 +28,15 @@ set(TEST_SOURCES
     test_hal.cpp
 )
 
+if (ENABLE_RAPIDCHECK)
+    list(APPEND TEST_SOURCES test_jobqueue_property.cpp)
+endif()
+
 add_executable(simcore_tests ${TEST_SOURCES})
 target_link_libraries(simcore_tests PRIVATE simcore gtest gtest_main gmock)
+if (ENABLE_RAPIDCHECK)
+    target_link_libraries(simcore_tests PRIVATE rapidcheck rapidcheck_gtest)
+endif()
 target_include_directories(simcore_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/tests
@@ -42,6 +49,13 @@ if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYST
   add_compile_options(-mavx2 -mfma)
 endif()
 
+option(SIM_BUILD_FUZZERS "Build libFuzzer harnesses" OFF)
+if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_executable(jobqueue_fuzz jobqueue_fuzz.cpp)
+    target_link_libraries(jobqueue_fuzz PRIVATE simcore)
+    target_compile_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+endif()
 
 # --- affinity test -------------------------------------------------
 if (UNIX AND NOT APPLE)   # linux

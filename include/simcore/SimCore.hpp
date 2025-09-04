@@ -579,7 +579,7 @@ private:
 
   int decidePreSteps(double slopeMsPerFrame) const {
     // warmup
-    if (costCount_ < std::max(settings_.predictiveWarmup, 2))
+    if (costCount_ < static_cast<std::size_t>(std::max(settings_.predictiveWarmup, 2)))
       return 0;
 
     // If trend isn't strong, do nothing
