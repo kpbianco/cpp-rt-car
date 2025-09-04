@@ -29,11 +29,18 @@ enum : std::uint32_t {
 };
 
 #if defined(__x86_64__) || defined(_M_X64)
+#  if defined(_MSC_VER)
+#    include <intrin.h>
+static inline std::uint64_t rdtsc() noexcept {
+    return __rdtsc();
+}
+#  else
 static inline std::uint64_t rdtsc() noexcept {
     unsigned hi, lo;
     __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
     return (static_cast<std::uint64_t>(hi) << 32) | lo;
 }
+#  endif
 #else
 #  include <chrono>
 static inline std::uint64_t rdtsc() noexcept {
@@ -161,9 +168,12 @@ public:
             std::size_t tail = b.cap - start;
             if (w < b.cap) tail = n;
             const std::size_t firstChunk = (tail > n) ? n : tail;
-            f.write(reinterpret_cast<const char*>(b.base + start), firstChunk * sizeof(Event));
+            f.write(reinterpret_cast<const char*>(b.base + start),
+                    static_cast<std::streamsize>(firstChunk * sizeof(Event)));
             const std::size_t remaining = n - firstChunk;
-            if (remaining) f.write(reinterpret_cast<const char*>(b.base), remaining * sizeof(Event));
+            if (remaining)
+                f.write(reinterpret_cast<const char*>(b.base),
+                        static_cast<std::streamsize>(remaining * sizeof(Event)));
         }
         return true;
     }

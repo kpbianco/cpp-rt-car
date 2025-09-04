@@ -241,7 +241,7 @@ public:
 
     recalcTiming();
 
-    costWindow_.assign(std::max(0, settings_.budgetWindow), 0.0);
+      costWindow_.assign(static_cast<std::size_t>(std::max(0, settings_.budgetWindow)), 0.0);
     costHead_ = 0;
     costCount_ = 0;
     costSumMs_ = 0.0;
@@ -422,9 +422,9 @@ private:
 
     threads_.reserve(workerCount_);
     for (std::size_t i = 0; i < workerCount_; ++i) {
-      threads_.emplace_back([this, i,
+      threads_.emplace_back([this, i
 #ifdef __linux__
-                             cpuList
+                             , cpuList
 #endif
       ] {
 #ifdef __linux__
@@ -537,9 +537,10 @@ private:
 
     for (int k = 0; k < N; ++k) {
       int idx = start + k;
-      if (idx >= (int)costWindow_.size())
-        idx -= (int)costWindow_.size();
-      double y = costWindow_[idx];
+        if (idx >= (int)costWindow_.size()) {
+          idx -= (int)costWindow_.size();
+        }
+        double y = costWindow_[static_cast<std::size_t>(idx)];
       int i = k;
       sumY += y;
       sumI += i;

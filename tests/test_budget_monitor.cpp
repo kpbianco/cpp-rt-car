@@ -9,7 +9,7 @@ static void busy_spin(int micros) {
     auto start = Clock::now();
     while (std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count() < micros) {
         // prevent the compiler from optimizing away
-        asm volatile("" ::: "memory");
+        std::atomic_signal_fence(std::memory_order_acq_rel);
     }
 }
 
