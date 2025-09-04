@@ -24,7 +24,7 @@
 #include "profiler.hpp"
 #include "worker_pool.hpp"
 
-#if defined(__linux__) || defined(__unix__)
+#ifndef _WIN32
 #include <sched.h>
 #endif
 #ifdef __linux__

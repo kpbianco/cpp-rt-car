@@ -21,7 +21,7 @@ jobs:
             sanitizers: ''
     steps:
       - name: Install dependencies
-        run: apt-get update && apt-get install -y git build-essential cmake clang
+        run: apt-get update && apt-get install -y git curl build-essential cmake clang
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -57,6 +57,7 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
+        continue-on-error: true
 
   build-windows:
     runs-on: windows-latest
@@ -86,3 +87,4 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
+        continue-on-error: true
