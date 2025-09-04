@@ -15,7 +15,7 @@ TEST(RobustFP, KahanImprovesSumULP) {
     // while Kahan summation retains them.
     std::vector<double> v;
     v.push_back(1.0); // large starting value
-    v.insert(v.end(), 1000000, 1e-16); // lots of tiny contributions
+    v.insert(v.end(), 1000000, 1e-20); // lots of tiny contributions
 
     // naive sum
     double naive = 0.0;
@@ -24,12 +24,7 @@ TEST(RobustFP, KahanImprovesSumULP) {
     // kahan sum
     double kahan = robust::kahan_sum(v.begin(), v.end());
 
-    // reference using long double
-    long double ref = 0.0L;
-    for (double x : v) ref += static_cast<long double>(x);
-    double refd = static_cast<double>(ref);
-
-    auto naiveULP = robust::ulp_distance(naive, refd);
-    auto kahanULP = robust::ulp_distance(kahan, refd);
-    EXPECT_LT(kahanULP, naiveULP);
+    const double expected = 1.0 + 1e-14;
+    EXPECT_GT(kahan, naive);              // should accumulate more
+    EXPECT_NEAR(kahan, expected, 1e-15);   // close to exact result
 }

@@ -59,18 +59,6 @@ elseif(SIM_PGO STREQUAL "use")
   add_link_options(-fprofile-use=${SIM_PGO_PROFILE} -fprofile-correction)
 endif()
 
-# Recommended warnings (clang/gcc)
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wnon-virtual-dtor)
-endif()
-
-if (SIM_WERROR)
-  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options(-Werror)
-  elseif (MSVC)
-    add_compile_options(/WX)
-  endif()
-endif()
 
 # --- GoogleTest integration ---
 # Use FetchContent to obtain googletest at configure time instead of
@@ -107,6 +95,21 @@ add_library(simcore INTERFACE)
 target_include_directories(simcore INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Enable warnings for project sources only
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(simcore INTERFACE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wnon-virtual-dtor)
+elseif (MSVC)
+    target_compile_options(simcore INTERFACE /W4)
+endif()
+
+if (SIM_WERROR)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(simcore INTERFACE -Werror)
+  elseif (MSVC)
+    target_compile_options(simcore INTERFACE /WX)
+  endif()
+endif()
 
 # In your top-level CMakeLists.txt
 
