@@ -63,7 +63,8 @@ public:
 
 private:
     static uint64_t to_ns(std::chrono::steady_clock::time_point tp) {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()).count();
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()).count());
     }
     static uint64_t ensure_monotonic(uint64_t ns) {
         uint64_t last = last_ns_.load();

@@ -28,13 +28,13 @@ set(TEST_SOURCES
     test_hal.cpp
 )
 
-if (ENABLE_RAPIDCHECK)
+if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
     list(APPEND TEST_SOURCES test_jobqueue_property.cpp)
 endif()
 
 add_executable(simcore_tests ${TEST_SOURCES})
 target_link_libraries(simcore_tests PRIVATE simcore gtest gtest_main gmock)
-if (ENABLE_RAPIDCHECK)
+if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
     target_link_libraries(simcore_tests PRIVATE rapidcheck rapidcheck_gtest)
 endif()
 target_include_directories(simcore_tests PRIVATE
