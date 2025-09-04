@@ -32,7 +32,7 @@ private:
     {
         std::unique_lock<std::mutex> lk(m_);
         while (!stop_) {
-            if (cv_.wait_until(lk, last_ + timeout_, [this]{ return stop_; })) break;
+            if (cv_.wait_until(lk, last_ + timeout_, [this]{ return stop_.load(); })) break;
             if (std::chrono::steady_clock::now() - last_ >= timeout_) {
                 lk.unlock();
                 cb_();

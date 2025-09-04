@@ -15,6 +15,9 @@
 #include <utility>
 #include <fcntl.h>
 #ifdef _WIN32
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 #include <io.h>
 #else
 #include <unistd.h>
@@ -127,11 +130,15 @@ public:
                 queue_.pop_front();
                 lk.unlock();
 #ifdef _WIN32
-                _write(fd_, msg.data(), static_cast<unsigned int>(msg.size()));
-                _write(fd_, "\n", 1);
+                int wr = _write(fd_, msg.data(), static_cast<unsigned int>(msg.size()));
+                (void)wr;
+                int wr2 = _write(fd_, "\n", 1);
+                (void)wr2;
 #else
-                ::write(fd_, msg.data(), msg.size());
-                ::write(fd_, "\n", 1);
+                ssize_t wr = ::write(fd_, msg.data(), msg.size());
+                (void)wr;
+                ssize_t wr2 = ::write(fd_, "\n", 1);
+                (void)wr2;
 #endif
                 auto now = std::chrono::steady_clock::now();
                 if (now - lastSync_ >= syncEvery_) {
