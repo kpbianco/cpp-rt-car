@@ -9,6 +9,7 @@ set(TEST_SOURCES
     test_phase_graph.cpp
     test_chunk_autotune.cpp
     test_deterministic_reduction.cpp
+    test_robust_fp.cpp
     test_budget_monitor.cpp
     test_simd.cpp
     test_rt_pool.cpp
