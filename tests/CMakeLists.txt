@@ -24,6 +24,7 @@ set(TEST_SOURCES
     test_highres_clock.cpp
     test_rate_governor.cpp
     test_hazard_ptr.cpp
+    test_physics_integrators.cpp
 )
 
 add_executable(simcore_tests ${TEST_SOURCES})
