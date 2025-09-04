@@ -634,6 +634,8 @@ private:
       // decide desired number (based on slope, warmup, etc.)
       const double slope = computeSlopeMsPerFrame();
       int desired = decidePreSteps(slope);
+      if (aheadFr < 1.0)
+        desired = 0; // only pre-step when at least one frame ahead
 
       // cap to remaining lookahead budget (e.g., 6–8 frames)
       int cap = settings_.predictiveLookaheadFrames -
