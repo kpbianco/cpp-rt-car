@@ -20,11 +20,11 @@ jobs:
           - build_type: RelWithDebInfo
             sanitizers: ''
     steps:
+      - name: Install dependencies
+        run: apt-get update && apt-get install -y git build-essential cmake clang
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install dependencies
-        run: apt-get update && apt-get install -y build-essential cmake clang
       - name: Set up compiler
         run: |
           if [ "${{matrix.compiler}}" = "clang" ]; then
