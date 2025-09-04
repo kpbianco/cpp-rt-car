@@ -146,6 +146,20 @@ endif()
 
 target_compile_features(simcore INTERFACE cxx_std_20)
 
+# Core module (math, containers)
+add_library(simcore_core INTERFACE)
+target_include_directories(simcore_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
+
+# Runtime module providing C API surface
+add_library(simcore_rt STATIC
+    rt/src/runtime.cpp
+)
+target_include_directories(simcore_rt PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/include
+)
+target_link_libraries(simcore_rt PUBLIC simcore_core)
+
 # Main executable
 add_executable(simcore_app src/main.cpp)
 target_link_libraries(simcore_app PRIVATE simcore)
