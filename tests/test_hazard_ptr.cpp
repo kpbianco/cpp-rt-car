@@ -55,20 +55,21 @@ TEST(HazardPointer, StackCorrectness) {
   });
   t1.join();
   t2.join();
-  std::vector<int> vals;
-  vals.reserve(2 * N);
+  std::vector<int> vals1, vals2;
+  vals1.reserve(N);
+  vals2.reserve(N);
   std::thread c1([&] {
     int x;
     while (st.pop(x))
-      vals.push_back(x);
+      vals1.push_back(x);
   });
   std::thread c2([&] {
     int x;
     while (st.pop(x))
-      vals.push_back(x);
+      vals2.push_back(x);
   });
   c1.join();
   c2.join();
   scan(); // reclaim any remaining
-  EXPECT_EQ(vals.size(), 2u * N);
+  EXPECT_EQ(vals1.size() + vals2.size(), 2u * N);
 }

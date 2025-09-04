@@ -57,7 +57,7 @@ struct RetiredNode {
   void (*deleter)(void *);
 };
 
-inline void default_delete(void *p) { delete static_cast<char *>(p); }
+inline void default_delete(void *p) { ::operator delete(p); }
 
 inline std::vector<RetiredNode> &retired_list() {
   thread_local std::vector<RetiredNode> list;
