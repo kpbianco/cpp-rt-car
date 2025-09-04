@@ -14,7 +14,7 @@ TEST(AdaptiveParamTest, DriftBounded) {
     Logger log; log.setLevel(Logger::Level::Error);
     SimCore sim(s);
     sim.setLogger(&log);
-    auto phase = sim.addPhase("Empty");
+    sim.addPhase("Empty");
 
     sim.run();
     // Some generous bound; depends on platform jitter.

@@ -2,6 +2,7 @@
 #include <simcore/SimCore.hpp>
 #include <simcore/logger.hpp>
 #include <simcore/profiler.hpp>
+#include <atomic>
 
 TEST(ProfilerIntegration, CollectsPhaseAndFrame) {
 #ifdef PROF_ENABLED
@@ -19,7 +20,12 @@ TEST(ProfilerIntegration, CollectsPhaseAndFrame) {
     sim.setProfiler(&prof);
 
     auto phase = sim.addPhase("Work");
-    sim.addSerialSubsystem(phase, [&](int64_t, SimCore::Seconds){ volatile int x=0; for(int i=0;i<1000;++i) x+=i; });
+    sim.addSerialSubsystem(phase, [&](int64_t, SimCore::Seconds){
+        std::atomic<int> x{0};
+        for (int i = 0; i < 1000; ++i) {
+            x.fetch_add(i, std::memory_order_relaxed);
+        }
+    });
 
     sim.run();
 
