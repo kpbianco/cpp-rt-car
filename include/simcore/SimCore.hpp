@@ -24,7 +24,9 @@
 #include "profiler.hpp"
 #include "worker_pool.hpp"
 
+#if defined(__linux__) || defined(__unix__)
 #include <sched.h>
+#endif
 #ifdef __linux__
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -563,13 +565,13 @@ private:
     int idxNew = static_cast<int>(costHead_) - 1;
     if (idxNew < 0)
       idxNew += static_cast<int>(costWindow_.size());
-    double prev = costWindow_[idxNew];
+    double prev = costWindow_[static_cast<std::size_t>(idxNew)];
 
     for (int k = 1; k <= M; ++k) {
       int idx = idxNew - k;
       if (idx < 0)
         idx += static_cast<int>(costWindow_.size());
-      double val = costWindow_[idx];
+      double val = costWindow_[static_cast<std::size_t>(idx)];
       if (prev > val)
         ++up; // increasing towards present
       prev = val;
@@ -722,7 +724,9 @@ private:
       const std::size_t levelStart = head;
       while (head < q.size())
         ++head;
-      std::vector<std::size_t> level(q.begin() + levelStart, q.begin() + head);
+      using Diff = std::vector<std::size_t>::difference_type;
+      std::vector<std::size_t> level(q.begin() + static_cast<Diff>(levelStart),
+                                     q.begin() + static_cast<Diff>(head));
       if (level.empty())
         break;
       levels.push_back(level);

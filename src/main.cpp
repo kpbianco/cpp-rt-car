@@ -47,9 +47,10 @@ int main(int argc, char** argv)
     Logger logger;
     logger.setLevel(Logger::Level::Info);
     logger.addSink(std::make_shared<Logger::StdoutSink>());
+    Logger *loggerPtr = &logger;
 
     SimCore sim(cfg);
-    sim.setLogger(&logger);
+    sim.setLogger(loggerPtr);
 
     auto input   = sim.addPhase("Input");
     auto physics = sim.addPhase("Physics");
@@ -83,7 +84,7 @@ int main(int argc, char** argv)
             double sum = 0.0;
             for (double v : cars.vel) sum += v;
             double avg = sum / static_cast<double>(cars.size());
-            LOG_INFO(&logger, "[REDUCE] frame={} avgVel={:.4f}", f, avg);
+            LOG_INFO(loggerPtr, "[REDUCE] frame={} avgVel={:.4f}", f, avg);
         }
     });
 

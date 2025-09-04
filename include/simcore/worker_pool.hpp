@@ -290,6 +290,6 @@ private:
   std::atomic<std::size_t> active_{0};
   std::atomic<std::size_t> outstanding_{0};
   std::size_t maxOutstanding_ = 0;
-  bool verbose_{false};
+  [[maybe_unused]] bool verbose_{false};
   std::atomic<std::size_t> nextWorker_{0};
 };
