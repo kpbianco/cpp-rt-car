@@ -24,7 +24,9 @@
 #include "profiler.hpp"
 #include "worker_pool.hpp"
 
+#ifndef _WIN32
 #include <sched.h>
+#endif
 #ifdef __linux__
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -239,7 +241,7 @@ public:
 
     recalcTiming();
 
-    costWindow_.assign(std::max(0, settings_.budgetWindow), 0.0);
+      costWindow_.assign(static_cast<std::size_t>(std::max(0, settings_.budgetWindow)), 0.0);
     costHead_ = 0;
     costCount_ = 0;
     costSumMs_ = 0.0;
@@ -420,9 +422,9 @@ private:
 
     threads_.reserve(workerCount_);
     for (std::size_t i = 0; i < workerCount_; ++i) {
-      threads_.emplace_back([this, i,
+      threads_.emplace_back([this, i
 #ifdef __linux__
-                             cpuList
+                             , cpuList
 #endif
       ] {
 #ifdef __linux__
@@ -535,9 +537,10 @@ private:
 
     for (int k = 0; k < N; ++k) {
       int idx = start + k;
-      if (idx >= (int)costWindow_.size())
-        idx -= (int)costWindow_.size();
-      double y = costWindow_[idx];
+        if (idx >= (int)costWindow_.size()) {
+          idx -= (int)costWindow_.size();
+        }
+        double y = costWindow_[static_cast<std::size_t>(idx)];
       int i = k;
       sumY += y;
       sumI += i;
@@ -563,13 +566,13 @@ private:
     int idxNew = static_cast<int>(costHead_) - 1;
     if (idxNew < 0)
       idxNew += static_cast<int>(costWindow_.size());
-    double prev = costWindow_[idxNew];
+    double prev = costWindow_[static_cast<std::size_t>(idxNew)];
 
     for (int k = 1; k <= M; ++k) {
       int idx = idxNew - k;
       if (idx < 0)
         idx += static_cast<int>(costWindow_.size());
-      double val = costWindow_[idx];
+      double val = costWindow_[static_cast<std::size_t>(idx)];
       if (prev > val)
         ++up; // increasing towards present
       prev = val;
@@ -579,7 +582,7 @@ private:
 
   int decidePreSteps(double slopeMsPerFrame) const {
     // warmup
-    if (costCount_ < std::max(settings_.predictiveWarmup, 2))
+    if (costCount_ < static_cast<std::size_t>(std::max(settings_.predictiveWarmup, 2)))
       return 0;
 
     // If trend isn't strong, do nothing
@@ -722,7 +725,9 @@ private:
       const std::size_t levelStart = head;
       while (head < q.size())
         ++head;
-      std::vector<std::size_t> level(q.begin() + levelStart, q.begin() + head);
+      using Diff = std::vector<std::size_t>::difference_type;
+      std::vector<std::size_t> level(q.begin() + static_cast<Diff>(levelStart),
+                                     q.begin() + static_cast<Diff>(head));
       if (level.empty())
         break;
       levels.push_back(level);

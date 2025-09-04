@@ -1,14 +1,15 @@
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
+#include <atomic>
 
 // Busy spin for ~usec microseconds
 static void spin_us(int usec) {
     using Clock = std::chrono::steady_clock;
     auto start = Clock::now();
     auto target = start + std::chrono::microseconds(usec);
-    volatile double x = 0.0;
+    std::atomic<int> x{0};
     while (Clock::now() < target) {
-        x += 1.0; // prevent full optimization
+        x.fetch_add(1, std::memory_order_relaxed); // prevent full optimization
     }
 }
 
@@ -50,7 +51,6 @@ TEST(PredictiveAdaptive, PrestepsReduceReactiveCatchup)
     auto simNoPred = make_sim(false);
     simNoPred->run();
     int reactiveNoPred = simNoPred->extraSteps();
-    int preNoPred      = simNoPred->preSteps();
 
     auto simPred = make_sim(true);
     simPred->run();

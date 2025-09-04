@@ -30,9 +30,9 @@ public:
   };
 
   WorkerPool(std::size_t numThreads, std::size_t queueSizePow2 = 1024,
-             bool verbose = false, std::size_t maxOutstanding = 0)
-      : verbose_(verbose) {
+             bool verbose = false, std::size_t maxOutstanding = 0) {
     (void)queueSizePow2; // compatibility; each worker owns its deque
+    (void)verbose;
     stopping_.store(false, std::memory_order_relaxed);
     active_.store(0, std::memory_order_relaxed);
     outstanding_.store(0, std::memory_order_relaxed);
@@ -290,6 +290,5 @@ private:
   std::atomic<std::size_t> active_{0};
   std::atomic<std::size_t> outstanding_{0};
   std::size_t maxOutstanding_ = 0;
-  bool verbose_{false};
   std::atomic<std::size_t> nextWorker_{0};
 };

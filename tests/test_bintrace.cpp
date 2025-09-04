@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
 #include <cstdint>
+#include <atomic>
 
 TEST(BinaryTrace, RecordsPhasesAndChunks) {
     SimCore::Settings s;
@@ -21,10 +22,10 @@ TEST(BinaryTrace, RecordsPhasesAndChunks) {
 
     // trivial range task
     sim.addParallelRangeTask(phase, [](std::size_t b, std::size_t e, std::int64_t, SimCore::Seconds){
-        // do a tiny deterministic op
-        volatile double x = 0.0;
-        for (std::size_t i=b; i<e; ++i) x += i * 0.000001;
-        (void)x;
+        // do a tiny deterministic op without volatile or float conversions
+        std::atomic<std::size_t> acc{0};
+        for (std::size_t i = b; i < e; ++i) acc.fetch_add(i, std::memory_order_relaxed);
+        (void)acc;
     });
 
     // one serial reduction just to have more markers

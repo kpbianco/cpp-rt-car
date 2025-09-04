@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <gtest/gtest.h>
 #include <mutex>
 #include <set>
@@ -14,6 +15,10 @@ TEST(WorkerPoolSched, HighPriorityRunsFirst) {
   WorkerPool pool(1);
   std::vector<int> order;
   std::mutex m;
+  std::promise<void> gate;
+  auto fut = gate.get_future();
+  // Block worker until both tasks enqueued so priority ordering is deterministic
+  pool.enqueue([&] { fut.wait(); });
   pool.enqueue(
       [&] {
         std::lock_guard<std::mutex> lk(m);
@@ -26,6 +31,7 @@ TEST(WorkerPoolSched, HighPriorityRunsFirst) {
         order.push_back(2);
       },
       WorkerPool::Priority::High);
+  gate.set_value();
   pool.drain();
   pool.stop();
   ASSERT_EQ(order.size(), 2u);
@@ -38,6 +44,7 @@ TEST(WorkerPoolSched, WorkStealing) {
   std::mutex m;
   for (int i = 0; i < 50; ++i) {
     pool.enqueueOn(0, [&] {
+      std::this_thread::sleep_for(1ms); // give other threads time to steal
       std::lock_guard<std::mutex> lk(m);
       threads.insert(std::this_thread::get_id());
     });

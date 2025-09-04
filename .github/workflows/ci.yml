@@ -6,10 +6,13 @@ on:
   pull_request:
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
+    container: ubuntu:22.04
     strategy:
+      fail-fast: false
       matrix:
+        compiler: [gcc, clang]
         build_type: [Debug, RelWithDebInfo]
         include:
           - build_type: Debug
@@ -17,13 +20,22 @@ jobs:
           - build_type: RelWithDebInfo
             sanitizers: ''
     steps:
+      - name: Install dependencies
+        run: apt-get update && apt-get install -y git curl build-essential cmake clang
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - name: Set up compiler
+        run: |
+          if [ "${{matrix.compiler}}" = "clang" ]; then
+            echo "CC=clang" >> $GITHUB_ENV
+            echo "CXX=clang++" >> $GITHUB_ENV
+          else
+            echo "CC=gcc" >> $GITHUB_ENV
+            echo "CXX=g++" >> $GITHUB_ENV
+          fi
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DSIM_SANITIZERS='${{matrix.sanitizers}}'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS='${{matrix.sanitizers}}' -DSIM_WERROR=ON
       - name: Build
         run: cmake --build build --config ${{matrix.build_type}} -- -j2
       - name: Test
@@ -32,3 +44,41 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           GTEST_DEATH_TEST_STYLE: threadsafe
         run: ctest --test-dir build -C ${{matrix.build_type}} --output-on-failure
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom-${{matrix.compiler}}-${{matrix.build_type}}.spdx.json
+          artifact-name: sbom-${{matrix.compiler}}-${{matrix.build_type}}
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        build_type: [Debug, RelWithDebInfo]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DSIM_WERROR=ON
+      - name: Build
+        run: cmake --build build --config ${{matrix.build_type}} -- /m
+      - name: Test
+        run: ctest --test-dir build -C ${{matrix.build_type}} --output-on-failure
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom-windows-${{matrix.build_type}}.spdx.json
+          artifact-name: sbom-windows-${{matrix.build_type}}
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        if: github.event_name == 'pull_request'
+        continue-on-error: true

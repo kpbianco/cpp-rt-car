@@ -17,13 +17,6 @@ static std::size_t parseSize(const char* s, std::size_t def)
     unsigned long long v = std::strtoull(s, &e, 10);
     return (e && *e == 0) ? static_cast<std::size_t>(v) : def;
 }
-static double parseDouble(const char* s, double def)
-{
-    if (!s) return def;
-    char* e = nullptr;
-    double v = std::strtod(s, &e);
-    return (e && *e == 0) ? v : def;
-}
 
 int main(int argc, char** argv)
 {
@@ -54,9 +47,10 @@ int main(int argc, char** argv)
     Logger logger;
     logger.setLevel(Logger::Level::Info);
     logger.addSink(std::make_shared<Logger::StdoutSink>());
+    Logger *loggerPtr = &logger;
 
     SimCore sim(cfg);
-    sim.setLogger(&logger);
+    sim.setLogger(loggerPtr);
 
     auto input   = sim.addPhase("Input");
     auto physics = sim.addPhase("Physics");
@@ -64,9 +58,9 @@ int main(int argc, char** argv)
 
     /* -------------- subsystems ------------------ */
     sim.addSerialSubsystem(input, [&](int64_t f, SimCore::Seconds dt){
-        double t = f * dt.count();
+        double t = static_cast<double>(f) * dt.count();
         for (std::size_t i = 0; i < N; ++i)
-            thr[i] = 0.5 + 0.05 * std::sin(t + i * 0.0005);
+            thr[i] = 0.5 + 0.05 * std::sin(t + static_cast<double>(i) * 0.0005);
     });
 
     sim.addParallelRangeTask(physics, [&](std::size_t b, std::size_t e,
@@ -89,8 +83,8 @@ int main(int argc, char** argv)
         if (f % 1000 == 0) {
             double sum = 0.0;
             for (double v : cars.vel) sum += v;
-            double avg = sum / cars.size();
-            LOG_INFO(&logger, "[REDUCE] frame={} avgVel={:.4f}", f, avg);
+            double avg = sum / static_cast<double>(cars.size());
+            LOG_INFO(loggerPtr, "[REDUCE] frame={} avgVel={:.4f}", f, avg);
         }
     });
 
