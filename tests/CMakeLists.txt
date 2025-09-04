@@ -2,6 +2,7 @@ set(TEST_SOURCES
     test_simcore_basic.cpp
     test_simcore_determinism.cpp
     test_logging.cpp
+    test_async_logger.cpp
     test_profiler.cpp
     test_adaptive_param.cpp
     test_soa.cpp
@@ -12,6 +13,7 @@ set(TEST_SOURCES
     test_deterministic_reduction.cpp
     test_robust_fp.cpp
     test_budget_monitor.cpp
+    test_fault_injection.cpp
     test_simd.cpp
     test_rt_pool.cpp
     test_rt_arena.cpp
@@ -26,6 +28,7 @@ set(TEST_SOURCES
     test_hazard_ptr.cpp
     test_physics_integrators.cpp
     test_hal.cpp
+    test_watchdog.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
