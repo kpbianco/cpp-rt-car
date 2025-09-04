@@ -19,6 +19,8 @@ set(TEST_SOURCES
     test_small_array_balance.cpp
     test_phase_telemetry.cpp
     test_aligned_allocator.cpp
+    test_highres_clock.cpp
+    test_rate_governor.cpp
 )
 
 add_executable(simcore_tests ${TEST_SOURCES})
