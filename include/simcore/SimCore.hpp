@@ -634,6 +634,8 @@ private:
       // decide desired number (based on slope, warmup, etc.)
       const double slope = computeSlopeMsPerFrame();
       int desired = decidePreSteps(slope);
+      if (aheadFr <= 0.0)
+        desired = 0; // only pre-step when we're ahead of schedule
 
       // cap to remaining lookahead budget (e.g., 6–8 frames)
       int cap = settings_.predictiveLookaheadFrames -
@@ -643,6 +645,10 @@ private:
       int n = std::min(desired, cap);
 
       for (int i = 0; i < n; ++i) {
+        // Respect maxFrames to avoid overshooting
+        if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames)
+          break;
+
         // Execute one extra frame right now
         auto cs = Clock::now();
         executeFrame();
