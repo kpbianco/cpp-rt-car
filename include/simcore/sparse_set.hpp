@@ -75,18 +75,27 @@ private:
     T default_{};
 };
 
-// Grouped view over two sparse sets.
+// Grouped view over two sparse sets. Iterates over the smaller set and
+// invokes the callback with matching components in a deterministic order.
 template <typename Func, typename A, typename B>
 void group_view(A& a, B& b, Func f) {
+    A* smallA = &a;
+    B* smallB = &b;
+    bool swapped = false;
     if (a.size() > b.size()) {
-        group_view(b, a, [&](std::size_t id, auto& compB, auto& compA) { f(id, compA, compB); });
-        return;
+        smallA = &b;
+        smallB = &a;
+        swapped = true;
     }
-    const auto& ents = a.entities();
+    const auto& ents = smallA->entities();
     for (std::size_t i = 0; i < ents.size(); ++i) {
         std::size_t id = ents[i];
-        if (b.has(id))
-            f(id, a.data()[i], *b.get(id));
+        if (smallB->has(id)) {
+            if (swapped)
+                f(id, *smallB->get(id), smallA->data()[i]);
+            else
+                f(id, smallA->data()[i], *smallB->get(id));
+        }
     }
 }
 
