@@ -9,6 +9,9 @@ jobs:
   build-linux:
     runs-on: ubuntu-22.04
     container: ubuntu:22.04
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
