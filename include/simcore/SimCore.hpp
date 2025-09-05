@@ -645,6 +645,10 @@ private:
       int n = std::min(desired, cap);
 
       for (int i = 0; i < n; ++i) {
+        // Respect maxFrames to avoid overshooting
+        if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames)
+          break;
+
         // Execute one extra frame right now
         auto cs = Clock::now();
         executeFrame();
