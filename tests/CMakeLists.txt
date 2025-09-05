@@ -6,6 +6,8 @@ set(TEST_SOURCES
     test_profiler.cpp
     test_adaptive_param.cpp
     test_soa.cpp
+    test_sparse_set.cpp
+    test_soa_view.cpp
     test_jobqueue.cpp
     test_workerpool_priority.cpp
     test_phase_graph.cpp
