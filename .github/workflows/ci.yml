@@ -8,7 +8,6 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
-    container: ubuntu:22.04
     defaults:
       run:
         shell: bash
@@ -23,14 +22,6 @@ jobs:
           - build_type: RelWithDebInfo
             sanitizers: ''
     steps:
-      - name: Install build deps (robust)
-        run: |
-          set -euo pipefail
-          sed -i 's|http://archive.ubuntu.com/ubuntu|https://mirror.azure.ubuntu.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list
-          for i in 1 2 3 4 5; do
-            apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 && break || sleep $((i*5))
-          done
-          apt-get install -y --no-install-recommends git curl build-essential cmake clang
       - uses: actions/checkout@v4
         with:
           submodules: recursive
