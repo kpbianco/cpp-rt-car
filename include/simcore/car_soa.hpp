@@ -2,17 +2,22 @@
 #include <vector>
 #include <cstddef>
 #include <cassert>
+#include "simcore/aligned_allocator.hpp"
 
 /* -----------------------------------------------------------------
    Struct-of-arrays storage for the dummy "car" example.
    Now maintains sparse/dense mappings so systems can query only the
-   components they need.
+   components they need. Dense arrays are cacheline aligned with tail
+   padding to avoid cross-line writes.
    ----------------------------------------------------------------- */
 struct CarSoA
 {
+    static constexpr std::size_t CacheLine = 64;
+    static constexpr std::size_t TailPad = CacheLine / sizeof(double);
+
     // dense component storage
-    std::vector<double> pos;   // metres
-    std::vector<double> vel;   // m/s
+    std::vector<double, AlignedAllocator<double, CacheLine>> pos;   // metres
+    std::vector<double, AlignedAllocator<double, CacheLine>> vel;   // m/s
     // entity mappings
     std::vector<std::size_t> sparse;  // entity -> dense index + 1 (0 = missing)
     std::vector<std::size_t> dense;   // dense index -> entity id
@@ -30,8 +35,8 @@ struct CarSoA
 
     void reserve(std::size_t n)
     {
-        pos.reserve(n);
-        vel.reserve(n);
+        pos.reserve(n + TailPad);
+        vel.reserve(n + TailPad);
         dense.reserve(n);
         sparse.reserve(n);
     }
@@ -48,6 +53,7 @@ struct CarSoA
         if (id >= sparse.size())
             sparse.resize(id + 1, 0);
         assert(sparse[id] == 0 && "entity already present");
+        ensure_capacity();
         std::size_t idx = pos.size();
         pos.push_back(p);
         vel.push_back(v);
@@ -97,4 +103,19 @@ struct CarSoA
         std::size_t idxp1 = (id < sparse.size()) ? sparse[id] : 0;
         return idxp1 ? &vel[idxp1 - 1] : &defaultVel;
     }
+
+    template <typename Func>
+    void for_each(Func f) {
+        for (std::size_t i = 0; i < pos.size(); ++i)
+            f(dense[i], pos[i], vel[i]);
+    }
+
+private:
+    void ensure_capacity() {
+        if (pos.capacity() - pos.size() <= TailPad)
+            pos.reserve(pos.size() * 2 + TailPad);
+        if (vel.capacity() - vel.size() <= TailPad)
+            vel.reserve(vel.size() * 2 + TailPad);
+    }
 };
+
