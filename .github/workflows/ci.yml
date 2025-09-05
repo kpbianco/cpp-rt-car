@@ -7,8 +7,10 @@ on:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
-    container: ubuntu:22.04
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -20,8 +22,6 @@ jobs:
           - build_type: RelWithDebInfo
             sanitizers: ''
     steps:
-      - name: Install dependencies
-        run: apt-get update && apt-get install -y git curl build-essential cmake clang
       - uses: actions/checkout@v4
         with:
           submodules: recursive
