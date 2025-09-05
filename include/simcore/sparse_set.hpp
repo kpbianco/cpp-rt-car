@@ -79,22 +79,21 @@ private:
 // invokes the callback with matching components in a deterministic order.
 template <typename Func, typename A, typename B>
 void group_view(A& a, B& b, Func f) {
-    A* smallA = &a;
-    B* smallB = &b;
-    bool swapped = false;
     if (a.size() > b.size()) {
-        smallA = &b;
-        smallB = &a;
-        swapped = true;
-    }
-    const auto& ents = smallA->entities();
-    for (std::size_t i = 0; i < ents.size(); ++i) {
-        std::size_t id = ents[i];
-        if (smallB->has(id)) {
-            if (swapped)
-                f(id, *smallB->get(id), smallA->data()[i]);
-            else
-                f(id, smallA->data()[i], *smallB->get(id));
+        const auto& ents = b.entities();
+        for (std::size_t i = 0; i < ents.size(); ++i) {
+            std::size_t id = ents[i];
+            if (a.has(id)) {
+                f(id, *a.get(id), b.data()[i]);
+            }
+        }
+    } else {
+        const auto& ents = a.entities();
+        for (std::size_t i = 0; i < ents.size(); ++i) {
+            std::size_t id = ents[i];
+            if (b.has(id)) {
+                f(id, a.data()[i], *b.get(id));
+            }
         }
     }
 }
