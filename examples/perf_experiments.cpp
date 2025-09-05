@@ -6,12 +6,19 @@
 #include <numeric>
 #include <thread>
 #include <vector>
+#include <coroutine>
+#include <algorithm>
+#include <utility>
 #ifdef __SSE__
 #include <xmmintrin.h>
 #endif
 
 #include <simcore/logger.hpp>
 #include <simcore/profiler.hpp>
+
+#if defined(__linux__) && __has_include(<numa.h>)
+#include <numa.h>
+#endif
 
 using clock_type = std::chrono::steady_clock;
 
@@ -284,21 +291,149 @@ static void experiment_worksteal_vs_global()
 }
 
 // -----------------------------------------------------------------------------
-// NUMA cross-node penalties (placeholder)
+// NUMA cross-node penalties
 // -----------------------------------------------------------------------------
+#if defined(__linux__) && __has_include(<numa.h>)
+static void experiment_numa_penalties()
+{
+    PROF_SCOPE(g_prof, "numa_penalties");
+    if (numa_available() < 0 || numa_num_configured_nodes() < 2) {
+        if (g_log)
+            LOG_WARN(g_log, "system lacks multiple NUMA nodes; skipping");
+        return;
+    }
+    const size_t bytes = 32 * 1024 * 1024 * g_scale; // 32 MB
+    char* buf = static_cast<char*>(numa_alloc_onnode(bytes, 0));
+    if (!buf) {
+        if (g_log)
+            LOG_ERROR(g_log, "numa_alloc_onnode failed");
+        return;
+    }
+    // first-touch the memory on node 0
+    for (size_t i = 0; i < bytes; i += 4096)
+        buf[i] = 1;
+
+    auto run = [&](int node) {
+        clock_type::duration dur{};
+        std::thread th([&]() {
+            numa_run_on_node(node);
+            volatile unsigned char sum = 0;
+            auto start = clock_type::now();
+            for (size_t i = 0; i < bytes; i += 64)
+                sum += buf[i];
+            dur = clock_type::now() - start;
+        });
+        th.join();
+        return dur;
+    };
+
+    auto t_local = run(0);
+    auto t_remote = run(1);
+    log_time("NUMA local", t_local);
+    log_time("NUMA remote", t_remote);
+    numa_free(buf, bytes);
+}
+#else
 static void experiment_numa_penalties()
 {
     if (g_log)
-        LOG_WARN(g_log, "NUMA experiment requires libnuma and multiple nodes; not run here.");
+        LOG_WARN(g_log, "NUMA experiment requires libnuma headers on Linux.");
 }
+#endif
 
 // -----------------------------------------------------------------------------
-// fiber vs thread blocking (placeholder)
+// fiber vs thread blocking
 // -----------------------------------------------------------------------------
+// very small cooperative fiber scheduler using C++20 coroutines
+#include <coroutine>
+struct Scheduler;
+struct Task {
+    struct promise_type {
+        Task get_return_object() { return Task{std::coroutine_handle<promise_type>::from_promise(*this)}; }
+        std::suspend_always initial_suspend() noexcept { return {}; }
+        std::suspend_never final_suspend() noexcept { return {}; }
+        void return_void() noexcept {}
+        void unhandled_exception() { std::terminate(); }
+    };
+    using handle_type = std::coroutine_handle<promise_type>;
+    handle_type h;
+    explicit Task(handle_type h) : h(h) {}
+    Task(Task&& o) noexcept : h(std::exchange(o.h, {})) {}
+    ~Task() { if (h) h.destroy(); }
+};
+
+struct Scheduler {
+    using time_handle = std::pair<clock_type::time_point, Task::handle_type>;
+    std::vector<time_handle> sleepers;
+    void spawn(Task t)
+    {
+        auto h = t.h;
+        t.h = {};
+        h.resume();
+    }
+    void run()
+    {
+        while (!sleepers.empty()) {
+            std::sort(sleepers.begin(), sleepers.end(),
+                      [](auto& a, auto& b) { return a.first < b.first; });
+            auto item = sleepers.front();
+            sleepers.erase(sleepers.begin());
+            if (item.first > clock_type::now())
+                std::this_thread::sleep_until(item.first);
+            item.second.resume();
+        }
+    }
+};
+
+struct SleepAwaiter {
+    Scheduler& sched;
+    clock_type::duration dur;
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(Task::handle_type h) const
+    {
+        sched.sleepers.emplace_back(clock_type::now() + dur, h);
+    }
+    void await_resume() const noexcept {}
+};
+
+static Task fiber_func(Scheduler& sched, int iters)
+{
+    for (int i = 0; i < iters; ++i)
+        co_await SleepAwaiter{sched, std::chrono::microseconds(50)};
+}
+
 static void experiment_fiber_vs_thread()
 {
-    if (g_log)
-        LOG_WARN(g_log, "Fiber vs thread blocking experiment not implemented (requires fiber lib).");
+    PROF_SCOPE(g_prof, "fiber_vs_thread");
+    const int tasks = 1000 * static_cast<int>(g_scale);
+    const int iters = 5;
+    auto run_threads = [&]() {
+        std::vector<std::thread> ths;
+        auto start = clock_type::now();
+        for (int i = 0; i < tasks; ++i) {
+            ths.emplace_back([&]() {
+                for (int k = 0; k < iters; ++k)
+                    std::this_thread::sleep_for(std::chrono::microseconds(50));
+            });
+        }
+        for (auto& t : ths)
+            t.join();
+        return clock_type::now() - start;
+    };
+
+    auto run_fibers = [&]() {
+        Scheduler sched;
+        auto start = clock_type::now();
+        for (int i = 0; i < tasks; ++i)
+            sched.spawn(fiber_func(sched, iters));
+        sched.run();
+        return clock_type::now() - start;
+    };
+
+    auto t_threads = run_threads();
+    auto t_fibers = run_fibers();
+    log_time("threads blocking", t_threads);
+    log_time("fibers blocking", t_fibers);
 }
 
 int main(int argc, char** argv)
