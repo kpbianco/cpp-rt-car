@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -16,9 +17,8 @@
 #include <memory_resource>
 #include <string>
 #include <thread>
-#include <vector>
 #include <unordered_map>
-#include <fstream>
+#include <vector>
 
 #include "bintrace.hpp"
 #include "frame_arena.hpp"
@@ -94,7 +94,8 @@ struct DetRangeReductionRef {
   double (*leaf)(void *, std::size_t, std::size_t, std::int64_t,
                  std::chrono::duration<double>);
   void *leafCtx{};
-  void (*sink)(void *, double, std::int64_t, std::chrono::duration<double>);
+  void (*sink)(void *, double, const std::uint64_t *, std::size_t, std::int64_t,
+               std::chrono::duration<double>);
   void *sinkCtx{};
 };
 
@@ -146,10 +147,10 @@ public:
     int targetChunksPerThread = 2;
     std::size_t minChunk = 64;
     std::size_t maxChunk = 8192;
-    double chunkPercentile = 0.9;      // percentile target [0,1]
-    int chunkSampleFrames = 20;        // frames to sample before pinning
+    double chunkPercentile = 0.9;        // percentile target [0,1]
+    int chunkSampleFrames = 20;          // frames to sample before pinning
     double chunkDriftThreshold = 1000.0; // CUSUM threshold for drift
-    std::string chunkCacheFile;        // optional cache file base path
+    std::string chunkCacheFile;          // optional cache file base path
 
     // Small-array parallel cut-offs (avoid over-partitioning)
     // If minParallelElems==0 -> auto = max(2*minChunk, minChunk)
@@ -191,7 +192,9 @@ public:
 
   struct DetRangeReduction {
     std::function<double(std::size_t, std::size_t, std::int64_t, Seconds)> fn;
-    std::function<void(double, std::int64_t, Seconds)> sink;
+    std::function<void(double, const std::uint64_t *, std::size_t, std::int64_t,
+                       Seconds)>
+        sink;
   };
 
   struct Phase {
@@ -262,7 +265,8 @@ public:
 
     recalcTiming();
 
-      costWindow_.assign(static_cast<std::size_t>(std::max(0, settings_.budgetWindow)), 0.0);
+    costWindow_.assign(
+        static_cast<std::size_t>(std::max(0, settings_.budgetWindow)), 0.0);
     costHead_ = 0;
     costCount_ = 0;
     costSumMs_ = 0.0;
@@ -295,8 +299,8 @@ public:
 
   // Phase API
   std::size_t addPhase(const std::string &name, std::size_t elemCount = 0) {
-    phases_.emplace_back(
-        Phase{name, {}, {}, {}, {}, {}, elemCount, true, 0, 0, 0, {}, 0.0, false});
+    phases_.emplace_back(Phase{
+        name, {}, {}, {}, {}, {}, elemCount, true, 0, 0, 0, {}, 0.0, false});
     succ_.push_back({});
     indegree_.push_back(0);
     graphDirty_ = true;
@@ -344,10 +348,13 @@ public:
       std::size_t phaseIndex,
       std::function<double(std::size_t, std::size_t, std::int64_t, Seconds)>
           leaf,
-      std::function<void(double, std::int64_t, Seconds)> sink) {
+      std::function<void(double, const std::uint64_t *, std::size_t,
+                         std::int64_t, Seconds)>
+          sink) {
     using LeafF =
         std::function<double(std::size_t, std::size_t, std::int64_t, Seconds)>;
-    using SinkF = std::function<void(double, std::int64_t, Seconds)>;
+    using SinkF = std::function<void(double, const std::uint64_t *, std::size_t,
+                                     std::int64_t, Seconds)>;
     auto leafSp = std::make_shared<LeafF>(std::move(leaf));
     auto sinkSp = std::make_shared<SinkF>(std::move(sink));
     phases_[phaseIndex].keep.push_back(leafSp);
@@ -359,8 +366,9 @@ public:
                   Seconds dt) -> double {
       return (*static_cast<LeafF *>(c))(b, e, fr, dt);
     };
-    ref.sink = [](void *c, double total, std::int64_t fr, Seconds dt) {
-      (*static_cast<SinkF *>(c))(total, fr, dt);
+    ref.sink = [](void *c, double total, const std::uint64_t *chk,
+                  std::size_t n, std::int64_t fr, Seconds dt) {
+      (*static_cast<SinkF *>(c))(total, chk, n, fr, dt);
     };
     phases_[phaseIndex].detRanges.push_back(ref);
   }
@@ -453,7 +461,8 @@ private:
     for (std::size_t i = 0; i < workerCount_; ++i) {
       threads_.emplace_back([this, i
 #ifdef __linux__
-                             , cpuList
+                             ,
+                             cpuList
 #endif
       ] {
 #ifdef __linux__
@@ -569,9 +578,8 @@ private:
 
     const std::size_t threads = std::max<std::size_t>(1, workerCount_);
     std::size_t targetChunks = std::max<std::size_t>(
-        1, threads *
-               static_cast<std::size_t>(
-                   std::max(1, settings_.targetChunksPerThread)));
+        1, threads * static_cast<std::size_t>(
+                         std::max(1, settings_.targetChunksPerThread)));
     if (hint == TaskHint::Latency)
       targetChunks *= 2;
 
@@ -583,8 +591,8 @@ private:
       calc = 1;
 
     if (ph.chunkPinned) {
-      double diff = static_cast<double>(calc) -
-                    static_cast<double>(ph.chosenChunk);
+      double diff =
+          static_cast<double>(calc) - static_cast<double>(ph.chosenChunk);
       ph.chunkCusum += diff;
       if (std::fabs(ph.chunkCusum) > settings_.chunkDriftThreshold) {
         ph.chunkPinned = false;
@@ -643,10 +651,10 @@ private:
 
     for (int k = 0; k < N; ++k) {
       int idx = start + k;
-        if (idx >= (int)costWindow_.size()) {
-          idx -= (int)costWindow_.size();
-        }
-        double y = costWindow_[static_cast<std::size_t>(idx)];
+      if (idx >= (int)costWindow_.size()) {
+        idx -= (int)costWindow_.size();
+      }
+      double y = costWindow_[static_cast<std::size_t>(idx)];
       int i = k;
       sumY += y;
       sumI += i;
@@ -688,7 +696,8 @@ private:
 
   int decidePreSteps(double slopeMsPerFrame) const {
     // warmup
-    if (costCount_ < static_cast<std::size_t>(std::max(settings_.predictiveWarmup, 2)))
+    if (costCount_ <
+        static_cast<std::size_t>(std::max(settings_.predictiveWarmup, 2)))
       return 0;
 
     // If trend isn't strong, do nothing
@@ -951,7 +960,7 @@ private:
     // Deterministic range reductions (parallel leaves + pairwise fold)
     for (auto &rr : ph.detRanges) {
       if (ph.elementCount == 0) {
-        rr.sink(rr.sinkCtx, 0.0, frame_, dt_);
+        rr.sink(rr.sinkCtx, 0.0, nullptr, 0, frame_, dt_);
         continue;
       }
       const std::size_t count = ph.elementCount;
@@ -979,15 +988,18 @@ private:
       ArenaResource res(frameArenas_->tls());
       std::pmr::vector<double> partials(&res);
       partials.resize(totalChunks, 0.0);
+      std::pmr::vector<std::uint64_t> checksums(&res);
+      checksums.resize(totalChunks, 0ull);
 
       struct LeafCtx {
         DetRangeReductionRef rr;
         std::pmr::vector<double> *partials;
+        std::pmr::vector<std::uint64_t> *checksums;
         std::size_t chunk;
       };
       void *mem =
           frameArenas_->tls().allocate(sizeof(LeafCtx), alignof(LeafCtx));
-      auto *leafCtx = new (mem) LeafCtx{rr, &partials, chunk};
+      auto *leafCtx = new (mem) LeafCtx{rr, &partials, &checksums, chunk};
 
       auto leafThunk = [](void *c, std::size_t b, std::size_t e, std::int64_t f,
                           Seconds dt) {
@@ -995,6 +1007,12 @@ private:
         const std::size_t idx = b / LC->chunk;
         double v = LC->rr.leaf(LC->rr.leafCtx, b, e, f, dt);
         (*(LC->partials))[idx] = v;
+        std::uint64_t bits;
+        std::memcpy(&bits, &v, sizeof(v));
+        std::uint64_t h = 1469598103934665603ull;
+        h ^= bits;
+        h *= 1099511628211ull;
+        (*(LC->checksums))[idx] = h;
       };
       RangeFnRef leafRef{leafThunk, leafCtx};
 
@@ -1030,7 +1048,7 @@ private:
         }
       }
       double total = simcore_det::pairwise_sum(partials);
-      rr.sink(rr.sinkCtx, total, frame_, dt_);
+      rr.sink(rr.sinkCtx, total, checksums.data(), totalChunks, frame_, dt_);
     }
 
     bintrace_.log(bintrace::EV_PhaseEnd, static_cast<std::uint32_t>(phaseIndex),
