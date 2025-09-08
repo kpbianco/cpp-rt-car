@@ -2,6 +2,7 @@
 #pragma once
 #include <cstddef>
 #include <type_traits>
+#include <cmath>
 
 #if defined(__AVX2__)
   #include <immintrin.h>
@@ -89,11 +90,11 @@ inline void axpy3(double a,
         _mm256_maskstore_pd(p.z + i, mask, pz);
     }
 #else
-    // Portable scalar fallback (API is still available)
+    // Portable scalar fallback with fused semantics
     for (std::size_t i = 0; i < n; ++i) {
-        p.x[i] += a * v.x[i];
-        p.y[i] += a * v.y[i];
-        p.z[i] += a * v.z[i];
+        p.x[i] = std::fma(a, v.x[i], p.x[i]);
+        p.y[i] = std::fma(a, v.y[i], p.y[i]);
+        p.z[i] = std::fma(a, v.z[i], p.z[i]);
     }
 #endif
 }

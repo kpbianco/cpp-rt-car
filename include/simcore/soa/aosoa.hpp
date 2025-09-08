@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <vector>
+#include <cmath>
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -117,9 +118,9 @@ inline void axpy3(double a,
     for (std::size_t i = 0; i < n; ++i) {
         std::size_t t = i / TILE;
         std::size_t j = i % TILE;
-        p.tiles[t].x[j] += a * v.tiles[t].x[j];
-        p.tiles[t].y[j] += a * v.tiles[t].y[j];
-        p.tiles[t].z[j] += a * v.tiles[t].z[j];
+        p.tiles[t].x[j] = std::fma(a, v.tiles[t].x[j], p.tiles[t].x[j]);
+        p.tiles[t].y[j] = std::fma(a, v.tiles[t].y[j], p.tiles[t].y[j]);
+        p.tiles[t].z[j] = std::fma(a, v.tiles[t].z[j], p.tiles[t].z[j]);
     }
 #endif
 }
