@@ -15,9 +15,9 @@ static rt::Task fence_task(rt::FiberPool& pool, simcore::hal::Fence& f,
 
 TEST(FiberPool, FenceStormSimCore) {
     for (int threads : {1, 4}) {
-        simcore::SimCore::Settings s;
-        s.threads = threads;
-        simcore::SimCore sim(s);
+        SimCore::Settings s;
+        s.threads = static_cast<std::size_t>(threads);
+        SimCore sim(s);
         auto& pool = sim.fiberPool();
         std::atomic<int> done{0};
         const int N = 64;
