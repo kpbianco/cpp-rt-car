@@ -295,7 +295,8 @@ public:
 
   // Phase API
   std::size_t addPhase(const std::string &name, std::size_t elemCount = 0) {
-    phases_.emplace_back(Phase{name, {}, {}, {}, {}, {}, elemCount, true});
+    phases_.emplace_back(
+        Phase{name, {}, {}, {}, {}, {}, elemCount, true, 0, 0, 0, {}, 0.0, false});
     succ_.push_back({});
     indegree_.push_back(0);
     graphDirty_ = true;
@@ -568,8 +569,9 @@ private:
 
     const std::size_t threads = std::max<std::size_t>(1, workerCount_);
     std::size_t targetChunks = std::max<std::size_t>(
-        1, threads * static_cast<std::size_t>(
-                         std::max(1, settings_.targetChunksPerThread))));
+        1, threads *
+               static_cast<std::size_t>(
+                   std::max(1, settings_.targetChunksPerThread)));
     if (hint == TaskHint::Latency)
       targetChunks *= 2;
 
@@ -608,8 +610,10 @@ private:
       auto temp = ph.chunkSamples;
       std::size_t idx = static_cast<std::size_t>(
           std::clamp(settings_.chunkPercentile, 0.0, 1.0) *
-          (temp.size() - 1));
-      std::nth_element(temp.begin(), temp.begin() + idx, temp.end());
+          static_cast<double>(temp.size() - 1));
+      std::nth_element(temp.begin(),
+                       temp.begin() + static_cast<std::ptrdiff_t>(idx),
+                       temp.end());
       ph.chosenChunk = temp[idx];
       ph.chunkPinned = true;
       ph.chunkSamples.clear();
