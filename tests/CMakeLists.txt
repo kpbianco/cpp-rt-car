@@ -38,6 +38,7 @@ set(TEST_SOURCES
     test_numerics.cpp
     test_prng_determinism.cpp
     test_snapshot.cpp
+    test_trace_export.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
@@ -52,7 +53,9 @@ endif()
 target_include_directories(simcore_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_SOURCE_DIR}
 )
+target_compile_definitions(simcore_tests PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 add_test(NAME simcore_all COMMAND simcore_tests)
 
