@@ -177,6 +177,9 @@ add_executable(trace_dump src/trace_dump.cpp)
 target_link_libraries(trace_dump PRIVATE simcore)
 target_include_directories(trace_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Tiny sample programs
+add_subdirectory(samples)
+
 # Tests
 if (ENABLE_TESTS)
     enable_testing()
