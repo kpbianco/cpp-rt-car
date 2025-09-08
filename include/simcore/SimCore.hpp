@@ -28,6 +28,7 @@
 #include <rt/fiber_pool.hpp>
 #include <rt/numerics.hpp>
 #include <rt/prng.hpp>
+#include <rt/snapshot.hpp>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -424,6 +425,100 @@ public:
   std::int64_t frame() const { return frame_; }
   double dtSeconds() const { return dt_.count(); }
   double lastDriftMs() const { return lastDriftMs_; }
+
+  std::vector<std::uint8_t> saveFrame() const {
+    rt::SnapshotWriter w;
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(frame_));
+    w.write<std::uint64_t>(rngSeed_);
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(subSteps_));
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(preSteps_));
+    std::uint64_t phCount = phases_.size();
+    w.write<std::uint64_t>(phCount);
+    for (const auto &ph : phases_) {
+      w.writeVector(ph.chunkSamples);
+      w.write<std::uint64_t>(static_cast<std::uint64_t>(ph.elementCount));
+      std::uint8_t en = ph.enabled ? 1 : 0;
+      w.write(en);
+      w.write<std::uint64_t>(static_cast<std::uint64_t>(ph.chosenChunk));
+      w.write<std::uint64_t>(static_cast<std::uint64_t>(ph.totalChunks));
+      w.write<std::uint64_t>(static_cast<std::uint64_t>(ph.chunkSkew));
+      w.write(ph.chunkCusum);
+      std::uint8_t pinned = ph.chunkPinned ? 1 : 0;
+      w.write(pinned);
+    }
+    w.writeVector(costWindow_);
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(costHead_));
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(costCount_));
+    w.write(costSumMs_);
+    std::uint8_t prim = predictivePrimed_ ? 1 : 0;
+    w.write(prim);
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(degradeRung_));
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(bursts_));
+    w.write<std::uint64_t>(static_cast<std::uint64_t>(extraSteps_));
+    w.write(recoveredMs_);
+    w.write(precoveredMs_);
+    return w.data;
+  }
+
+  void loadFrame(const std::vector<std::uint8_t> &data) {
+    rt::SnapshotReader r(data);
+    std::uint64_t tmp = 0;
+    r.read(tmp);
+    frame_ = static_cast<std::int64_t>(tmp);
+    r.read(rngSeed_);
+    r.read(tmp);
+    subSteps_ = static_cast<int>(tmp);
+    r.read(tmp);
+    preSteps_ = static_cast<int>(tmp);
+    std::uint64_t phSaved = 0;
+    r.read(phSaved);
+    for (std::uint64_t i = 0; i < phSaved; ++i) {
+      std::vector<std::size_t> samples;
+      r.readVector(samples);
+      r.read(tmp);
+      std::size_t elem = static_cast<std::size_t>(tmp);
+      std::uint8_t en = 0;
+      r.read(en);
+      r.read(tmp);
+      std::size_t chosen = static_cast<std::size_t>(tmp);
+      r.read(tmp);
+      std::size_t totalChunks = static_cast<std::size_t>(tmp);
+      r.read(tmp);
+      std::size_t chunkSkew = static_cast<std::size_t>(tmp);
+      double cusum = 0.0;
+      r.read(cusum);
+      std::uint8_t pinned = 0;
+      r.read(pinned);
+      if (i < phases_.size()) {
+        auto &ph = phases_[i];
+        ph.chunkSamples = std::move(samples);
+        ph.elementCount = elem;
+        ph.enabled = (en != 0);
+        ph.chosenChunk = chosen;
+        ph.totalChunks = totalChunks;
+        ph.chunkSkew = chunkSkew;
+        ph.chunkCusum = cusum;
+        ph.chunkPinned = (pinned != 0);
+      }
+    }
+    r.readVector(costWindow_);
+    r.read(tmp);
+    costHead_ = static_cast<std::size_t>(tmp);
+    r.read(tmp);
+    costCount_ = static_cast<std::size_t>(tmp);
+    r.read(costSumMs_);
+    std::uint8_t prim = 0;
+    r.read(prim);
+    predictivePrimed_ = prim != 0;
+    r.read(tmp);
+    degradeRung_ = static_cast<int>(tmp);
+    r.read(tmp);
+    bursts_ = static_cast<int>(tmp);
+    r.read(tmp);
+    extraSteps_ = static_cast<int>(tmp);
+    r.read(recoveredMs_);
+    r.read(precoveredMs_);
+  }
 
   void run() {
     startReal_ = Clock::now();
