@@ -4,7 +4,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <utility>
 #include <vector>
+
+#if defined(_MSC_VER)
+#pragma warning(push)
+// Disable "structure was padded due to alignment specifier" which fires on
+// the cache-line alignment used throughout the queue implementation.
+#pragma warning(disable : 4324)
+#endif
 
 // Lock-free bounded multi-producer/multi-consumer queue based on
 // Dmitry Vyukov's algorithm.  Adds sequence-number padding to avoid
@@ -26,8 +34,9 @@ public:
 
   // Non-blocking push; returns false if the queue is full.  When
   // singleProducer is true the enqueue position is updated via a
-  // relaxed store allowing hot producer loops to avoid a CAS.
-  bool try_push(T &&v, bool singleProducer = false) {
+  // relaxed store allowing hot producer loops to avoid a CAS.  Accepts
+  // both lvalues and rvalues via perfect forwarding.
+  template <typename U> bool try_push(U &&v, bool singleProducer = false) {
     std::size_t pos = singleProducer
                           ? enqueueCache_
                           : enqueuePos_.load(std::memory_order_relaxed);
@@ -55,7 +64,7 @@ public:
       }
     }
     enqueueCache_ = pos + 1;
-    cell->data = std::move(v);
+    cell->data = std::forward<U>(v);
     cell->sequence.store(pos + 1, std::memory_order_release);
     return true;
   }
@@ -138,3 +147,7 @@ thread_local std::size_t BoundedMPMCQueue<T>::enqueueCache_ = 0;
 
 template <typename T>
 thread_local std::size_t BoundedMPMCQueue<T>::dequeueCache_ = 0;
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
