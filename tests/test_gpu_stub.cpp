@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
-#include <hal/gpu_stub.hpp>
+#include <gpu_stub.hpp>
 #include <rt/fiber_pool.hpp>
 #include <simcore/hal.hpp>
 #include <atomic>
