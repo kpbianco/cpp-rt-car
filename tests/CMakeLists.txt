@@ -35,6 +35,8 @@ set(TEST_SOURCES
     test_physics_integrators.cpp
     test_hal.cpp
     test_watchdog.cpp
+    test_numerics.cpp
+    test_prng_determinism.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)

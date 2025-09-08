@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <rt/numerics.hpp>
 
 // Worker pool with per-thread double-ended queues and work stealing.
 // Jobs support priorities and categories to help scheduling.
@@ -41,7 +42,10 @@ public:
     threads_.reserve(numThreads);
     for (std::size_t i = 0; i < numThreads; ++i) {
       queues_.emplace_back(std::make_unique<QueueData>());
-      threads_.emplace_back([this, i] { this->workerLoop(i); });
+      threads_.emplace_back([this, i] {
+        rt::init_fp_env();
+        this->workerLoop(i);
+      });
     }
   }
 
