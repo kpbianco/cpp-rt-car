@@ -30,7 +30,11 @@ try {
 
 # Reduce system timer to 0.5 ms if possible
 try {
-  [void][System.Runtime.InteropServices.DllImport("winmm.dll")]public static extern uint timeBeginPeriod(uint uPeriod); $null = timeBeginPeriod 1
+  Add-Type -Namespace winmm -Name Native -MemberDefinition @'
+    [DllImport("winmm.dll")]
+    public static extern uint timeBeginPeriod(uint uPeriod);
+'@
+  $null = [winmm.Native]::timeBeginPeriod(1)
   Write-Host "[rt_harden] timeBeginPeriod(1) called"
 } catch {
   Write-Host "[rt_harden] timeBeginPeriod not permitted"
