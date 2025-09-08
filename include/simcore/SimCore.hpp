@@ -178,8 +178,8 @@ public:
     std::size_t detReduceLeaf = 2048;
 
     // Numeric control
-    bool useFMA = false;              // gate for fused multiply-add
-    std::uint64_t rngSeed = 0;        // base seed for counter PRNG
+    bool useFMA = false;       // gate for fused multiply-add
+    std::uint64_t rngSeed = 0; // base seed for counter PRNG
 
     // Time Budget Monitor
     bool budgetMonitor = true;
@@ -237,6 +237,7 @@ public:
     std::vector<std::size_t> chunkSamples;
     double chunkCusum = 0.0;
     bool chunkPinned = false;
+    int numaNode = -1;
   };
 
   struct BudgetSample {
@@ -325,9 +326,23 @@ public:
 #endif
 
   // Phase API
-  std::size_t addPhase(const std::string &name, std::size_t elemCount = 0) {
-    phases_.emplace_back(Phase{
-        name, {}, {}, {}, {}, {}, elemCount, true, 0, 0, 0, {}, 0.0, false});
+  std::size_t addPhase(const std::string &name, std::size_t elemCount = 0,
+                       int numaNode = -1) {
+    phases_.emplace_back(Phase{name,
+                               {},
+                               {},
+                               {},
+                               {},
+                               {},
+                               elemCount,
+                               true,
+                               0,
+                               0,
+                               0,
+                               {},
+                               0.0,
+                               false,
+                               numaNode});
     succ_.push_back({});
     indegree_.push_back(0);
     graphDirty_ = true;
@@ -339,6 +354,9 @@ public:
     graphDirty_ = true;
     LOG_DEBUG(logger_, "Phase '{}' set elementCount={}",
               phases_[phaseIndex].name, count);
+  }
+  void setPhaseNUMANode(std::size_t phaseIndex, int node) {
+    phases_[phaseIndex].numaNode = node;
   }
   void addSerialSubsystem(std::size_t phaseIndex, Subsystem fn) {
     using F = std::function<void(std::int64_t, Seconds)>;
@@ -541,9 +559,7 @@ private:
   void initThreads() {
     stopThreads();
     workerCount_ = settings_.threads;
-
-    frameArenas_ = std::make_unique<FrameArenaPool>(
-        workerCount_ + 1, settings_.arenaPerThreadBytes, 64);
+    std::vector<int> threadNodes(workerCount_ + 1, -1);
 
     bintrace_.init(workerCount_ + 1, settings_.bintraceEventsPerThread,
                    settings_.bintraceEnable);
@@ -576,7 +592,21 @@ private:
           cpuList.push_back(c);
       }
     }
+#ifdef SIM_USE_NUMA
+    if (numa_available() != -1 && !cpuList.empty()) {
+      for (std::size_t i = 0; i < workerCount_; ++i) {
+        int cpu = cpuList[i % cpuList.size()];
+        threadNodes[i] = numa_node_of_cpu(cpu);
+      }
+      int mainCpu = ::sched_getcpu();
+      if (mainCpu >= 0)
+        threadNodes[workerCount_] = numa_node_of_cpu(mainCpu);
+    }
 #endif
+#endif
+
+    frameArenas_ = std::make_unique<FrameArenaPool>(
+        workerCount_ + 1, settings_.arenaPerThreadBytes, 64, threadNodes);
 
     threads_.reserve(workerCount_);
     for (std::size_t i = 0; i < workerCount_; ++i) {
@@ -849,8 +879,8 @@ private:
 
     // Scale the number of pre-steps with the observed slope, capped by the
     // configured limit.
-    int steps =
-        static_cast<int>(std::ceil(slopeMsPerFrame / settings_.predictiveSlopeMsPerFrame));
+    int steps = static_cast<int>(
+        std::ceil(slopeMsPerFrame / settings_.predictiveSlopeMsPerFrame));
     if (steps <= 0)
       return 0;
     return std::clamp(steps, 0, settings_.predictivePreStepLimit);
@@ -1016,6 +1046,13 @@ private:
     auto &ph = phases_[phaseIndex];
     if (!ph.enabled)
       return;
+#ifdef SIM_USE_NUMA
+    bool numaSet = false;
+    if (ph.numaNode >= 0 && numa_available() != -1) {
+      numa_set_preferred(ph.numaNode);
+      numaSet = true;
+    }
+#endif
 
     bintrace_.log(bintrace::EV_PhaseBegin,
                   static_cast<std::uint32_t>(phaseIndex),
@@ -1192,6 +1229,11 @@ private:
 
     bintrace_.log(bintrace::EV_PhaseEnd, static_cast<std::uint32_t>(phaseIndex),
                   static_cast<std::uint64_t>(frame_));
+
+#ifdef SIM_USE_NUMA
+    if (numaSet)
+      numa_set_preferred(-1);
+#endif
   }
 
   void executeFrame() {
@@ -1262,8 +1304,7 @@ private:
     default:
       break;
     }
-    bintrace_.log(bintrace::EV_BudgetLadder,
-                  static_cast<std::uint32_t>(rung),
+    bintrace_.log(bintrace::EV_BudgetLadder, static_cast<std::uint32_t>(rung),
                   static_cast<std::uint64_t>(frame_));
   }
 
@@ -1313,7 +1354,8 @@ private:
 
     const double ratioRef = std::max(ratio, avgRatio);
     const double t1 = settings_.budgetWarnRatio;
-    const double t2 = (settings_.budgetWarnRatio + settings_.budgetCritRatio) * 0.5;
+    const double t2 =
+        (settings_.budgetWarnRatio + settings_.budgetCritRatio) * 0.5;
     const double t3 =
         std::max(settings_.budgetWarnRatio, settings_.budgetCritRatio - 0.02);
     if (degradeRung_ < 1 && ratioRef >= t1)

@@ -71,10 +71,12 @@ endif()
 
 # --- affinity test -------------------------------------------------
 if (UNIX AND NOT APPLE)   # linux
-    list(APPEND TEST_SOURCES tests/test_affinity.cpp)
+    list(APPEND TEST_SOURCES tests/test_affinity.cpp tests/test_numa_pool.cpp)
     find_library(LIBNUMA numa)
-    if (LIBNUMA)
+    find_path(NUMA_INCLUDE_DIR numa.h)
+    if (LIBNUMA AND NUMA_INCLUDE_DIR)
         target_compile_definitions(simcore_tests PRIVATE SIM_USE_NUMA)
         target_link_libraries(simcore_tests PRIVATE ${LIBNUMA})
+        target_include_directories(simcore_tests PRIVATE ${NUMA_INCLUDE_DIR})
     endif()
 endif()
