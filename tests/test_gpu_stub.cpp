@@ -26,7 +26,7 @@ TEST(GPUStub, Overlap) {
     SimCore::Settings s; s.threads = 1; SimCore sim(s);
     auto& pool = sim.fiberPool();
     constexpr auto gpu_time = 50ms;
-    auto fence = simcore::hal::gpu::submit([]() { std::this_thread::sleep_for(gpu_time); });
+    auto fence = simcore::hal::gpu::submit([gpu_time]() { std::this_thread::sleep_for(gpu_time); });
 
     std::atomic<bool> fence_done{false};
     std::atomic<bool> cpu_done{false};
