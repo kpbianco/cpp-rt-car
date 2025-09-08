@@ -704,17 +704,24 @@ private:
     if (slopeMsPerFrame < settings_.predictiveSlopeMsPerFrame)
       return 0;
 
-    // Only block if we're already at/over critical budget (don’t use
-    // predictiveMinAvgRatio here)
+    // Only act if we're below critical budget and the average load is high
+    // enough to warrant intervention.
     const double periodMs = 1000.0 / settings_.hz;
     const double avgComputeMs =
         (costCount_ ? (costSumMs_ / double(costCount_)) : 0.0);
     const double avgRatio = (periodMs > 0.0) ? (avgComputeMs / periodMs) : 0.0;
     if (avgRatio >= settings_.budgetCritRatio)
       return 0;
+    if (avgRatio < settings_.predictiveMinAvgRatio)
+      return 0;
 
-    // Heuristic: 1 step by default, up to your configured limit
-    return std::clamp(1, 0, settings_.predictivePreStepLimit);
+    // Scale the number of pre-steps with the observed slope, capped by the
+    // configured limit.
+    int steps =
+        static_cast<int>(std::ceil(slopeMsPerFrame / settings_.predictiveSlopeMsPerFrame));
+    if (steps <= 0)
+      return 0;
+    return std::clamp(steps, 0, settings_.predictivePreStepLimit);
   }
 
   // --- main step ----------------------------------------------------------
