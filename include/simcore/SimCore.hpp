@@ -26,6 +26,8 @@
 #include "profiler.hpp"
 #include "worker_pool.hpp"
 #include <rt/fiber_pool.hpp>
+#include <rt/numerics.hpp>
+#include <rt/prng.hpp>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -118,6 +120,15 @@ public:
   bool broadphaseCoarse() const { return settings_.broadphaseCoarse; }
   int subSteps() const { return subSteps_; }
 
+  // Counter-based deterministic PRNG. Counter is derived from frame and
+  // element index so results are independent of execution order.
+  std::uint32_t prng(std::uint64_t frame, std::uint64_t index,
+                     std::uint64_t counter = 0) const {
+    std::uint64_t ctr = (frame << 32) ^ (index & 0xffffffffull);
+    ctr += counter;
+    return rt::prng::uniform_u32(rngSeed_, ctr);
+  }
+
   struct Settings {
     // Affinity / NUMA
     bool pinThreads = false;
@@ -164,6 +175,10 @@ public:
 
     // Deterministic reduction leaf size (elements)
     std::size_t detReduceLeaf = 2048;
+
+    // Numeric control
+    bool useFMA = false;              // gate for fused multiply-add
+    std::uint64_t rngSeed = 0;        // base seed for counter PRNG
 
     // Time Budget Monitor
     bool budgetMonitor = true;
@@ -260,6 +275,8 @@ public:
 
   void applySettings(const Settings &s) {
     settings_ = s;
+    rngSeed_ = settings_.rngSeed;
+    rt::set_use_fma(settings_.useFMA);
     if (settings_.hz <= 0.0)
       settings_.hz = 1.0;
     if (settings_.threads == 0)
@@ -478,6 +495,7 @@ private:
         if (settings_.pinThreads && !cpuList.empty())
           set_affinity(std::size_t(cpuList[i % cpuList.size()]));
 #endif
+        rt::init_fp_env();
         frameArenas_->bindCurrentThread(i);
         bintrace_.bindThread(i);
         workerLoop();
@@ -485,6 +503,7 @@ private:
     }
     frameArenas_->bindCurrentThread(workerCount_); // main
     bintrace_.bindThread(workerCount_);
+    rt::init_fp_env();
     fiberPool_ = std::make_unique<rt::FiberPool>(workerCount_);
   }
 
@@ -1231,6 +1250,7 @@ private:
 
   // ---- state ----
   Settings settings_{};
+  std::uint64_t rngSeed_ = 0;
   std::vector<Phase> phases_;
   std::vector<std::vector<std::size_t>> succ_;
   std::vector<int> indegree_;
