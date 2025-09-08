@@ -49,7 +49,7 @@ if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
 endif()
 
 add_executable(simcore_tests ${TEST_SOURCES})
-target_link_libraries(simcore_tests PRIVATE simcore gtest gtest_main gmock)
+target_link_libraries(simcore_tests PRIVATE simcore simcore_rt gtest gtest_main gmock)
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
     target_link_libraries(simcore_tests PRIVATE rapidcheck rapidcheck_gtest)
 endif()
