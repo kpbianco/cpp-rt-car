@@ -37,6 +37,7 @@ set(TEST_SOURCES
     test_watchdog.cpp
     test_numerics.cpp
     test_prng_determinism.cpp
+    test_snapshot.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
