@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cmath>
 #if defined(__SSE__)
-#include <xmmintrin.h>
+#include <immintrin.h>
 #endif
 
 namespace rt {
@@ -16,7 +16,9 @@ inline void init_fp_env() {
     std::fesetround(FE_TONEAREST);
 #if defined(__SSE__)
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+#ifdef _MM_SET_DENORMALS_ZERO_MODE
     _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#endif
 #endif
 }
 

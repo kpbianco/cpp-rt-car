@@ -46,7 +46,7 @@ inline double uniform_double(std::uint64_t seed, std::uint64_t counter) {
     std::uint64_t r = static_cast<std::uint64_t>(uniform_u32(seed, counter)) << 32;
     r |= static_cast<std::uint64_t>(uniform_u32(seed, counter + 1));
     const double scale = 1.0 / static_cast<double>(std::uint64_t(-1));
-    return r * scale;
+    return static_cast<double>(r) * scale;
 }
 
 } // namespace rt::prng
