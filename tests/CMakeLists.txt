@@ -9,6 +9,7 @@ set(TEST_SOURCES
     test_sparse_set.cpp
     test_soa_view.cpp
     test_jobqueue.cpp
+    test_jobqueue_perf.cpp
     test_workerpool_priority.cpp
     test_phase_graph.cpp
     test_static_phase_graph.cpp
