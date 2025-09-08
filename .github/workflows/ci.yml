@@ -25,6 +25,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Real-time hardening
+        run: tools/rt_harden.sh
       - name: Set up compiler
         run: |
           if [ "${{matrix.compiler}}" = "clang" ]; then
@@ -65,6 +67,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Real-time hardening
+        run: powershell -ExecutionPolicy Bypass -File tools/rt_harden.ps1
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DSIM_WERROR=ON
       - name: Build
