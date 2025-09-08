@@ -1288,7 +1288,8 @@ private:
     startReal_ = Clock::now();
   }
 
-  void activateDegradeRung(int rung) {
+public:
+  void applyDegradeRung(int rung) {
     degradeRung_ = rung;
     switch (rung) {
     case 1:
@@ -1308,6 +1309,7 @@ private:
                   static_cast<std::uint64_t>(frame_));
   }
 
+private:
   void updateBudget(double computeMs) {
     if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
       return;
@@ -1359,11 +1361,11 @@ private:
     const double t3 =
         std::max(settings_.budgetWarnRatio, settings_.budgetCritRatio - 0.02);
     if (degradeRung_ < 1 && ratioRef >= t1)
-      activateDegradeRung(1);
+      applyDegradeRung(1);
     if (degradeRung_ < 2 && ratioRef >= t2)
-      activateDegradeRung(2);
+      applyDegradeRung(2);
     if (degradeRung_ < 3 && ratioRef >= t3)
-      activateDegradeRung(3);
+      applyDegradeRung(3);
 
     if (settings_.autoAdaptHz) {
       if (adaptCooldown_ > 0)
