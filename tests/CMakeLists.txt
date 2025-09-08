@@ -11,6 +11,7 @@ set(TEST_SOURCES
     test_jobqueue.cpp
     test_workerpool_priority.cpp
     test_phase_graph.cpp
+    test_static_phase_graph.cpp
     test_chunk_autotune.cpp
     test_deterministic_reduction.cpp
     test_robust_fp.cpp
