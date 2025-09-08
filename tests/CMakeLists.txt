@@ -36,6 +36,8 @@ set(TEST_SOURCES
     test_hal.cpp
     test_gpu_stub.cpp
     test_watchdog.cpp
+    test_rt_watchdog.cpp
+    test_crashdump.cpp
     test_numerics.cpp
     test_prng_determinism.cpp
     test_snapshot.cpp

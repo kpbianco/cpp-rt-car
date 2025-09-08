@@ -153,9 +153,15 @@ add_library(simcore_core INTERFACE)
 target_include_directories(simcore_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
 
 # Runtime module providing C API surface
-add_library(simcore_rt STATIC
-    rt/src/runtime.cpp
-)
+set(RT_SOURCES rt/src/runtime.cpp)
+
+if (UNIX)
+    list(APPEND RT_SOURCES rt/src/crashdump_posix.cpp)
+else()
+    list(APPEND RT_SOURCES rt/src/crashdump_stub.cpp)
+endif()
+
+add_library(simcore_rt STATIC ${RT_SOURCES})
 target_include_directories(simcore_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/include
