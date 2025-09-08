@@ -13,11 +13,15 @@ static rt::Task wait_task(rt::FiberPool& pool, simcore::hal::Fence fence, std::a
     done.store(true, std::memory_order_relaxed);
 }
 
-static rt::Task cpu_task(std::chrono::milliseconds dur, std::atomic<bool>& done) {
+static rt::Task cpu_task(std::chrono::milliseconds dur,
+                         std::atomic<bool>& done,
+                         std::atomic<simcore::hal::Duration::rep>& elapsed_ns) {
     auto start = simcore::hal::now();
     while (simcore::hal::elapsed(start, simcore::hal::now()) < dur) {
         // busy work
     }
+    elapsed_ns.store(simcore::hal::elapsed(start, simcore::hal::now()).count(),
+                     std::memory_order_relaxed);
     done.store(true, std::memory_order_relaxed);
     co_return;
 }
@@ -26,13 +30,20 @@ TEST(GPUStub, Overlap) {
     SimCore::Settings s; s.threads = 1; SimCore sim(s);
     auto& pool = sim.fiberPool();
     constexpr auto gpu_time = 50ms;
-    auto fence = simcore::hal::gpu::submit([gpu_time]() { std::this_thread::sleep_for(gpu_time); });
+    std::atomic<simcore::hal::Duration::rep> gpu_ns{0};
+    auto fence = simcore::hal::gpu::submit([&]() {
+        auto start = simcore::hal::now();
+        std::this_thread::sleep_for(gpu_time);
+        gpu_ns.store(simcore::hal::elapsed(start, simcore::hal::now()).count(),
+                     std::memory_order_relaxed);
+    });
 
     std::atomic<bool> fence_done{false};
     std::atomic<bool> cpu_done{false};
+    std::atomic<simcore::hal::Duration::rep> cpu_ns{0};
 
     pool.spawn(wait_task(pool, fence, fence_done));
-    pool.spawn(cpu_task(gpu_time, cpu_done));
+    pool.spawn(cpu_task(gpu_time, cpu_done, cpu_ns));
 
     auto start = simcore::hal::now();
     pool.drain();
@@ -41,10 +52,12 @@ TEST(GPUStub, Overlap) {
     EXPECT_TRUE(fence_done.load());
     EXPECT_TRUE(cpu_done.load());
 
-    auto expected = gpu_time + gpu_time;
+    simcore::hal::Duration gpu_actual{gpu_ns.load(std::memory_order_relaxed)};
+    simcore::hal::Duration cpu_actual{cpu_ns.load(std::memory_order_relaxed)};
+    auto expected = gpu_actual + cpu_actual;
     auto overlap = expected - total;
     double pct = std::chrono::duration<double>(overlap).count() /
-                 std::chrono::duration<double>(gpu_time).count();
+                 std::chrono::duration<double>(cpu_actual).count();
     EXPECT_GT(pct, 0.5);
 }
 
