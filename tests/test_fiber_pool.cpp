@@ -8,7 +8,7 @@
 using namespace std::chrono_literals;
 
 static rt::Task fence_task(rt::FiberPool& pool, simcore::hal::Fence& f,
-                           std::atomic<int>& counter) {
+                           std::atomic<std::size_t>& counter) {
     co_await rt::FiberPool::FenceAwaiter{f, pool};
     counter.fetch_add(1, std::memory_order_relaxed);
 }
@@ -19,10 +19,10 @@ TEST(FiberPool, FenceStormSimCore) {
         s.threads = static_cast<std::size_t>(threads);
         SimCore sim(s);
         auto& pool = sim.fiberPool();
-        std::atomic<int> done{0};
-        const int N = 64;
+        std::atomic<std::size_t> done{0};
+        const std::size_t N = 64;
         std::vector<simcore::hal::Fence> fences(N);
-        for (int i = 0; i < N; ++i) {
+        for (std::size_t i = 0; i < N; ++i) {
             pool.spawn(fence_task(pool, fences[i], done));
         }
         for (auto& f : fences) {
