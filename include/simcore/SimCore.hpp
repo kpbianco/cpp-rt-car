@@ -17,6 +17,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <unordered_map>
+#include <fstream>
 
 #include "bintrace.hpp"
 #include "frame_arena.hpp"
@@ -144,6 +146,10 @@ public:
     int targetChunksPerThread = 2;
     std::size_t minChunk = 64;
     std::size_t maxChunk = 8192;
+    double chunkPercentile = 0.9;      // percentile target [0,1]
+    int chunkSampleFrames = 20;        // frames to sample before pinning
+    double chunkDriftThreshold = 1000.0; // CUSUM threshold for drift
+    std::string chunkCacheFile;        // optional cache file base path
 
     // Small-array parallel cut-offs (avoid over-partitioning)
     // If minParallelElems==0 -> auto = max(2*minChunk, minChunk)
@@ -200,6 +206,9 @@ public:
     std::size_t chosenChunk = 0;
     std::size_t totalChunks = 0;
     std::size_t chunkSkew = 0;
+    std::vector<std::size_t> chunkSamples;
+    double chunkCusum = 0.0;
+    bool chunkPinned = false;
   };
 
   struct BudgetSample {
@@ -213,10 +222,22 @@ public:
 
   SimCore() : SimCore(Settings{}) {}
   explicit SimCore(const Settings &s) {
+#ifndef _WIN32
+    char host[256];
+    if (gethostname(host, sizeof(host)) == 0)
+      machineId_ = host;
+    else
+      machineId_ = "unknown";
+#else
+    machineId_ = "windows";
+#endif
     applySettings(s);
     initThreads();
   }
-  ~SimCore() { stopThreads(); }
+  ~SimCore() {
+    saveChunkCache();
+    stopThreads();
+  }
 
   void setLogger(Logger *l) { logger_ = l; }
   void setProfiler(Profiler *p) { profiler_ = p; }
@@ -259,6 +280,7 @@ public:
              settings_.predictiveSlopeMsPerFrame,
              settings_.predictivePreStepLimit, settings_.minParallelElems,
              settings_.minParallelChunks);
+    loadChunkCache();
     graphDirty_ = true;
   }
 
@@ -273,7 +295,8 @@ public:
 
   // Phase API
   std::size_t addPhase(const std::string &name, std::size_t elemCount = 0) {
-    phases_.emplace_back(Phase{name, {}, {}, {}, {}, {}, elemCount, true});
+    phases_.emplace_back(
+        Phase{name, {}, {}, {}, {}, {}, elemCount, true, 0, 0, 0, {}, 0.0, false});
     succ_.push_back({});
     indegree_.push_back(0);
     graphDirty_ = true;
@@ -356,6 +379,12 @@ public:
 
   void setDeterministicHash(std::uint64_t h) { deterministicHash_ = h; }
   std::uint64_t deterministicHash() const { return deterministicHash_; }
+  std::size_t phaseChunk(std::size_t phaseIndex) const {
+    return phases_[phaseIndex].chosenChunk;
+  }
+  bool phaseChunkPinned(std::size_t phaseIndex) const {
+    return phases_[phaseIndex].chunkPinned;
+  }
 
   void requestExit() { terminate_ = true; }
   std::int64_t frame() const { return frame_; }
@@ -496,7 +525,40 @@ private:
     }
   }
 
-  std::size_t pickChunk(std::size_t elems, TaskHint hint) const {
+  std::string cachePath() const {
+    if (settings_.chunkCacheFile.empty())
+      return "";
+    return settings_.chunkCacheFile + "." + machineId_;
+  }
+
+  void loadChunkCache() {
+    chunkCache_.clear();
+    std::string path = cachePath();
+    if (path.empty())
+      return;
+    std::ifstream in(path);
+    if (!in)
+      return;
+    std::string phase;
+    std::size_t chunk;
+    while (in >> phase >> chunk)
+      chunkCache_[phase] = chunk;
+  }
+
+  void saveChunkCache() {
+    std::string path = cachePath();
+    if (path.empty())
+      return;
+    std::ofstream out(path);
+    if (!out)
+      return;
+    for (auto &p : chunkCache_)
+      out << p.first << " " << p.second << "\n";
+  }
+
+  std::size_t pickChunk(std::size_t phaseIdx, std::size_t elems,
+                        TaskHint hint) {
+    auto &ph = phases_[phaseIdx];
     if (!settings_.autoTuneChunks) {
       std::size_t chunk = std::max<std::size_t>(
           1, settings_.chunkSize ? settings_.chunkSize : 256);
@@ -504,20 +566,64 @@ private:
         chunk = std::max<std::size_t>(1, chunk / 2);
       return chunk;
     }
+
     const std::size_t threads = std::max<std::size_t>(1, workerCount_);
     std::size_t targetChunks = std::max<std::size_t>(
-        1, threads * static_cast<std::size_t>(
-                         std::max(1, settings_.targetChunksPerThread)));
+        1, threads *
+               static_cast<std::size_t>(
+                   std::max(1, settings_.targetChunksPerThread)));
     if (hint == TaskHint::Latency)
       targetChunks *= 2;
 
-    std::size_t chunk = (elems + targetChunks - 1) / targetChunks; // ceil
-    chunk = std::clamp(chunk, settings_.minChunk, settings_.maxChunk);
-    if (chunk > elems)
-      chunk = elems;
-    if (chunk == 0)
-      chunk = 1;
-    return chunk;
+    std::size_t calc = (elems + targetChunks - 1) / targetChunks; // ceil
+    calc = std::clamp(calc, settings_.minChunk, settings_.maxChunk);
+    if (calc > elems)
+      calc = elems;
+    if (calc == 0)
+      calc = 1;
+
+    if (ph.chunkPinned) {
+      double diff = static_cast<double>(calc) -
+                    static_cast<double>(ph.chosenChunk);
+      ph.chunkCusum += diff;
+      if (std::fabs(ph.chunkCusum) > settings_.chunkDriftThreshold) {
+        ph.chunkPinned = false;
+        ph.chunkSamples.clear();
+        ph.chunkCusum = 0.0;
+        ph.chosenChunk = calc;
+        ph.chunkSamples.push_back(calc);
+      } else {
+        return ph.chosenChunk;
+      }
+    } else if (!ph.chunkPinned) {
+      auto it = chunkCache_.find(ph.name);
+      if (it != chunkCache_.end()) {
+        ph.chosenChunk = it->second;
+        ph.chunkPinned = true;
+        return ph.chosenChunk;
+      }
+    }
+
+    ph.chunkSamples.push_back(calc);
+    if (ph.chunkSamples.size() >=
+        static_cast<std::size_t>(std::max(1, settings_.chunkSampleFrames))) {
+      auto temp = ph.chunkSamples;
+      std::size_t idx = static_cast<std::size_t>(
+          std::clamp(settings_.chunkPercentile, 0.0, 1.0) *
+          static_cast<double>(temp.size() - 1));
+      std::nth_element(temp.begin(),
+                       temp.begin() + static_cast<std::ptrdiff_t>(idx),
+                       temp.end());
+      ph.chosenChunk = temp[idx];
+      ph.chunkPinned = true;
+      ph.chunkSamples.clear();
+      chunkCache_[ph.name] = ph.chosenChunk;
+      saveChunkCache();
+      return ph.chosenChunk;
+    }
+
+    ph.chosenChunk = calc;
+    return calc;
   }
 
   // --- Predictive helpers -------------------------------------------------
@@ -778,7 +884,7 @@ private:
       for (std::size_t tIdx = 0; tIdx < ph.ranges.size(); ++tIdx) {
         auto &rt = ph.ranges[tIdx];
 
-        const std::size_t chunk = pickChunk(count, rt.hint);
+        const std::size_t chunk = pickChunk(phaseIndex, count, rt.hint);
         const std::size_t totalChunks = (count + chunk - 1) / chunk;
         const std::size_t threads = workerCount_ + 1; // include main thread
         const std::size_t skew = threads ? (totalChunks % threads) : 0;
@@ -1094,6 +1200,8 @@ private:
 
   std::unique_ptr<FrameArenaPool> frameArenas_;
   bintrace::Trace bintrace_;
+  std::unordered_map<std::string, std::size_t> chunkCache_;
+  std::string machineId_;
 
   Logger *logger_ = nullptr;
   Profiler *profiler_ = nullptr;
