@@ -42,6 +42,7 @@ set(TEST_SOURCES
     test_prng_determinism.cpp
     test_snapshot.cpp
     test_trace_export.cpp
+    test_units.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
