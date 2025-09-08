@@ -25,6 +25,7 @@
 #include "logger.hpp"
 #include "profiler.hpp"
 #include "worker_pool.hpp"
+#include <rt/fiber_pool.hpp>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -111,6 +112,7 @@ public:
   double recoveredMs() const { return recoveredMs_; }
   double precoveredMs() const { return precoveredMs_; }
   FrameArena &frameArena() { return frameArenas_->tls(); }
+  rt::FiberPool &fiberPool() { return *fiberPool_; }
   bintrace::Trace &bintrace() { return bintrace_; }
   bool visualizersEnabled() const { return settings_.visualizers; }
   bool broadphaseCoarse() const { return settings_.broadphaseCoarse; }
@@ -483,10 +485,15 @@ private:
     }
     frameArenas_->bindCurrentThread(workerCount_); // main
     bintrace_.bindThread(workerCount_);
+    fiberPool_ = std::make_unique<rt::FiberPool>(workerCount_);
   }
 
   void stopThreads() {
     if (threads_.empty()) {
+      if (fiberPool_) {
+        fiberPool_->stop();
+        fiberPool_.reset();
+      }
       bintrace_.shutdown();
       return;
     }
@@ -495,6 +502,10 @@ private:
     for (auto &t : threads_)
       t.join();
     threads_.clear();
+    if (fiberPool_) {
+      fiberPool_->stop();
+      fiberPool_.reset();
+    }
     bintrace_.shutdown();
   }
 
@@ -1265,6 +1276,7 @@ private:
   bool predictivePrimed_ = false;
 
   std::unique_ptr<FrameArenaPool> frameArenas_;
+  std::unique_ptr<rt::FiberPool> fiberPool_;
   bintrace::Trace bintrace_;
   std::unordered_map<std::string, std::size_t> chunkCache_;
   std::string machineId_;
