@@ -52,7 +52,14 @@ class FrameArena {
 public:
   explicit FrameArena(std::size_t capacityBytes = (1u << 20),
                       std::size_t alignment = 64, int numaNode = -1)
-      : alignment_(normalize_align(alignment)), numaNode_(numaNode) {
+      : alignment_(normalize_align(alignment))
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+        , numaNode_(numaNode)
+#endif
+  {
+#if !(defined(__linux__) && defined(SIM_USE_NUMA))
+    (void)numaNode;
+#endif
     reserve_(capacityBytes);
   }
 
@@ -63,14 +70,19 @@ public:
   FrameArena(FrameArena &&o) noexcept
       : buffer_(o.buffer_), capacity_(o.capacity_), head_(o.head_),
         alignment_(o.alignment_)
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+        , numaNode_(o.numaNode_)
+#endif
 #if defined(__linux__)
-        ,
-        pageSize_(o.pageSize_)
+        , pageSize_(o.pageSize_)
 #endif
   {
     o.buffer_ = nullptr;
     o.capacity_ = 0;
     o.head_ = 0;
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+    o.numaNode_ = -1;
+#endif
   }
 
   FrameArena &operator=(FrameArena &&o) noexcept {
@@ -83,6 +95,10 @@ public:
       head_ = o.head_;
       o.head_ = 0;
       alignment_ = o.alignment_;
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+      numaNode_ = o.numaNode_;
+      o.numaNode_ = -1;
+#endif
 #if defined(__linux__)
       pageSize_ = o.pageSize_;
 #endif
@@ -211,7 +227,9 @@ private:
   std::size_t capacity_ = 0;
   std::size_t head_ = 0;
   std::size_t alignment_ = 64;
+#if defined(__linux__) && defined(SIM_USE_NUMA)
   int numaNode_ = -1;
+#endif
 #if defined(__linux__)
   std::size_t pageSize_ = 4096;
 #endif
