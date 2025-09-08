@@ -27,8 +27,9 @@ static std::uint64_t run_hash(std::size_t threads, bool useFMA) {
     sim.setPhaseElementCount(phase, N);
 
     sim.addParallelRangeTask(phase, [&](std::size_t b, std::size_t e, int64_t f, SimCore::Seconds){
-        for (std::size_t i=b;i<e;++i)
-            vals[i] = sim.prng(f, i);
+        for (std::size_t i = b; i < e; ++i)
+            vals[i] =
+                sim.prng(static_cast<std::uint64_t>(f), static_cast<std::uint64_t>(i));
     });
 
     sim.addReductionTask(phase, [&](int64_t, SimCore::Seconds){
