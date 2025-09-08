@@ -94,6 +94,7 @@ endif()
 add_library(simcore INTERFACE)
 target_include_directories(simcore INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
 )
 
 # Enable warnings for project sources only
