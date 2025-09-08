@@ -26,6 +26,7 @@ enum : std::uint32_t {
     EV_PhaseEnd    = 0x02,
     EV_ChunkStart  = 0x03,
     EV_ChunkDone   = 0x04,
+    EV_BudgetLadder = 0x05,
 };
 
 #if defined(__x86_64__) || defined(_M_X64)

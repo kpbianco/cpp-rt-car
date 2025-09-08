@@ -22,6 +22,7 @@ set(TEST_SOURCES
     test_rt_arena.cpp
     test_rt_overflow_death.cpp
     test_bintrace.cpp
+    test_budget_degrade.cpp
     test_predictive_adaptive.cpp
     test_small_array_balance.cpp
     test_phase_telemetry.cpp

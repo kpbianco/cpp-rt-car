@@ -112,6 +112,9 @@ public:
   double precoveredMs() const { return precoveredMs_; }
   FrameArena &frameArena() { return frameArenas_->tls(); }
   bintrace::Trace &bintrace() { return bintrace_; }
+  bool visualizersEnabled() const { return settings_.visualizers; }
+  bool broadphaseCoarse() const { return settings_.broadphaseCoarse; }
+  int subSteps() const { return subSteps_; }
 
   struct Settings {
     // Affinity / NUMA
@@ -169,6 +172,10 @@ public:
     double adaptDownFactor = 0.95;
     double minHz = 60.0;
     int adaptCooldownFrames = 600;
+
+    // Graceful degradation
+    bool visualizers = true;
+    bool broadphaseCoarse = false;
 
     // Binary event trace
     bool bintraceEnable = false;
@@ -1114,6 +1121,27 @@ private:
     startReal_ = Clock::now();
   }
 
+  void activateDegradeRung(int rung) {
+    degradeRung_ = rung;
+    switch (rung) {
+    case 1:
+      settings_.visualizers = false;
+      break;
+    case 2:
+      if (subSteps_ > 1)
+        --subSteps_;
+      break;
+    case 3:
+      settings_.broadphaseCoarse = true;
+      break;
+    default:
+      break;
+    }
+    bintrace_.log(bintrace::EV_BudgetLadder,
+                  static_cast<std::uint32_t>(rung),
+                  static_cast<std::uint64_t>(frame_));
+  }
+
   void updateBudget(double computeMs) {
     if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
       return;
@@ -1157,6 +1185,18 @@ private:
                  frame_, computeMs, ratio, avgComputeMs, avgRatio);
       }
     }
+
+    const double ratioRef = std::max(ratio, avgRatio);
+    const double t1 = settings_.budgetWarnRatio;
+    const double t2 = (settings_.budgetWarnRatio + settings_.budgetCritRatio) * 0.5;
+    const double t3 =
+        std::max(settings_.budgetWarnRatio, settings_.budgetCritRatio - 0.02);
+    if (degradeRung_ < 1 && ratioRef >= t1)
+      activateDegradeRung(1);
+    if (degradeRung_ < 2 && ratioRef >= t2)
+      activateDegradeRung(2);
+    if (degradeRung_ < 3 && ratioRef >= t3)
+      activateDegradeRung(3);
 
     if (settings_.autoAdaptHz) {
       if (adaptCooldown_ > 0)
@@ -1211,6 +1251,7 @@ private:
   std::size_t costCount_ = 0;
   double costSumMs_ = 0.0;
   int adaptCooldown_ = 0;
+  int degradeRung_ = 0;
   std::function<void(const BudgetSample &)> budgetCb_;
 
   std::uint64_t deterministicHash_ = 0;
