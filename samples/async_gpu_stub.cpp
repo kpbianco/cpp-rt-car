@@ -1,18 +1,19 @@
 #include <cassert>
-#include <vector>
+#include <cstddef>
 #include <iostream>
+#include <vector>
 
 int main() {
-    const int N = 1024;
+    constexpr std::size_t N = 1024;
     std::vector<float> data(N, 1.0f);
 
 #ifdef _OPENMP
 #pragma omp target teams distribute parallel for map(tofrom: data[0:N])
-    for (int i = 0; i < N; ++i) {
+    for (std::size_t i = 0; i < N; ++i) {
         data[i] *= 2.0f;
     }
 #else
-    for (int i = 0; i < N; ++i) {
+    for (std::size_t i = 0; i < N; ++i) {
         data[i] *= 2.0f;
     }
 #endif
