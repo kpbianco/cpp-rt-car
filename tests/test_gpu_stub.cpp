@@ -10,7 +10,7 @@ using namespace std::chrono_literals;
 
 static rt::Task wait_task(rt::FiberPool& pool, simcore::hal::Fence fence, std::atomic<bool>& done) {
     co_await rt::FiberPool::FenceAwaiter{fence, pool};
-    done.store(true, std::memory_order_relaxed);
+    done.store(true, std::memory_order_release);
 }
 
 static rt::Task cpu_task(std::chrono::milliseconds dur,
@@ -21,8 +21,8 @@ static rt::Task cpu_task(std::chrono::milliseconds dur,
         // busy work
     }
     elapsed_ns.store(simcore::hal::elapsed(start, simcore::hal::now()).count(),
-                     std::memory_order_relaxed);
-    done.store(true, std::memory_order_relaxed);
+                     std::memory_order_release);
+    done.store(true, std::memory_order_release);
     co_return;
 }
 
@@ -35,7 +35,7 @@ TEST(GPUStub, Overlap) {
         auto start = simcore::hal::now();
         std::this_thread::sleep_for(gpu_time);
         gpu_ns.store(simcore::hal::elapsed(start, simcore::hal::now()).count(),
-                     std::memory_order_relaxed);
+                     std::memory_order_release);
     });
 
     std::atomic<bool> fence_done{false};
@@ -49,15 +49,13 @@ TEST(GPUStub, Overlap) {
     pool.drain();
     auto total = simcore::hal::elapsed(start, simcore::hal::now());
 
-    EXPECT_TRUE(fence_done.load());
-    EXPECT_TRUE(cpu_done.load());
+    EXPECT_TRUE(fence_done.load(std::memory_order_acquire));
+    EXPECT_TRUE(cpu_done.load(std::memory_order_acquire));
 
-    simcore::hal::Duration gpu_actual{gpu_ns.load(std::memory_order_relaxed)};
-    simcore::hal::Duration cpu_actual{cpu_ns.load(std::memory_order_relaxed)};
+    simcore::hal::Duration gpu_actual{gpu_ns.load(std::memory_order_acquire)};
+    simcore::hal::Duration cpu_actual{cpu_ns.load(std::memory_order_acquire)};
     auto expected = gpu_actual + cpu_actual;
     auto overlap = expected - total;
-    double pct = std::chrono::duration<double>(overlap).count() /
-                 std::chrono::duration<double>(cpu_actual).count();
-    EXPECT_GT(pct, 0.5);
+    EXPECT_GT(overlap.count(), (cpu_actual / 2).count());
 }
 
