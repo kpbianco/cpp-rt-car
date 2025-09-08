@@ -165,6 +165,11 @@ target_link_libraries(simcore_rt PUBLIC simcore_core)
 add_executable(simcore_app src/main.cpp)
 target_link_libraries(simcore_app PRIVATE simcore)
 
+# Sample trace dump utility
+add_executable(trace_dump src/trace_dump.cpp)
+target_link_libraries(trace_dump PRIVATE simcore)
+target_include_directories(trace_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 # Tests
 if (ENABLE_TESTS)
     enable_testing()
