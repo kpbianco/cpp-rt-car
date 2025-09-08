@@ -34,6 +34,7 @@ set(TEST_SOURCES
     test_hazard_ptr.cpp
     test_physics_integrators.cpp
     test_hal.cpp
+    test_gpu_stub.cpp
     test_watchdog.cpp
     test_numerics.cpp
     test_prng_determinism.cpp
