@@ -2,6 +2,7 @@
 #pragma once
 #include <cstddef>
 #include <type_traits>
+#include <cmath>
 
 #if defined(__AVX2__)
   #include <immintrin.h>
@@ -27,13 +28,13 @@ struct Vec3SoA<const T> {
 
 namespace detail {
 #if defined(ENABLE_SIMD) && defined(__AVX2__)
-// Precomputed masks for tail processing (1..3 elements)
-alignas(32) static constexpr std::int64_t mask_lut[4][4] = {
-    {0, 0, 0, 0},
-    {-1, 0, 0, 0},
-    {-1, -1, 0, 0},
-    {-1, -1, -1, 0}
-};
+// Dynamically generate masks for the remaining lanes (0..4).
+inline __m256i genmask(std::size_t rem) {
+    const __m256i count = _mm256_set1_epi64x(static_cast<long long>(rem));
+    const __m256i idx   = _mm256_set_epi64x(3, 2, 1, 0);
+    return _mm256_cmpgt_epi64(count, idx);
+}
+#define SOA_DETAIL_GENMASK
 #endif
 } // namespace detail
 
@@ -71,7 +72,7 @@ inline void axpy3(double a,
     // Vectorized tail using masks (no scalar loop)
     std::size_t rem = n - i;
     if (rem) {
-        const __m256i mask = _mm256_load_si256(reinterpret_cast<const __m256i*>(detail::mask_lut[rem]));
+        const __m256i mask = detail::genmask(rem);
 
         __m256d px = _mm256_maskload_pd(p.x + i, mask);
         __m256d vx = _mm256_maskload_pd(v.x + i, mask);
@@ -89,11 +90,11 @@ inline void axpy3(double a,
         _mm256_maskstore_pd(p.z + i, mask, pz);
     }
 #else
-    // Portable scalar fallback (API is still available)
+    // Portable scalar fallback with fused semantics
     for (std::size_t i = 0; i < n; ++i) {
-        p.x[i] += a * v.x[i];
-        p.y[i] += a * v.y[i];
-        p.z[i] += a * v.z[i];
+        p.x[i] = std::fma(a, v.x[i], p.x[i]);
+        p.y[i] = std::fma(a, v.y[i], p.y[i]);
+        p.z[i] = std::fma(a, v.z[i], p.z[i]);
     }
 #endif
 }
