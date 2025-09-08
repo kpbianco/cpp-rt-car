@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <chrono>
 #include <iostream>
+#include <cmath>
 
 #define ENABLE_SIMD 1
 #include <simcore/soa/soa_simd.hpp>
@@ -26,12 +27,12 @@ TEST(SIMD, SoAAxpy3MatchesScalar)
 
         const double a = 0.123;
 
-        // Scalar reference
+        // Scalar reference using fused multiply-add to match SIMD semantics
         auto px_ref = px, py_ref = py, pz_ref = pz;
         for (std::size_t i = 0; i < n; ++i) {
-            px_ref[i] += a * vx[i];
-            py_ref[i] += a * vy[i];
-            pz_ref[i] += a * vz[i];
+            px_ref[i] = std::fma(a, vx[i], px_ref[i]);
+            py_ref[i] = std::fma(a, vy[i], py_ref[i]);
+            pz_ref[i] = std::fma(a, vz[i], pz_ref[i]);
         }
 
         // SIMD/SoA path (or scalar fallback if AVX2 disabled)
