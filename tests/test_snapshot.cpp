@@ -2,6 +2,7 @@
 #include <simcore/SimCore.hpp>
 #include <simcore/logger.hpp>
 #include <rt/snapshot.hpp>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -28,11 +29,16 @@ TEST(SnapshotRollback, ReplayHashEquality) {
     for (int i = 0; i < 16; ++i) sparse[i * 2] = i;
 
     const std::size_t phase = sim.addPhase("P");
-    sim.addSerialSubsystem(phase, [&](std::int64_t f, SimCore::Seconds){
+    sim.addSerialSubsystem(phase, [&](std::int64_t f, SimCore::Seconds) {
         for (std::size_t i = 0; i < dense.size(); ++i)
-            dense[i] += int(sim.prng(f, i) & 0xff);
+            dense[i] += int(sim.prng(static_cast<std::uint64_t>(f),
+                                      static_cast<std::uint64_t>(i)) &
+                           0xff);
         for (auto &kv : sparse)
-            kv.second += int(sim.prng(f, kv.first) & 0xff);
+            kv.second +=
+                int(sim.prng(static_cast<std::uint64_t>(f),
+                              static_cast<std::uint64_t>(kv.first)) &
+                    0xff);
     });
 
     sim.run(); // run N frames
