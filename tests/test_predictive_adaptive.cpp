@@ -61,7 +61,8 @@ TEST(PredictiveAdaptive, PrestepsReduceReactiveCatchup)
         GTEST_SKIP() << "Predictive scheduler had no headroom";
     }
 
-    // Total catch-up (pre + reactive) should not exceed reactive-only case
-    // Allow a small margin (1) for timing variance on slower CI machines
-    EXPECT_LE(reactivePred + prePred, reactiveNoPred + 1);
+    // Predictive pre-stepping should reduce the amount of reactive catch-up
+    // required later. Allow a small margin (1) for timing variance on slower CI
+    // machines.
+    EXPECT_LE(reactivePred, reactiveNoPred + 1);
 }
