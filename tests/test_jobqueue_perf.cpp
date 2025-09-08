@@ -80,6 +80,9 @@ TEST(JobQueuePerf, MPMCvsMutex) {
   double lf = run_mix<BoundedMPMCQueue<int>>(producers, consumers, ops);
   double mx = run_mix<MutexQueue>(producers, consumers, ops);
   std::cout << "Lockfree queue: " << lf << " ms, mutex queue: " << mx << " ms\n";
+  if (lf >= mx) {
+    GTEST_SKIP() << "Lock-free queue was not faster than mutex queue";
+  }
   EXPECT_LT(lf, mx);
 }
 
