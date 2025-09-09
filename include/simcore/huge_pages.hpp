@@ -4,35 +4,46 @@
 #include <cstdlib>
 #ifdef __linux__
 #include <sys/mman.h>
+#elif defined(_WIN32)
+#include <malloc.h>
 #endif
 
 namespace sim {
 
 inline void* alloc_huge(std::size_t bytes) {
 #ifdef __linux__
-    void* ptr = mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_HUGE_2MB,
-                     -1, 0);
-    if (ptr != MAP_FAILED)
-        return ptr;
+    int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB;
+#ifdef MAP_HUGE_2MB
+    flags |= MAP_HUGE_2MB;
 #endif
+    void* map = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, flags, -1, 0);
+    if (map != MAP_FAILED)
+        return map;
     void* ptr = nullptr;
     if (posix_memalign(&ptr, 2 * 1024 * 1024, bytes) != 0)
         return nullptr;
-#ifdef __linux__
     madvise(ptr, bytes, MADV_HUGEPAGE);
-#endif
     return ptr;
+#elif defined(_WIN32)
+    return _aligned_malloc(bytes, 2 * 1024 * 1024);
+#else
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, 2 * 1024 * 1024, bytes) != 0)
+        return nullptr;
+    return ptr;
+#endif
 }
 
 inline void free_huge(void* ptr, std::size_t bytes) {
 #ifdef __linux__
-    if (ptr && bytes) {
-        if (munmap(ptr, bytes) == 0)
-            return;
-    }
-#endif
+    if (ptr && bytes && munmap(ptr, bytes) == 0)
+        return;
     free(ptr);
+#elif defined(_WIN32)
+    _aligned_free(ptr);
+#else
+    free(ptr);
+#endif
 }
 
 enum class StreamAdvice { Normal, Sequential, Random };
