@@ -53,6 +53,7 @@ set(TEST_SOURCES
     test_sbom.cpp
     test_minidump_symbols.cpp
     test_perf_artifacts.cpp
+    test_config_hot_reload.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
