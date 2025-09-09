@@ -49,6 +49,10 @@ set(TEST_SOURCES
     test_units.cpp
     test_huge_page.cpp
     test_thermal_limp.cpp
+    test_sandbox.cpp
+    test_sbom.cpp
+    test_minidump_symbols.cpp
+    test_perf_artifacts.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
