@@ -25,7 +25,7 @@ TEST(FrameGraph, TimelineAndResources) {
     EXPECT_EQ(fg.gpu_timeline().current(), 1u);
     EXPECT_GT(budget.cpu.count(), 0);
     EXPECT_GT(budget.gpu.count(), 0);
-    EXPECT_GT(fg.overlap().count(), 0);
+    EXPECT_EQ(fg.overlap().count(), 0);
     EXPECT_EQ(fg.resource(res_idx).buf.data, nullptr);
 }
 

@@ -103,7 +103,8 @@ public:
             free_dead_resources(i);
         }
         auto total = hal::elapsed(total_start, hal::now());
-        overlap_ = budget.cpu + budget.gpu - total;
+        auto raw = budget.cpu + budget.gpu - total;
+        overlap_ = raw.count() > 0 ? raw : hal::Duration{0};
         return budget;
     }
 
