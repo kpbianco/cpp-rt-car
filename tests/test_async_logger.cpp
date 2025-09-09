@@ -65,5 +65,6 @@ TEST(Logger, AsyncRingFileSinkDrops)
     }
     constexpr std::size_t expected = static_cast<std::size_t>(threads * perThread);
     EXPECT_EQ(sink->dropped(), expected);
+    sink.reset();
     fs::remove(path);
 }
