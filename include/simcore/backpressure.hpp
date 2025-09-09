@@ -22,7 +22,8 @@ class TokenBucket {
   void refill() {
     std::int64_t prev = last_ns_.load(std::memory_order_relaxed);
     std::int64_t cur = now_ns();
-    double elapsed = (cur - prev) / 1e9;
+    // Cast the nanosecond delta to double before scaling to seconds
+    double elapsed = static_cast<double>(cur - prev) / 1e9;
     if (elapsed <= 0)
       return;
     if (last_ns_.compare_exchange_strong(prev, cur)) {
