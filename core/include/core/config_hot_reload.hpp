@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(_MSC_VER)
+#define _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING
+#endif
+
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
