@@ -73,16 +73,41 @@ public:
     public:
         explicit AsyncRingFileSink(const std::string& path,
                                    std::size_t cap = 1024,
-                                   std::chrono::milliseconds syncEvery = std::chrono::milliseconds(100))
+                                   std::chrono::milliseconds syncEvery = std::chrono::milliseconds(100),
+                                   bool directSync = false,
+                                   std::size_t preallocate = 0)
             : fd_(-1), cap_(cap), syncEvery_(syncEvery) {
 #ifdef _WIN32
             int tmp = -1;
-            if (_sopen_s(&tmp, path.c_str(), _O_CREAT | _O_APPEND | _O_WRONLY, _SH_DENYNO,
+            int oflag = _O_CREAT | _O_APPEND | _O_WRONLY;
+#ifdef _O_DSYNC
+            if (directSync) oflag |= _O_DSYNC;
+#endif
+            if (_sopen_s(&tmp, path.c_str(), oflag, _SH_DENYNO,
                           _S_IREAD | _S_IWRITE) == 0) {
                 fd_ = tmp;
+                if (fd_ >= 0 && preallocate > 0) {
+#ifdef _WIN32
+                    _chsize_s(fd_, static_cast<long long>(preallocate));
+#endif
+                }
             }
 #else
-            fd_ = ::open(path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0644);
+            int flags = O_CREAT | O_APPEND | O_WRONLY;
+            if (directSync) {
+                flags |= O_DSYNC;
+#ifdef O_DIRECT
+                flags |= O_DIRECT;
+#endif
+            }
+            fd_ = ::open(path.c_str(), flags, 0644);
+            if (fd_ >= 0 && preallocate > 0) {
+#if defined(__linux__)
+                ::posix_fallocate(fd_, 0, static_cast<off_t>(preallocate));
+#else
+                ::ftruncate(fd_, static_cast<off_t>(preallocate));
+#endif
+            }
 #endif
             if (fd_ >= 0) {
                 worker_ = std::thread([this]{ run(); });
@@ -108,10 +133,15 @@ public:
         void write(const Record& r) override {
             if (fd_ < 0) return;
             std::lock_guard<std::mutex> lk(m_);
-            if (queue_.size() >= cap_) queue_.pop_front();
+            if (queue_.size() >= cap_) {
+                ++dropped_;
+                return;
+            }
             queue_.push_back(r.msg);
             cv_.notify_one();
         }
+
+        std::size_t dropped() const { return dropped_.load(); }
 
     private:
         void flush() {
@@ -159,6 +189,7 @@ public:
         int fd_;
         std::deque<std::string> queue_;
         std::size_t cap_;
+        std::atomic<std::size_t> dropped_{0};
         std::chrono::milliseconds syncEvery_;
         std::chrono::steady_clock::time_point lastSync_{};
         std::mutex m_;

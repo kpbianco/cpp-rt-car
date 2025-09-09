@@ -32,3 +32,22 @@ TEST(Logger, AsyncRingFileSinkFlushes)
     EXPECT_EQ(count,10);
     fs::remove(path);
 }
+
+TEST(Logger, AsyncRingFileSinkDrops)
+{
+    namespace fs = std::filesystem;
+    auto path = fs::temp_directory_path() / "async_log_drop.log";
+    std::error_code ec;
+    fs::remove(path, ec);
+    auto sink = std::make_shared<Logger::AsyncRingFileSink>(path.string(), 1, std::chrono::milliseconds(10));
+    {
+        Logger log;
+        log.addSink(sink);
+        for(int i=0;i<10;++i){
+            log.info("msg{}", i);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    EXPECT_EQ(sink->dropped(), 9u);
+    fs::remove(path);
+}
