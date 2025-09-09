@@ -82,6 +82,8 @@ public:
             int oflag = _O_CREAT | _O_APPEND | _O_WRONLY;
 #ifdef _O_DSYNC
             if (directSync) oflag |= _O_DSYNC;
+#else
+            (void)directSync;
 #endif
             if (_sopen_s(&tmp, path.c_str(), oflag, _SH_DENYNO,
                           _S_IREAD | _S_IWRITE) == 0) {

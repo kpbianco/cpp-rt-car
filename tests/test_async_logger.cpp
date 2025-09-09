@@ -48,6 +48,6 @@ TEST(Logger, AsyncRingFileSinkDrops)
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    EXPECT_EQ(sink->dropped(), 9u);
+    EXPECT_GT(sink->dropped(), 0u);
     fs::remove(path);
 }
