@@ -191,6 +191,11 @@ public:
     double minHz = 60.0;
     int adaptCooldownFrames = 600;
 
+    // Thermal monitoring
+    bool thermalMonitor = false;
+    double thermalLimpCelsius = 95.0;
+    std::function<double()> readPackageTemp;
+
     // Graceful degradation
     bool visualizers = true;
     bool broadphaseCoarse = false;
@@ -1302,6 +1307,10 @@ public:
     case 3:
       settings_.broadphaseCoarse = true;
       break;
+    case 4:
+      if (subSteps_ > 1)
+        subSteps_ = 1;
+      break;
     default:
       break;
     }
@@ -1311,6 +1320,11 @@ public:
 
 private:
   void updateBudget(double computeMs) {
+    if (settings_.thermalMonitor && settings_.readPackageTemp) {
+      double t = settings_.readPackageTemp();
+      if (t >= settings_.thermalLimpCelsius && degradeRung_ < 4)
+        applyDegradeRung(4);
+    }
     if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
       return;
 
