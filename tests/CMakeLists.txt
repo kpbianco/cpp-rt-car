@@ -50,6 +50,7 @@ set(TEST_SOURCES
     test_huge_page.cpp
     test_thermal_limp.cpp
     test_config_hot_reload.cpp
+    test_plugin_manager.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
@@ -67,6 +68,19 @@ target_include_directories(simcore_tests PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 target_compile_definitions(simcore_tests PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+add_library(test_sample_plugin SHARED sample_plugin.c)
+target_include_directories(test_sample_plugin PRIVATE ${CMAKE_SOURCE_DIR}/rt/include)
+set_target_properties(test_sample_plugin PROPERTIES OUTPUT_NAME sample_plugin)
+
+add_library(test_incompatible_plugin SHARED sample_plugin_bad.c)
+target_include_directories(test_incompatible_plugin PRIVATE ${CMAKE_SOURCE_DIR}/rt/include)
+set_target_properties(test_incompatible_plugin PROPERTIES OUTPUT_NAME bad_plugin)
+
+add_dependencies(simcore_tests test_sample_plugin test_incompatible_plugin)
+target_compile_definitions(simcore_tests PRIVATE \
+    PLUGIN_PATH="$<TARGET_FILE:test_sample_plugin>" \
+    BAD_PLUGIN_PATH="$<TARGET_FILE:test_incompatible_plugin>")
 
 add_test(NAME simcore_all COMMAND simcore_tests)
 
