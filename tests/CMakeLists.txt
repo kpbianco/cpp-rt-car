@@ -32,6 +32,9 @@ set(TEST_SOURCES
     test_highres_clock.cpp
     test_rate_governor.cpp
     test_hazard_ptr.cpp
+    test_lockfree_queue.cpp
+    test_seqlock_config.cpp
+    test_backpressure.cpp
     test_physics_integrators.cpp
     test_hal.cpp
     test_gpu_stub.cpp
