@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <string>
+#include <filesystem>
 
 TEST(ReproBuild, StoresArtifactWithHash) {
     std::string script = std::string(PROJECT_SOURCE_DIR) + "/tools/store_repro_build.py";
@@ -16,5 +17,5 @@ TEST(ReproBuild, StoresArtifactWithHash) {
     EXPECT_NE(contents.find("CMakeLists.txt"), std::string::npos);
     std::remove(std::string(dest + "/build.json").c_str());
     std::remove(std::string(dest + "/CMakeLists.txt").c_str());
-    rmdir(dest.c_str());
+    std::filesystem::remove(dest);
 }

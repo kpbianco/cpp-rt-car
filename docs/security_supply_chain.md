@@ -7,9 +7,9 @@ and its tooling.
 ## Sandboxing
 
 The header `simcore/sandbox.hpp` exposes `enable_sandbox()` which
-restricts the current process. On Linux it switches the process into
-`seccomp` strict mode; on Windows a Job Object is created so that tools
-terminate if the parent process exits.
+restricts the current process. On Linux it installs a minimal `seccomp`
+filter; on Windows a Job Object is created so that tools terminate if
+the parent process exits.
 
 ## Minidump symbol support
 
