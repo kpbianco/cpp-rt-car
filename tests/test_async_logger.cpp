@@ -41,13 +41,14 @@ TEST(Logger, AsyncRingFileSinkDrops)
     auto path = fs::temp_directory_path() / "async_log_drop.log";
     std::error_code ec;
     fs::remove(path, ec);
-    auto sink = std::make_shared<Logger::AsyncRingFileSink>(path.string(), 1,
-                                                           std::chrono::milliseconds(100));
+    // Use a zero-capacity queue so every record is dropped deterministically.
+    auto sink = std::make_shared<Logger::AsyncRingFileSink>(
+        path.string(), 0, std::chrono::milliseconds(100));
+    constexpr int threads = 4;
+    constexpr int perThread = 1000;
     {
         Logger log;
         log.addSink(sink);
-        constexpr int threads = 4;
-        constexpr int perThread = 1000;
         std::barrier start(threads + 1);
         std::vector<std::thread> workers;
         for (int t = 0; t < threads; ++t) {
@@ -62,6 +63,7 @@ TEST(Logger, AsyncRingFileSinkDrops)
         for (auto &th : workers) th.join();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    EXPECT_GT(sink->dropped(), 0u);
+    constexpr std::size_t expected = static_cast<std::size_t>(threads * perThread);
+    EXPECT_EQ(sink->dropped(), expected);
     fs::remove(path);
 }
