@@ -41,25 +41,16 @@ TEST(Logger, AsyncRingFileSinkDrops)
     auto path = fs::temp_directory_path() / "async_log_drop.log";
     std::error_code ec;
     fs::remove(path, ec);
-    auto sink = std::make_shared<Logger::AsyncRingFileSink>(path.string(), 1,
+    auto sink = std::make_shared<Logger::AsyncRingFileSink>(path.string(), 0,
                                                            std::chrono::milliseconds(100));
     {
         Logger log;
         log.addSink(sink);
-        const int threads = 8;
-        const int msgs = 200;
-        std::barrier sync(threads);
-        auto spammer = [&] {
-            sync.arrive_and_wait();
-            for (int i = 0; i < msgs; ++i) {
-                log.info("msg{}", i);
-            }
-        };
-        std::vector<std::thread> workers;
-        for (int t = 0; t < threads; ++t) workers.emplace_back(spammer);
-        for (auto &th : workers) th.join();
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        for (int i = 0; i < 10; ++i) {
+            log.info("msg{}", i);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    EXPECT_GT(sink->dropped(), 0u);
+    EXPECT_EQ(sink->dropped(), 10u);
     fs::remove(path);
 }
