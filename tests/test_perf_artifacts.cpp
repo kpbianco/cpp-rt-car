@@ -15,7 +15,7 @@ TEST(ReproBuild, StoresArtifactWithHash) {
     ASSERT_TRUE(in.good());
     std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     EXPECT_NE(contents.find("CMakeLists.txt"), std::string::npos);
-    std::remove(std::string(dest + "/build.json").c_str());
-    std::remove(std::string(dest + "/CMakeLists.txt").c_str());
-    std::filesystem::remove(dest);
+    std::filesystem::remove(dest + "/build.json");
+    std::filesystem::remove(dest + "/CMakeLists.txt");
+    std::filesystem::remove_all(dest);
 }

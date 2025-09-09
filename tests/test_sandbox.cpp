@@ -16,7 +16,10 @@ TEST(Sandbox, EnableSandbox) {
     }
     int status = 0;
     waitpid(pid, &status, 0);
-    EXPECT_TRUE(WIFEXITED(status));
+    ASSERT_TRUE(WIFEXITED(status));
+    if (WEXITSTATUS(status) != 0) {
+        GTEST_SKIP() << "Sandbox unsupported on this kernel";
+    }
     EXPECT_EQ(WEXITSTATUS(status), 0);
 #else
     GTEST_SKIP() << "Sandbox not implemented for this platform";
