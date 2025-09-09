@@ -79,7 +79,7 @@ public:
             Fence fence;
             std::atomic<hal::Duration::rep> gpu_ns{0};
             if (p.gpu) {
-                fence = submit([&, i]() {
+                fence = submit([&]() {
                     auto start = hal::now();
                     p.gpu();
                     auto end = hal::now();
@@ -94,7 +94,7 @@ public:
                 cpu_timeline_.signal();
             }
             if (p.gpu) {
-                fence_wait(fence, std::chrono::milliseconds::max());
+                ::simcore::hal::gpu::fence_wait(fence, std::chrono::milliseconds::max());
                 budget.gpu += hal::Duration{gpu_ns.load(std::memory_order_acquire)};
             }
             free_dead_resources(i);
