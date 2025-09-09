@@ -7,6 +7,7 @@ TEST(ThermalMonitor, LimpRungReducesSubsteps) {
     s.maxFrames = 2;
     s.threads = 1;
     s.budgetMonitor = false;
+    s.bintraceEnable = true;
     s.thermalMonitor = true;
     s.thermalLimpCelsius = 80.0;
     s.readPackageTemp = [](){ return 100.0; };

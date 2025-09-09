@@ -41,6 +41,7 @@ inline void free_huge(void* ptr, std::size_t bytes) {
     free(ptr);
 #elif defined(_WIN32)
     _aligned_free(ptr);
+    (void)bytes;
 #else
     free(ptr);
 #endif
