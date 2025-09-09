@@ -45,3 +45,5 @@ deep C-states.  This behaviour can be toggled at runtime by re-running the
 scripts: invoking them applies the low-latency configuration, while restoring a
 balanced power profile can be done with native tools such as `cpupower` on Linux
 or `powercfg` on Windows.
+
+See also [Memory/TLB/Thermal Discipline](memory_tlb_thermal.md) for in-application strategies.

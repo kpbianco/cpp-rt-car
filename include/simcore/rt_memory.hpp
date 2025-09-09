@@ -16,10 +16,10 @@
 #include <unistd.h>   // sysconf
 #endif
 
-// Optional toggles (define before including if you want them ON):
-// #define RT_ARENA_PRETOUCH          1
-// #define RT_ARENA_MLOCK             1
-// #define RT_ARENA_MADVISE_HUGEPAGE  1
+#include "hal.hpp"
+
+// Optional toggle (define before including if you want it ON):
+// #define RT_ARENA_PRETOUCH 1
 
 namespace rt {
 
@@ -51,11 +51,14 @@ static inline std::size_t os_page_size() noexcept {
 class FrameArena {
 public:
   explicit FrameArena(std::size_t capacityBytes = (1u << 20),
-                      std::size_t alignment = 64, int numaNode = -1)
+                      std::size_t alignment = 64, int numaNode = -1,
+                      simcore::hal::MemFlags flags =
+                          simcore::hal::MemFlags::none)
       : alignment_(normalize_align(alignment))
 #if defined(__linux__) && defined(SIM_USE_NUMA)
         , numaNode_(numaNode)
 #endif
+        , flags_(flags)
   {
 #if !(defined(__linux__) && defined(SIM_USE_NUMA))
     (void)numaNode;
@@ -76,6 +79,7 @@ public:
 #if defined(__linux__)
         , pageSize_(o.pageSize_)
 #endif
+        , flags_(o.flags_)
   {
     o.buffer_ = nullptr;
     o.capacity_ = 0;
@@ -83,6 +87,7 @@ public:
 #if defined(__linux__) && defined(SIM_USE_NUMA)
     o.numaNode_ = -1;
 #endif
+    o.flags_ = simcore::hal::MemFlags::none;
   }
 
   FrameArena &operator=(FrameArena &&o) noexcept {
@@ -102,6 +107,8 @@ public:
 #if defined(__linux__)
       pageSize_ = o.pageSize_;
 #endif
+      flags_ = o.flags_;
+      o.flags_ = simcore::hal::MemFlags::none;
     }
     return *this;
   }
@@ -171,16 +178,10 @@ private:
       }
 #if defined(__linux__)
       pageSize_ = os_page_size();
-#endif
-#if RT_ARENA_MADVISE_HUGEPAGE
-#if defined(__linux__)
-      (void)::madvise(buffer_, capacity_, MADV_HUGEPAGE);
-#endif
-#endif
-#if RT_ARENA_MLOCK
-#if defined(__linux__)
-      (void)::mlock(buffer_, capacity_);
-#endif
+      if (simcore::hal::has_flag(flags_, simcore::hal::MemFlags::hugepage))
+        (void)::madvise(buffer_, capacity_, MADV_HUGEPAGE);
+      if (simcore::hal::has_flag(flags_, simcore::hal::MemFlags::pinned))
+        (void)::mlock(buffer_, capacity_);
 #endif
 #if RT_ARENA_PRETOUCH
       pre_touch_();
@@ -191,10 +192,9 @@ private:
 
   void release_() noexcept {
     if (buffer_) {
-#if RT_ARENA_MLOCK
 #if defined(__linux__)
-      (void)::munlock(buffer_, capacity_);
-#endif
+      if (simcore::hal::has_flag(flags_, simcore::hal::MemFlags::pinned))
+        (void)::munlock(buffer_, capacity_);
 #endif
 #if defined(__linux__) && defined(SIM_USE_NUMA)
       if (numaNode_ >= 0 && numa_available() != -1) {
@@ -227,6 +227,7 @@ private:
   std::size_t capacity_ = 0;
   std::size_t head_ = 0;
   std::size_t alignment_ = 64;
+  simcore::hal::MemFlags flags_ = simcore::hal::MemFlags::none;
 #if defined(__linux__) && defined(SIM_USE_NUMA)
   int numaNode_ = -1;
 #endif
@@ -241,12 +242,13 @@ public:
   FrameArenaPool(std::size_t threads,
                  std::size_t perThreadCapacityBytes = (1u << 20),
                  std::size_t baseAlignment = 64,
-                 const std::vector<int> &nodes = {})
+                 const std::vector<int> &nodes = {},
+                 simcore::hal::MemFlags flags = simcore::hal::MemFlags::none)
       : arenas_(), nodes_(nodes), nextIndex_(0) {
     arenas_.reserve(threads);
     for (std::size_t i = 0; i < threads; ++i) {
       int node = (i < nodes_.size()) ? nodes_[i] : -1;
-      arenas_.emplace_back(perThreadCapacityBytes, baseAlignment, node);
+      arenas_.emplace_back(perThreadCapacityBytes, baseAlignment, node, flags);
     }
 
     static_assert(std::is_move_constructible<FrameArena>::value,

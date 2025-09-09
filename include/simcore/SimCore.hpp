@@ -191,6 +191,10 @@ public:
     double minHz = 60.0;
     int adaptCooldownFrames = 600;
 
+    // Thermal monitoring
+    bool thermalMonitor = false;
+    double thermalLimitC = 90.0;
+
     // Graceful degradation
     bool visualizers = true;
     bool broadphaseCoarse = false;
@@ -1302,6 +1306,9 @@ public:
     case 3:
       settings_.broadphaseCoarse = true;
       break;
+    case 4:
+      subSteps_ = 1;
+      break;
     default:
       break;
     }
@@ -1310,6 +1317,19 @@ public:
   }
 
 private:
+#if defined(__linux__)
+  static double readPackageTempC() {
+    const char *paths[] = {"/sys/class/thermal/thermal_zone0/temp",
+                           "/sys/class/hwmon/hwmon0/temp1_input"};
+    for (const char *p : paths) {
+      std::ifstream in(p);
+      double milli;
+      if (in && (in >> milli))
+        return milli / 1000.0;
+    }
+    return 0.0;
+  }
+#endif
   void updateBudget(double computeMs) {
     if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
       return;
@@ -1366,6 +1386,14 @@ private:
       applyDegradeRung(2);
     if (degradeRung_ < 3 && ratioRef >= t3)
       applyDegradeRung(3);
+
+#if defined(__linux__)
+    if (settings_.thermalMonitor) {
+      lastTempC_ = readPackageTempC();
+      if (degradeRung_ < 4 && lastTempC_ >= settings_.thermalLimitC)
+        applyDegradeRung(4);
+    }
+#endif
 
     if (settings_.autoAdaptHz) {
       if (adaptCooldown_ > 0)
@@ -1426,6 +1454,7 @@ private:
 
   std::uint64_t deterministicHash_ = 0;
   double lastDriftMs_ = 0.0;
+  double lastTempC_ = 0.0;
   int bursts_ = 0;
   int extraSteps_ = 0;
   double recoveredMs_ = 0.0;
