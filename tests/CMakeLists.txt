@@ -43,6 +43,8 @@ set(TEST_SOURCES
     test_snapshot.cpp
     test_trace_export.cpp
     test_units.cpp
+    test_huge_page.cpp
+    test_thermal_limp.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
