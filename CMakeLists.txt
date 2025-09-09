@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(car_sim_core LANGUAGES CXX)
+project(car_sim_core LANGUAGES C CXX)
 
 # Options (toggle logging / profiler / tests)
 option(ENABLE_LOG "Enable logging" ON)
@@ -154,7 +154,7 @@ add_library(simcore_core INTERFACE)
 target_include_directories(simcore_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
 
 # Runtime module providing C API surface
-set(RT_SOURCES rt/src/runtime.cpp)
+set(RT_SOURCES rt/src/runtime.cpp rt/src/plugin_manager.cpp)
 
 if (UNIX)
     list(APPEND RT_SOURCES rt/src/crashdump_posix.cpp)
@@ -168,6 +168,9 @@ target_include_directories(simcore_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/include
 )
 target_link_libraries(simcore_rt PUBLIC simcore_core)
+if (UNIX)
+    target_link_libraries(simcore_rt PUBLIC dl)
+endif()
 
 # Main executable
 add_executable(simcore_app src/main.cpp)

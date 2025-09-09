@@ -49,11 +49,42 @@ set(TEST_SOURCES
     test_units.cpp
     test_huge_page.cpp
     test_thermal_limp.cpp
+    test_config_hot_reload.cpp
     test_sandbox.cpp
     test_sbom.cpp
     test_minidump_symbols.cpp
     test_perf_artifacts.cpp
-    test_config_hot_reload.cpp
+    test_plugin_manager.cpp
+)
+
+if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
+    list(APPEND TEST_SOURCES test_jobqueue_property.cpp)
+endif()
+
+add_executable(simcore_tests ${TEST_SOURCES})
+target_link_libraries(simcore_tests PRIVATE simcore simcore_rt gtest gtest_main gmock)
+if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
+    target_link_libraries(simcore_tests PRIVATE rapidcheck rapidcheck_gtest)
+endif()
+target_include_directories(simcore_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_SOURCE_DIR}
+)
+target_compile_definitions(simcore_tests PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+add_library(test_sample_plugin SHARED sample_plugin.c)
+target_include_directories(test_sample_plugin PRIVATE ${CMAKE_SOURCE_DIR}/rt/include)
+set_target_properties(test_sample_plugin PROPERTIES OUTPUT_NAME sample_plugin)
+
+add_library(test_incompatible_plugin SHARED sample_plugin_bad.c)
+target_include_directories(test_incompatible_plugin PRIVATE ${CMAKE_SOURCE_DIR}/rt/include)
+set_target_properties(test_incompatible_plugin PROPERTIES OUTPUT_NAME bad_plugin)
+
+add_dependencies(simcore_tests test_sample_plugin test_incompatible_plugin)
+target_compile_definitions(simcore_tests PRIVATE
+    PLUGIN_PATH="$<TARGET_FILE:test_sample_plugin>"
+    BAD_PLUGIN_PATH="$<TARGET_FILE:test_incompatible_plugin>"
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
