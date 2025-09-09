@@ -78,9 +78,10 @@ target_include_directories(test_incompatible_plugin PRIVATE ${CMAKE_SOURCE_DIR}/
 set_target_properties(test_incompatible_plugin PROPERTIES OUTPUT_NAME bad_plugin)
 
 add_dependencies(simcore_tests test_sample_plugin test_incompatible_plugin)
-target_compile_definitions(simcore_tests PRIVATE \
-    PLUGIN_PATH="$<TARGET_FILE:test_sample_plugin>" \
-    BAD_PLUGIN_PATH="$<TARGET_FILE:test_incompatible_plugin>")
+target_compile_definitions(simcore_tests PRIVATE
+    PLUGIN_PATH="$<TARGET_FILE:test_sample_plugin>"
+    BAD_PLUGIN_PATH="$<TARGET_FILE:test_incompatible_plugin>"
+)
 
 add_test(NAME simcore_all COMMAND simcore_tests)
 
