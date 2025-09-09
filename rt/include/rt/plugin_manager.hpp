@@ -8,7 +8,7 @@ namespace rt {
 
 struct PluginHandle {
     void* handle{nullptr};
-    rt_plugin_desc desc{};
+    rt_plugin_desc_t desc{};
     rt_plugin_shutdown_fn shutdown{nullptr};
 };
 
