@@ -1,20 +1,43 @@
 #pragma once
 
-#if defined(_MSC_VER)
-#define _SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING
-#endif
-
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <utility>
 #include <string>
 #include <system_error>
 
 #include "core/config.hpp"
 
 namespace core {
+
+namespace detail {
+inline std::shared_ptr<Config> atomic_load_cfg(const std::shared_ptr<Config> *ptr) {
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+  auto value = std::atomic_load(ptr);
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+  return value;
+}
+
+inline void atomic_store_cfg(std::shared_ptr<Config> *ptr,
+                             std::shared_ptr<Config> value) {
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+  std::atomic_store(ptr, std::move(value));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+}
+} // namespace detail
 
 // Simple hot-reloading wrapper around the Config structure.
 //
@@ -31,10 +54,10 @@ public:
   // Load initial configuration from disk. Returns true on success.
   bool load() {
     Config cfg;
-    if (!read_from_disk(cfg, std::atomic_load(&config_)->major)) {
+    if (!read_from_disk(cfg, detail::atomic_load_cfg(&config_)->major)) {
       return false;
     }
-    std::atomic_store(&config_, std::make_shared<Config>(cfg));
+    detail::atomic_store_cfg(&config_, std::make_shared<Config>(cfg));
     last_write_ = std::filesystem::last_write_time(path_);
     return true;
   }
@@ -50,17 +73,17 @@ public:
       return false; // either can't stat or nothing changed
     }
     Config cfg;
-    if (!read_from_disk(cfg, std::atomic_load(&config_)->major)) {
+    if (!read_from_disk(cfg, detail::atomic_load_cfg(&config_)->major)) {
       return false;
     }
     last_write_ = current;
-    std::atomic_store(&config_, std::make_shared<Config>(cfg));
+    detail::atomic_store_cfg(&config_, std::make_shared<Config>(cfg));
     return true;
   }
 
   // Obtain the current configuration snapshot.
   std::shared_ptr<const Config> get() const noexcept {
-    return std::atomic_load(&config_);
+    return detail::atomic_load_cfg(&config_);
   }
 
 private:

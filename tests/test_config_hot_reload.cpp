@@ -26,6 +26,9 @@ TEST(ConfigHotReload, ReloadsUpdatedFile) {
     out << "1 1";
   }
 
+  // Allow filesystem timestamp to advance after write
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+
   ASSERT_TRUE(loader.hot_reload());
   EXPECT_EQ(loader.get()->minor, 1u);
 
