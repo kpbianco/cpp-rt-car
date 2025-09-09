@@ -43,7 +43,7 @@ TEST(Logger, AsyncRingFileSinkDrops)
     {
         Logger log;
         log.addSink(sink);
-        for(int i=0;i<10;++i){
+        for(int i=0;i<1000;++i){
             log.info("msg{}", i);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
