@@ -96,6 +96,7 @@ target_include_directories(simcore INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
     ${CMAKE_CURRENT_SOURCE_DIR}/hal
+    ${CMAKE_CURRENT_SOURCE_DIR}/gpu
 )
 
 # Enable warnings for project sources only
