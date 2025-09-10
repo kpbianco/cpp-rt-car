@@ -53,7 +53,8 @@ TEST(RobustFP, KahanFloatReduction) {
     double kahan = robust::kahan_sum_fp32(v.begin(), v.end());
     EXPECT_GT(kahan, static_cast<double>(naive));
     EXPECT_NEAR(kahan, mixed, 1e-12);
-    double expected = 1.0 + static_cast<double>(v.size()) * static_cast<double>(1e-8f);
+    double expected = 1.0 +
+        static_cast<double>(v.size() - 1) * static_cast<double>(1e-8f);
     EXPECT_NEAR(kahan, expected, 5e-11);
 }
 
