@@ -84,7 +84,7 @@ public:
     // If all worker threads are busy and this is a high-priority job,
     // spawn a detached helper thread so the work isn't blocked behind
     // lower priority tasks.
-    if (pr == Priority::High &&
+    if (pr == Priority::High && threads_.size() > 1 &&
         active_.load(std::memory_order_acquire) >= threads_.size()) {
       std::thread([this, job = std::move(job)]() mutable {
         active_.fetch_add(1, std::memory_order_acq_rel);
@@ -118,7 +118,7 @@ public:
               threads_.size();
           Job job{std::move(fn), pr, cat};
           // Same high-priority helper thread logic as enqueueOn
-          if (pr == Priority::High &&
+          if (pr == Priority::High && threads_.size() > 1 &&
               active_.load(std::memory_order_acquire) >= threads_.size()) {
             std::thread([this, job = std::move(job)]() mutable {
               active_.fetch_add(1, std::memory_order_acq_rel);
@@ -144,7 +144,7 @@ public:
       std::size_t idx =
           nextWorker_.fetch_add(1, std::memory_order_relaxed) % threads_.size();
       Job job{std::move(fn), pr, cat};
-      if (pr == Priority::High &&
+      if (pr == Priority::High && threads_.size() > 1 &&
           active_.load(std::memory_order_acquire) >= threads_.size()) {
         std::thread([this, job = std::move(job)]() mutable {
           active_.fetch_add(1, std::memory_order_acq_rel);
