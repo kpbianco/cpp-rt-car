@@ -622,48 +622,16 @@ private:
     frameArenas_ = std::make_unique<FrameArenaPool>(
         workerCount_ + 1, settings_.arenaPerThreadBytes, 64, threadNodes);
 
-    threads_.reserve(workerCount_);
-    for (std::size_t i = 0; i < workerCount_; ++i) {
-      threads_.emplace_back([this, i
-#ifdef __linux__
-                             ,
-                             cpuList
-#endif
-      ] {
-#ifdef __linux__
-        if (settings_.pinThreads && !cpuList.empty())
-          set_affinity(std::size_t(cpuList[i % cpuList.size()]));
-#endif
-        rt::init_fp_env();
-        frameArenas_->bindCurrentThread(i);
-        bintrace_.bindThread(i);
-        workerLoop();
-      });
-    }
+    // Worker threads are provided by WorkerPool.  We only bind the main
+    // thread here; worker threads will bind themselves when executing
+    // jobs.
     frameArenas_->bindCurrentThread(workerCount_); // main
     bintrace_.bindThread(workerCount_);
     rt::init_fp_env();
-    fiberPool_ = std::make_unique<rt::FiberPool>(workerCount_);
   }
 
   void stopThreads() {
-    if (threads_.empty()) {
-      if (fiberPool_) {
-        fiberPool_->stop();
-        fiberPool_.reset();
-      }
-      bintrace_.shutdown();
-      return;
-    }
-    shutdown_.store(true, std::memory_order_release);
-    dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
-    for (auto &t : threads_)
-      t.join();
     threads_.clear();
-    if (fiberPool_) {
-      fiberPool_->stop();
-      fiberPool_.reset();
-    }
     bintrace_.shutdown();
   }
 
@@ -1205,30 +1173,19 @@ private:
       };
       RangeFnRef leafRef{leafThunk, leafCtx};
 
-      if (workerCount_ > 1) {
-        active_.fn = &leafRef;
-        active_.totalChunks = totalChunks;
-        active_.elementCount = count;
-        active_.chunkSize = chunk;
-        active_.frame = frame_;
-        active_.dt = dt_;
-
-        nextChunk_.store(0, std::memory_order_relaxed);
-        remaining_.store(totalChunks, std::memory_order_release);
-        dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
-
-        while (remaining_.load(std::memory_order_acquire) > 0) {
-          std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
-          if (idx >= totalChunks) {
-            std::this_thread::yield();
-            continue;
-          }
+      if (workerCount_ > 1 && pool_) {
+        std::atomic<std::size_t> remaining(totalChunks);
+        for (std::size_t idx = 0; idx < totalChunks; ++idx) {
           const std::size_t b = idx * chunk;
           const std::size_t e = std::min(b + chunk, count);
-          leafThunk(leafCtx, b, e, frame_, dt_);
-          if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1)
-            break;
+          pool_->submit([leafThunk, leafCtx, b, e, frame = frame_, dt = dt_,
+                         &remaining] {
+            leafThunk(leafCtx, b, e, frame, dt);
+            remaining.fetch_sub(1, std::memory_order_acq_rel);
+          });
         }
+        while (remaining.load(std::memory_order_acquire) > 0)
+          std::this_thread::yield();
       } else {
         for (std::size_t idx = 0; idx < totalChunks; ++idx) {
           const std::size_t b = idx * chunk;
@@ -1266,7 +1223,7 @@ private:
       } else {
         std::atomic<std::size_t> remaining(level.size());
         for (auto idx : level) {
-          pool_->enqueue([this, idx, &remaining] {
+          pool_->submit([this, idx, &remaining] {
             executePhase(idx);
             remaining.fetch_sub(1, std::memory_order_acq_rel);
           });

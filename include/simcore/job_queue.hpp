@@ -7,6 +7,16 @@
 #include <utility>
 #include <vector>
 
+// Developers may include this header in phase code and use the macro below to
+// statically forbid the creation of OS threads.  In release builds this macro
+// will trigger a compile-time error if invoked.
+#if defined(NDEBUG)
+#define SIMCORE_FORBID_THREAD_SPAWN()                                             \
+  static_assert(false, "Phases must not start OS threads")
+#else
+#define SIMCORE_FORBID_THREAD_SPAWN() ((void)0)
+#endif
+
 #if defined(_MSC_VER)
 #pragma warning(push)
 // Disable "structure was padded due to alignment specifier" which fires on
