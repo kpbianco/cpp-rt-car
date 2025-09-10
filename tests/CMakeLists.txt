@@ -37,6 +37,8 @@ set(TEST_SOURCES
     test_seqlock_config.cpp
     test_backpressure.cpp
     test_physics_integrators.cpp
+    test_constraint_solver.cpp
+    test_narrowphase.cpp
     test_hal.cpp
     test_gpu_stub.cpp
     test_frame_graph.cpp

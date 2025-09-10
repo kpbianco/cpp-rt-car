@@ -50,6 +50,16 @@ void rk4(State &s, double dt, AccelFn &&accel) {
     s.vel += (a1 + 2.0 * a2 + 2.0 * a3 + a4) * (dt / 6.0);
 }
 
+// Hamiltonian integrator using a velocity Verlet/leapfrog scheme.
+// This conserves energy better for separable Hamiltonian systems.
+// State is expected to expose 'pos' and 'vel' members.
+template <class State, class AccelFn>
+void stormerVerlet(State &s, double dt, AccelFn &&accel) {
+    auto vHalf = s.vel + accel(s) * (dt * 0.5);
+    s.pos += vHalf * dt;
+    s.vel = vHalf + accel(s) * (dt * 0.5);
+}
+
 struct CFLAdvisor {
     double maxVelocity{1.0};
     double maxAcceleration{1.0};
