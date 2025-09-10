@@ -19,6 +19,7 @@ set(TEST_SOURCES
     test_budget_monitor.cpp
     test_fault_injection.cpp
     test_simd.cpp
+    test_aosoa_autotune.cpp
     test_rt_pool.cpp
     test_rt_arena.cpp
     test_rt_overflow_death.cpp

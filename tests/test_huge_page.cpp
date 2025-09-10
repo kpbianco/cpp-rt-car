@@ -11,8 +11,11 @@ TEST(MemoryDiscipline, HugePagesAndPrefetch) {
     auto color = sim::page_color(ptr);
     EXPECT_LT(color, 64u);
     int* iptr = static_cast<int*>(ptr);
-    sim::prefetch(iptr, 8, sim::PrefetchMode::Enabled);
-    sim::prefetch(iptr, 8, sim::PrefetchMode::Disabled);
+    // Prefetch should be a no-op for small working sets and only fire when the
+    // range is large enough to benefit. We exercise both paths here.
+    sim::prefetch(iptr, 8, 4096, sim::PrefetchMode::Enabled);
+    sim::prefetch(iptr, 8, 4096, sim::PrefetchMode::Disabled);
+    sim::prefetch(iptr, 8, 4, sim::PrefetchMode::Enabled); // small-N path
     sim::free_huge(ptr, bytes);
 }
 
