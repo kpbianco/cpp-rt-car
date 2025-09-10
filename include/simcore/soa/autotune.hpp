@@ -4,17 +4,20 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
-#include <chrono>
 
 #include <simcore/soa/aosoa.hpp>
 
-#if defined(__x86_64__) || defined(_M_X64)
-#    include <x86intrin.h>
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_IX86)
+#    if defined(_MSC_VER)
+#        include <intrin.h>
+#    else
+#        include <x86intrin.h>
+#    endif
 #endif
 
 namespace soa {
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 inline std::uint64_t read_cycles() { return __rdtsc(); }
 #else
 inline std::uint64_t read_cycles() { return 0; }
