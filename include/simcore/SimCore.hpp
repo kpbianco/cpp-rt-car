@@ -197,6 +197,7 @@ public:
     std::function<double()> readPackageTemp;
 
     // Graceful degradation
+    bool limpMode = false; // global switch to minimize workload
     bool visualizers = true;
     bool broadphaseCoarse = false;
 
@@ -297,6 +298,12 @@ public:
       settings_.predictiveWindow = settings_.budgetWindow;
 
     recalcTiming();
+
+    if (settings_.limpMode) {
+      settings_.budgetMonitor = false;
+      settings_.bintraceEnable = false;
+      applyDegradeRung(4);
+    }
 
     costWindow_.assign(
         static_cast<std::size_t>(std::max(0, settings_.budgetWindow)), 0.0);
