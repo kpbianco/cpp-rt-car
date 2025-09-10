@@ -1,0 +1,60 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Dev",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_TESTS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release with ThinLTO",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SIM_ENABLE_LTO": "ON",
+        "SIM_LTO_THIN": "ON"
+      }
+    },
+    {
+      "name": "pgo-generate",
+      "displayName": "PGO Generate",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/pgo-gen",
+      "cacheVariables": {
+        "SIM_PGO": "gen",
+        "SIM_PGO_PROFILE": "${sourceDir}/profiles/gen"
+      }
+    },
+    {
+      "name": "pgo-use",
+      "displayName": "PGO Use",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/pgo-use",
+      "cacheVariables": {
+        "SIM_PGO": "use",
+        "SIM_PGO_PROFILE": "${sourceDir}/profiles/gen"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "pgo-generate", "configurePreset": "pgo-generate" },
+    { "name": "pgo-use", "configurePreset": "pgo-use" }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev" }
+  ]
+}

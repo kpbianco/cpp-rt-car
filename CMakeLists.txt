@@ -7,6 +7,8 @@ option(ENABLE_LOG "Enable logging" ON)
 option(ENABLE_PROF "Enable profiler" ON)
 option(ENABLE_TESTS "Build tests" ON)
 option(ENABLE_RAPIDCHECK "Enable RapidCheck property tests" OFF)
+option(SIM_ENABLE_IWYU "Run include-what-you-use during builds" OFF)
+option(SIM_WARN_ODR "Enable -Wodr to detect ODR violations" OFF)
 
 # Sanitizer toggles (semicolons to enable multiple: address;thread;leak;memory;hwaddress;safe-stack;cfi)
 set(SIM_SANITIZERS "" CACHE STRING "Sanitizers to enable for all targets")
@@ -32,6 +34,21 @@ if (SIM_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-flto)
     add_link_options(-flto)
   endif()
+endif()
+
+# IWYU
+if (SIM_ENABLE_IWYU)
+  find_program(IWYU_PATH NAMES include-what-you-use iwyu)
+  if (IWYU_PATH)
+    set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${IWYU_PATH})
+  else()
+    message(WARNING "include-what-you-use requested but not found")
+  endif()
+endif()
+
+# ODR warnings
+if (SIM_WARN_ODR AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  add_compile_options(-Wodr)
 endif()
 
 # LTO
@@ -188,6 +205,15 @@ add_subdirectory(samples)
 if (ENABLE_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# Optional Bloaty size analysis
+find_program(BLOATY_EXE NAMES bloaty)
+if (BLOATY_EXE)
+  add_custom_target(bloaty
+    COMMAND ${BLOATY_EXE} $<TARGET_FILE:simcore_app> -d compileunits,symbols -n 0.1
+    DEPENDS simcore_app
+    COMMENT "Run Bloaty on simcore_app")
 endif()
 
 add_custom_target(tests
