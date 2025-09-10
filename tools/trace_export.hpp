@@ -29,5 +29,20 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
     os << "]}";
 }
 
+inline void write_etw_trace(const bintrace::Trace::Snapshot& snap, std::ostream& os) {
+    os << "tsc,thread,code,a,b\n";
+    for (const auto& e : snap.events) {
+        os << e.tsc << ',' << e.thread << ',' << e.code << ','
+           << e.a << ',' << e.b << '\n';
+    }
+}
+
+inline void write_ebpf_trace(const bintrace::Trace::Snapshot& snap, std::ostream& os) {
+    for (const auto& e : snap.events) {
+        os << e.tsc << ' ' << e.thread << ' ' << e.code << ' '
+           << e.a << ' ' << e.b << '\n';
+    }
+}
+
 } // namespace trace_export
 

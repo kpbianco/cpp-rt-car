@@ -28,3 +28,41 @@ TEST(TraceExport, GoldenJson)
     std::size_t bin_size = snap.events.size() * sizeof(bintrace::Event);
     EXPECT_LT(out.size(), bin_size * 10);
 }
+
+TEST(TraceExport, GoldenEtw)
+{
+    bintrace::Trace::Snapshot snap;
+    snap.events = {
+        bintrace::Event{100, bintrace::EV_PhaseBegin, 0, 0, 0, 0},
+        bintrace::Event{150, bintrace::EV_PhaseEnd, 0, 0, 0, 0},
+        bintrace::Event{200, bintrace::EV_ChunkStart, 0, 0, 1, 0},
+        bintrace::Event{300, bintrace::EV_ChunkDone, 0, 0, 1, 0}
+    };
+
+    std::ostringstream os;
+    trace_export::write_etw_trace(snap, os);
+    std::string out = os.str();
+
+    std::ifstream f(std::string(PROJECT_SOURCE_DIR) + "/tests/golden/trace_sample_etw.csv");
+    std::string golden((std::istreambuf_iterator<char>(f)), {});
+    EXPECT_EQ(out, golden);
+}
+
+TEST(TraceExport, GoldenEbpf)
+{
+    bintrace::Trace::Snapshot snap;
+    snap.events = {
+        bintrace::Event{100, bintrace::EV_PhaseBegin, 0, 0, 0, 0},
+        bintrace::Event{150, bintrace::EV_PhaseEnd, 0, 0, 0, 0},
+        bintrace::Event{200, bintrace::EV_ChunkStart, 0, 0, 1, 0},
+        bintrace::Event{300, bintrace::EV_ChunkDone, 0, 0, 1, 0}
+    };
+
+    std::ostringstream os;
+    trace_export::write_ebpf_trace(snap, os);
+    std::string out = os.str();
+
+    std::ifstream f(std::string(PROJECT_SOURCE_DIR) + "/tests/golden/trace_sample_ebpf.txt");
+    std::string golden((std::istreambuf_iterator<char>(f)), {});
+    EXPECT_EQ(out, golden);
+}
