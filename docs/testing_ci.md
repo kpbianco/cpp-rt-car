@@ -5,16 +5,12 @@ strategies are used to harden the runtime and catch regressions early.
 
 ## Differential Tests
 
-`tools/differential_test.py` compares kernel outputs against a known
-baseline and fails when the maximum absolute drift exceeds a threshold.
-This is useful when refactoring complex kernels where small numerical
-changes may hide large behavioural regressions.
-
-Example usage:
-
-```bash
-python tools/differential_test.py old.txt new.txt --threshold 0.01
-```
+`tests/test_differential_output.cpp` loads kernel results and compares
+them against a baseline stored under `tests/golden/`.  The test computes
+the maximum absolute drift and fails when it exceeds a threshold.  This
+keeps refactors honest when small numerical deltas could mask behavioural
+regressions.  The check runs automatically under the GoogleTest suite in
+CI.
 
 ## Chaos Tests
 
