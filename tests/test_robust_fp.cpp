@@ -2,6 +2,7 @@
 #include <simcore/robust_fp.hpp>
 #include <vector>
 #include <limits>
+#include <cstdint>
 
 TEST(RobustFP, SafeRsqrtFinite) {
     double r = robust::safe_rsqrt(0.0);
@@ -27,4 +28,37 @@ TEST(RobustFP, KahanImprovesSumULP) {
     const double expected = 1.0 + 1e-14;
     EXPECT_GT(kahan, naive);              // should accumulate more
     EXPECT_NEAR(kahan, expected, 1e-15);   // close to exact result
+}
+
+TEST(RobustFP, FloatReductionMixedPrecision) {
+    // Many small FP32 values lose precision when accumulated in float.
+    std::vector<float> v(1000000, 1e-7f);
+    float naive = 0.0f;
+    for (float x : v) naive += x;
+
+    double mixed = robust::sum_fp32_to_fp64(v.begin(), v.end());
+    EXPECT_GT(mixed, static_cast<double>(naive));
+    EXPECT_NEAR(mixed, 1000000.0 * 1e-7, 1e-9);
+}
+
+TEST(RobustFP, KahanFloatReduction) {
+    std::vector<float> v;
+    v.push_back(1.0f);
+    v.insert(v.end(), 1000000, 1e-8f);
+
+    double mixed = robust::sum_fp32_to_fp64(v.begin(), v.end());
+    double kahan = robust::kahan_sum_fp32(v.begin(), v.end());
+    EXPECT_GT(kahan, mixed);
+    EXPECT_NEAR(kahan, 1.0 + 1000000.0 * 1e-8, 1e-12);
+}
+
+TEST(RobustFP, ShadowArithmeticDetectsInstability) {
+    // Catastrophic cancellation in single precision.
+    float a = 1e8f;
+    float b = -1e8f;
+    float c = 1.0f;
+    float result = (a + b) + c; // loses the c contribution
+    double shadow = (static_cast<double>(a) + static_cast<double>(b)) + static_cast<double>(c);
+    std::uint64_t ulp = robust::ulp_distance(static_cast<double>(result), shadow);
+    EXPECT_GT(ulp, 0u); // shadow arithmetic detects the loss
 }
