@@ -8,6 +8,7 @@
 #include <cassert>
 #include <new>
 #include <fstream>
+#include "highres_clock.hpp"
 
 namespace bintrace {
 
@@ -29,28 +30,9 @@ enum : std::uint32_t {
     EV_BudgetLadder = 0x05,
 };
 
-#if defined(__x86_64__) || defined(_M_X64)
-#  if defined(_MSC_VER)
-#    include <intrin.h>
 static inline std::uint64_t rdtsc() noexcept {
-    return __rdtsc();
+    return HighResClock::now();
 }
-#  else
-static inline std::uint64_t rdtsc() noexcept {
-    unsigned hi, lo;
-    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-    return (static_cast<std::uint64_t>(hi) << 32) | lo;
-}
-#  endif
-#else
-#  include <chrono>
-static inline std::uint64_t rdtsc() noexcept {
-    using Clock = std::chrono::steady_clock;
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            Clock::now().time_since_epoch()).count());
-}
-#endif
 
 class Trace {
 public:

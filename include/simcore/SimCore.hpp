@@ -24,6 +24,7 @@
 #include "frame_arena.hpp"
 #include "logger.hpp"
 #include "profiler.hpp"
+#include "highres_clock.hpp"
 #include "worker_pool.hpp"
 #include <rt/fiber_pool.hpp>
 #include <rt/numerics.hpp>
@@ -106,7 +107,7 @@ struct DetRangeReductionRef {
 class SimCore {
 public:
   using Seconds = std::chrono::duration<double>;
-  using Clock = std::chrono::steady_clock;
+  using Clock = HighResClock;
   using TaskHint = ::TaskHint;
 
   int bursts() const { return bursts_; }
@@ -266,6 +267,7 @@ public:
 #else
     machineId_ = "windows";
 #endif
+    HighResClock::init();
     applySettings(s);
     initThreads();
   }
@@ -908,24 +910,22 @@ private:
     // Frame-level profiler scope
     PROF_SCOPE(profiler_, "Frame");
 
-    auto computeStart = Clock::now();
+    uint64_t computeStart = Clock::now();
     executeFrame();
-    auto computeEnd = Clock::now();
+    uint64_t computeEnd = Clock::now();
 
-    const double computeMs =
-        std::chrono::duration<double, std::milli>(computeEnd - computeStart)
-            .count();
+    const double computeMs = Clock::to_ms(computeEnd - computeStart);
     updateBudget(computeMs);
 
     // feed-forward: build headroom (do BEFORE sleeping)
     if (settings_.predictiveEnable) {
       // headroom to the *next* frame target (not just-finished frame)
-      auto nowBeforePre = Clock::now();
-      const auto nextFrameTarget =
-          nextTarget_ + std::chrono::duration_cast<Clock::duration>(dt_);
-      const auto aheadDur = nextFrameTarget - nowBeforePre;
+      uint64_t nowBeforePre = Clock::now();
+      const uint64_t nextFrameTarget = nextTarget_ + dtNs_;
+      const int64_t aheadDur = static_cast<int64_t>(nextFrameTarget) -
+                               static_cast<int64_t>(nowBeforePre);
       const double aheadFr =
-          std::chrono::duration<double>(aheadDur).count() / dt_.count();
+          (static_cast<double>(aheadDur) / 1e9) / dt_.count();
 
       // decide desired number (based on slope, warmup, etc.)
       const double slope = computeSlopeMsPerFrame();
@@ -946,40 +946,42 @@ private:
           break;
 
         // Execute one extra frame right now
-        auto cs = Clock::now();
+        uint64_t cs = Clock::now();
         executeFrame();
-        auto ce = Clock::now();
+        uint64_t ce = Clock::now();
 
         // keep budget accounting for each pre-step
-        double cm = std::chrono::duration<double, std::milli>(ce - cs).count();
+        double cm = Clock::to_ms(ce - cs);
         updateBudget(cm);
 
         // each pre-step moves the schedule forward by dt
-        nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
+        nextTarget_ += dtNs_;
         ++preSteps_;
       }
     }
 
-    nextTarget_ += std::chrono::duration_cast<Clock::duration>(dt_);
+    nextTarget_ += dtNs_;
 
-    auto now = Clock::now();
+    uint64_t now = Clock::now();
     if (now < nextTarget_) {
-      auto remain = std::chrono::duration_cast<std::chrono::microseconds>(
-          nextTarget_ - now);
-      if (remain.count() > settings_.spinMicros)
+      uint64_t remain = nextTarget_ - now;
+      if (remain > static_cast<uint64_t>(settings_.spinMicros) * 1000ULL)
         std::this_thread::sleep_for(
-            remain - std::chrono::microseconds(settings_.spinMicros));
-      else { /* busy */
+            std::chrono::nanoseconds(remain -
+                                     static_cast<uint64_t>(settings_.spinMicros) *
+                                         1000ULL));
+      else {
       }
     }
 
     // reactive fallback
     if (settings_.adaptive) {
       logDrift();
-      auto behind = Clock::now() - nextTarget_;
-      if (behind.count() > 0) {
+      int64_t behind = static_cast<int64_t>(Clock::now()) -
+                       static_cast<int64_t>(nextTarget_);
+      if (behind > 0) {
         int extra =
-            int(std::chrono::duration<double>(behind).count() / dt_.count());
+            int((static_cast<double>(behind) / 1e9) / dt_.count());
         if (extra > settings_.maxCatchUp)
           extra = settings_.maxCatchUp;
 
@@ -993,11 +995,10 @@ private:
           if (settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames)
             break;
 
-          auto cs = Clock::now();
+          uint64_t cs = Clock::now();
           executeFrame();
-          auto ce = Clock::now();
-          double cm =
-              std::chrono::duration<double, std::milli>(ce - cs).count();
+          uint64_t ce = Clock::now();
+          double cm = Clock::to_ms(ce - cs);
           updateBudget(cm);
         }
       }
@@ -1282,9 +1283,9 @@ private:
       return;
     if (frame_ % settings_.driftLogInterval)
       return;
-    auto now = Clock::now();
+    uint64_t now = Clock::now();
     double simT = static_cast<double>(frame_) * dt_.count();
-    double realT = std::chrono::duration<double>(now - startReal_).count();
+    double realT = static_cast<double>(now - startReal_) / 1e9;
     lastDriftMs_ = (simT - realT) * 1000.0;
     if (logger_)
       LOG_INFO(logger_, "[DRIFT] frame={} drift={:.2f}ms", frame_,
@@ -1296,7 +1297,7 @@ private:
         (settings_.hz > 1000.0) ? int(std::ceil(settings_.hz / 1000.0)) : 1;
     dt_ = Seconds{1.0 / settings_.hz};
     outerDt_ = dt_ * subSteps_;
-    outerDtChrono_ = std::chrono::duration_cast<Clock::duration>(outerDt_);
+    dtNs_ = static_cast<std::uint64_t>(dt_.count() * 1'000'000'000.0);
     startReal_ = Clock::now();
   }
 
@@ -1413,9 +1414,9 @@ private:
   int subSteps_ = 1;
   Seconds dt_{1.0 / 500.0};
   Seconds outerDt_{dt_};
-  Clock::duration outerDtChrono_{};
-  Clock::time_point nextTarget_{};
-  Clock::time_point startReal_{};
+  std::uint64_t dtNs_{0};
+  std::uint64_t nextTarget_{0};
+  std::uint64_t startReal_{0};
   Seconds accumulator_{0};
 
   std::vector<std::thread> threads_;

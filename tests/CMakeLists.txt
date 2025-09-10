@@ -32,6 +32,7 @@ set(TEST_SOURCES
     test_phase_telemetry.cpp
     test_aligned_allocator.cpp
     test_highres_clock.cpp
+    test_highres_clock_integration.cpp
     test_rate_governor.cpp
     test_hazard_ptr.cpp
     test_lockfree_queue.cpp

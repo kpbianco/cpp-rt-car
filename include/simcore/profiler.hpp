@@ -1,13 +1,13 @@
 #pragma once
 #include <string>
 #include <vector>
-#include <chrono>
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
 #include <algorithm>
 #include <iostream>
 #include <iomanip>
+#include "highres_clock.hpp"
 
 #ifdef PROF_ENABLED
 
@@ -30,17 +30,17 @@ public:
     public:
         ScopeGuard(Profiler* p, std::string n)
             : prof_(p), name_(std::move(n)),
-              t0_(std::chrono::steady_clock::now()) {}
+              t0_(HighResClock::now()) {}
         ~ScopeGuard() {
             if (!prof_) return;
-            auto t1 = std::chrono::steady_clock::now();
-            long double ns = std::chrono::duration<long double, std::nano>(t1 - t0_).count();
+            auto t1 = HighResClock::now();
+            long double ns = static_cast<long double>(t1 - t0_);
             prof_->record(name_, ns);
         }
     private:
         Profiler* prof_;
         std::string name_;
-        std::chrono::steady_clock::time_point t0_;
+        uint64_t t0_;
     };
 
     void record(const std::string& n, long double ns) {
