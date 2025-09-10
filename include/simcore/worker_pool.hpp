@@ -82,18 +82,28 @@ public:
     }
     Job job{std::move(fn), pr, cat};
     // If all worker threads are busy and this is a high-priority job,
-    // spawn a detached helper thread so the work isn't blocked behind
-    // lower priority tasks.
+    // run it immediately on the calling thread for single-worker pools
+    // or spawn a detached helper thread when multiple workers exist.
     if (pr == Priority::High &&
         active_.load(std::memory_order_acquire) >= threads_.size()) {
-      std::thread([this, job = std::move(job)]() mutable {
+      if (threads_.size() == 1) {
         active_.fetch_add(1, std::memory_order_acq_rel);
         if (job.fn)
           job.fn();
         active_.fetch_sub(1, std::memory_order_acq_rel);
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
-      }).detach();
-      return;
+        return;
+      }
+      if (threads_.size() > 1) {
+        std::thread([this, job = std::move(job)]() mutable {
+          active_.fetch_add(1, std::memory_order_acq_rel);
+          if (job.fn)
+            job.fn();
+          active_.fetch_sub(1, std::memory_order_acq_rel);
+          outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+        }).detach();
+        return;
+      }
     }
 
     auto &qd = *queues_[idx];
@@ -120,14 +130,24 @@ public:
           // Same high-priority helper thread logic as enqueueOn
           if (pr == Priority::High &&
               active_.load(std::memory_order_acquire) >= threads_.size()) {
-            std::thread([this, job = std::move(job)]() mutable {
+            if (threads_.size() == 1) {
               active_.fetch_add(1, std::memory_order_acq_rel);
               if (job.fn)
                 job.fn();
               active_.fetch_sub(1, std::memory_order_acq_rel);
               outstanding_.fetch_sub(1, std::memory_order_acq_rel);
-            }).detach();
-            return true;
+              return true;
+            }
+            if (threads_.size() > 1) {
+              std::thread([this, job = std::move(job)]() mutable {
+                active_.fetch_add(1, std::memory_order_acq_rel);
+                if (job.fn)
+                  job.fn();
+                active_.fetch_sub(1, std::memory_order_acq_rel);
+                outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+              }).detach();
+              return true;
+            }
           }
 
           auto &qd = *queues_[idx];
@@ -146,14 +166,24 @@ public:
       Job job{std::move(fn), pr, cat};
       if (pr == Priority::High &&
           active_.load(std::memory_order_acquire) >= threads_.size()) {
-        std::thread([this, job = std::move(job)]() mutable {
+        if (threads_.size() == 1) {
           active_.fetch_add(1, std::memory_order_acq_rel);
           if (job.fn)
             job.fn();
           active_.fetch_sub(1, std::memory_order_acq_rel);
           outstanding_.fetch_sub(1, std::memory_order_acq_rel);
-        }).detach();
-        return true;
+          return true;
+        }
+        if (threads_.size() > 1) {
+          std::thread([this, job = std::move(job)]() mutable {
+            active_.fetch_add(1, std::memory_order_acq_rel);
+            if (job.fn)
+              job.fn();
+            active_.fetch_sub(1, std::memory_order_acq_rel);
+            outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+          }).detach();
+          return true;
+        }
       }
       auto &qd = *queues_[idx];
       {

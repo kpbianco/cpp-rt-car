@@ -57,6 +57,7 @@ set(TEST_SOURCES
     test_minidump_symbols.cpp
     test_perf_artifacts.cpp
     test_plugin_manager.cpp
+    test_scheduler.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
