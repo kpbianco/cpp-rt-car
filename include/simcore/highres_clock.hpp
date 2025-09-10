@@ -37,7 +37,7 @@ public:
     }
 
     // Nanoseconds since an arbitrary epoch (monotonic).
-    static uint64_t now_ns() {
+    static uint64_t now() {
         auto ref_now = std::chrono::steady_clock::now();
         uint64_t ns_ref = to_ns(ref_now);
 
@@ -56,6 +56,11 @@ public:
             return ensure_monotonic(ns);
         }
         return ensure_monotonic(ns_ref);
+    }
+
+    // Helper: convert nanoseconds to milliseconds.
+    static double to_ms(uint64_t ns) {
+        return static_cast<double>(ns) / 1'000'000.0;
     }
 
     static bool using_tsc() { return tsc_ok_.load(); }
