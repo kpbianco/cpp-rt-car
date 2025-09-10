@@ -14,7 +14,8 @@ reduce remote NUMA traffic. Tasks have priorities and an aging counter; every
 time a task waits in the queue its age increases, effectively boosting its
 priority so that low priority tasks will eventually run and avoid starvation.
 
-The scheduler exposes a helper `pop_next_with_aging` function that selects the
-next task based on the `(priority + age)` heuristic. This function is used by
-unit tests to verify the aging behaviour.
+Tasks are represented by the nested `Scheduler::Task` struct. The scheduler
+exposes a helper `Scheduler::pop_next_with_aging` function that selects the next
+task based on the `(priority + age)` heuristic. This function is used by unit
+tests to verify the aging behaviour.
 
