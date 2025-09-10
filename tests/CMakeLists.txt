@@ -15,6 +15,7 @@ set(TEST_SOURCES
     test_static_phase_graph.cpp
     test_chunk_autotune.cpp
     test_deterministic_reduction.cpp
+    test_differential_output.cpp
     test_robust_fp.cpp
     test_budget_monitor.cpp
     test_fault_injection.cpp
