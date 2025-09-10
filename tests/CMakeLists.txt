@@ -51,6 +51,11 @@ set(TEST_SOURCES
     test_thermal_limp.cpp
     test_config_hot_reload.cpp
     test_plugin_manager.cpp
+    test_sandbox.cpp
+    test_sbom.cpp
+    test_minidump_symbols.cpp
+    test_perf_artifacts.cpp
+    test_plugin_manager.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
