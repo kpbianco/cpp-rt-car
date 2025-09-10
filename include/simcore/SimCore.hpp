@@ -197,6 +197,7 @@ public:
     std::function<double()> readPackageTemp;
 
     // Graceful degradation
+    bool limpMode = false; // global switch to minimize workload
     bool visualizers = true;
     bool broadphaseCoarse = false;
 
@@ -297,6 +298,12 @@ public:
       settings_.predictiveWindow = settings_.budgetWindow;
 
     recalcTiming();
+
+    if (settings_.limpMode) {
+      settings_.budgetMonitor = false;
+      settings_.bintraceEnable = false;
+      applyDegradeRung(4);
+    }
 
     costWindow_.assign(
         static_cast<std::size_t>(std::max(0, settings_.budgetWindow)), 0.0);
@@ -1296,24 +1303,14 @@ private:
 public:
   void applyDegradeRung(int rung) {
     degradeRung_ = rung;
-    switch (rung) {
-    case 1:
+    if (rung >= 1)
       settings_.visualizers = false;
-      break;
-    case 2:
-      if (subSteps_ > 1)
-        --subSteps_;
-      break;
-    case 3:
+    if (rung >= 2 && subSteps_ > 1)
+      --subSteps_;
+    if (rung >= 3)
       settings_.broadphaseCoarse = true;
-      break;
-    case 4:
-      if (subSteps_ > 1)
-        subSteps_ = 1;
-      break;
-    default:
-      break;
-    }
+    if (rung >= 4)
+      subSteps_ = 1;
     bintrace_.log(bintrace::EV_BudgetLadder, static_cast<std::uint32_t>(rung),
                   static_cast<std::uint64_t>(frame_));
   }

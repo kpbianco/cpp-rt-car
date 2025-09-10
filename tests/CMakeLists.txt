@@ -53,6 +53,7 @@ set(TEST_SOURCES
     test_units.cpp
     test_huge_page.cpp
     test_thermal_limp.cpp
+    test_limp_mode.cpp
     test_config_hot_reload.cpp
     test_plugin_manager.cpp
     test_sandbox.cpp
@@ -119,3 +120,4 @@ if (UNIX AND NOT APPLE)   # linux
         target_include_directories(simcore_tests PRIVATE ${NUMA_INCLUDE_DIR})
     endif()
 endif()
+
