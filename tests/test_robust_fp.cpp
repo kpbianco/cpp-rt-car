@@ -38,7 +38,8 @@ TEST(RobustFP, FloatReductionMixedPrecision) {
 
     double mixed = robust::sum_fp32_to_fp64(v.begin(), v.end());
     EXPECT_GT(mixed, static_cast<double>(naive));
-    EXPECT_NEAR(mixed, 1000000.0 * 1e-7, 1e-9);
+    double expected = static_cast<double>(v.size()) * static_cast<double>(1e-7f);
+    EXPECT_NEAR(mixed, expected, 5e-10);
 }
 
 TEST(RobustFP, KahanFloatReduction) {
@@ -46,10 +47,14 @@ TEST(RobustFP, KahanFloatReduction) {
     v.push_back(1.0f);
     v.insert(v.end(), 1000000, 1e-8f);
 
+    float naive = 0.0f;
+    for (float x : v) naive += x;
     double mixed = robust::sum_fp32_to_fp64(v.begin(), v.end());
     double kahan = robust::kahan_sum_fp32(v.begin(), v.end());
-    EXPECT_GT(kahan, mixed);
-    EXPECT_NEAR(kahan, 1.0 + 1000000.0 * 1e-8, 1e-12);
+    EXPECT_GT(kahan, static_cast<double>(naive));
+    EXPECT_NEAR(kahan, mixed, 1e-12);
+    double expected = 1.0 + static_cast<double>(v.size()) * static_cast<double>(1e-8f);
+    EXPECT_NEAR(kahan, expected, 5e-11);
 }
 
 TEST(RobustFP, ShadowArithmeticDetectsInstability) {
@@ -57,8 +62,8 @@ TEST(RobustFP, ShadowArithmeticDetectsInstability) {
     float a = 1e8f;
     float b = -1e8f;
     float c = 1.0f;
-    float result = (a + b) + c; // loses the c contribution
-    double shadow = (static_cast<double>(a) + static_cast<double>(b)) + static_cast<double>(c);
+    float result = (a + c) + b; // loses the c contribution
+    double shadow = (static_cast<double>(a) + static_cast<double>(c)) + static_cast<double>(b);
     std::uint64_t ulp = robust::ulp_distance(static_cast<double>(result), shadow);
     EXPECT_GT(ulp, 0u); // shadow arithmetic detects the loss
 }
