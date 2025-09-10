@@ -12,6 +12,35 @@ inline double safe_rsqrt(double x, double eps = 1e-12) {
     return 1.0 / std::sqrt(x);
 }
 
+// Accumulate a range of float values into double precision. This makes
+// the mixed-precision policy explicit for code paths where FP32 data is
+// reduced using FP64 accumulation.
+template <class It>
+double sum_fp32_to_fp64(It begin, It end) {
+    double acc = 0.0;
+    for (It it = begin; it != end; ++it) {
+        acc += static_cast<double>(*it);
+    }
+    return acc;
+}
+
+// Kahan/Babushka summation for a range of float values with a double
+// accumulator. Useful for highly sensitive reductions where classical
+// FP32->FP64 promotion is still not accurate enough.
+template <class It>
+double kahan_sum_fp32(It begin, It end) {
+    double sum = 0.0;
+    double c = 0.0; // compensation
+    for (It it = begin; it != end; ++it) {
+        double val = static_cast<double>(*it);
+        double y = val - c;
+        double t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    }
+    return sum;
+}
+
 // Classic Kahan summation for improved accuracy.
 template <class It>
 double kahan_sum(It begin, It end) {
