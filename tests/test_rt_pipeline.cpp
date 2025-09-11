@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -10,6 +11,16 @@
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
 #include <simcore/worker_pool.hpp>
+
+static void busy_spin(int micros) {
+  using Clock = std::chrono::steady_clock;
+  auto start = Clock::now();
+  while (std::chrono::duration_cast<std::chrono::microseconds>(
+             Clock::now() - start)
+             .count() < micros) {
+    std::atomic_signal_fence(std::memory_order_acq_rel);
+  }
+}
 
 TEST(RTPipeline, QueueMetricsAndNoThreadsInSrc) {
   WorkerPool pool(1);
@@ -89,10 +100,10 @@ TEST(RTPipeline, RateGovernorDropsVisualsToMeetBudget) {
 
   sim.addSerialSubsystem(visuals, [&](int64_t, SimCore::Seconds) {
     if (sim.visualizersEnabled())
-      std::this_thread::sleep_for(std::chrono::milliseconds(4));
+      busy_spin(4000);
   });
   sim.addSerialSubsystem(physics, [&](int64_t, SimCore::Seconds) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    busy_spin(2000);
   });
 
   std::vector<double> frames;
@@ -104,8 +115,8 @@ TEST(RTPipeline, RateGovernorDropsVisualsToMeetBudget) {
 
   EXPECT_GT(sim.visualsDropped(), 0);
   std::sort(frames.begin(), frames.end());
-  std::size_t idx =
-      static_cast<std::size_t>(std::floor(frames.size() * 0.99));
+  std::size_t idx = static_cast<std::size_t>(std::floor(
+      static_cast<double>(frames.size()) * 0.99));
   if (idx > 0)
     --idx;
   if (idx >= frames.size())
