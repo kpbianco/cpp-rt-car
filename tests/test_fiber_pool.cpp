@@ -2,7 +2,9 @@
 #include <simcore/SimCore.hpp>
 #ifdef thread
 #undef thread
+#define thread thread
 #endif
+#include <thread>
 #include <atomic>
 #include <rt/fiber_pool.hpp>
 #include <simcore/hal.hpp>
