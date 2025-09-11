@@ -22,9 +22,9 @@
 
 #include "bintrace.hpp"
 #include "frame_arena.hpp"
+#include "highres_clock.hpp"
 #include "logger.hpp"
 #include "profiler.hpp"
-#include "highres_clock.hpp"
 #include "worker_pool.hpp"
 #include <rt/fiber_pool.hpp>
 #include <rt/numerics.hpp>
@@ -273,7 +273,7 @@ public:
   }
   ~SimCore() {
     saveChunkCache();
-    stopThreads();
+    bintrace_.shutdown();
   }
 
   void setLogger(Logger *l) { logger_ = l; }
@@ -314,8 +314,7 @@ public:
     costSumMs_ = 0.0;
     predictivePrimed_ = false;
 
-    if (!threads_.empty() && settings_.threads != workerCount_) {
-      stopThreads();
+    if (settings_.threads != workerCount_) {
       initThreads();
     }
     LOG_INFO(logger_,
@@ -561,24 +560,13 @@ public:
   }
 
 private:
-  struct ActiveRange {
-    RangeFnRef *fn = nullptr;
-    std::size_t totalChunks = 0;
-    std::size_t elementCount = 0;
-    std::size_t chunkSize = 0;
-    std::int64_t frame = 0;
-    Seconds dt{};
-  };
-
   void initThreads() {
-    stopThreads();
+    bintrace_.shutdown();
     workerCount_ = settings_.threads;
     std::vector<int> threadNodes(workerCount_ + 1, -1);
 
     bintrace_.init(workerCount_ + 1, settings_.bintraceEventsPerThread,
                    settings_.bintraceEnable);
-
-    shutdown_.store(false, std::memory_order_relaxed);
 
 #ifdef __linux__
     std::vector<int> cpuList;
@@ -628,54 +616,6 @@ private:
     frameArenas_->bindCurrentThread(workerCount_); // main
     bintrace_.bindThread(workerCount_);
     rt::init_fp_env();
-  }
-
-  void stopThreads() {
-    threads_.clear();
-    bintrace_.shutdown();
-  }
-
-  void workerLoop() {
-    std::uint64_t localToken = dispatchToken_.load(std::memory_order_acquire);
-    for (;;) {
-      while (localToken == dispatchToken_.load(std::memory_order_acquire) &&
-             !shutdown_.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
-      }
-      if (shutdown_.load(std::memory_order_acquire))
-        break;
-      localToken = dispatchToken_.load(std::memory_order_acquire);
-      processActiveRange();
-    }
-  }
-
-  void processActiveRange() {
-    for (;;) {
-      std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
-      if (idx >= active_.totalChunks)
-        break;
-      std::size_t b = idx * active_.chunkSize;
-      std::size_t e = std::min(b + active_.chunkSize, active_.elementCount);
-
-      if (settings_.logChunks) {
-        // lightweight binary log already present; text under flag only
-        LOG_TRACE(logger_, "ChunkStart idx={} b={} e={}", idx, b, e);
-      }
-
-      bintrace_.log(bintrace::EV_ChunkStart,
-                    static_cast<std::uint32_t>(active_.chunkSize),
-                    (static_cast<std::uint64_t>(active_.frame) << 32) |
-                        static_cast<std::uint64_t>(idx));
-
-      active_.fn->fn(active_.fn->ctx, b, e, active_.frame, active_.dt);
-
-      bintrace_.log(bintrace::EV_ChunkDone, static_cast<std::uint32_t>(e - b),
-                    (static_cast<std::uint64_t>(active_.frame) << 32) |
-                        static_cast<std::uint64_t>(idx));
-
-      if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1)
-        break;
-    }
   }
 
   std::string cachePath() const {
@@ -934,10 +874,8 @@ private:
     if (now < nextTarget_) {
       uint64_t remain = nextTarget_ - now;
       if (remain > static_cast<uint64_t>(settings_.spinMicros) * 1000ULL)
-        std::this_thread::sleep_for(
-            std::chrono::nanoseconds(remain -
-                                     static_cast<uint64_t>(settings_.spinMicros) *
-                                         1000ULL));
+        std::this_thread::sleep_for(std::chrono::nanoseconds(
+            remain - static_cast<uint64_t>(settings_.spinMicros) * 1000ULL));
       else {
       }
     }
@@ -948,8 +886,7 @@ private:
       int64_t behind = static_cast<int64_t>(Clock::now()) -
                        static_cast<int64_t>(nextTarget_);
       if (behind > 0) {
-        int extra =
-            int((static_cast<double>(behind) / 1e9) / dt_.count());
+        int extra = int((static_cast<double>(behind) / 1e9) / dt_.count());
         if (extra > settings_.maxCatchUp)
           extra = settings_.maxCatchUp;
 
@@ -1081,30 +1018,18 @@ private:
           continue;
         }
 
-        // parallel path…
-        active_.fn = &rt;
-        active_.totalChunks = totalChunks;
-        active_.elementCount = count;
-        active_.chunkSize = chunk;
-        active_.frame = frame_;
-        active_.dt = dt_;
-
-        nextChunk_.store(0, std::memory_order_relaxed);
-        remaining_.store(totalChunks, std::memory_order_release);
-        dispatchToken_.fetch_add(1, std::memory_order_acq_rel);
-
-        while (remaining_.load(std::memory_order_acquire) > 0) {
-          std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
-          if (idx >= totalChunks) {
-            std::this_thread::yield();
-            continue;
-          }
-          std::size_t begin = idx * active_.chunkSize;
-          std::size_t end = std::min(begin + active_.chunkSize, count);
-          rt.fn(rt.ctx, begin, end, frame_, dt_);
-          if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1)
-            break;
+        std::atomic<std::size_t> remaining(totalChunks);
+        for (std::size_t idx = 0; idx < totalChunks; ++idx) {
+          const std::size_t begin = idx * chunk;
+          const std::size_t end = std::min(begin + chunk, count);
+          pool_->submit(
+              [&rt, begin, end, frame = frame_, dt = dt_, &remaining] {
+                rt.fn(rt.ctx, begin, end, frame, dt);
+                remaining.fetch_sub(1, std::memory_order_acq_rel);
+              });
         }
+        while (remaining.load(std::memory_order_acquire) > 0)
+          std::this_thread::yield();
       }
     } else {
       for (auto &rt : ph.ranges)
@@ -1176,11 +1101,11 @@ private:
         for (std::size_t idx = 0; idx < totalChunks; ++idx) {
           const std::size_t b = idx * chunk;
           const std::size_t e = std::min(b + chunk, count);
-          pool_->submit([leafThunk, leafCtx, b, e, frame = frame_, dt = dt_,
-                         &remaining] {
-            leafThunk(leafCtx, b, e, frame, dt);
-            remaining.fetch_sub(1, std::memory_order_acq_rel);
-          });
+          pool_->submit(
+              [leafThunk, leafCtx, b, e, frame = frame_, dt = dt_, &remaining] {
+                leafThunk(leafCtx, b, e, frame, dt);
+                remaining.fetch_sub(1, std::memory_order_acq_rel);
+              });
         }
         while (remaining.load(std::memory_order_acquire) > 0)
           std::this_thread::yield();
@@ -1374,14 +1299,7 @@ private:
   std::uint64_t startReal_{0};
   Seconds accumulator_{0};
 
-  std::vector<std::thread> threads_;
   std::size_t workerCount_ = 0;
-  std::atomic<bool> shutdown_{false};
-
-  ActiveRange active_{};
-  std::atomic<std::size_t> nextChunk_{0};
-  std::atomic<std::size_t> remaining_{0};
-  std::atomic<std::uint64_t> dispatchToken_{0};
 
   std::vector<double> costWindow_;
   std::size_t costHead_ = 0;
