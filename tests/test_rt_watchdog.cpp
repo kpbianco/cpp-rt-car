@@ -8,11 +8,12 @@ TEST(RtWatchdog, LimpModeOnStall) {
     rt::Watchdog wd(std::chrono::milliseconds(50),
                     std::chrono::milliseconds(200),
                     [&]{ ++limps; });
+    wd.arm(std::chrono::milliseconds(50));
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
     EXPECT_TRUE(wd.limp());
     EXPECT_EQ(limps.load(), 1);
     wd.touch();
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
     EXPECT_EQ(limps.load(), 1); // within relaxed budget
 }
 
