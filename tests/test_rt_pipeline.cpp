@@ -92,6 +92,7 @@ TEST(RTPipeline, RateGovernorDropsVisualsToMeetBudget) {
   s.maxFrames = 50;
   s.threads = 0;
   s.hz = 200;
+  s.budgetMonitor = false;
   SimCore sim(s);
   sim.setWorkerPool(&pool);
 
