@@ -63,6 +63,7 @@ set(TEST_SOURCES
     test_perf_artifacts.cpp
     test_plugin_manager.cpp
     test_scheduler.cpp
+    test_rt_pipeline.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)

@@ -99,6 +99,11 @@ public:
 
   std::size_t capacity() const { return buffer_.size(); }
 
+  // Convenience alias for telemetry hooks.  The worker pool records peak
+  // queue depth by sampling this value, so expose an explicit name that makes
+  // the intent clear to readers of the instrumentation code.
+  std::size_t max_capacity() const { return buffer_.size(); }
+
   std::size_t size() const {
     auto enq = enqueuePos_.load(std::memory_order_acquire);
     auto deq = dequeuePos_.load(std::memory_order_acquire);
