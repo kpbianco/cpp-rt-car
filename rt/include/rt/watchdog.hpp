@@ -51,8 +51,8 @@ public:
         std::unique_lock<std::mutex> lk(m_);
         if (armed_) {
             auto now = std::chrono::steady_clock::now();
-            auto next = last_ + (limp_.load() ? limp_budget_ : budget_);
-            if (now >= next) {
+            auto budget = limp_.load() ? limp_budget_ : budget_;
+            if (now - last_ >= budget) {
                 limp_ = true;
                 trips_.fetch_add(1, std::memory_order_relaxed);
                 auto cb = limp_cb_;
@@ -60,6 +60,7 @@ public:
                 if (cb)
                     cb();
                 lk.lock();
+                last_ = now;
             }
         }
         armed_ = false;
@@ -77,13 +78,15 @@ private:
                 cv_.wait(lk, [this] { return stop_.load() || armed_; });
                 continue;
             }
-            auto next = last_ + (limp_.load() ? limp_budget_ : budget_);
-            if (cv_.wait_until(lk, next, [this] { return stop_.load() || !armed_; })) {
+            auto budget = limp_.load() ? limp_budget_ : budget_;
+            auto start = last_;
+            if (cv_.wait_for(lk, budget, [this] { return stop_.load() || !armed_; })) {
                 continue;
             }
             if (!armed_)
                 continue;
-            if (std::chrono::steady_clock::now() >= next) {
+            auto now = std::chrono::steady_clock::now();
+            if (now - start >= budget && start == last_) {
                 limp_ = true;
                 trips_.fetch_add(1, std::memory_order_relaxed);
                 lk.unlock();
@@ -91,7 +94,7 @@ private:
                     limp_cb_();
                 }
                 lk.lock();
-                last_ = std::chrono::steady_clock::now();
+                last_ = now;
             }
         }
     }
