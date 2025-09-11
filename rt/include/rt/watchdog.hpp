@@ -19,7 +19,7 @@ public:
           limp_budget_(limp_budget),
           limp_cb_(std::move(limp_cb)),
           stop_(false),
-          armed_(true) {
+          armed_(false) {
         last_ = std::chrono::steady_clock::now();
         worker_ = std::thread([this] { run(); });
     }
@@ -48,7 +48,20 @@ public:
     }
 
     void disarm() {
-        std::lock_guard<std::mutex> lk(m_);
+        std::unique_lock<std::mutex> lk(m_);
+        if (armed_) {
+            auto now = std::chrono::steady_clock::now();
+            auto next = last_ + (limp_.load() ? limp_budget_ : budget_);
+            if (now >= next) {
+                limp_ = true;
+                trips_.fetch_add(1, std::memory_order_relaxed);
+                auto cb = limp_cb_;
+                lk.unlock();
+                if (cb)
+                    cb();
+                lk.lock();
+            }
+        }
         armed_ = false;
         cv_.notify_all();
     }

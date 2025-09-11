@@ -122,7 +122,7 @@ public:
   bool visualizersEnabled() const { return settings_.visualizers; }
   bool broadphaseCoarse() const { return settings_.broadphaseCoarse; }
   int subSteps() const { return subSteps_; }
-  int watchdogTrips() const { return watchdogTrips_.load(); }
+  int watchdogTrips() const { return watchdogTrips_.load(std::memory_order_acquire); }
   bool limpModeActive() const { return settings_.limpMode || watchdogLimp_.load(); }
 
   // Counter-based deterministic PRNG. Counter is derived from frame and
@@ -274,8 +274,8 @@ public:
     applySettings(s);
     watchdog_ = std::make_unique<rt::Watchdog>(
         std::chrono::hours(24), std::chrono::hours(24), [this] {
-          watchdogTrips_.fetch_add(1, std::memory_order_relaxed);
-          watchdogLimp_.store(true, std::memory_order_relaxed);
+          watchdogTrips_.fetch_add(1, std::memory_order_acq_rel);
+          watchdogLimp_.store(true, std::memory_order_release);
           if (logger_)
             LOG_TRACE(logger_, "[WD] trip frame={} ", frame_);
           applyDegradeRung(4);
