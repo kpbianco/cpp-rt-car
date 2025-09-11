@@ -1458,6 +1458,6 @@ private:
 };
 
 #ifdef NDEBUG
-#define thread                                                          \
+#define thread(...)                                                       \
   static_assert(false, "SimCore phases must not spawn OS threads; use WorkerPool::submit")
 #endif

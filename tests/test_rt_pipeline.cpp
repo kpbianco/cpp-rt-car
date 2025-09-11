@@ -15,7 +15,7 @@ TEST(RTPipeline, QueueMetricsAndNoThreadsInSrc) {
   sim.setWorkerPool(&pool);
   auto p = sim.addPhase("p");
   sim.addSerialSubsystem(p, [](int64_t, SimCore::Seconds) {});
-  sim.step();
+  sim.run();
   pool.drain();
 
   auto stats = pool.stats();
