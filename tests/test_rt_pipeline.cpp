@@ -13,14 +13,18 @@ TEST(RTPipeline, QueueMetricsAndNoThreadsInSrc) {
   WorkerPool pool(1);
   SimCore::Settings s;
   s.maxFrames = 1;
+  s.threads = 0; // disable internal threads so worker pool runs phases
   SimCore sim(s);
   sim.setWorkerPool(&pool);
-  auto p = sim.addPhase("p");
-  for (int i = 0; i < 8; ++i) {
-    sim.addSerialSubsystem(p, [](int64_t, SimCore::Seconds) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    });
-  }
+
+  auto p1 = sim.addPhase("p1");
+  auto p2 = sim.addPhase("p2");
+  auto sleeper = [](int64_t, SimCore::Seconds) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  };
+  sim.addSerialSubsystem(p1, sleeper);
+  sim.addSerialSubsystem(p2, sleeper);
+
   sim.run();
   pool.stop();
 
