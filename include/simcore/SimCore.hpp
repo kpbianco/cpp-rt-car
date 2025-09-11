@@ -30,6 +30,7 @@
 #include <rt/numerics.hpp>
 #include <rt/prng.hpp>
 #include <rt/snapshot.hpp>
+#include <rt/watchdog.hpp>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -121,6 +122,8 @@ public:
   bool visualizersEnabled() const { return settings_.visualizers; }
   bool broadphaseCoarse() const { return settings_.broadphaseCoarse; }
   int subSteps() const { return subSteps_; }
+  int watchdogTrips() const { return watchdogTrips_.load(); }
+  bool limpModeActive() const { return settings_.limpMode || watchdogLimp_.load(); }
 
   // Counter-based deterministic PRNG. Counter is derived from frame and
   // element index so results are independent of execution order.
@@ -269,6 +272,14 @@ public:
 #endif
     HighResClock::init();
     applySettings(s);
+    watchdog_ = std::make_unique<rt::Watchdog>(
+        std::chrono::hours(24), std::chrono::hours(24), [this] {
+          watchdogTrips_.fetch_add(1, std::memory_order_relaxed);
+          watchdogLimp_.store(true, std::memory_order_relaxed);
+          if (logger_)
+            LOG_TRACE(logger_, "[WD] trip frame={} ", frame_);
+          applyDegradeRung(4);
+        });
     initThreads();
   }
   ~SimCore() {
@@ -1250,6 +1261,11 @@ private:
   }
 
   void executeFrame() {
+    if (watchdog_) {
+      auto budget =
+          std::chrono::duration_cast<std::chrono::milliseconds>(outerDt_ * 1.25);
+      watchdog_->arm(budget);
+    }
     if (frameArenas_)
       frameArenas_->beginFrame();
     if (graphDirty_) {
@@ -1275,6 +1291,8 @@ private:
           std::this_thread::yield();
       }
     }
+    if (watchdog_)
+      watchdog_->disarm();
     ++frame_;
   }
 
@@ -1449,6 +1467,9 @@ private:
   std::unique_ptr<FrameArenaPool> frameArenas_;
   std::unique_ptr<rt::FiberPool> fiberPool_;
   bintrace::Trace bintrace_;
+  std::unique_ptr<rt::Watchdog> watchdog_;
+  std::atomic<int> watchdogTrips_{0};
+  std::atomic<bool> watchdogLimp_{false};
   std::unordered_map<std::string, std::size_t> chunkCache_;
   std::string machineId_;
 

@@ -18,7 +18,8 @@ public:
         : budget_(budget),
           limp_budget_(limp_budget),
           limp_cb_(std::move(limp_cb)),
-          stop_(false) {
+          stop_(false),
+          armed_(true) {
         last_ = std::chrono::steady_clock::now();
         worker_ = std::thread([this] { run(); });
     }
@@ -37,18 +38,41 @@ public:
         cv_.notify_all();
     }
 
+    void arm(std::chrono::milliseconds budget) {
+        std::lock_guard<std::mutex> lk(m_);
+        budget_ = budget;
+        limp_budget_ = budget * 2;
+        last_ = std::chrono::steady_clock::now();
+        armed_ = true;
+        cv_.notify_all();
+    }
+
+    void disarm() {
+        std::lock_guard<std::mutex> lk(m_);
+        armed_ = false;
+        cv_.notify_all();
+    }
+
     bool limp() const noexcept { return limp_.load(); }
+    int trips() const noexcept { return trips_.load(); }
 
 private:
     void run() {
         std::unique_lock<std::mutex> lk(m_);
         while (!stop_) {
-            auto next = last_ + (limp_.load() ? limp_budget_ : budget_);
-            if (cv_.wait_until(lk, next, [this] { return stop_.load(); })) {
-                break;
+            if (!armed_) {
+                cv_.wait(lk, [this] { return stop_.load() || armed_; });
+                continue;
             }
+            auto next = last_ + (limp_.load() ? limp_budget_ : budget_);
+            if (cv_.wait_until(lk, next, [this] { return stop_.load() || !armed_; })) {
+                continue;
+            }
+            if (!armed_)
+                continue;
             if (std::chrono::steady_clock::now() >= next) {
                 limp_ = true;
+                trips_.fetch_add(1, std::memory_order_relaxed);
                 lk.unlock();
                 if (limp_cb_) {
                     limp_cb_();
@@ -64,10 +88,12 @@ private:
     Callback limp_cb_;
     std::atomic<bool> limp_{false};
     std::atomic<bool> stop_;
+    std::atomic<bool> armed_;
     std::chrono::steady_clock::time_point last_;
     std::thread worker_;
     std::mutex m_;
     std::condition_variable cv_;
+    std::atomic<int> trips_{0};
 };
 
 } // namespace rt

@@ -52,3 +52,24 @@ TEST(RTPipeline, QueueMetricsAndNoThreadsInSrc) {
   EXPECT_FALSE(found);
 }
 
+TEST(RTPipeline, WatchdogTripRecordedAndContinues) {
+  WorkerPool pool(1);
+  SimCore::Settings s;
+  s.maxFrames = 2;
+  s.threads = 0;
+  SimCore sim(s);
+  sim.setWorkerPool(&pool);
+
+  auto p = sim.addPhase("stall");
+  auto stall = [](int64_t, SimCore::Seconds) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  };
+  sim.addSerialSubsystem(p, stall);
+
+  sim.run();
+  pool.stop();
+
+  EXPECT_GT(sim.watchdogTrips(), 0);
+  EXPECT_GE(sim.frame(), 2);
+}
+
