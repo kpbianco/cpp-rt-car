@@ -1266,7 +1266,7 @@ private:
       } else {
         std::atomic<std::size_t> remaining(level.size());
         for (auto idx : level) {
-          pool_->enqueue([this, idx, &remaining] {
+          pool_->submit([this, idx, &remaining] {
             executePhase(idx);
             remaining.fetch_sub(1, std::memory_order_acq_rel);
           });
@@ -1456,3 +1456,8 @@ private:
   Profiler *profiler_ = nullptr;
   WorkerPool *pool_ = nullptr;
 };
+
+#ifdef NDEBUG
+#define thread                                                          \
+  static_assert(false, "SimCore phases must not spawn OS threads; use WorkerPool::submit")
+#endif
