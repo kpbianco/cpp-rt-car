@@ -1385,32 +1385,36 @@ private:
       if (t >= settings_.thermalLimpCelsius && degradeRung_ < 4)
         applyDegradeRung(4);
     }
-    if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
-      return;
-
-    if (!costWindow_.empty()) {
-      if (costCount_ < costWindow_.size()) {
-        costWindow_[costHead_] = computeMs;
-        costSumMs_ += computeMs;
-        ++costCount_;
-        costHead_ = (costHead_ + 1) % costWindow_.size();
-      } else {
-        double &slot = costWindow_[costHead_];
-        costSumMs_ += computeMs - slot;
-        slot = computeMs;
-        costHead_ = (costHead_ + 1) % costWindow_.size();
-      }
-    }
-
     const double periodMs = 1000.0 / settings_.hz;
     const double ratio = computeMs / periodMs;
-    const double avgComputeMs =
-        (costCount_ ? (costSumMs_ / double(costCount_)) : computeMs);
-    const double avgRatio = avgComputeMs / periodMs;
+
+    double avgComputeMs = computeMs;
+    double avgRatio = ratio;
+
+    if (settings_.budgetMonitor && settings_.budgetWindow > 0) {
+      if (!costWindow_.empty()) {
+        if (costCount_ < costWindow_.size()) {
+          costWindow_[costHead_] = computeMs;
+          costSumMs_ += computeMs;
+          ++costCount_;
+          costHead_ = (costHead_ + 1) % costWindow_.size();
+        } else {
+          double &slot = costWindow_[costHead_];
+          costSumMs_ += computeMs - slot;
+          slot = computeMs;
+          costHead_ = (costHead_ + 1) % costWindow_.size();
+        }
+      }
+      avgComputeMs = (costCount_ ? (costSumMs_ / double(costCount_)) : computeMs);
+      avgRatio = avgComputeMs / periodMs;
+    }
 
     if (budgetCb_)
       budgetCb_(BudgetSample{computeMs, periodMs, ratio, avgComputeMs, avgRatio,
                              frame_});
+
+    if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
+      return;
 
     if (logger_) {
       if (ratio >= settings_.budgetCritRatio ||

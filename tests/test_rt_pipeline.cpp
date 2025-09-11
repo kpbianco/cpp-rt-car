@@ -115,11 +115,10 @@ TEST(RTPipeline, RateGovernorDropsVisualsToMeetBudget) {
   pool.stop();
 
   EXPECT_GT(sim.visualsDropped(), 0);
+  ASSERT_FALSE(frames.empty());
   std::sort(frames.begin(), frames.end());
-  std::size_t idx = static_cast<std::size_t>(std::floor(
-      static_cast<double>(frames.size()) * 0.99));
-  if (idx > 0)
-    --idx;
+  std::size_t idx = static_cast<std::size_t>(
+      std::floor(static_cast<double>(frames.size()) * 0.99));
   if (idx >= frames.size())
     idx = frames.size() - 1;
   double p99 = frames[idx];
