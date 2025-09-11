@@ -64,7 +64,7 @@ public:
     }
     Job job{std::move(fn), pr, cat};
     if (pr == Priority::High &&
-        active_.load(std::memory_order_acquire) >= threads_.size()) {
+        outstanding_.load(std::memory_order_acquire) >= threads_.size()) {
       if (threads_.size() == 1) {
         active_.fetch_add(1, std::memory_order_acq_rel);
         if (job.fn)
@@ -114,7 +114,7 @@ public:
                                                std::memory_order_relaxed)) {
           Job job{std::move(fn), pr, cat};
           if (pr == Priority::High &&
-              active_.load(std::memory_order_acquire) >= threads_.size()) {
+              outstanding_.load(std::memory_order_acquire) >= threads_.size()) {
             if (threads_.size() == 1) {
               active_.fetch_add(1, std::memory_order_acq_rel);
               if (job.fn)
@@ -150,7 +150,7 @@ public:
       outstanding_.fetch_add(1, std::memory_order_acq_rel);
       Job job{std::move(fn), pr, cat};
       if (pr == Priority::High &&
-          active_.load(std::memory_order_acquire) >= threads_.size()) {
+          outstanding_.load(std::memory_order_acquire) >= threads_.size()) {
         if (threads_.size() == 1) {
           active_.fetch_add(1, std::memory_order_acq_rel);
           if (job.fn)

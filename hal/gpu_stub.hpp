@@ -1,9 +1,12 @@
 #pragma once
 
-#include <thread>
 #include <tuple>
 #include <utility>
 #include <chrono>
+#ifdef thread
+#undef thread
+#endif
+#include <thread>
 
 #include "hal.hpp"
 
