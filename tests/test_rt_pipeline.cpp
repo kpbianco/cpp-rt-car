@@ -100,7 +100,7 @@ TEST(RTPipeline, RateGovernorDropsVisualsToMeetBudget) {
 
   sim.addSerialSubsystem(visuals, [&](int64_t, SimCore::Seconds) {
     if (sim.visualizersEnabled())
-      busy_spin(4000);
+      busy_spin(10000);
   });
   sim.addSerialSubsystem(physics, [&](int64_t, SimCore::Seconds) {
     busy_spin(2000);
