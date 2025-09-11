@@ -1171,8 +1171,6 @@ private:
         h *= 1099511628211ull;
         (*(LC->checksums))[idx] = h;
       };
-      RangeFnRef leafRef{leafThunk, leafCtx};
-
       if (workerCount_ > 1 && pool_) {
         std::atomic<std::size_t> remaining(totalChunks);
         for (std::size_t idx = 0; idx < totalChunks; ++idx) {

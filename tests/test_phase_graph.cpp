@@ -24,7 +24,7 @@ TEST(PhaseGraph, EnforcesDepsAndRunsParallelFrontier)
     SimCore sim(s);
     sim.setLogger(&log);
 
-    WorkerPool pool(/*threads*/3, /*queue size pow2*/1024, /*verbose*/false);
+    WorkerPool pool(/*threads*/3, /*queue size pow2*/1024);
     sim.setWorkerPool(&pool);
 
     auto A = sim.addPhase("A");
