@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <utility>
 
 // Simple PI based rate governor. Controls a scale factor so that
 // compute_ms stays within frame_ms. Includes hysteresis and clamping.
@@ -14,6 +15,28 @@ public:
                  RungCallback rungCb = {})
         : frame_ms_(frame_ms), kp_(kp), ki_(ki), floor_(floor),
           ceiling_(ceiling), hyst_(hysteresis), rungCb_(std::move(rungCb)) {}
+
+    RateGovernor(const RateGovernor &) = default;
+    RateGovernor(RateGovernor &&) = default;
+    RateGovernor &operator=(const RateGovernor &other) {
+        if (this != &other) {
+            frame_ms_ = other.frame_ms_;
+            kp_ = other.kp_;
+            ki_ = other.ki_;
+            floor_ = other.floor_;
+            ceiling_ = other.ceiling_;
+            hyst_ = other.hyst_;
+            target_ = other.target_;
+            integral_ = other.integral_;
+            scale_ = other.scale_;
+            rung_ = other.rung_;
+            rungCb_ = other.rungCb_;
+        }
+        return *this;
+    }
+    RateGovernor &operator=(RateGovernor &&other) noexcept {
+        return *this = other;
+    }
 
     // Update with the last frame's compute time and parameters. Returns new
     // scale factor.
