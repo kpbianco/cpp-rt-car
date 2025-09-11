@@ -1,9 +1,11 @@
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <vector>
 #include <thread>
-#include <chrono>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
@@ -71,5 +73,44 @@ TEST(RTPipeline, WatchdogTripRecordedAndContinues) {
 
   EXPECT_GT(sim.watchdogTrips(), 0);
   EXPECT_GE(sim.frame(), 2);
+}
+
+TEST(RTPipeline, RateGovernorDropsVisualsToMeetBudget) {
+  WorkerPool pool(1);
+  SimCore::Settings s;
+  s.maxFrames = 50;
+  s.threads = 0;
+  s.hz = 200;
+  SimCore sim(s);
+  sim.setWorkerPool(&pool);
+
+  auto visuals = sim.addPhase("visuals");
+  auto physics = sim.addPhase("physics");
+
+  sim.addSerialSubsystem(visuals, [&](int64_t, SimCore::Seconds) {
+    if (sim.visualizersEnabled())
+      std::this_thread::sleep_for(std::chrono::milliseconds(4));
+  });
+  sim.addSerialSubsystem(physics, [&](int64_t, SimCore::Seconds) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  });
+
+  std::vector<double> frames;
+  sim.setBudgetCallback(
+      [&](const SimCore::BudgetSample &b) { frames.push_back(b.computeMs); });
+
+  sim.run();
+  pool.stop();
+
+  EXPECT_GT(sim.visualsDropped(), 0);
+  std::sort(frames.begin(), frames.end());
+  std::size_t idx =
+      static_cast<std::size_t>(std::floor(frames.size() * 0.99));
+  if (idx > 0)
+    --idx;
+  if (idx >= frames.size())
+    idx = frames.size() - 1;
+  double p99 = frames[idx];
+  EXPECT_LE(p99, (1000.0 / s.hz) * 1.05);
 }
 

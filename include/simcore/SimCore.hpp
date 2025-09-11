@@ -26,6 +26,7 @@
 #include "profiler.hpp"
 #include "highres_clock.hpp"
 #include "worker_pool.hpp"
+#include "rate_governor.hpp"
 #include <rt/fiber_pool.hpp>
 #include <rt/numerics.hpp>
 #include <rt/prng.hpp>
@@ -124,6 +125,9 @@ public:
   int subSteps() const { return subSteps_; }
   int watchdogTrips() const { return watchdogTrips_.load(std::memory_order_acquire); }
   bool limpModeActive() const { return settings_.limpMode || watchdogLimp_.load(); }
+  int visualsDropped() const { return dropVisualsCount_; }
+  int substepsReduced() const { return reduceSubstepsCount_; }
+  int phasesCoarsened() const { return coarsenPhaseCount_; }
 
   // Counter-based deterministic PRNG. Counter is derived from frame and
   // element index so results are independent of execution order.
@@ -311,6 +315,17 @@ public:
       settings_.predictiveWindow = settings_.budgetWindow;
 
     recalcTiming();
+
+    governor_ = RateGovernor(
+        frame_budget_ms_, 0.1, 0.01, 0.5, 1.0, hysteresis_,
+        [this](int rung) {
+          if (rung == 1)
+            drop_visuals_();
+          else if (rung == 2)
+            reduce_substeps_();
+          else if (rung == 3)
+            coarsen_phase_();
+        });
 
     if (settings_.limpMode) {
       settings_.budgetMonitor = false;
@@ -927,6 +942,7 @@ private:
 
     const double computeMs = Clock::to_ms(computeEnd - computeStart);
     updateBudget(computeMs);
+    governor_.update(computeMs, frame_budget_ms_, target_util_, hysteresis_);
 
     // feed-forward: build headroom (do BEFORE sleeping)
     if (settings_.predictiveEnable) {
@@ -1317,6 +1333,7 @@ private:
     outerDt_ = dt_ * subSteps_;
     dtNs_ = static_cast<std::uint64_t>(dt_.count() * 1'000'000'000.0);
     startReal_ = Clock::now();
+    frame_budget_ms_ = 1000.0 / settings_.hz;
   }
 
 public:
@@ -1335,6 +1352,33 @@ public:
   }
 
 private:
+  void drop_visuals_() {
+    if (settings_.visualizers) {
+      settings_.visualizers = false;
+      ++dropVisualsCount_;
+      bintrace_.log(bintrace::EV_BudgetLadder, 1u,
+                    static_cast<std::uint64_t>(frame_));
+    }
+  }
+
+  void reduce_substeps_() {
+    if (subSteps_ > 1) {
+      --subSteps_;
+      ++reduceSubstepsCount_;
+      bintrace_.log(bintrace::EV_BudgetLadder, 2u,
+                    static_cast<std::uint64_t>(frame_));
+    }
+  }
+
+  void coarsen_phase_() {
+    if (!settings_.broadphaseCoarse) {
+      settings_.broadphaseCoarse = true;
+      ++coarsenPhaseCount_;
+      bintrace_.log(bintrace::EV_BudgetLadder, 3u,
+                    static_cast<std::uint64_t>(frame_));
+    }
+  }
+
   void updateBudget(double computeMs) {
     if (settings_.thermalMonitor && settings_.readPackageTemp) {
       double t = settings_.readPackageTemp();
@@ -1453,6 +1497,14 @@ private:
   int adaptCooldown_ = 0;
   int degradeRung_ = 0;
   std::function<void(const BudgetSample &)> budgetCb_;
+
+  RateGovernor governor_{0.0};
+  double frame_budget_ms_ = 0.0;
+  double target_util_ = 0.9;
+  double hysteresis_ = 0.05;
+  int dropVisualsCount_ = 0;
+  int reduceSubstepsCount_ = 0;
+  int coarsenPhaseCount_ = 0;
 
   std::uint64_t deterministicHash_ = 0;
   double lastDriftMs_ = 0.0;
