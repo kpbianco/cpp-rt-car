@@ -278,7 +278,14 @@ public:
 
   void setLogger(Logger *l) { logger_ = l; }
   void setProfiler(Profiler *p) { profiler_ = p; }
-  void setWorkerPool(WorkerPool *pool) { pool_ = pool; }
+  void setWorkerPool(WorkerPool *pool) {
+    if (pool != pool_) {
+      if (pool_ == ownedPool_.get()) {
+        ownedPool_.reset();
+      }
+      pool_ = pool;
+    }
+  }
   void setBudgetCallback(std::function<void(const BudgetSample &)> cb) {
     budgetCb_ = std::move(cb);
   }
@@ -563,6 +570,16 @@ private:
   void initThreads() {
     bintrace_.shutdown();
     workerCount_ = settings_.threads;
+
+    if (pool_ == ownedPool_.get()) {
+      pool_ = nullptr;
+    }
+    ownedPool_.reset();
+    if (!pool_ && workerCount_ > 1) {
+      ownedPool_ = std::make_unique<WorkerPool>(workerCount_);
+      pool_ = ownedPool_.get();
+    }
+
     std::vector<int> threadNodes(workerCount_ + 1, -1);
 
     bintrace_.init(workerCount_ + 1, settings_.bintraceEventsPerThread,
@@ -1325,7 +1342,8 @@ private:
   std::unordered_map<std::string, std::size_t> chunkCache_;
   std::string machineId_;
 
-  Logger *logger_ = nullptr;
-  Profiler *profiler_ = nullptr;
-  WorkerPool *pool_ = nullptr;
-};
+    Logger *logger_ = nullptr;
+    Profiler *profiler_ = nullptr;
+    std::unique_ptr<WorkerPool> ownedPool_;
+    WorkerPool *pool_ = nullptr;
+  };
