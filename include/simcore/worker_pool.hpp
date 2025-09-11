@@ -19,19 +19,22 @@ public:
   enum class Priority { High, Normal, Low };
   enum class Category { CPU, GPU, IO };
   using JobFn = std::function<void()>;
+  using InitFn = std::function<void(std::size_t)>;
 
   explicit WorkerPool(std::size_t numThreads,
-                      std::size_t queueSizePow2 = 1024)
+                      std::size_t queueSizePow2 = 1024,
+                      InitFn init = InitFn{})
       : highQ_(queueSizePow2),
         normalQ_(queueSizePow2),
-        lowQ_(queueSizePow2) {
+        lowQ_(queueSizePow2),
+        init_(std::move(init)) {
     stopping_.store(false, std::memory_order_relaxed);
     outstanding_.store(0, std::memory_order_relaxed);
     maxDepth_.store(0, std::memory_order_relaxed);
     steals_.store(0, std::memory_order_relaxed);
     threads_.reserve(numThreads);
     for (std::size_t i = 0; i < numThreads; ++i) {
-      threads_.emplace_back([this] { this->workerLoop(); });
+      threads_.emplace_back([this, i] { this->workerLoop(i); });
     }
   }
 
@@ -118,7 +121,9 @@ private:
     return highQ_.try_pop(out) || normalQ_.try_pop(out) || lowQ_.try_pop(out);
   }
 
-  void workerLoop() {
+  void workerLoop(std::size_t id) {
+    if (init_)
+      init_(id);
     rt::init_fp_env();
     for (;;) {
       Job job;
@@ -140,6 +145,7 @@ private:
   BoundedMPMCQueue<Job> lowQ_;
 
   std::vector<std::thread> threads_;
+  InitFn init_;
   std::atomic<bool> stopping_{false};
   std::atomic<std::size_t> outstanding_{0};
   std::atomic<std::size_t> maxDepth_{0};

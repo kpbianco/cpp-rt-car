@@ -284,6 +284,19 @@ public:
         ownedPool_.reset();
       }
       pool_ = pool;
+      if (pool_ && frameArenas_) {
+        std::atomic<std::size_t> remaining(pool_->thread_count());
+        for (std::size_t i = 0; i < pool_->thread_count(); ++i) {
+          pool_->submit([this, &remaining] {
+            auto idx = frameArenas_->claimNextSlot();
+            frameArenas_->bindCurrentThread(idx);
+            bintrace_.bindThread(idx);
+            remaining.fetch_sub(1, std::memory_order_acq_rel);
+          });
+        }
+        while (remaining.load(std::memory_order_acquire) > 0)
+          std::this_thread::yield();
+      }
     }
   }
   void setBudgetCallback(std::function<void(const BudgetSample &)> cb) {
@@ -575,10 +588,6 @@ private:
       pool_ = nullptr;
     }
     ownedPool_.reset();
-    if (!pool_ && workerCount_ > 1) {
-      ownedPool_ = std::make_unique<WorkerPool>(workerCount_);
-      pool_ = ownedPool_.get();
-    }
 
     std::vector<int> threadNodes(workerCount_ + 1, -1);
 
@@ -627,12 +636,20 @@ private:
     frameArenas_ = std::make_unique<FrameArenaPool>(
         workerCount_ + 1, settings_.arenaPerThreadBytes, 64, threadNodes);
 
-    // Worker threads are provided by WorkerPool.  We only bind the main
-    // thread here; worker threads will bind themselves when executing
-    // jobs.
+    // Worker threads will bind themselves via the worker pool init callback.
     frameArenas_->bindCurrentThread(workerCount_); // main
     bintrace_.bindThread(workerCount_);
     rt::init_fp_env();
+
+    if (!pool_ && workerCount_ > 1) {
+      ownedPool_ = std::make_unique<WorkerPool>(
+          workerCount_, 1024,
+          [this](std::size_t i) {
+            frameArenas_->bindCurrentThread(i);
+            bintrace_.bindThread(i);
+          });
+      pool_ = ownedPool_.get();
+    }
   }
 
   std::string cachePath() const {
