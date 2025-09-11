@@ -1052,8 +1052,11 @@ private:
           continue;
         }
 
-        std::atomic<std::size_t> remaining(totalChunks);
-        for (std::size_t idx = 0; idx < totalChunks; ++idx) {
+        // Run the first chunk on the calling thread to avoid deadlock when all
+        // worker threads are occupied by outer phase dispatch.  The remaining
+        // chunks are scheduled on the pool and we wait for them to finish.
+        std::atomic<std::size_t> remaining(totalChunks > 0 ? totalChunks - 1 : 0);
+        for (std::size_t idx = 1; idx < totalChunks; ++idx) {
           const std::size_t begin = idx * chunk;
           const std::size_t end = std::min(begin + chunk, count);
           pool_->submit(
@@ -1062,6 +1065,9 @@ private:
                 remaining.fetch_sub(1, std::memory_order_acq_rel);
               });
         }
+        const std::size_t begin0 = 0;
+        const std::size_t end0 = std::min(chunk, count);
+        rt.fn(rt.ctx, begin0, end0, frame_, dt_);
         while (remaining.load(std::memory_order_acquire) > 0)
           std::this_thread::yield();
       }
@@ -1174,17 +1180,23 @@ private:
     for (const auto &level : levels) {
       if (level.empty())
         continue;
-      if (!pool_ || level.size() == 1) {
+      const std::size_t poolThreads = pool_ ? pool_->thread_count() : 0;
+      if (!pool_ || level.size() == 1 || poolThreads <= 1) {
         for (auto idx : level)
           executePhase(idx);
       } else {
-        std::atomic<std::size_t> remaining(level.size());
-        for (auto idx : level) {
+        const std::size_t maxParallel = poolThreads - 1; // leave one free
+        const std::size_t toSubmit = std::min(level.size(), maxParallel);
+        std::atomic<std::size_t> remaining(toSubmit);
+        for (std::size_t i = 0; i < toSubmit; ++i) {
+          auto idx = level[i];
           pool_->submit([this, idx, &remaining] {
             executePhase(idx);
             remaining.fetch_sub(1, std::memory_order_acq_rel);
           });
         }
+        for (std::size_t i = toSubmit; i < level.size(); ++i)
+          executePhase(level[i]);
         while (remaining.load(std::memory_order_acquire) != 0)
           std::this_thread::yield();
       }
