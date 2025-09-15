@@ -941,8 +941,9 @@ private:
     uint64_t computeEnd = Clock::now();
 
     const double computeMs = Clock::to_ms(computeEnd - computeStart);
-    updateBudget(computeMs);
-    governor_.update(computeMs, frame_budget_ms_, target_util_, hysteresis_);
+    auto govResult =
+        governor_.update(computeMs, frame_budget_ms_, target_util_, hysteresis_);
+    updateBudget(computeMs, govResult.rungAdvanced);
 
     // feed-forward: build headroom (do BEFORE sleeping)
     if (settings_.predictiveEnable) {
@@ -979,7 +980,9 @@ private:
 
         // keep budget accounting for each pre-step
         double cm = Clock::to_ms(ce - cs);
-        updateBudget(cm);
+        auto preGov =
+            governor_.update(cm, frame_budget_ms_, target_util_, hysteresis_);
+        updateBudget(cm, preGov.rungAdvanced);
 
         // each pre-step moves the schedule forward by dt
         nextTarget_ += dtNs_;
@@ -1026,7 +1029,9 @@ private:
           executeFrame();
           uint64_t ce = Clock::now();
           double cm = Clock::to_ms(ce - cs);
-          updateBudget(cm);
+          auto catchGov =
+              governor_.update(cm, frame_budget_ms_, target_util_, hysteresis_);
+          updateBudget(cm, catchGov.rungAdvanced);
         }
       }
     } else
@@ -1379,7 +1384,7 @@ private:
     }
   }
 
-  void updateBudget(double computeMs) {
+  void updateBudget(double computeMs, bool skipSample = false) {
     if (settings_.thermalMonitor && settings_.readPackageTemp) {
       double t = settings_.readPackageTemp();
       if (t >= settings_.thermalLimpCelsius && degradeRung_ < 4)
@@ -1409,7 +1414,7 @@ private:
       avgRatio = avgComputeMs / periodMs;
     }
 
-    if (budgetCb_)
+    if (budgetCb_ && !skipSample)
       budgetCb_(BudgetSample{computeMs, periodMs, ratio, avgComputeMs, avgRatio,
                              frame_});
 
