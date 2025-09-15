@@ -7,13 +7,14 @@ TEST(RateGovernor, AdversarialBurstTriggersLadderAndRecovers) {
     RateGovernor rg(16.0, 0.1, 0.01, 0.5, 1.0, 0.05,
                     [&](int rung){ events.push_back(rung); });
     // warmup stable frames
+    RateGovernor::UpdateResult res;
     for(int i=0;i<5;i++) {
-        double s = rg.update(10.0);
-        EXPECT_NEAR(s, 1.0, 0.1);
+        res = rg.update(10.0);
+        EXPECT_NEAR(res.scale, 1.0, 0.1);
     }
     // adversarial burst
-    double s = rg.update(40.0);
-    EXPECT_LT(s, 1.0);
+    res = rg.update(40.0);
+    EXPECT_LT(res.scale, 1.0);
     EXPECT_EQ(rg.rung(), 3);
     ASSERT_EQ(events.size(), 3u);
     EXPECT_EQ(events[0], 1);
@@ -21,8 +22,8 @@ TEST(RateGovernor, AdversarialBurstTriggersLadderAndRecovers) {
     EXPECT_EQ(events[2], 3);
     // subsequent frames should recover
     for(int i=0;i<40;i++) {
-        s = rg.update(10.0);
+        res = rg.update(10.0);
     }
-    EXPECT_GT(s, 0.95);
+    EXPECT_GT(res.scale, 0.95);
 }
 

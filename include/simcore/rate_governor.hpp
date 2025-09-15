@@ -24,25 +24,8 @@ public:
 
     RateGovernor(const RateGovernor &) = default;
     RateGovernor(RateGovernor &&) = default;
-    RateGovernor &operator=(const RateGovernor &other) {
-        if (this != &other) {
-            frame_ms_ = other.frame_ms_;
-            kp_ = other.kp_;
-            ki_ = other.ki_;
-            floor_ = other.floor_;
-            ceiling_ = other.ceiling_;
-            hyst_ = other.hyst_;
-            target_ = other.target_;
-            integral_ = other.integral_;
-            scale_ = other.scale_;
-            rung_ = other.rung_;
-            rungCb_ = other.rungCb_;
-        }
-        return *this;
-    }
-    RateGovernor &operator=(RateGovernor &&other) noexcept {
-        return *this = other;
-    }
+    RateGovernor &operator=(const RateGovernor &) = default;
+    RateGovernor &operator=(RateGovernor &&) = default;
 
     // Update with the last frame's compute time and parameters.
     UpdateResult update(double compute_ms, double frame_ms,
@@ -61,17 +44,17 @@ public:
 
         const double ratioRef = compute_ms / frame_ms_;
         int prevRung = rung_;
-        if (rung_ < 1 && ratioRef >= t1_) {
+        if (rung_ < 1 && ratioRef >= kRungThresholds[0]) {
             rung_ = 1;
             if (rungCb_)
                 rungCb_(1);
         }
-        if (rung_ < 2 && ratioRef >= t2_) {
+        if (rung_ < 2 && ratioRef >= kRungThresholds[1]) {
             rung_ = 2;
             if (rungCb_)
                 rungCb_(2);
         }
-        if (rung_ < 3 && ratioRef >= t3_) {
+        if (rung_ < 3 && ratioRef >= kRungThresholds[2]) {
             rung_ = 3;
             if (rungCb_)
                 rungCb_(3);
@@ -99,9 +82,7 @@ private:
     double integral_ = 0.0;
     double scale_ = 1.0;
     int rung_ = 0;
-    const double t1_ = 1.1;
-    const double t2_ = 1.3;
-    const double t3_ = 1.5;
+    inline static constexpr double kRungThresholds[3] = {1.1, 1.3, 1.5};
     RungCallback rungCb_;
 };
 
