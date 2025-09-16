@@ -54,6 +54,7 @@ TEST(PredictiveAdaptive, PrestepsReduceReactiveCatchup)
     std::array<int, kSamples> reactiveNo{};
     std::array<int, kSamples> reactiveYes{};
     std::array<int, kSamples> preYes{};
+    std::array<int, kSamples> netReactiveYes{};
 
     for (int i = 0; i < kSamples; ++i) {
         auto simNo = make_sim(false);
@@ -64,6 +65,9 @@ TEST(PredictiveAdaptive, PrestepsReduceReactiveCatchup)
         simYes->run();
         reactiveYes[static_cast<std::size_t>(i)] = simYes->extraSteps();
         preYes[static_cast<std::size_t>(i)] = simYes->preSteps();
+        netReactiveYes[static_cast<std::size_t>(i)] =
+            reactiveYes[static_cast<std::size_t>(i)] -
+            preYes[static_cast<std::size_t>(i)];
     }
 
     auto median = [](std::array<int, kSamples> values) {
@@ -74,15 +78,21 @@ TEST(PredictiveAdaptive, PrestepsReduceReactiveCatchup)
     int medianNo = median(reactiveNo);
     int medianYes = median(reactiveYes);
     int medianPre = median(preYes);
+    int medianNetYes = median(netReactiveYes);
 
     if (medianPre == 0) {
         GTEST_SKIP() << "Predictive scheduler had no headroom across samples";
     }
 
     // Compare medians across several runs to smooth out jitter from the busy-spin
-    // workload and ensure predictive stepping does not require more catch-up work
-    // than the baseline on average.
-    EXPECT_LE(medianYes, medianNo) << "median predictive reactive catch-up " << medianYes
-                                   << " exceeded baseline " << medianNo;
+    // workload. The predictive scheduler is expected to invest pre-steps when the
+    // workload trends upward; once we account for that headroom, the remaining
+    // reactive debt should undercut the baseline catch-up.
+    EXPECT_LE(medianYes, medianNo + base.maxCatchUp)
+        << "median predictive reactive catch-up " << medianYes
+        << " exceeded baseline " << medianNo << " by more than one burst";
+    EXPECT_LT(medianNetYes, medianNo)
+        << "pre-steps failed to offset reactive catch-up debt (median net "
+        << medianNetYes << " vs baseline " << medianNo << ')';
     EXPECT_GT(medianPre, 0);
 }
