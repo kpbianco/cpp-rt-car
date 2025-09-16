@@ -1,10 +1,14 @@
+#include <algorithm>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
+#include <simcore/rt_memory.hpp>
+#include <simcore/soa/first_touch.hpp>
 
 #ifdef SIM_USE_NUMA
 #include <numa.h>
@@ -22,6 +26,26 @@ struct ArenaCapture {
   std::vector<void *> addresses;
   std::vector<int> nodes;
 };
+
+void expect_pages_on_nodes(void *base, std::size_t bytes,
+                           std::size_t firstBytes, int nodeA, int nodeB) {
+  if (bytes == 0)
+    return;
+  const std::size_t page = rt::os_page_size();
+  const std::size_t totalPages = (bytes + page - 1) / page;
+  std::vector<void *> pages(totalPages);
+  for (std::size_t i = 0; i < totalPages; ++i)
+    pages[i] = static_cast<char *>(base) + i * page;
+  std::vector<int> status(totalPages);
+  numa_move_pages(0, static_cast<unsigned long>(totalPages), pages.data(),
+                  nullptr, status.data(), 0);
+  const std::size_t boundaryPages =
+      std::min((firstBytes + page - 1) / page, totalPages);
+  for (std::size_t i = 0; i < boundaryPages; ++i)
+    EXPECT_EQ(status[i], nodeA);
+  for (std::size_t i = boundaryPages; i < totalPages; ++i)
+    EXPECT_EQ(status[i], nodeB);
+}
 } // namespace
 
 TEST(NumaIntegration, WorkerArenasAreNodeLocal) {
@@ -72,6 +96,64 @@ TEST(NumaIntegration, WorkerArenasAreNodeLocal) {
     ASSERT_GE(capture.nodes[i], 0);
     EXPECT_EQ(status[i], capture.nodes[i]);
   }
+}
+
+TEST(NumaIntegration, FirstTouchSoADistributesPages) {
+  if (numa_available() < 0 || numa_num_configured_nodes() < 2) {
+    GTEST_SKIP() << "NUMA not available";
+  }
+
+  const std::vector<int> nodes{0, 1};
+  constexpr std::size_t elements = 1u << 19; // ~4 MiB per channel
+  auto x = std::make_unique<double[]>(elements);
+  auto y = std::make_unique<double[]>(elements);
+  auto z = std::make_unique<double[]>(elements);
+  soa::Vec3SoA<double> soa{x.get(), y.get(), z.get()};
+
+  soa::init_vec3_soa(soa, elements, nodes, 0.0);
+
+  const std::size_t totalBytes = elements * sizeof(double);
+  const std::size_t threads = nodes.size();
+  const std::size_t chunk = (elements + threads - 1) / threads;
+  const std::size_t firstElems = std::min(elements, chunk);
+  const std::size_t firstBytes = firstElems * sizeof(double);
+
+  expect_pages_on_nodes(x.get(), totalBytes, firstBytes, nodes[0], nodes[1]);
+  EXPECT_DOUBLE_EQ(x[0], 0.0);
+  EXPECT_DOUBLE_EQ(y[0], 0.0);
+  EXPECT_DOUBLE_EQ(z[0], 0.0);
+}
+
+TEST(NumaIntegration, FirstTouchAoSoADistributesPages) {
+  if (numa_available() < 0 || numa_num_configured_nodes() < 2) {
+    GTEST_SKIP() << "NUMA not available";
+  }
+
+  const std::vector<int> nodes{0, 1};
+  constexpr std::size_t Tile = 256;
+  constexpr std::size_t elements = Tile * 512; // 512 tiles worth of elements
+  const std::size_t tileCount = (elements + Tile - 1) / Tile;
+  using TileType = typename soa::Vec3AoSoA<double, Tile>::Tile;
+  auto tiles = std::make_unique<TileType[]>(tileCount);
+  soa::Vec3AoSoA<double, Tile> aosoa{tiles.get()};
+
+  soa::init_vec3_aosoa(aosoa, elements, nodes, 1.0);
+
+  const std::size_t totalBytes = tileCount * sizeof(TileType);
+  const std::size_t totalSlots = tileCount * Tile;
+  const std::size_t threads = nodes.size();
+  const std::size_t chunk = (totalSlots + threads - 1) / threads;
+  const std::size_t firstElems = std::min(totalSlots, chunk);
+  const std::size_t fullTiles = firstElems / Tile;
+  const std::size_t lane = firstElems % Tile;
+  std::size_t firstBytes = fullTiles * sizeof(TileType);
+  if (lane > 0)
+    firstBytes += (2 * Tile + lane) * sizeof(double);
+
+  expect_pages_on_nodes(tiles.get(), totalBytes, firstBytes, nodes[0], nodes[1]);
+  EXPECT_DOUBLE_EQ(aosoa.tiles[0].x[0], 1.0);
+  EXPECT_DOUBLE_EQ(aosoa.tiles[0].y[0], 1.0);
+  EXPECT_DOUBLE_EQ(aosoa.tiles[0].z[0], 1.0);
 }
 #else
 TEST(NumaIntegration, Skipped) {
