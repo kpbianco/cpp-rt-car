@@ -1412,10 +1412,12 @@ private:
       if (t >= settings_.thermalLimpCelsius && degradeRung_ < 4)
         applyDegradeRung(4);
     }
-    if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
-      return;
 
-    if (!costWindow_.empty()) {
+    const double periodMs = 1000.0 / settings_.hz;
+    const bool monitorActive =
+        settings_.budgetMonitor && settings_.budgetWindow > 0;
+
+    if (monitorActive && !costWindow_.empty()) {
       if (costCount_ < costWindow_.size()) {
         costWindow_[costHead_] = computeMs;
         costSumMs_ += computeMs;
@@ -1429,15 +1431,22 @@ private:
       }
     }
 
-    const double periodMs = 1000.0 / settings_.hz;
     const double ratio = computeMs / periodMs;
-    const double avgComputeMs =
-        (costCount_ ? (costSumMs_ / double(costCount_)) : computeMs);
-    const double avgRatio = avgComputeMs / periodMs;
+    double avgComputeMs = computeMs;
+    double avgRatio = periodMs > 0.0 ? ratio : 0.0;
+
+    if (monitorActive) {
+      avgComputeMs =
+          (costCount_ ? (costSumMs_ / double(costCount_)) : computeMs);
+      avgRatio = avgComputeMs / periodMs;
+    }
 
     if (budgetCb_)
       budgetCb_(BudgetSample{computeMs, periodMs, ratio, avgComputeMs, avgRatio,
                              frame_});
+
+    if (!monitorActive)
+      return;
 
     if (logger_) {
       if (ratio >= settings_.budgetCritRatio ||
