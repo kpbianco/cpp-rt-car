@@ -23,21 +23,22 @@ public:
 
   struct Stats {
     std::size_t maxQueueDepth;
-    std::size_t steals;
+    std::size_t totalSteals;
+    std::vector<std::size_t> stealsPerThread;
   };
 
   WorkerPool(std::size_t numThreads, std::size_t queueSizePow2 = 1024,
              bool verbose = false, std::size_t maxOutstanding = 0)
-      : queue_(queueSizePow2) {
+      : queue_(queueSizePow2), stealsPerThread_(numThreads) {
     (void)verbose;
     stopping_.store(false, std::memory_order_relaxed);
     active_.store(0, std::memory_order_relaxed);
     outstanding_.store(0, std::memory_order_relaxed);
     maxOutstanding_ = maxOutstanding;
     for (std::size_t i = 0; i < numThreads; ++i) {
-      threads_.emplace_back([this] {
+      threads_.emplace_back([this, i] {
         rt::init_fp_env();
-        workerLoop();
+        workerLoop(i);
       });
     }
   }
@@ -88,12 +89,6 @@ public:
     while (!queue_.try_push(std::move(job))) {
       std::this_thread::yield();
     }
-    auto depth = queue_.size();
-    auto prev = maxQueueDepth_.load(std::memory_order_relaxed);
-    while (depth > prev &&
-           !maxQueueDepth_.compare_exchange_weak(prev, depth,
-                                                std::memory_order_relaxed)) {
-    }
   }
 
   void enqueue(JobFn fn, Priority pr = Priority::Normal,
@@ -138,12 +133,6 @@ public:
             outstanding_.fetch_sub(1, std::memory_order_acq_rel);
             return false;
           }
-          auto depth = queue_.size();
-          auto prev = maxQueueDepth_.load(std::memory_order_relaxed);
-          while (depth > prev &&
-                 !maxQueueDepth_.compare_exchange_weak(
-                     prev, depth, std::memory_order_relaxed)) {
-          }
           return true;
         }
       }
@@ -174,12 +163,6 @@ public:
       if (!queue_.try_push(std::move(job))) {
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
         return false;
-      }
-      auto depth = queue_.size();
-      auto prev = maxQueueDepth_.load(std::memory_order_relaxed);
-      while (depth > prev &&
-             !maxQueueDepth_.compare_exchange_weak(prev, depth,
-                                                  std::memory_order_relaxed)) {
       }
       return true;
     }
@@ -213,12 +196,21 @@ public:
   }
 
   Stats stats() const {
-    return Stats{maxQueueDepth_.load(std::memory_order_relaxed),
-                 steals_.load(std::memory_order_relaxed)};
+    Stats s;
+    s.maxQueueDepth = queue_.max_depth();
+    s.stealsPerThread.reserve(stealsPerThread_.size());
+    std::size_t totalSteals = 0;
+    for (const auto &counter : stealsPerThread_) {
+      auto steals = counter.load(std::memory_order_relaxed);
+      s.stealsPerThread.push_back(steals);
+      totalSteals += steals;
+    }
+    s.totalSteals = totalSteals;
+    return s;
   }
 
 private:
-  void workerLoop() {
+  void workerLoop(std::size_t index) {
     for (;;) {
       Job job;
       if (queue_.try_pop(job)) {
@@ -229,7 +221,9 @@ private:
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
         continue;
       }
-      steals_.fetch_add(1, std::memory_order_relaxed);
+      if (index < stealsPerThread_.size()) {
+        stealsPerThread_[index].fetch_add(1, std::memory_order_relaxed);
+      }
       if (stopping_.load(std::memory_order_acquire) &&
           outstanding_.load(std::memory_order_acquire) == 0) {
         break;
@@ -244,7 +238,6 @@ private:
   std::atomic<std::size_t> active_{0};
   std::atomic<std::size_t> outstanding_{0};
   std::size_t maxOutstanding_ = 0;
-  std::atomic<std::size_t> maxQueueDepth_{0};
-  std::atomic<std::size_t> steals_{0};
+  std::vector<std::atomic<std::size_t>> stealsPerThread_{};
 };
 
