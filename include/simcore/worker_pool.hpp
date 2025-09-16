@@ -198,11 +198,14 @@ public:
   Stats stats() const {
     Stats s;
     s.maxQueueDepth = queue_.max_depth();
-    s.totalSteals = totalSteals_.load(std::memory_order_relaxed);
     s.stealsPerThread.reserve(stealsPerThread_.size());
+    std::size_t totalSteals = 0;
     for (const auto &counter : stealsPerThread_) {
-      s.stealsPerThread.push_back(counter.load(std::memory_order_relaxed));
+      auto steals = counter.load(std::memory_order_relaxed);
+      s.stealsPerThread.push_back(steals);
+      totalSteals += steals;
     }
+    s.totalSteals = totalSteals;
     return s;
   }
 
@@ -218,7 +221,6 @@ private:
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
         continue;
       }
-      totalSteals_.fetch_add(1, std::memory_order_relaxed);
       if (index < stealsPerThread_.size()) {
         stealsPerThread_[index].fetch_add(1, std::memory_order_relaxed);
       }
@@ -237,6 +239,5 @@ private:
   std::atomic<std::size_t> outstanding_{0};
   std::size_t maxOutstanding_ = 0;
   std::vector<std::atomic<std::size_t>> stealsPerThread_{};
-  std::atomic<std::size_t> totalSteals_{0};
 };
 
