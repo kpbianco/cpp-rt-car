@@ -30,6 +30,7 @@
 #include "highres_clock.hpp"
 #include "worker_pool.hpp"
 #include <rt/fiber_pool.hpp>
+#include <rt/numa.hpp>
 #include <rt/numerics.hpp>
 #include <rt/prng.hpp>
 #include <rt/snapshot.hpp>
@@ -652,12 +653,20 @@ private:
 
     threads_.reserve(workerCount_);
     for (std::size_t i = 0; i < workerCount_; ++i) {
-      threads_.emplace_back([this, i
+      int node = (i < threadNodes.size()) ? threadNodes[i] : -1;
+      threads_.emplace_back([this, i, node
 #ifdef __linux__
                              ,
                              cpuList
 #endif
       ] {
+#ifndef SIM_USE_NUMA
+        (void)node;
+#endif
+#ifdef SIM_USE_NUMA
+        if (node >= 0)
+          rt::numa::bind_thread_to_node(node);
+#endif
 #ifdef __linux__
         if (settings_.pinThreads && !cpuList.empty())
           set_affinity(std::size_t(cpuList[i % cpuList.size()]));
