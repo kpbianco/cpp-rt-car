@@ -41,7 +41,7 @@ TEST(RTPipeline, QueueMetricsAndNoThreadsInSrc) {
 
   auto stats = pool.stats();
   EXPECT_GT(stats.maxQueueDepth, 0u);
-  EXPECT_GT(stats.steals, 0u);
+  EXPECT_GT(stats.totalSteals, 0u);
 
   bool found = false;
   std::filesystem::path srcDir{PROJECT_SOURCE_DIR};

@@ -66,6 +66,12 @@ public:
     enqueueCache_ = pos + 1;
     cell->data = std::forward<U>(v);
     cell->sequence.store(pos + 1, std::memory_order_release);
+    auto depth = count_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    auto prev = maxDepth_.load(std::memory_order_relaxed);
+    while (depth > prev &&
+           !maxDepth_.compare_exchange_weak(prev, depth,
+                                            std::memory_order_relaxed)) {
+    }
     return true;
   }
 
@@ -94,6 +100,7 @@ public:
     dequeueCache_ = pos + 1;
     out = std::move(cell->data);
     cell->sequence.store(pos + buffer_.size(), std::memory_order_release);
+    count_.fetch_sub(1, std::memory_order_acq_rel);
     return true;
   }
 
@@ -105,12 +112,14 @@ public:
   std::size_t max_capacity() const { return buffer_.size(); }
 
   std::size_t size() const {
-    auto enq = enqueuePos_.load(std::memory_order_acquire);
-    auto deq = dequeuePos_.load(std::memory_order_acquire);
-    return enq - deq;
+    return count_.load(std::memory_order_acquire);
   }
 
   bool empty() const { return size() == 0; }
+
+  std::size_t max_depth() const {
+    return maxDepth_.load(std::memory_order_relaxed);
+  }
 
 private:
   static constexpr std::size_t cacheLine() {
@@ -141,6 +150,8 @@ private:
   const std::size_t mask_;
   alignas(cacheLine()) std::atomic<std::size_t> enqueuePos_{0};
   alignas(cacheLine()) std::atomic<std::size_t> dequeuePos_{0};
+  std::atomic<std::size_t> count_{0};
+  std::atomic<std::size_t> maxDepth_{0};
 
   // Per-thread caches for enqueue/dequeue positions.
   static thread_local std::size_t enqueueCache_;
