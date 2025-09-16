@@ -113,7 +113,8 @@ endif()
 
 # --- affinity test -------------------------------------------------
 if (UNIX AND NOT APPLE)   # linux
-    list(APPEND TEST_SOURCES tests/test_affinity.cpp tests/test_numa_pool.cpp)
+    list(APPEND TEST_SOURCES tests/test_affinity.cpp tests/test_numa_pool.cpp
+                                 tests/test_numa_integration.cpp)
     find_library(LIBNUMA numa)
     find_path(NUMA_INCLUDE_DIR numa.h)
     if (LIBNUMA AND NUMA_INCLUDE_DIR)

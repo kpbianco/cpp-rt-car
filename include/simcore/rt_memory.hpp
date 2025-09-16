@@ -50,17 +50,10 @@ static inline std::size_t os_page_size() noexcept {
 // Optional: page pre-touch, mlock, hugepage advice at init.
 class FrameArena {
 public:
+  FrameArena() = default;
   explicit FrameArena(std::size_t capacityBytes = (1u << 20),
-                      std::size_t alignment = 64, int numaNode = -1)
-      : alignment_(normalize_align(alignment))
-#if defined(__linux__) && defined(SIM_USE_NUMA)
-        , numaNode_(numaNode)
-#endif
-  {
-#if !(defined(__linux__) && defined(SIM_USE_NUMA))
-    (void)numaNode;
-#endif
-    reserve_(capacityBytes);
+                      std::size_t alignment = 64, int numaNode = -1) {
+    configure(capacityBytes, alignment, numaNode);
   }
 
   FrameArena(const FrameArena &) = delete;
@@ -107,6 +100,29 @@ public:
   }
 
   ~FrameArena() { release_(); }
+
+  void configure(std::size_t capacityBytes, std::size_t alignment = 64,
+                 int numaNode = -1) {
+    alignment = normalize_align(alignment);
+    if (buffer_ && capacity_ == capacityBytes && alignment_ == alignment
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+        && numaNode_ == numaNode
+#endif
+    ) {
+      head_ = 0;
+#if !(defined(__linux__) && defined(SIM_USE_NUMA))
+      (void)numaNode;
+#endif
+      return;
+    }
+    alignment_ = alignment;
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+    numaNode_ = numaNode;
+#else
+    (void)numaNode;
+#endif
+    reserve_(capacityBytes);
+  }
 
   void reset() noexcept { head_ = 0; }
   std::size_t capacity() const noexcept { return capacity_; }
@@ -242,12 +258,9 @@ public:
                  std::size_t perThreadCapacityBytes = (1u << 20),
                  std::size_t baseAlignment = 64,
                  const std::vector<int> &nodes = {})
-      : arenas_(), nodes_(nodes), nextIndex_(0) {
-    arenas_.reserve(threads);
-    for (std::size_t i = 0; i < threads; ++i) {
-      int node = (i < nodes_.size()) ? nodes_[i] : -1;
-      arenas_.emplace_back(perThreadCapacityBytes, baseAlignment, node);
-    }
+      : arenas_(threads), nodes_(nodes), perThreadCapacityBytes_(perThreadCapacityBytes),
+        baseAlignment_(baseAlignment), nextIndex_(0) {
+    nodes_.resize(threads, -1);
 
     static_assert(std::is_move_constructible<FrameArena>::value,
                   "FrameArena must be move-constructible");
@@ -262,6 +275,10 @@ public:
   void bindCurrentThread(std::size_t i) noexcept {
     assert(i < arenas_.size());
     tlsIndex_ = i;
+    if (perThreadCapacityBytes_) {
+      int node = nodeForIndex(i);
+      arenas_[i].configure(perThreadCapacityBytes_, baseAlignment_, node);
+    }
   }
 
   // Non-deterministic first-touch assignment (optional).
@@ -281,12 +298,18 @@ public:
   const FrameArena &arena(std::size_t i) const noexcept { return arenas_[i]; }
   FrameArena &arena(std::size_t i) noexcept { return arenas_[i]; }
   int node(std::size_t i) const noexcept {
-    return (i < nodes_.size()) ? nodes_[i] : -1;
+    return nodeForIndex(i);
   }
 
 private:
+  int nodeForIndex(std::size_t i) const noexcept {
+    return (i < nodes_.size()) ? nodes_[i] : -1;
+  }
+
   std::vector<FrameArena> arenas_;
   std::vector<int> nodes_;
+  std::size_t perThreadCapacityBytes_ = 0;
+  std::size_t baseAlignment_ = 64;
   std::atomic<std::size_t> nextIndex_;
   static thread_local std::size_t tlsIndex_;
 };
