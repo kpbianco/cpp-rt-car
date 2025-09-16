@@ -3,6 +3,7 @@
 // minParallelChunks).
 #pragma once
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -24,6 +25,7 @@
 #include "frame_arena.hpp"
 #include "logger.hpp"
 #include "profiler.hpp"
+#include "rate_governor.hpp"
 #include "highres_clock.hpp"
 #include "worker_pool.hpp"
 #include <rt/fiber_pool.hpp>
@@ -124,6 +126,17 @@ public:
   int subSteps() const { return subSteps_; }
   int watchdogTrips() const { return watchdogTrips_.load(std::memory_order_acquire); }
   bool limpModeActive() const { return settings_.limpMode || watchdogLimp_.load(); }
+  int governorRung() const { return governor_.rung(); }
+  double governorScale() const { return governorScale_; }
+  std::uint64_t rungActivations(int rung) const {
+    if (rung < 1 || rung > 4)
+      return 0;
+    return degradeActivations_[static_cast<std::size_t>(rung - 1)];
+  }
+  std::uint64_t governorRungCount(int rung) const {
+    return governor_.rungCount(rung);
+  }
+  double frameBudgetMs() const { return frame_budget_ms_; }
 
   // Counter-based deterministic PRNG. Counter is derived from frame and
   // element index so results are independent of execution order.
@@ -194,6 +207,15 @@ public:
     double adaptDownFactor = 0.95;
     double minHz = 60.0;
     int adaptCooldownFrames = 600;
+
+    // Rate governor
+    bool rateGovernorEnable = true;
+    double rateGovernorTargetUtil = 0.9;
+    double rateGovernorHysteresis = 0.05;
+    double rateGovernorKp = 0.1;
+    double rateGovernorKi = 0.01;
+    double rateGovernorMinScale = 0.5;
+    double rateGovernorMaxScale = 1.0;
 
     // Thermal monitoring
     bool thermalMonitor = false;
@@ -311,6 +333,17 @@ public:
       settings_.predictiveWindow = settings_.budgetWindow;
 
     recalcTiming();
+
+    frame_budget_ms_ = dt_.count() * 1000.0;
+    target_util_ = settings_.rateGovernorTargetUtil;
+    hysteresis_ = settings_.rateGovernorHysteresis;
+    governor_ = RateGovernor(settings_.rateGovernorKp, settings_.rateGovernorKi,
+                             settings_.rateGovernorMinScale,
+                             settings_.rateGovernorMaxScale);
+    governor_.setCallback([this](int rung) { applyDegradeRung(rung); });
+    governorScale_ = 1.0;
+    degradeRung_ = 0;
+    degradeActivations_.fill(0);
 
     if (settings_.limpMode) {
       settings_.budgetMonitor = false;
@@ -927,6 +960,9 @@ private:
 
     const double computeMs = Clock::to_ms(computeEnd - computeStart);
     updateBudget(computeMs);
+    if (settings_.rateGovernorEnable)
+      governorScale_ =
+          governor_.update(computeMs, frame_budget_ms_, target_util_, hysteresis_);
 
     // feed-forward: build headroom (do BEFORE sleeping)
     if (settings_.predictiveEnable) {
@@ -1316,35 +1352,72 @@ private:
     dt_ = Seconds{1.0 / settings_.hz};
     outerDt_ = dt_ * subSteps_;
     dtNs_ = static_cast<std::uint64_t>(dt_.count() * 1'000'000'000.0);
+    frame_budget_ms_ = dt_.count() * 1000.0;
     startReal_ = Clock::now();
   }
 
 public:
   void applyDegradeRung(int rung) {
-    degradeRung_ = rung;
-    if (rung >= 1)
+    if (rung <= degradeRung_)
+      return;
+    rung = std::clamp(rung, 0, 4);
+    for (int step = degradeRung_ + 1; step <= rung; ++step) {
+      degradeRung_ = step;
+      recordDegradeActivation_(step);
+      switch (step) {
+      case 1:
+        drop_visuals_();
+        break;
+      case 2:
+        reduce_substeps_();
+        break;
+      case 3:
+        coarsen_phase_();
+        break;
+      case 4:
+        drop_visuals_();
+        coarsen_phase_();
+        subSteps_ = 1;
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
+private:
+  void drop_visuals_() {
+    if (settings_.visualizers)
       settings_.visualizers = false;
-    if (rung >= 2 && subSteps_ > 1)
+  }
+
+  void reduce_substeps_() {
+    if (subSteps_ > 1)
       --subSteps_;
-    if (rung >= 3)
-      settings_.broadphaseCoarse = true;
-    if (rung >= 4)
-      subSteps_ = 1;
+  }
+
+  void coarsen_phase_() { settings_.broadphaseCoarse = true; }
+
+  void recordDegradeActivation_(int rung) {
+    if (rung < 1 || rung > 4)
+      return;
+    degradeActivations_[static_cast<std::size_t>(rung - 1)]++;
     bintrace_.log(bintrace::EV_BudgetLadder, static_cast<std::uint32_t>(rung),
                   static_cast<std::uint64_t>(frame_));
   }
 
-private:
   void updateBudget(double computeMs) {
     if (settings_.thermalMonitor && settings_.readPackageTemp) {
       double t = settings_.readPackageTemp();
       if (t >= settings_.thermalLimpCelsius && degradeRung_ < 4)
         applyDegradeRung(4);
     }
-    if (!settings_.budgetMonitor || settings_.budgetWindow <= 0)
-      return;
 
-    if (!costWindow_.empty()) {
+    const double periodMs = 1000.0 / settings_.hz;
+    const bool monitorActive =
+        settings_.budgetMonitor && settings_.budgetWindow > 0;
+
+    if (monitorActive && !costWindow_.empty()) {
       if (costCount_ < costWindow_.size()) {
         costWindow_[costHead_] = computeMs;
         costSumMs_ += computeMs;
@@ -1358,15 +1431,22 @@ private:
       }
     }
 
-    const double periodMs = 1000.0 / settings_.hz;
     const double ratio = computeMs / periodMs;
-    const double avgComputeMs =
-        (costCount_ ? (costSumMs_ / double(costCount_)) : computeMs);
-    const double avgRatio = avgComputeMs / periodMs;
+    double avgComputeMs = computeMs;
+    double avgRatio = periodMs > 0.0 ? ratio : 0.0;
+
+    if (monitorActive) {
+      avgComputeMs =
+          (costCount_ ? (costSumMs_ / double(costCount_)) : computeMs);
+      avgRatio = avgComputeMs / periodMs;
+    }
 
     if (budgetCb_)
       budgetCb_(BudgetSample{computeMs, periodMs, ratio, avgComputeMs, avgRatio,
                              frame_});
+
+    if (!monitorActive)
+      return;
 
     if (logger_) {
       if (ratio >= settings_.budgetCritRatio ||
@@ -1452,6 +1532,12 @@ private:
   double costSumMs_ = 0.0;
   int adaptCooldown_ = 0;
   int degradeRung_ = 0;
+  std::array<std::uint64_t, 4> degradeActivations_{};
+  RateGovernor governor_{};
+  double frame_budget_ms_ = 0.0;
+  double target_util_ = 0.9;
+  double hysteresis_ = 0.05;
+  double governorScale_ = 1.0;
   std::function<void(const BudgetSample &)> budgetCb_;
 
   std::uint64_t deterministicHash_ = 0;
