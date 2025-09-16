@@ -660,6 +660,9 @@ private:
                              cpuList
 #endif
       ] {
+#ifndef SIM_USE_NUMA
+        (void)node;
+#endif
 #ifdef SIM_USE_NUMA
         if (node >= 0)
           rt::numa::bind_thread_to_node(node);

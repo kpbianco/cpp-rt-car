@@ -51,7 +51,7 @@ static inline std::size_t os_page_size() noexcept {
 class FrameArena {
 public:
   FrameArena() = default;
-  explicit FrameArena(std::size_t capacityBytes = (1u << 20),
+  explicit FrameArena(std::size_t capacityBytes,
                       std::size_t alignment = 64, int numaNode = -1) {
     configure(capacityBytes, alignment, numaNode);
   }
