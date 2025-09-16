@@ -75,6 +75,7 @@ public:
       }
       if (threads_.size() > 1) {
         std::thread([this, job = std::move(job)]() mutable {
+          rt::init_fp_env();
           active_.fetch_add(1, std::memory_order_acq_rel);
           if (job.fn)
             job.fn();
@@ -124,6 +125,7 @@ public:
               return true;
             }
             std::thread([this, job = std::move(job)]() mutable {
+              rt::init_fp_env();
               active_.fetch_add(1, std::memory_order_acq_rel);
               if (job.fn)
                 job.fn();
@@ -160,6 +162,7 @@ public:
           return true;
         }
         std::thread([this, job = std::move(job)]() mutable {
+          rt::init_fp_env();
           active_.fetch_add(1, std::memory_order_acq_rel);
           if (job.fn)
             job.fn();
