@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "bintrace.hpp"
+#include "deterministic_reduce.hpp"
 #include "frame_arena.hpp"
 #include "logger.hpp"
 #include "profiler.hpp"
@@ -45,23 +46,6 @@
 #include <numa.h>
 #endif
 #endif
-
-namespace simcore_det {
-template <class Vec> inline double pairwise_sum(Vec &vals) {
-  std::size_t len = vals.size();
-  if (len == 0)
-    return 0.0;
-  while (len > 1) {
-    const std::size_t half = len / 2;
-    for (std::size_t i = 0; i < half; ++i)
-      vals[i] += vals[i + half];
-    if (len & 1)
-      vals[half] = vals[len - 1];
-    len = half + (len & 1);
-  }
-  return vals[0];
-}
-} // namespace simcore_det
 
 // PMR adaptor for FrameArena
 struct ArenaResource : std::pmr::memory_resource {
@@ -1283,7 +1267,8 @@ private:
           leafThunk(leafCtx, b, e, frame_, dt_);
         }
       }
-      double total = simcore_det::pairwise_sum(partials);
+      double total =
+          simcore::deterministic_reduce::pairwise_sum(partials);
       rr.sink(rr.sinkCtx, total, checksums.data(), totalChunks, frame_, dt_);
     }
 

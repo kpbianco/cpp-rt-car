@@ -13,6 +13,7 @@
 #include <xmmintrin.h>
 #endif
 
+#include <simcore/deterministic_reduce.hpp>
 #include <simcore/logger.hpp>
 #include <simcore/profiler.hpp>
 
@@ -53,15 +54,6 @@ static double kahan_sum(const std::vector<double>& v)
     return sum;
 }
 
-static double pairwise_sum(const double* begin, const double* end)
-{
-    auto len = end - begin;
-    if (len <= 1)
-        return len ? *begin : 0.0;
-    const double* mid = begin + len / 2;
-    return pairwise_sum(begin, mid) + pairwise_sum(mid, end);
-}
-
 static void experiment_pairwise_vs_kahan()
 {
     PROF_SCOPE(g_prof, "pairwise_vs_kahan");
@@ -73,7 +65,8 @@ static void experiment_pairwise_vs_kahan()
     volatile double kahan = kahan_sum(data);
     auto t_kahan = clock_type::now() - start;
     start = clock_type::now();
-    volatile double pairwise = pairwise_sum(data.data(), data.data() + data.size());
+    volatile double pairwise =
+        simcore::deterministic_reduce::pairwise_sum(data.data(), data.size());
     auto t_pair = clock_type::now() - start;
 
     if (g_log)
