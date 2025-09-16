@@ -16,11 +16,7 @@ jobs:
       matrix:
         compiler: [gcc, clang]
         build_type: [Debug, RelWithDebInfo]
-        include:
-          - build_type: Debug
-            sanitizers: address;undefined
-          - build_type: RelWithDebInfo
-            sanitizers: ''
+        fma: [ON, OFF]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,7 +33,15 @@ jobs:
             echo "CXX=g++" >> $GITHUB_ENV
           fi
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS='${{matrix.sanitizers}}' -DSIM_WERROR=ON
+        run: |
+          SANITIZERS=${{ matrix.build_type == 'Debug' && 'address;undefined' || '' }}
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DENABLE_TESTS=ON \
+            -DENABLE_RAPIDCHECK=ON \
+            -DSIM_SANITIZERS="$SANITIZERS" \
+            -DSIM_ENABLE_AVX2=${{ matrix.fma }} \
+            -DSIM_WERROR=ON
       - name: Build
         run: cmake --build build --config ${{matrix.build_type}} -- -j2
       - name: Test
@@ -51,8 +55,8 @@ jobs:
         with:
           path: .
           format: spdx-json
-          output-file: sbom-${{matrix.compiler}}-${{matrix.build_type}}.spdx.json
-          artifact-name: sbom-${{matrix.compiler}}-${{matrix.build_type}}
+          output-file: sbom-${{matrix.compiler}}-${{matrix.build_type}}-${{matrix.fma}}.spdx.json
+          artifact-name: sbom-${{matrix.compiler}}-${{matrix.build_type}}-${{matrix.fma}}
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'

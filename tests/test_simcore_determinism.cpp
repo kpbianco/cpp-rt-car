@@ -1,10 +1,21 @@
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
 #include <simcore/logger.hpp>
-#include <vector>
+#include <array>
 #include <cstring>
+#include <string>
+#include <vector>
 
-static std::uint64_t runHash(std::size_t threads) {
+#include <rt/numerics.hpp>
+
+namespace {
+
+struct DeterminismParam {
+    std::size_t threads;
+    bool useFma;
+};
+
+static std::uint64_t runHash(std::size_t threads, bool useFma) {
     SimCore::Settings s;
     s.hz = 1000.0;
     s.maxFrames = 1500;
@@ -14,6 +25,7 @@ static std::uint64_t runHash(std::size_t threads) {
     s.spinMicros = 200;
     s.logPhases = false;
     s.logRangeTasks = false;
+    s.useFMA = useFma;
 
     Logger logger; logger.setLevel(Logger::Level::Error);
     SimCore sim(s);
@@ -48,8 +60,39 @@ static std::uint64_t runHash(std::size_t threads) {
     return sim.deterministicHash();
 }
 
-TEST(SimCoreDeterminism, HashSameAcrossThreadCounts) {
-    auto h2 = runHash(2);
-    auto h8 = runHash(8);
-    EXPECT_EQ(h2, h8);
+class SimCoreDeterminism : public ::testing::TestWithParam<DeterminismParam> {};
+
+TEST_P(SimCoreDeterminism, HashSameAcrossThreadCounts) {
+    auto params = GetParam();
+    auto singleThreadHash = runHash(1, params.useFma);
+    auto multiThreadHash = runHash(params.threads, params.useFma);
+    EXPECT_EQ(singleThreadHash, multiThreadHash);
 }
+
+constexpr std::array<std::size_t, 3> kThreadCounts{2, 4, 8};
+
+std::vector<DeterminismParam> buildParams() {
+    std::vector<DeterminismParam> params;
+    params.reserve(kThreadCounts.size() * 2);
+    for (auto threads : kThreadCounts) {
+        params.push_back({threads, false});
+        if constexpr (rt::detail::kBuildAllowsFma) {
+            params.push_back({threads, true});
+        }
+    }
+    return params;
+}
+
+const auto kDeterminismParams = buildParams();
+
+std::string determinismParamName(const ::testing::TestParamInfo<DeterminismParam> &info) {
+    std::string name = std::to_string(info.param.threads) + "Threads";
+    name += info.param.useFma ? "FmaOn" : "FmaOff";
+    return name;
+}
+
+INSTANTIATE_TEST_SUITE_P(CrossMatrixDeterminism, SimCoreDeterminism,
+                         ::testing::ValuesIn(kDeterminismParams),
+                         determinismParamName);
+
+} // namespace
