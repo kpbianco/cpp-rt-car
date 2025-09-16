@@ -29,13 +29,12 @@ public:
 
   WorkerPool(std::size_t numThreads, std::size_t queueSizePow2 = 1024,
              bool verbose = false, std::size_t maxOutstanding = 0)
-      : queue_(queueSizePow2) {
+      : queue_(queueSizePow2), stealsPerThread_(numThreads) {
     (void)verbose;
     stopping_.store(false, std::memory_order_relaxed);
     active_.store(0, std::memory_order_relaxed);
     outstanding_.store(0, std::memory_order_relaxed);
     maxOutstanding_ = maxOutstanding;
-    stealsPerThread_.resize(numThreads);
     for (std::size_t i = 0; i < numThreads; ++i) {
       threads_.emplace_back([this, i] {
         rt::init_fp_env();
