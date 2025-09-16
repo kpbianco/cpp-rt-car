@@ -34,7 +34,10 @@ jobs:
           fi
       - name: Configure
         run: |
-          SANITIZERS=${{ matrix.build_type == 'Debug' && 'address;undefined' || '' }}
+          SANITIZERS=""
+          if [ "${{ matrix.build_type }}" = "Debug" ]; then
+            SANITIZERS="address;undefined"
+          fi
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DENABLE_TESTS=ON \
