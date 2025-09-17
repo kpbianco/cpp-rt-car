@@ -51,13 +51,15 @@ struct OverlapBudget {
 
 namespace detail {
 
-inline rt::Task wait_for_fence_task(Fence fence,
-                                    std::atomic<hal::Duration::rep>* gpu_ns,
-                                    rt::FiberPool& pool,
-                                    std::atomic<hal::Duration::rep>& gpu_total) {
-    std::unique_ptr<std::atomic<hal::Duration::rep>> gpu_ns_holder{gpu_ns};
+inline rt::Task wait_for_fence_task(
+    Fence fence,
+    std::shared_ptr<std::atomic<hal::Duration::rep>> gpu_ns,
+    rt::FiberPool& pool,
+    std::atomic<hal::Duration::rep>& gpu_total) {
     co_await rt::FiberPool::FenceAwaiter{fence, pool};
-    gpu_total.fetch_add(gpu_ns_holder->load(std::memory_order_acquire), std::memory_order_acq_rel);
+    if (gpu_ns) {
+        gpu_total.fetch_add(gpu_ns->load(std::memory_order_acquire), std::memory_order_acq_rel);
+    }
     co_return;
 }
 
@@ -100,10 +102,10 @@ public:
 
         for (std::size_t i = 0; i < passes_.size(); ++i) {
             auto& p = passes_[i];
-            std::atomic<hal::Duration::rep>* gpu_ns = nullptr;
+            std::shared_ptr<std::atomic<hal::Duration::rep>> gpu_ns;
             Fence fence;
             if (p.gpu) {
-                gpu_ns = new std::atomic<hal::Duration::rep>(0);
+                gpu_ns = std::make_shared<std::atomic<hal::Duration::rep>>(0);
                 fence = submit([&, pass_idx = i, gpu_ns]() {
                     auto start = hal::now();
                     cpu_timeline_.wait(pass_idx + 1);
@@ -129,7 +131,7 @@ public:
                 if (!pool_ptr)
                     pool_ptr = &ensure_pool();
                 auto* pool = pool_ptr;
-                pool->spawn(detail::wait_for_fence_task(std::move(fence), gpu_ns,
+                pool->spawn(detail::wait_for_fence_task(std::move(fence), std::move(gpu_ns),
                                                        *pool, gpu_total));
             }
         }
