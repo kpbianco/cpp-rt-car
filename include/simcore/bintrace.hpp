@@ -23,11 +23,20 @@ struct alignas(32) Event {
 };
 
 enum : std::uint32_t {
-    EV_PhaseBegin  = 0x01,
-    EV_PhaseEnd    = 0x02,
-    EV_ChunkStart  = 0x03,
-    EV_ChunkDone   = 0x04,
-    EV_BudgetLadder = 0x05,
+    EV_PhaseBegin        = 0x01,
+    EV_PhaseEnd          = 0x02,
+    EV_ChunkStart        = 0x03,
+    EV_ChunkDone         = 0x04,
+    EV_GovernorRung      = 0x05,
+    EV_BudgetLadder      = EV_GovernorRung,
+    EV_QueuePush         = 0x06,
+    EV_QueuePop          = 0x07,
+    EV_WorkSteal         = 0x08,
+    EV_WatchdogTrip      = 0x09,
+    EV_GpuFenceWaitBegin = 0x0A,
+    EV_GpuFenceWaitEnd   = 0x0B,
+    EV_SnapshotSave      = 0x0C,
+    EV_SnapshotLoad      = 0x0D,
 };
 
 static inline std::uint64_t rdtsc() noexcept {
@@ -40,6 +49,7 @@ public:
 
     void init(std::size_t threads, std::size_t eventsPerThread, bool enabled) {
         enabled_ = enabled;
+        eventsPerThread_ = eventsPerThread;
         buffers_.clear();
         buffers_.resize(threads); // needs movable/default-constructible Buffer
         for (std::size_t i=0;i<threads;++i) {
@@ -54,6 +64,7 @@ public:
     }
 
     void shutdown() {
+        eventsPerThread_ = 0;
         for (auto& b : buffers_) {
             if (b.mem) {
                 ::operator delete(b.mem, std::align_val_t(64));
@@ -64,6 +75,25 @@ public:
         buffers_.clear();
         tlsBuf_ = nullptr;
         tlsThreadIdx_ = ~std::size_t{0};
+    }
+
+    std::size_t threadCount() const noexcept { return buffers_.size(); }
+
+    std::size_t appendThreads(std::size_t count) {
+        if (count == 0)
+            return buffers_.size();
+        const std::size_t base = buffers_.size();
+        buffers_.resize(base + count);
+        if (eventsPerThread_ == 0)
+            return base;
+        for (std::size_t i = base; i < buffers_.size(); ++i) {
+            Buffer &b = buffers_[i];
+            b.cap = eventsPerThread_;
+            b.mem = ::operator new(b.cap * sizeof(Event), std::align_val_t(64));
+            b.base = static_cast<Event *>(b.mem);
+            b.write.store(0, std::memory_order_relaxed);
+        }
+        return base;
     }
 
     bool enabled() const noexcept { return enabled_; }
@@ -191,6 +221,7 @@ private:
 
     std::vector<Buffer> buffers_;
     bool enabled_ = false;
+    std::size_t eventsPerThread_ = 0;
 
     // TLS writer cursor
     static thread_local Buffer* tlsBuf_;
@@ -199,5 +230,29 @@ private:
 
 inline thread_local typename Trace::Buffer* Trace::tlsBuf_ = nullptr;
 inline thread_local std::size_t            Trace::tlsThreadIdx_ = ~std::size_t{0};
+
+namespace detail {
+inline std::atomic<Trace*> g_trace{nullptr};
+} // namespace detail
+
+inline void set_global_trace(Trace* trace) {
+    detail::g_trace.store(trace, std::memory_order_release);
+}
+
+inline Trace* global_trace() {
+    return detail::g_trace.load(std::memory_order_acquire);
+}
+
+inline void log_queue_push(std::uint32_t depth, std::uint64_t capacity = 0) {
+    if (auto* trace = global_trace()) {
+        trace->log(EV_QueuePush, depth, capacity);
+    }
+}
+
+inline void log_queue_pop(std::uint32_t depth, std::uint64_t capacity = 0) {
+    if (auto* trace = global_trace()) {
+        trace->log(EV_QueuePop, depth, capacity);
+    }
+}
 
 } // namespace bintrace

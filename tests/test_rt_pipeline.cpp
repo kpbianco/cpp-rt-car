@@ -3,6 +3,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <thread>
@@ -11,6 +12,8 @@
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
 #include <simcore/worker_pool.hpp>
+#include <gpu/frame_graph.hpp>
+#include "tools/trace_export.hpp"
 
 static void busy_for(double ms) {
   using Clock = std::chrono::steady_clock;
@@ -128,5 +131,81 @@ TEST(RTPipeline, RateGovernorClampsFrameBudget) {
   double p99 = sorted[index];
   double budget = 1000.0 / s.hz;
   EXPECT_LE(p99, budget * 1.05);
+}
+
+TEST(RTPipeline, TraceIncludesCriticalEvents) {
+  WorkerPool pool(3);
+  SimCore::Settings s;
+  s.hz = 60.0;
+  s.maxFrames = 100;
+  s.threads = 3;
+  s.autoTuneChunks = false;
+  s.chunkSize = 64;
+  s.bintraceEnable = true;
+  s.bintraceEventsPerThread = 1u << 14;
+  s.budgetMonitor = false;
+  SimCore sim(s);
+  sim.setWorkerPool(&pool);
+
+  sim.applyDegradeRung(1);
+
+  auto rangePhase = sim.addPhase("range", 1024);
+  sim.addParallelRangeTask(rangePhase,
+                           [](std::size_t, std::size_t, std::int64_t,
+                              SimCore::Seconds) { busy_for(0.2); });
+
+  auto slowPhase = sim.addPhase("slow");
+  sim.addSerialSubsystem(slowPhase, [](std::int64_t frame, SimCore::Seconds) {
+    if (frame % 25 == 0)
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    else
+      busy_for(1.0);
+  });
+
+  sim.run();
+
+  EXPECT_GE(sim.watchdogTrips(), 1);
+
+  auto frameSnapshot = sim.saveFrame();
+  sim.loadFrame(frameSnapshot);
+
+  simcore::hal::gpu::FrameGraph fg;
+  fg.add_pass([]() { busy_for(1.0); },
+              []() { std::this_thread::sleep_for(std::chrono::milliseconds(5)); });
+  (void)fg.execute();
+
+  auto snap = sim.bintrace().snapshot();
+
+  std::ostringstream os;
+  trace_export::write_chrome_trace(snap, os);
+  auto json = os.str();
+  EXPECT_FALSE(json.empty());
+
+  auto countCat = [&json](const std::string &cat) {
+    std::string pattern = "\"cat\":\"" + cat + "\"";
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = json.find(pattern, pos)) != std::string::npos) {
+      ++count;
+      pos += pattern.size();
+    }
+    return count;
+  };
+
+  EXPECT_GE(countCat("PhaseBegin"), 200u);
+  EXPECT_GE(countCat("PhaseEnd"), 200u);
+  EXPECT_GE(countCat("ChunkStart"), 1u);
+  EXPECT_GE(countCat("ChunkDone"), 1u);
+  EXPECT_GE(countCat("QueuePush"), 1u);
+  EXPECT_GE(countCat("QueuePop"), 1u);
+  EXPECT_GE(countCat("WorkSteal"), 1u);
+  EXPECT_GE(countCat("GovernorRung"), 1u);
+  EXPECT_GE(countCat("WatchdogTrip"), 1u);
+  EXPECT_GE(countCat("GpuFenceWaitBegin"), 1u);
+  EXPECT_GE(countCat("GpuFenceWaitEnd"), 1u);
+  EXPECT_GE(countCat("SnapshotSave"), 1u);
+  EXPECT_GE(countCat("SnapshotLoad"), 1u);
+
+  pool.stop();
 }
 

@@ -3,9 +3,12 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <new>
 #include <utility>
 #include <vector>
+
+#include "bintrace.hpp"
 
 #if defined(_MSC_VER)
 #pragma warning(push)
@@ -66,11 +69,16 @@ public:
     enqueueCache_ = pos + 1;
     cell->data = std::forward<U>(v);
     cell->sequence.store(pos + 1, std::memory_order_release);
-    auto depth = count_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    auto prevCount = count_.fetch_add(1, std::memory_order_acq_rel);
+    auto depth = prevCount + 1;
     auto prev = maxDepth_.load(std::memory_order_relaxed);
     while (depth > prev &&
            !maxDepth_.compare_exchange_weak(prev, depth,
                                             std::memory_order_relaxed)) {
+    }
+    if (depth <= std::numeric_limits<std::uint32_t>::max()) {
+        bintrace::log_queue_push(static_cast<std::uint32_t>(depth),
+                                 static_cast<std::uint64_t>(mask_ + 1));
     }
     return true;
   }
@@ -100,7 +108,12 @@ public:
     dequeueCache_ = pos + 1;
     out = std::move(cell->data);
     cell->sequence.store(pos + buffer_.size(), std::memory_order_release);
-    count_.fetch_sub(1, std::memory_order_acq_rel);
+    auto prevCount = count_.fetch_sub(1, std::memory_order_acq_rel);
+    auto depth = (prevCount > 0) ? (prevCount - 1) : 0;
+    if (depth <= std::numeric_limits<std::uint32_t>::max()) {
+        bintrace::log_queue_pop(static_cast<std::uint32_t>(depth),
+                                static_cast<std::uint64_t>(mask_ + 1));
+    }
     return true;
   }
 

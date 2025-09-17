@@ -1,10 +1,12 @@
 #pragma once
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <thread>
 #include <vector>
 #include <rt/numerics.hpp>
+#include "bintrace.hpp"
 #include "job_queue.hpp"
 #include "debug.hpp"
 
@@ -200,6 +202,11 @@ public:
     return outstanding_.load(std::memory_order_acquire);
   }
 
+  void setTrace(bintrace::Trace *trace, std::size_t baseIndex) {
+    traceBase_.store(baseIndex, std::memory_order_release);
+    trace_.store(trace, std::memory_order_release);
+  }
+
   Stats stats() const {
     Stats s;
     s.maxQueueDepth = queue_.max_depth();
@@ -216,7 +223,15 @@ public:
 
 private:
   void workerLoop(std::size_t index) {
+    bool bound = false;
     for (;;) {
+      if (!bound) {
+        if (auto *trace = trace_.load(std::memory_order_acquire)) {
+          const std::size_t base = traceBase_.load(std::memory_order_acquire);
+          trace->bindThread(base + index);
+          bound = true;
+        }
+      }
       Job job;
       if (queue_.try_pop(job)) {
         active_.fetch_add(1, std::memory_order_acq_rel);
@@ -228,6 +243,13 @@ private:
       }
       if (index < stealsPerThread_.size()) {
         stealsPerThread_[index].fetch_add(1, std::memory_order_relaxed);
+      }
+      if (auto *trace = trace_.load(std::memory_order_acquire)) {
+        if (outstanding_.load(std::memory_order_acquire) > 0) {
+          trace->log(bintrace::EV_WorkSteal,
+                     static_cast<std::uint32_t>(index),
+                     static_cast<std::uint64_t>(queue_.size()));
+        }
       }
       if (stopping_.load(std::memory_order_acquire) &&
           outstanding_.load(std::memory_order_acquire) == 0) {
@@ -244,5 +266,7 @@ private:
   std::atomic<std::size_t> outstanding_{0};
   std::size_t maxOutstanding_ = 0;
   std::vector<std::atomic<std::size_t>> stealsPerThread_{};
+  std::atomic<bintrace::Trace *> trace_{nullptr};
+  std::atomic<std::size_t> traceBase_{0};
 };
 

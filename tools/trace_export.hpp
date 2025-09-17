@@ -11,7 +11,15 @@ inline const char* codeToCat(std::uint32_t code) {
     case bintrace::EV_PhaseEnd:    return "PhaseEnd";
     case bintrace::EV_ChunkStart:  return "ChunkStart";
     case bintrace::EV_ChunkDone:   return "ChunkDone";
-    case bintrace::EV_BudgetLadder:return "BudgetLadder";
+    case bintrace::EV_GovernorRung:return "GovernorRung";
+    case bintrace::EV_QueuePush:   return "QueuePush";
+    case bintrace::EV_QueuePop:    return "QueuePop";
+    case bintrace::EV_WorkSteal:   return "WorkSteal";
+    case bintrace::EV_WatchdogTrip:return "WatchdogTrip";
+    case bintrace::EV_GpuFenceWaitBegin: return "GpuFenceWaitBegin";
+    case bintrace::EV_GpuFenceWaitEnd:   return "GpuFenceWaitEnd";
+    case bintrace::EV_SnapshotSave:      return "SnapshotSave";
+    case bintrace::EV_SnapshotLoad:      return "SnapshotLoad";
     default: return "Unknown";
     }
 }
