@@ -60,6 +60,8 @@ public:
         task.h = {};
     }
 
+    void wait_for_fence(simcore::hal::Fence fence);
+
     void drain() {
         std::unique_lock<std::mutex> lock(pendingMutex_);
         pendingCv_.wait(lock, [this] { return pending_.load(std::memory_order_acquire) == 0; });

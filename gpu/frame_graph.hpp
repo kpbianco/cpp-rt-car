@@ -49,15 +49,6 @@ struct OverlapBudget {
     hal::Duration gpu{0};
 };
 
-namespace detail {
-
-inline rt::Task wait_for_fence_task(Fence fence, rt::FiberPool& pool) {
-    co_await rt::FiberPool::FenceAwaiter{fence, pool};
-    co_return;
-}
-
-} // namespace detail
-
 class FrameGraph {
 public:
     using PassFn = std::function<void()>;
@@ -122,7 +113,7 @@ public:
                 if (!pool_ptr)
                     pool_ptr = &ensure_pool();
                 auto* pool = pool_ptr;
-                pool->spawn(detail::wait_for_fence_task(std::move(fence), *pool));
+                pool->wait_for_fence(std::move(fence));
             }
         }
         if (pool_ptr)

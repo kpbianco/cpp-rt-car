@@ -171,7 +171,12 @@ add_library(simcore_core INTERFACE)
 target_include_directories(simcore_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
 
 # Runtime module providing C API surface
-set(RT_SOURCES rt/src/runtime.cpp rt/src/plugin_manager.cpp rt/src/scheduler.cpp)
+set(RT_SOURCES
+    rt/src/runtime.cpp
+    rt/src/plugin_manager.cpp
+    rt/src/scheduler.cpp
+    rt/src/fiber_pool.cpp
+)
 
 if (UNIX)
     list(APPEND RT_SOURCES rt/src/crashdump_posix.cpp)
