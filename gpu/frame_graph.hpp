@@ -52,12 +52,12 @@ struct OverlapBudget {
 namespace detail {
 
 inline rt::Task wait_for_fence_task(Fence fence,
-                                    std::unique_ptr<std::atomic<hal::Duration::rep>> gpu_ns,
+                                    std::atomic<hal::Duration::rep>* gpu_ns,
                                     rt::FiberPool& pool,
                                     std::atomic<hal::Duration::rep>& gpu_total) {
-    auto* gpu_ns_ptr = gpu_ns.get();
+    std::unique_ptr<std::atomic<hal::Duration::rep>> gpu_ns_holder{gpu_ns};
     co_await rt::FiberPool::FenceAwaiter{fence, pool};
-    gpu_total.fetch_add(gpu_ns_ptr->load(std::memory_order_acquire), std::memory_order_acq_rel);
+    gpu_total.fetch_add(gpu_ns_holder->load(std::memory_order_acquire), std::memory_order_acq_rel);
     co_return;
 }
 
@@ -100,17 +100,16 @@ public:
 
         for (std::size_t i = 0; i < passes_.size(); ++i) {
             auto& p = passes_[i];
-            std::unique_ptr<std::atomic<hal::Duration::rep>> gpu_ns;
+            std::atomic<hal::Duration::rep>* gpu_ns = nullptr;
             Fence fence;
             if (p.gpu) {
-                gpu_ns = std::make_unique<std::atomic<hal::Duration::rep>>(0);
-                auto* gpu_ns_ptr = gpu_ns.get();
-                fence = submit([&, pass_idx = i, gpu_ns_ptr]() {
+                gpu_ns = new std::atomic<hal::Duration::rep>(0);
+                fence = submit([&, pass_idx = i, gpu_ns]() {
                     auto start = hal::now();
                     cpu_timeline_.wait(pass_idx + 1);
                     p.gpu();
                     auto end = hal::now();
-                    gpu_ns_ptr->store(hal::elapsed(start, end).count(), std::memory_order_release);
+                    gpu_ns->store(hal::elapsed(start, end).count(), std::memory_order_release);
                     gpu_timeline_.signal();
                 });
             }
@@ -130,7 +129,7 @@ public:
                 if (!pool_ptr)
                     pool_ptr = &ensure_pool();
                 auto* pool = pool_ptr;
-                pool->spawn(detail::wait_for_fence_task(std::move(fence), std::move(gpu_ns),
+                pool->spawn(detail::wait_for_fence_task(std::move(fence), gpu_ns,
                                                        *pool, gpu_total));
             }
         }
