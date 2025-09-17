@@ -49,6 +49,19 @@ struct OverlapBudget {
     hal::Duration gpu{0};
 };
 
+namespace detail {
+
+inline rt::Task wait_for_fence_task(Fence fence,
+                                    std::shared_ptr<std::atomic<hal::Duration::rep>> gpu_ns,
+                                    rt::FiberPool& pool,
+                                    std::atomic<hal::Duration::rep>& gpu_total) {
+    co_await rt::FiberPool::FenceAwaiter{fence, pool};
+    gpu_total.fetch_add(gpu_ns->load(std::memory_order_acquire), std::memory_order_acq_rel);
+    co_return;
+}
+
+} // namespace detail
+
 class FrameGraph {
 public:
     using PassFn = std::function<void()>;
@@ -87,17 +100,17 @@ public:
         for (std::size_t i = 0; i < passes_.size(); ++i) {
             auto& p = passes_[i];
             std::shared_ptr<std::atomic<hal::Duration::rep>> gpu_ns;
-            std::shared_ptr<Fence> fence;
+            Fence fence;
             if (p.gpu) {
                 gpu_ns = std::make_shared<std::atomic<hal::Duration::rep>>(0);
-                fence = std::make_shared<Fence>(submit([&, pass_idx = i, gpu_ns]() {
+                fence = submit([&, pass_idx = i, gpu_ns]() {
                     auto start = hal::now();
                     cpu_timeline_.wait(pass_idx + 1);
                     p.gpu();
                     auto end = hal::now();
                     gpu_ns->store(hal::elapsed(start, end).count(), std::memory_order_release);
                     gpu_timeline_.signal();
-                }));
+                });
             }
             bool cpu_signaled = false;
             if (p.cpu) {
@@ -115,8 +128,8 @@ public:
                 if (!pool_ptr)
                     pool_ptr = &ensure_pool();
                 auto* pool = pool_ptr;
-                pool->spawn(wait_for_fence_task(std::move(fence), std::move(gpu_ns), *pool,
-                                               gpu_total));
+                pool->spawn(detail::wait_for_fence_task(std::move(fence), std::move(gpu_ns),
+                                                       *pool, gpu_total));
             }
         }
         if (pool_ptr)
@@ -143,15 +156,6 @@ private:
                 r.buf.size = 0;
             }
         }
-    }
-
-    static rt::Task wait_for_fence_task(std::shared_ptr<Fence> fence,
-                                        std::shared_ptr<std::atomic<hal::Duration::rep>> gpu_ns,
-                                        rt::FiberPool& pool,
-                                        std::atomic<hal::Duration::rep>& gpu_total) {
-        co_await rt::FiberPool::FenceAwaiter{*fence, pool};
-        gpu_total.fetch_add(gpu_ns->load(std::memory_order_acquire), std::memory_order_acq_rel);
-        co_return;
     }
 
     std::vector<Pass> passes_;
