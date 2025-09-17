@@ -3,6 +3,7 @@
 #include <tuple>
 #include <utility>
 #include <chrono>
+#include <functional>
 #ifdef thread
 #undef thread
 #endif
@@ -24,17 +25,23 @@ struct Buffer {
 
 template <typename Kernel, typename... Args>
 Fence submit(Kernel&& kernel, Args&&... args) {
-    Fence f = hal::fence_create();
-    auto tuple_args = std::make_tuple(std::forward<Args>(args)...);
+    Fence fence = hal::fence_create();
+    auto args_tuple = std::make_tuple(std::forward<Args>(args)...);
+
     std::thread([
-                func = std::forward<Kernel>(kernel),
-                f,
-                args = std::move(tuple_args)
-            ]() mutable {
-        std::apply(func, args);
-        hal::fence_signal(f);
+                    func = std::forward<Kernel>(kernel),
+                    fence,
+                    args_tuple = std::move(args_tuple)
+                ]() mutable {
+        std::apply(
+            [&func](auto&&... unpacked) mutable {
+                std::invoke(std::move(func), std::forward<decltype(unpacked)>(unpacked)...);
+            },
+            std::move(args_tuple));
+        hal::fence_signal(fence);
     }).detach();
-    return f;
+
+    return fence;
 }
 
 inline bool fence_wait(Fence& f, std::chrono::milliseconds timeout) {
