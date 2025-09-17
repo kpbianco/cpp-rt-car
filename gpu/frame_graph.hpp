@@ -115,13 +115,8 @@ public:
                 if (!pool_ptr)
                     pool_ptr = &ensure_pool();
                 auto* pool = pool_ptr;
-                auto wait_task = [this, fence, gpu_ns, pool, &gpu_total]() -> rt::Task {
-                    co_await rt::FiberPool::FenceAwaiter{*fence, *pool};
-                    gpu_total.fetch_add(gpu_ns->load(std::memory_order_acquire),
-                                        std::memory_order_acq_rel);
-                    co_return;
-                };
-                pool->spawn(wait_task());
+                pool->spawn(wait_for_fence_task(std::move(fence), std::move(gpu_ns), *pool,
+                                               gpu_total));
             }
         }
         if (pool_ptr)
@@ -148,6 +143,15 @@ private:
                 r.buf.size = 0;
             }
         }
+    }
+
+    static rt::Task wait_for_fence_task(std::shared_ptr<Fence> fence,
+                                        std::shared_ptr<std::atomic<hal::Duration::rep>> gpu_ns,
+                                        rt::FiberPool& pool,
+                                        std::atomic<hal::Duration::rep>& gpu_total) {
+        co_await rt::FiberPool::FenceAwaiter{*fence, pool};
+        gpu_total.fetch_add(gpu_ns->load(std::memory_order_acquire), std::memory_order_acq_rel);
+        co_return;
     }
 
     std::vector<Pass> passes_;
