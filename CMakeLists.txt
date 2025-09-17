@@ -188,6 +188,8 @@ add_library(simcore_rt STATIC ${RT_SOURCES})
 target_include_directories(simcore_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/hal
 )
 target_link_libraries(simcore_rt PUBLIC simcore_core)
 if (UNIX)
