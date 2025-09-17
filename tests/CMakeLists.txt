@@ -44,6 +44,7 @@ set(TEST_SOURCES
     test_narrowphase.cpp
     test_hal.cpp
     test_gpu_stub.cpp
+    test_gpu_overlap.cpp
     test_frame_graph.cpp
     test_watchdog.cpp
     test_rt_watchdog.cpp
