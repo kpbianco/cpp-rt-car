@@ -2,9 +2,9 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <memory>
 #include <atomic>
 #include <cstring>
-#include <memory>
 #include <cassert>
 #include <new>
 #include <fstream>
@@ -51,13 +51,13 @@ public:
         enabled_ = enabled;
         eventsPerThread_ = eventsPerThread;
         buffers_.clear();
-        buffers_.resize(threads); // needs movable/default-constructible Buffer
-        for (std::size_t i=0;i<threads;++i) {
-            Buffer& b = buffers_[i];
-            b.cap = eventsPerThread;
-            b.mem = ::operator new(b.cap * sizeof(Event), std::align_val_t(64));
-            b.base = static_cast<Event*>(b.mem);
-            b.write.store(0, std::memory_order_relaxed);
+        buffers_.reserve(threads);
+        for (std::size_t i = 0; i < threads; ++i) {
+            auto buf = std::make_unique<Buffer>();
+            if (eventsPerThread_) {
+                buf->allocate(eventsPerThread_);
+            }
+            buffers_.emplace_back(std::move(buf));
         }
         tlsBuf_ = nullptr;
         tlsThreadIdx_ = ~std::size_t{0};
@@ -66,10 +66,8 @@ public:
     void shutdown() {
         eventsPerThread_ = 0;
         for (auto& b : buffers_) {
-            if (b.mem) {
-                ::operator delete(b.mem, std::align_val_t(64));
-                b.mem = nullptr; b.base = nullptr; b.cap = 0;
-                b.write.store(0, std::memory_order_relaxed);
+            if (b) {
+                b->release();
             }
         }
         buffers_.clear();
@@ -83,15 +81,13 @@ public:
         if (count == 0)
             return buffers_.size();
         const std::size_t base = buffers_.size();
-        buffers_.resize(base + count);
-        if (eventsPerThread_ == 0)
-            return base;
-        for (std::size_t i = base; i < buffers_.size(); ++i) {
-            Buffer &b = buffers_[i];
-            b.cap = eventsPerThread_;
-            b.mem = ::operator new(b.cap * sizeof(Event), std::align_val_t(64));
-            b.base = static_cast<Event *>(b.mem);
-            b.write.store(0, std::memory_order_relaxed);
+        buffers_.reserve(base + count);
+        for (std::size_t i = 0; i < count; ++i) {
+            auto buf = std::make_unique<Buffer>();
+            if (eventsPerThread_) {
+                buf->allocate(eventsPerThread_);
+            }
+            buffers_.emplace_back(std::move(buf));
         }
         return base;
     }
@@ -100,7 +96,7 @@ public:
 
     void bindThread(std::size_t idx) {
         if (idx >= buffers_.size()) return;
-        tlsBuf_ = &buffers_[idx];
+        tlsBuf_ = buffers_[idx].get();
         tlsThreadIdx_ = idx;
     }
 
@@ -129,7 +125,7 @@ public:
         s.perThreadCount.resize(buffers_.size(), 0);
         std::size_t total = 0;
         for (std::size_t t=0; t<buffers_.size(); ++t) {
-            const Buffer& b = buffers_[t];
+            const Buffer& b = *buffers_[t];
             const std::size_t w = b.write.load(std::memory_order_acquire);
             std::size_t n = (w < b.cap) ? w : b.cap;
             s.perThreadCount[t] = n;
@@ -139,7 +135,7 @@ public:
 
         std::size_t cursor = 0;
         for (std::size_t t=0; t<buffers_.size(); ++t) {
-            const Buffer& b = buffers_[t];
+            const Buffer& b = *buffers_[t];
             const std::size_t w = b.write.load(std::memory_order_acquire);
             const std::size_t cap = b.cap;
             const std::size_t n = s.perThreadCount[t];
@@ -171,7 +167,7 @@ public:
              static_cast<std::uint32_t>(sizeof(Event))};
         f.write(reinterpret_cast<const char*>(&h), sizeof(h));
         for (std::size_t t=0; t<buffers_.size(); ++t) {
-            const Buffer& b = buffers_[t];
+            const Buffer& b = *buffers_[t];
             const std::size_t w = b.write.load(std::memory_order_acquire);
             const std::size_t n = (w < b.cap) ? w : b.cap;
             std::uint64_t cnt = static_cast<std::uint64_t>(n);
@@ -196,30 +192,36 @@ private:
         void*     mem   = nullptr;
         Event*    base  = nullptr;
         std::size_t cap = 0;
-        std::atomic<std::size_t> write;
+        std::atomic<std::size_t> write{0};
 
-        Buffer() : write(0) {}
-
-        // non-copyable (atomic)
+        Buffer() = default;
         Buffer(const Buffer&) = delete;
         Buffer& operator=(const Buffer&) = delete;
 
-        // movable (manual because atomic is non-movable)
-        Buffer(Buffer&& o) noexcept
-            : mem(o.mem), base(o.base), cap(o.cap), write(o.write.load(std::memory_order_relaxed)) {
-            o.mem = nullptr; o.base = nullptr; o.cap = 0; o.write.store(0, std::memory_order_relaxed);
+        ~Buffer() { release(); }
+
+        void allocate(std::size_t newCap) {
+            release();
+            if (newCap == 0)
+                return;
+            cap = newCap;
+            mem = ::operator new(cap * sizeof(Event), std::align_val_t(64));
+            base = static_cast<Event*>(mem);
+            write.store(0, std::memory_order_relaxed);
         }
-        Buffer& operator=(Buffer&& o) noexcept {
-            if (this != &o) {
-                mem = o.mem; base = o.base; cap = o.cap;
-                write.store(o.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                o.mem = nullptr; o.base = nullptr; o.cap = 0; o.write.store(0, std::memory_order_relaxed);
+
+        void release() {
+            if (mem) {
+                ::operator delete(mem, std::align_val_t(64));
+                mem = nullptr;
+                base = nullptr;
+                cap = 0;
+                write.store(0, std::memory_order_relaxed);
             }
-            return *this;
         }
     };
 
-    std::vector<Buffer> buffers_;
+    std::vector<std::unique_ptr<Buffer>> buffers_;
     bool enabled_ = false;
     std::size_t eventsPerThread_ = 0;
 
