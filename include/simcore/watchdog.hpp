@@ -5,6 +5,7 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include "debug.hpp"
 
 class Watchdog {
 public:
@@ -13,6 +14,7 @@ public:
         : timeout_(timeout), cb_(std::move(cb)), stop_(false)
     {
         last_ = std::chrono::steady_clock::now();
+        simcore::debug::assert_thread_creation_allowed();
         worker_ = std::thread([this]{ run(); });
     }
     ~Watchdog()

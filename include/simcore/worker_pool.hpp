@@ -6,6 +6,7 @@
 #include <vector>
 #include <rt/numerics.hpp>
 #include "job_queue.hpp"
+#include "debug.hpp"
 
 // Worker pool backed by a bounded MPMC ring buffer.  All work is submitted
 // through the ring which provides a single scheduling surface and enables
@@ -36,6 +37,7 @@ public:
     outstanding_.store(0, std::memory_order_relaxed);
     maxOutstanding_ = maxOutstanding;
     for (std::size_t i = 0; i < numThreads; ++i) {
+      simcore::debug::assert_thread_creation_allowed();
       threads_.emplace_back([this, i] {
         rt::init_fp_env();
         workerLoop(i);
@@ -75,6 +77,7 @@ public:
         return;
       }
       if (threads_.size() > 1) {
+        simcore::debug::assert_thread_creation_allowed();
         std::thread([this, job = std::move(job)]() mutable {
           rt::init_fp_env();
           active_.fetch_add(1, std::memory_order_acq_rel);
@@ -119,6 +122,7 @@ public:
               outstanding_.fetch_sub(1, std::memory_order_acq_rel);
               return true;
             }
+            simcore::debug::assert_thread_creation_allowed();
             std::thread([this, job = std::move(job)]() mutable {
               rt::init_fp_env();
               active_.fetch_add(1, std::memory_order_acq_rel);
@@ -150,6 +154,7 @@ public:
           outstanding_.fetch_sub(1, std::memory_order_acq_rel);
           return true;
         }
+        simcore::debug::assert_thread_creation_allowed();
         std::thread([this, job = std::move(job)]() mutable {
           rt::init_fp_env();
           active_.fetch_add(1, std::memory_order_acq_rel);

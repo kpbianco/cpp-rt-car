@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "bintrace.hpp"
+#include "debug.hpp"
 #include "deterministic_reduce.hpp"
 #include "frame_arena.hpp"
 #include "logger.hpp"
@@ -654,6 +655,7 @@ private:
     threads_.reserve(workerCount_);
     for (std::size_t i = 0; i < workerCount_; ++i) {
       int node = (i < threadNodes.size()) ? threadNodes[i] : -1;
+      simcore::debug::assert_thread_creation_allowed();
       threads_.emplace_back([this, i, node
 #ifdef __linux__
                              ,
@@ -719,6 +721,7 @@ private:
   }
 
   void processActiveRange() {
+    [[maybe_unused]] simcore::debug::PhaseScope phaseScopeGuard;
     for (;;) {
       std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
       if (idx >= active_.totalChunks)
@@ -1099,6 +1102,7 @@ private:
     auto &ph = phases_[phaseIndex];
     if (!ph.enabled)
       return;
+    [[maybe_unused]] simcore::debug::PhaseScope phaseScopeGuard;
 #ifdef SIM_USE_NUMA
     bool numaSet = false;
     if (ph.numaNode >= 0 && numa_available() != -1) {
@@ -1558,7 +1562,7 @@ private:
   WorkerPool *pool_ = nullptr;
 };
 
-#ifdef NDEBUG
+#if RTFW_ENFORCE_NO_RAW_THREADS
 #define thread(...)                                                       \
   static_assert(false, "SimCore phases must not spawn OS threads; use WorkerPool::submit")
 #endif

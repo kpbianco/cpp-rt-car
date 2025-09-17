@@ -99,6 +99,13 @@ target_compile_definitions(simcore_tests PRIVATE
 
 add_test(NAME simcore_all COMMAND simcore_tests)
 
+add_executable(simcore_thread_violation EXCLUDE_FROM_ALL thread_violation.cpp)
+target_link_libraries(simcore_thread_violation PRIVATE simcore)
+target_compile_definitions(simcore_thread_violation PRIVATE RTFW_ENFORCE_NO_RAW_THREADS=1)
+add_test(NAME simcore_thread_violation_build
+         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target simcore_thread_violation --config $<CONFIG>)
+set_tests_properties(simcore_thread_violation_build PROPERTIES WILL_FAIL TRUE)
+
 option(SIM_ENABLE_AVX2 "Enable AVX2/FMA for SIMD kernels" ON)
 if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
   add_compile_options(-mavx2 -mfma)

@@ -6,6 +6,7 @@
 #include <mutex>
 #include <chrono>
 #include <thread>
+#include "debug.hpp"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -112,6 +113,7 @@ public:
             }
 #endif
             if (fd_ >= 0) {
+                simcore::debug::assert_thread_creation_allowed();
                 worker_ = std::thread([this]{ run(); });
             }
         }
