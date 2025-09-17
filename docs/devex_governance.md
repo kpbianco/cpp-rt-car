@@ -19,3 +19,10 @@ the major version.
 
 Changes are reviewed by maintainers. A quorum of two maintainers must approve
 API or ABI changes.
+
+## Scheduling Invariants
+
+* Development builds define `RTFW_ENFORCE_NO_RAW_THREADS`. When this flag is
+  active, including `SimCore.hpp` forbids direct `std::thread` construction.
+  Phases must submit asynchronous work through the provided worker pool to keep
+  a single scheduling surface and maintain consistent telemetry.
