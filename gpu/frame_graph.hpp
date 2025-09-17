@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
+#include <memory>
 #include <thread>
 #include <vector>
 
 #include "hal/hal.hpp"
 #include "hal/gpu_stub.hpp"
+#include <rt/fiber_pool.hpp>
 
 namespace simcore::hal::gpu {
 
@@ -52,6 +54,11 @@ public:
     using PassFn = std::function<void()>;
     struct Pass { PassFn cpu; PassFn gpu; };
 
+    FrameGraph() = default;
+    explicit FrameGraph(rt::FiberPool* pool) : externalPool_(pool) {}
+
+    void set_fiber_pool(rt::FiberPool* pool) { externalPool_ = pool; }
+
     ~FrameGraph() {
         for (auto& r : resources_) {
             if (r.buf.data) hal::free(r.buf.data);
@@ -74,34 +81,46 @@ public:
     OverlapBudget execute() {
         OverlapBudget budget{};
         auto total_start = hal::now();
+        std::atomic<hal::Duration::rep> gpu_total{0};
+        rt::FiberPool* pool_ptr = nullptr;
+
         for (std::size_t i = 0; i < passes_.size(); ++i) {
             auto& p = passes_[i];
             Fence fence;
-            std::atomic<hal::Duration::rep> gpu_ns{0};
             if (p.gpu) {
                 fence = submit([&, pass_idx = i]() {
                     auto start = hal::now();
                     cpu_timeline_.wait(pass_idx + 1);
                     p.gpu();
                     auto end = hal::now();
-                    gpu_ns.store(hal::elapsed(start, end).count(), std::memory_order_release);
+                    gpu_total.fetch_add(hal::elapsed(start, end).count(), std::memory_order_acq_rel);
                     gpu_timeline_.signal();
                 });
             }
+            bool cpu_signaled = false;
             if (p.cpu) {
                 auto start = hal::now();
                 p.cpu();
                 budget.cpu += hal::elapsed(start, hal::now());
                 cpu_timeline_.signal();
+                cpu_signaled = true;
+            }
+            if (p.gpu && !cpu_signaled) {
+                cpu_timeline_.signal();
+                cpu_signaled = true;
             }
             if (p.gpu) {
-                ::simcore::hal::gpu::fence_wait(
-                    fence,
-                    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::hours(24)));
-                budget.gpu += hal::Duration{gpu_ns.load(std::memory_order_acquire)};
+                if (!pool_ptr)
+                    pool_ptr = &ensure_pool();
+                auto* pool = pool_ptr;
+                pool->wait_for_fence(std::move(fence));
             }
-            free_dead_resources(i);
         }
+        if (pool_ptr)
+            pool_ptr->drain();
+        for (std::size_t i = 0; i < passes_.size(); ++i)
+            free_dead_resources(i);
+        budget.gpu = hal::Duration{gpu_total.load(std::memory_order_acquire)};
         auto total = hal::elapsed(total_start, hal::now());
         auto raw = budget.cpu + budget.gpu - total;
         overlap_ = raw.count() > 0 ? raw : hal::Duration{0};
@@ -128,6 +147,20 @@ private:
     TimelineSemaphore cpu_timeline_;
     TimelineSemaphore gpu_timeline_;
     hal::Duration overlap_{0};
+    rt::FiberPool* externalPool_{nullptr};
+    std::unique_ptr<rt::FiberPool> ownedPool_;
+
+    rt::FiberPool& ensure_pool() {
+        if (externalPool_)
+            return *externalPool_;
+        if (!ownedPool_) {
+            auto threads = std::thread::hardware_concurrency();
+            if (threads == 0)
+                threads = 1;
+            ownedPool_ = std::make_unique<rt::FiberPool>(threads);
+        }
+        return *ownedPool_;
+    }
 };
 
 // Stubs for mixed compute submissions.

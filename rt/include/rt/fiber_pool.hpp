@@ -60,11 +60,11 @@ public:
         task.h = {};
     }
 
+    void wait_for_fence(simcore::hal::Fence fence);
+
     void drain() {
-        using namespace std::chrono_literals;
-        while (pending_.load(std::memory_order_acquire) > 0) {
-            std::this_thread::sleep_for(1ms);
-        }
+        std::unique_lock<std::mutex> lock(pendingMutex_);
+        pendingCv_.wait(lock, [this] { return pending_.load(std::memory_order_acquire) == 0; });
     }
 
     void stop() {
@@ -135,7 +135,10 @@ private:
             h.resume();
             if (h.done()) {
                 h.destroy();
-                pending_.fetch_sub(1, std::memory_order_acq_rel);
+                if (pending_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                    std::lock_guard<std::mutex> lock(pendingMutex_);
+                    pendingCv_.notify_all();
+                }
             }
         }
     }
@@ -171,6 +174,8 @@ private:
     std::vector<WaitItem> waiters_;
     std::thread poller_;
 
+    std::mutex pendingMutex_;
+    std::condition_variable pendingCv_;
     std::atomic<std::size_t> pending_{0};
 };
 
