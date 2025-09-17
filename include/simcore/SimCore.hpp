@@ -721,7 +721,7 @@ private:
   }
 
   void processActiveRange() {
-    simcore::debug::PhaseScope phaseScopeGuard;
+    [[maybe_unused]] simcore::debug::PhaseScope phaseScopeGuard;
     for (;;) {
       std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
       if (idx >= active_.totalChunks)
@@ -1102,7 +1102,7 @@ private:
     auto &ph = phases_[phaseIndex];
     if (!ph.enabled)
       return;
-    simcore::debug::PhaseScope phaseScopeGuard;
+    [[maybe_unused]] simcore::debug::PhaseScope phaseScopeGuard;
 #ifdef SIM_USE_NUMA
     bool numaSet = false;
     if (ph.numaNode >= 0 && numa_available() != -1) {
