@@ -82,18 +82,40 @@ endif()
 # expecting a checked out submodule. This keeps the repository light and
 # avoids build failures when the submodule is missing.
 if (ENABLE_TESTS)
+    option(SIM_DOWNLOAD_GTEST "Download GoogleTest if it is not provided" ON)
+    set(SIM_GTEST_AVAILABLE OFF)
+
     if (EXISTS "${CMAKE_SOURCE_DIR}/external/googletest/CMakeLists.txt")
         add_subdirectory(external/googletest)
+        set(SIM_GTEST_AVAILABLE ON)
+        set(SIM_GTEST_LIBRARIES gtest gtest_main gmock)
     else()
-        include(FetchContent)
-        FetchContent_Declare(
-            googletest
-            URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
-        )
-        # For Windows: Prevent overriding the parent project's compiler/linker
-        # settings on MSVC.
-        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-        FetchContent_MakeAvailable(googletest)
+        find_package(GTest CONFIG QUIET)
+        if (GTest_FOUND)
+            set(SIM_GTEST_AVAILABLE ON)
+            set(SIM_GTEST_LIBRARIES GTest::gtest)
+            if (TARGET GTest::gtest_main)
+                list(APPEND SIM_GTEST_LIBRARIES GTest::gtest_main)
+            endif()
+            if (TARGET GTest::gmock)
+                list(APPEND SIM_GTEST_LIBRARIES GTest::gmock)
+            endif()
+        elseif (SIM_DOWNLOAD_GTEST)
+            include(FetchContent)
+            FetchContent_Declare(
+                googletest
+                URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            )
+            # For Windows: Prevent overriding the parent project's compiler/linker
+            # settings on MSVC.
+            set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+            FetchContent_MakeAvailable(googletest)
+            set(SIM_GTEST_AVAILABLE ON)
+            set(SIM_GTEST_LIBRARIES gtest gtest_main gmock)
+        else()
+            message(WARNING "GoogleTest not available; gtest-based tests will be skipped.")
+        endif()
     endif()
 
     if (ENABLE_RAPIDCHECK)
@@ -120,6 +142,7 @@ add_library(simcore_platform STATIC src/platform_init.cpp)
 target_include_directories(simcore_platform PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(simcore_platform PUBLIC simcore)
+set_target_properties(simcore_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Enable warnings for project sources only
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -197,9 +220,16 @@ target_include_directories(simcore_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hal
 )
 target_link_libraries(simcore_rt PUBLIC simcore_core)
+set_target_properties(simcore_rt PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (UNIX)
     target_link_libraries(simcore_rt PUBLIC dl)
 endif()
+
+add_library(rtfw SHARED src/c_abi.cpp)
+target_include_directories(rtfw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rtfw PRIVATE simcore simcore_platform simcore_rt)
+target_compile_definitions(rtfw PRIVATE RTFW_BUILD=1)
+set_target_properties(rtfw PROPERTIES OUTPUT_NAME rtfw)
 
 # Main executable
 add_executable(simcore_app src/main.cpp)

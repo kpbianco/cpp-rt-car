@@ -136,9 +136,12 @@ public:
 
 private:
   static constexpr std::size_t cacheLine() {
-#ifdef __cpp_lib_hardware_interference_size
+#if defined(__cpp_lib_hardware_interference_size) && \
+    !(defined(__GNUC__) && !defined(__clang__))
     return std::hardware_destructive_interference_size;
 #else
+    // GCC emits -Winterference-size even though the feature test macro is
+    // defined, so fall back to a conservative cache line size there.
     return 64;
 #endif
   }
