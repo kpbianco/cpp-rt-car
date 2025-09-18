@@ -224,6 +224,7 @@ public:
 private:
   void workerLoop(std::size_t index) {
     bool bound = false;
+    bool stealLogged = false;
     for (;;) {
       if (!bound) {
         if (auto *trace = trace_.load(std::memory_order_acquire)) {
@@ -239,6 +240,7 @@ private:
           job.fn();
         active_.fetch_sub(1, std::memory_order_acq_rel);
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+        stealLogged = false;
         continue;
       }
       if (index < stealsPerThread_.size()) {
@@ -246,9 +248,14 @@ private:
       }
       if (auto *trace = trace_.load(std::memory_order_acquire)) {
         if (outstanding_.load(std::memory_order_acquire) > 0) {
-          trace->log(bintrace::EV_WorkSteal,
-                     static_cast<std::uint32_t>(index),
-                     static_cast<std::uint64_t>(queue_.size()));
+          if (!stealLogged) {
+            trace->log(bintrace::EV_WorkSteal,
+                       static_cast<std::uint32_t>(index),
+                       static_cast<std::uint64_t>(queue_.size()));
+            stealLogged = true;
+          }
+        } else {
+          stealLogged = false;
         }
       }
       if (stopping_.load(std::memory_order_acquire) &&
