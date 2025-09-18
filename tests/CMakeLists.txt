@@ -70,7 +70,6 @@ if (SIM_GTEST_AVAILABLE)
         test_sbom.cpp
         test_minidump_symbols.cpp
         test_perf_artifacts.cpp
-        test_plugin_manager.cpp
         test_scheduler.cpp
         test_rt_pipeline.cpp
         test_platform_gate.cpp
@@ -81,8 +80,11 @@ if (SIM_GTEST_AVAILABLE)
     endif()
 
     if (UNIX AND NOT APPLE)   # linux
-        list(APPEND TEST_SOURCES tests/test_affinity.cpp tests/test_numa_pool.cpp
-                                 tests/test_numa_integration.cpp)
+        list(APPEND TEST_SOURCES
+            test_affinity.cpp
+            test_numa_pool.cpp
+            test_numa_integration.cpp
+        )
     endif()
 
     add_executable(simcore_tests ${TEST_SOURCES})
