@@ -1,11 +1,11 @@
 add_executable(sample_particles particles.cpp)
-target_link_libraries(sample_particles PRIVATE simcore)
+target_link_libraries(sample_particles PRIVATE simcore_platform)
 
 add_executable(sample_tyre_belt tyre_belt_kernel.cpp)
-target_link_libraries(sample_tyre_belt PRIVATE simcore)
+target_link_libraries(sample_tyre_belt PRIVATE simcore_platform)
 
 add_executable(sample_async_gpu async_gpu_stub.cpp)
-target_link_libraries(sample_async_gpu PRIVATE simcore)
+target_link_libraries(sample_async_gpu PRIVATE simcore_platform)
 
 if (BUILD_TESTING)
     add_test(NAME sample_particles COMMAND sample_particles)

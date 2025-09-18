@@ -68,6 +68,7 @@ set(TEST_SOURCES
     test_plugin_manager.cpp
     test_scheduler.cpp
     test_rt_pipeline.cpp
+    test_platform_gate.cpp
 )
 
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
@@ -75,7 +76,7 @@ if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
 endif()
 
 add_executable(simcore_tests ${TEST_SOURCES})
-target_link_libraries(simcore_tests PRIVATE simcore simcore_rt gtest gtest_main gmock)
+target_link_libraries(simcore_tests PRIVATE simcore_platform simcore_rt gtest gtest_main gmock)
 if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
     target_link_libraries(simcore_tests PRIVATE rapidcheck rapidcheck_gtest)
 endif()
@@ -103,7 +104,7 @@ target_compile_definitions(simcore_tests PRIVATE
 add_test(NAME simcore_all COMMAND simcore_tests)
 
 add_executable(simcore_thread_violation EXCLUDE_FROM_ALL thread_violation.cpp)
-target_link_libraries(simcore_thread_violation PRIVATE simcore)
+target_link_libraries(simcore_thread_violation PRIVATE simcore_platform)
 target_compile_definitions(simcore_thread_violation PRIVATE RTFW_ENFORCE_NO_RAW_THREADS=1)
 add_test(NAME simcore_thread_violation_build
          COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target simcore_thread_violation --config $<CONFIG>)
@@ -117,7 +118,7 @@ endif()
 option(SIM_BUILD_FUZZERS "Build libFuzzer harnesses" OFF)
 if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_executable(jobqueue_fuzz jobqueue_fuzz.cpp)
-    target_link_libraries(jobqueue_fuzz PRIVATE simcore)
+    target_link_libraries(jobqueue_fuzz PRIVATE simcore_platform)
     target_compile_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
