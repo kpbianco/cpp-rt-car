@@ -45,6 +45,7 @@ public:
     struct Sink {
         virtual ~Sink() = default;
         virtual void write(const Record& r) = 0;
+        virtual std::size_t dropped() const { return 0; }
     };
 
     class StdoutSink : public Sink {
@@ -145,7 +146,7 @@ public:
             cv_.notify_one();
         }
 
-        std::size_t dropped() const { return dropped_.load(); }
+        std::size_t dropped() const override { return dropped_.load(); }
 
     private:
         void flush() {
@@ -242,6 +243,15 @@ public:
     void addSink(std::shared_ptr<Sink> s) {
         std::lock_guard<std::mutex> lk(sinkMutex_);
         sinks_.push_back(std::move(s));
+    }
+
+    std::size_t dropped() const {
+        std::lock_guard<std::mutex> lk(sinkMutex_);
+        std::size_t total = 0;
+        for (const auto& s : sinks_) {
+            total += s->dropped();
+        }
+        return total;
     }
 
     bool willLog(Level l) const {

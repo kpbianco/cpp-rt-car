@@ -1,5 +1,6 @@
 #include <simcore/SimCore.hpp>
 #include <simcore/logger.hpp>
+#include <simcore/metrics.hpp>
 #include <simcore/arena.hpp>
 #include <simcore/car_soa.hpp>
 
@@ -26,6 +27,8 @@ int main(int argc, char** argv)
     cfg.maxFrames = 3000;
     cfg.chunkSize = 128;
 
+    bool metricsJson = false;
+
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--elements") == 0 && i + 1 < argc)
@@ -34,6 +37,8 @@ int main(int argc, char** argv)
             cfg.threads = parseSize(argv[++i], cfg.threads);
         else if (std::strcmp(argv[i], "--pin") == 0)
             cfg.pinThreads = true;
+        else if (std::strcmp(argv[i], "--metrics-json") == 0)
+            metricsJson = true;
     }
 
     /* ------------ arena + arrays ---------------- */
@@ -49,8 +54,12 @@ int main(int argc, char** argv)
     logger.addSink(std::make_shared<Logger::StdoutSink>());
     Logger *loggerPtr = &logger;
 
+    metrics::Registry metricsRegistry;
+
     SimCore sim(cfg);
     sim.setLogger(loggerPtr);
+    if (metricsJson)
+        sim.setMetrics(&metricsRegistry);
 
     auto input   = sim.addPhase("Input");
     auto physics = sim.addPhase("Physics");
@@ -90,6 +99,9 @@ int main(int argc, char** argv)
 
     sim.run();
 
-    std::cout << "Final pos0=" << cars.pos[0] << "\n";
+    if (metricsJson)
+        std::cout << metricsRegistry.to_json() << "\n";
+    else
+        std::cout << "Final pos0=" << cars.pos[0] << "\n";
     return 0;
 }
