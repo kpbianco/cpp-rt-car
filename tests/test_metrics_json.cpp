@@ -64,6 +64,8 @@ TEST(MetricsJson, EmitsPhaseStatsAndCounters) {
   EXPECT_NE(counters.find("worker.queue_max"), counters.end());
   EXPECT_NE(counters.find("worker.steals_total"), counters.end());
   EXPECT_NE(counters.find("logger.dropped"), counters.end());
+  EXPECT_NE(counters.find("trace.dropped"), counters.end());
+  EXPECT_NE(counters.find("log_drops"), counters.end());
   EXPECT_NE(counters.find("thermal.events"), counters.end());
 
   const std::string json = registry.to_json();
@@ -86,5 +88,7 @@ TEST(MetricsJson, EmitsPhaseStatsAndCounters) {
   expectKey("\"worker.queue_max\"");
   expectKey("\"worker.steals_total\"");
   expectKey("\"logger.dropped\"");
+  expectKey("\"trace.dropped\"");
+  expectKey("\"log_drops\"");
   expectKey("\"thermal.events\"");
 }

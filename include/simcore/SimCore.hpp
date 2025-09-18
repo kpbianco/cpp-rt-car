@@ -322,9 +322,12 @@ public:
       registry->set_counter(
           "thermal.events",
           thermalEvents_.load(std::memory_order_acquire));
-      const std::uint64_t drops =
+      const std::uint64_t loggerDrops =
           logger_ ? static_cast<std::uint64_t>(logger_->dropped()) : 0;
-      registry->set_counter("logger.dropped", drops);
+      const std::uint64_t traceDrops = bintrace_.dropped();
+      registry->set_counter("logger.dropped", loggerDrops);
+      registry->set_counter("trace.dropped", traceDrops);
+      registry->set_counter("log_drops", loggerDrops + traceDrops);
       registry->set_counter("worker.queue_max", 0);
       registry->set_counter("worker.steals_total", 0);
     }
@@ -648,9 +651,12 @@ private:
     registry->set_counter("thermal.events",
                           thermalEvents_.load(std::memory_order_acquire));
 
-    const std::uint64_t drops =
+    const std::uint64_t loggerDrops =
         logger_ ? static_cast<std::uint64_t>(logger_->dropped()) : 0;
-    registry->set_counter("logger.dropped", drops);
+    const std::uint64_t traceDrops = bintrace_.dropped();
+    registry->set_counter("logger.dropped", loggerDrops);
+    registry->set_counter("trace.dropped", traceDrops);
+    registry->set_counter("log_drops", loggerDrops + traceDrops);
 
     if (pool_) {
       auto sample = metrics::make_sample(pool_->stats());

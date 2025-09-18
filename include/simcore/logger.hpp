@@ -6,6 +6,7 @@
 #include <mutex>
 #include <chrono>
 #include <thread>
+#include "backpressure.hpp"
 #include "debug.hpp"
 #include <cstdio>
 #include <fstream>
@@ -78,7 +79,9 @@ public:
                                    std::chrono::milliseconds syncEvery = std::chrono::milliseconds(100),
                                    bool directSync = false,
                                    std::size_t preallocate = 0)
-            : fd_(-1), cap_(cap), syncEvery_(syncEvery) {
+            : fd_(-1), cap_(cap),
+              backpressure_(cap, refillRate(cap, syncEvery)),
+              syncEvery_(syncEvery) {
 #ifdef _WIN32
             int tmp = -1;
             int oflag = _O_CREAT | _O_APPEND | _O_WRONLY;
@@ -137,9 +140,13 @@ public:
 
         void write(const Record& r) override {
             if (fd_ < 0) return;
+            if (!backpressure_.try_acquire()) {
+                dropped_.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
             std::lock_guard<std::mutex> lk(m_);
             if (queue_.size() >= cap_) {
-                ++dropped_;
+                dropped_.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
             queue_.push_back(r.msg);
@@ -194,6 +201,7 @@ public:
         int fd_;
         std::deque<std::string> queue_;
         std::size_t cap_;
+        simcore::TokenBucket backpressure_;
         std::atomic<std::size_t> dropped_{0};
         std::chrono::milliseconds syncEvery_;
         std::chrono::steady_clock::time_point lastSync_{};
@@ -201,6 +209,18 @@ public:
         std::condition_variable cv_;
         bool stop_ = false;
         std::thread worker_;
+
+        static double refillRate(std::size_t cap,
+                                 std::chrono::milliseconds interval) {
+            if (cap == 0)
+                return 1.0;
+            const double seconds =
+                static_cast<double>(interval.count()) / 1000.0;
+            if (seconds <= 0.0)
+                return static_cast<double>(cap);
+            const double rate = static_cast<double>(cap) / seconds;
+            return rate < 1.0 ? 1.0 : rate;
+        }
     };
 
     class RingBufferSink : public Sink {
