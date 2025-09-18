@@ -10,6 +10,7 @@ set(TEST_SOURCES
     test_soa_view.cpp
     test_jobqueue.cpp
     test_queue_metrics.cpp
+    test_metrics_json.cpp
     test_jobqueue_perf.cpp
     test_workerpool_priority.cpp
     test_phase_graph.cpp

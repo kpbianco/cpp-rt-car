@@ -26,6 +26,7 @@
 #include "deterministic_reduce.hpp"
 #include "frame_arena.hpp"
 #include "logger.hpp"
+#include "metrics.hpp"
 #include "profiler.hpp"
 #include "rate_governor.hpp"
 #include "highres_clock.hpp"
@@ -296,12 +297,38 @@ public:
     stopThreads();
   }
 
-  void setLogger(Logger *l) { logger_ = l; }
+  void setLogger(Logger *l) {
+    logger_ = l;
+    publishCounters();
+  }
   void setProfiler(Profiler *p) { profiler_ = p; }
   void setWorkerPool(WorkerPool *pool) {
     pool_ = pool;
     workerPoolTraceAttached_ = false;
     attachWorkerPoolTrace();
+    lastWorkerStealCounterCount_ = 0;
+    publishCounters();
+  }
+  void setMetrics(metrics::Registry *registry) {
+    lastWorkerStealCounterCount_ = 0;
+    metrics_.store(registry, std::memory_order_release);
+    if (registry) {
+      registry->set_counter(
+          "missed_frames", missedFrames_.load(std::memory_order_acquire));
+      registry->set_counter(
+          "watchdog.trips",
+          static_cast<std::uint64_t>(
+              watchdogTrips_.load(std::memory_order_acquire)));
+      registry->set_counter(
+          "thermal.events",
+          thermalEvents_.load(std::memory_order_acquire));
+      const std::uint64_t drops =
+          logger_ ? static_cast<std::uint64_t>(logger_->dropped()) : 0;
+      registry->set_counter("logger.dropped", drops);
+      registry->set_counter("worker.queue_max", 0);
+      registry->set_counter("worker.steals_total", 0);
+    }
+    publishCounters();
   }
   void setBudgetCallback(std::function<void(const BudgetSample &)> cb) {
     budgetCb_ = std::move(cb);
@@ -599,9 +626,58 @@ public:
     nextTarget_ = startReal_;
     while (step()) {
     }
+    publishCounters();
   }
 
 private:
+  static std::string workerStealCounterName(std::size_t index) {
+    return "worker.steals[" + std::to_string(index) + "]";
+  }
+
+  void publishCounters() {
+    auto *registry = metrics_.load(std::memory_order_acquire);
+    if (!registry)
+      return;
+
+    registry->set_counter("missed_frames",
+                          missedFrames_.load(std::memory_order_acquire));
+    registry->set_counter(
+        "watchdog.trips",
+        static_cast<std::uint64_t>(
+            watchdogTrips_.load(std::memory_order_acquire)));
+    registry->set_counter("thermal.events",
+                          thermalEvents_.load(std::memory_order_acquire));
+
+    const std::uint64_t drops =
+        logger_ ? static_cast<std::uint64_t>(logger_->dropped()) : 0;
+    registry->set_counter("logger.dropped", drops);
+
+    if (pool_) {
+      auto sample = metrics::make_sample(pool_->stats());
+      registry->set_counter("worker.queue_max",
+                            static_cast<std::uint64_t>(sample.queueMaxDepth));
+      registry->set_counter("worker.steals_total",
+                            static_cast<std::uint64_t>(sample.totalSteals));
+      for (std::size_t i = sample.stealsPerThread.size();
+           i < lastWorkerStealCounterCount_; ++i) {
+        registry->set_counter(workerStealCounterName(i), 0);
+      }
+      for (std::size_t i = 0; i < sample.stealsPerThread.size(); ++i) {
+        registry->set_counter(
+            workerStealCounterName(i),
+            static_cast<std::uint64_t>(sample.stealsPerThread[i]));
+      }
+      lastWorkerStealCounterCount_ = sample.stealsPerThread.size();
+    } else {
+      registry->set_counter("worker.queue_max", 0);
+      registry->set_counter("worker.steals_total", 0);
+      for (std::size_t i = 0; i < lastWorkerStealCounterCount_; ++i) {
+        registry->set_counter(workerStealCounterName(i), 0);
+      }
+      lastWorkerStealCounterCount_ = 0;
+    }
+  }
+
   struct ActiveRange {
     RangeFnRef *fn = nullptr;
     std::size_t totalChunks = 0;
@@ -1053,11 +1129,22 @@ private:
       }
     }
 
+    uint64_t afterSleep = Clock::now();
+    int64_t behindNs = static_cast<int64_t>(afterSleep) -
+                       static_cast<int64_t>(nextTarget_);
+    std::uint64_t missedThisStep = 0;
+    if (behindNs > 0 && dt_.count() > 0.0) {
+      const double behindFrames =
+          (static_cast<double>(behindNs) / 1e9) / dt_.count();
+      if (behindFrames > 0.0)
+        missedThisStep =
+            static_cast<std::uint64_t>(std::ceil(behindFrames));
+    }
+
     // reactive fallback
     if (settings_.adaptive) {
       logDrift();
-      int64_t behind = static_cast<int64_t>(Clock::now()) -
-                       static_cast<int64_t>(nextTarget_);
+      int64_t behind = behindNs;
       if (behind > 0) {
         int extra =
             int((static_cast<double>(behind) / 1e9) / dt_.count());
@@ -1084,6 +1171,10 @@ private:
     } else
       logDrift();
 
+    if (missedThisStep > 0)
+      missedFrames_.fetch_add(missedThisStep, std::memory_order_acq_rel);
+
+    publishCounters();
     return !(settings_.maxFrames >= 0 && frame_ >= settings_.maxFrames);
   }
 
@@ -1138,6 +1229,7 @@ private:
     auto &ph = phases_[phaseIndex];
     if (!ph.enabled)
       return;
+    uint64_t phaseStart = Clock::now();
     [[maybe_unused]] simcore::debug::PhaseScope phaseScopeGuard;
 #ifdef SIM_USE_NUMA
     bool numaSet = false;
@@ -1328,6 +1420,12 @@ private:
     if (numaSet)
       numa_set_preferred(-1);
 #endif
+
+    if (auto *registry = metrics_.load(std::memory_order_acquire)) {
+      const uint64_t phaseEnd = Clock::now();
+      registry->record_phase(ph.name,
+                             Clock::to_ms(phaseEnd - phaseStart));
+    }
   }
 
   void executeFrame() {
@@ -1450,8 +1548,10 @@ private:
   void updateBudget(double computeMs) {
     if (settings_.thermalMonitor && settings_.readPackageTemp) {
       double t = settings_.readPackageTemp();
-      if (t >= settings_.thermalLimpCelsius && degradeRung_ < 4)
+      if (t >= settings_.thermalLimpCelsius && degradeRung_ < 4) {
+        thermalEvents_.fetch_add(1, std::memory_order_acq_rel);
         applyDegradeRung(4);
+      }
     }
 
     const double periodMs = 1000.0 / settings_.hz;
@@ -1598,6 +1698,10 @@ private:
   std::atomic<int> watchdogTrips_{0};
   std::atomic<bool> watchdogLimp_{false};
   std::atomic<int> watchdogTripPending_{0};
+  std::atomic<std::uint64_t> missedFrames_{0};
+  std::atomic<std::uint64_t> thermalEvents_{0};
+  std::atomic<metrics::Registry *> metrics_{nullptr};
+  std::size_t lastWorkerStealCounterCount_ = 0;
   std::unordered_map<std::string, std::size_t> chunkCache_;
   std::string machineId_;
 
