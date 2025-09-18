@@ -1,12 +1,6 @@
 #include <gtest/gtest.h>
 #include <simcore/SimCore.hpp>
 #ifdef __linux__
-#include <sched.h>
-
-static int this_cpu()
-{
-    return sched_getcpu();
-}
 
 TEST(AffinityTest, ThreadsPinnedRoundRobin)
 {
