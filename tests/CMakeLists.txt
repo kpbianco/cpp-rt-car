@@ -3,6 +3,7 @@ set(TEST_SOURCES
     test_simcore_determinism.cpp
     test_logging.cpp
     test_async_logger.cpp
+    test_logger_backpressure.cpp
     test_profiler.cpp
     test_adaptive_param.cpp
     test_soa.cpp

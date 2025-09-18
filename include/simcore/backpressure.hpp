@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <limits>
 
 namespace simcore {
 
@@ -12,6 +14,14 @@ class TokenBucket {
   const double refill_rate_; // tokens per second
   std::atomic<int> tokens_;
   std::atomic<std::int64_t> last_ns_;
+
+  static int clamp_to_int(std::size_t value) {
+    constexpr std::size_t kMax =
+        static_cast<std::size_t>(std::numeric_limits<int>::max());
+    if (value > kMax)
+      return std::numeric_limits<int>::max();
+    return static_cast<int>(value);
+  }
 
   static std::int64_t now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -39,6 +49,9 @@ class TokenBucket {
   }
 
 public:
+  TokenBucket(std::size_t capacity, double refill_rate)
+      : TokenBucket(clamp_to_int(capacity), refill_rate) {}
+
   TokenBucket(int capacity, double refill_rate)
       : capacity_(capacity), refill_rate_(refill_rate), tokens_(capacity),
         last_ns_(now_ns()) {}
@@ -51,6 +64,12 @@ public:
         return true;
     }
     return false;
+  }
+
+  bool try_acquire(std::size_t n) {
+    if (n == 0)
+      return true;
+    return try_acquire(clamp_to_int(n));
   }
 };
 
