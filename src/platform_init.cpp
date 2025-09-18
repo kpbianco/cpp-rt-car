@@ -147,9 +147,11 @@ uint64_t read_monotonic_raw() {
   if (::clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0) {
     struct timespec tp;
     ::clock_gettime(CLOCK_MONOTONIC, &tp);
-    return static_cast<uint64_t>(tp.tv_sec) * 1000000000ull + tp.tv_nsec;
+    return static_cast<uint64_t>(tp.tv_sec) * 1000000000ull +
+           static_cast<uint64_t>(tp.tv_nsec);
   }
-  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull + ts.tv_nsec;
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull +
+         static_cast<uint64_t>(ts.tv_nsec);
 }
 
 #endif
