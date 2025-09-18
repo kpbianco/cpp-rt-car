@@ -116,6 +116,11 @@ target_include_directories(simcore INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/gpu
 )
 
+add_library(simcore_platform STATIC src/platform_init.cpp)
+target_include_directories(simcore_platform PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(simcore_platform PUBLIC simcore)
+
 # Enable warnings for project sources only
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(simcore INTERFACE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wnon-virtual-dtor)
@@ -198,11 +203,11 @@ endif()
 
 # Main executable
 add_executable(simcore_app src/main.cpp)
-target_link_libraries(simcore_app PRIVATE simcore)
+target_link_libraries(simcore_app PRIVATE simcore_platform)
 
 # Sample trace dump utility
 add_executable(trace_dump src/trace_dump.cpp)
-target_link_libraries(trace_dump PRIVATE simcore)
+target_link_libraries(trace_dump PRIVATE simcore_platform)
 target_include_directories(trace_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Tiny sample programs

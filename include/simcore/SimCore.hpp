@@ -28,6 +28,7 @@
 #include "logger.hpp"
 #include "metrics.hpp"
 #include "profiler.hpp"
+#include "platform_init.hpp"
 #include "rate_governor.hpp"
 #include "highres_clock.hpp"
 #include "worker_pool.hpp"
@@ -138,6 +139,10 @@ public:
     // Affinity / NUMA
     bool pinThreads = false;
     bool compactNUMA = false;
+
+    // Platform policy
+    bool platformInit = false;
+    int platformFifoPriority = 1;
 
     // Cadence
     double hz = 500.0;
@@ -703,33 +708,52 @@ private:
     bintrace_.init(workerCount_ + 1, settings_.bintraceEventsPerThread,
                    settings_.bintraceEnable);
     bintrace::set_global_trace(&bintrace_);
+    bintrace_.bindThread(workerCount_);
+
+    platformInitState_ = {};
+    if (settings_.platformInit) {
+      simcore::PlatformInitOptions opts;
+      opts.enable = true;
+      opts.fifoPriority = settings_.platformFifoPriority;
+      platformInitState_ =
+          simcore::platform_init_rt(opts, logger_, &bintrace_);
+    }
 
     shutdown_.store(false, std::memory_order_relaxed);
 
 #ifdef __linux__
     std::vector<int> cpuList;
     if (settings_.pinThreads) {
-      const long nCpusL = ::sysconf(_SC_NPROCESSORS_ONLN);
-      const int nCpus =
-          (nCpusL > static_cast<long>(std::numeric_limits<int>::max()))
-              ? std::numeric_limits<int>::max()
-              : static_cast<int>(nCpusL);
+      cpu_set_t allowed;
+      CPU_ZERO(&allowed);
+      if (::sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+        for (int c = 0; c < CPU_SETSIZE; ++c)
+          if (CPU_ISSET(c, &allowed))
+            cpuList.push_back(c);
+      }
+      if (cpuList.empty()) {
+        const long nCpusL = ::sysconf(_SC_NPROCESSORS_ONLN);
+        const int nCpus =
+            (nCpusL > static_cast<long>(std::numeric_limits<int>::max()))
+                ? std::numeric_limits<int>::max()
+                : static_cast<int>(nCpusL);
 #ifdef SIM_USE_NUMA
-      if (settings_.compactNUMA && numa_available() != -1) {
-        const int maxNode = numa_max_node();
-        for (int node = 0; node <= maxNode; ++node) {
-          struct bitmask *bm = numa_allocate_cpumask();
-          numa_node_to_cpus(node, bm);
-          for (int c = 0; c < nCpus; ++c)
-            if (numa_bitmask_isbitset(bm, c))
-              cpuList.push_back(c);
-          numa_free_cpumask(bm);
-        }
-      } else
+        if (settings_.compactNUMA && numa_available() != -1) {
+          const int maxNode = numa_max_node();
+          for (int node = 0; node <= maxNode; ++node) {
+            struct bitmask *bm = numa_allocate_cpumask();
+            numa_node_to_cpus(node, bm);
+            for (int c = 0; c < nCpus; ++c)
+              if (numa_bitmask_isbitset(bm, c))
+                cpuList.push_back(c);
+            numa_free_cpumask(bm);
+          }
+        } else
 #endif
-      {
-        for (int c = 0; c < nCpus; ++c)
-          cpuList.push_back(c);
+        {
+          for (int c = 0; c < nCpus; ++c)
+            cpuList.push_back(c);
+        }
       }
     }
 #ifdef SIM_USE_NUMA
@@ -772,6 +796,9 @@ private:
         rt::init_fp_env();
         frameArenas_->bindCurrentThread(i);
         bintrace_.bindThread(i);
+        if (platformInitState_.requested)
+          simcore::platform_apply_worker_policy(platformInitState_, logger_,
+                                                &bintrace_);
         workerLoop();
       });
     }
@@ -1700,6 +1727,7 @@ private:
   std::unique_ptr<FrameArenaPool> frameArenas_;
   std::unique_ptr<rt::FiberPool> fiberPool_;
   bintrace::Trace bintrace_;
+  simcore::PlatformInitState platformInitState_{};
   std::unique_ptr<rt::Watchdog> watchdog_;
   std::atomic<int> watchdogTrips_{0};
   std::atomic<bool> watchdogLimp_{false};

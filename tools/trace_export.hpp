@@ -20,6 +20,7 @@ inline const char* codeToCat(std::uint32_t code) {
     case bintrace::EV_GpuFenceWaitEnd:   return "GpuFenceWaitEnd";
     case bintrace::EV_SnapshotSave:      return "SnapshotSave";
     case bintrace::EV_SnapshotLoad:      return "SnapshotLoad";
+    case bintrace::EV_PlatformCrumb:     return "PlatformCrumb";
     default: return "Unknown";
     }
 }
