@@ -284,6 +284,7 @@ public:
         std::chrono::hours(24), std::chrono::hours(24), [this] {
           watchdogTrips_.fetch_add(1, std::memory_order_acq_rel);
           watchdogLimp_.store(true, std::memory_order_release);
+          watchdogTripPending_.fetch_add(1, std::memory_order_acq_rel);
           if (logger_)
             LOG_TRACE(logger_, "[WD] trip frame={} ", frame_);
           applyDegradeRung(4);
@@ -297,7 +298,11 @@ public:
 
   void setLogger(Logger *l) { logger_ = l; }
   void setProfiler(Profiler *p) { profiler_ = p; }
-  void setWorkerPool(WorkerPool *pool) { pool_ = pool; }
+  void setWorkerPool(WorkerPool *pool) {
+    pool_ = pool;
+    workerPoolTraceAttached_ = false;
+    attachWorkerPoolTrace();
+  }
   void setBudgetCallback(std::function<void(const BudgetSample &)> cb) {
     budgetCb_ = std::move(cb);
   }
@@ -489,6 +494,9 @@ public:
   double lastDriftMs() const { return lastDriftMs_; }
 
   std::vector<std::uint8_t> saveFrame() const {
+    const_cast<SimCore *>(this)->bintrace_.log(
+        bintrace::EV_SnapshotSave, static_cast<std::uint32_t>(frame_),
+        static_cast<std::uint64_t>(frame_));
     rt::SnapshotWriter w;
     w.write<std::uint64_t>(static_cast<std::uint64_t>(frame_));
     w.write<std::uint64_t>(rngSeed_);
@@ -527,6 +535,9 @@ public:
     std::uint64_t tmp = 0;
     r.read(tmp);
     frame_ = static_cast<std::int64_t>(tmp);
+    bintrace_.log(bintrace::EV_SnapshotLoad,
+                  static_cast<std::uint32_t>(frame_),
+                  static_cast<std::uint64_t>(frame_));
     r.read(rngSeed_);
     r.read(tmp);
     subSteps_ = static_cast<int>(tmp);
@@ -605,8 +616,11 @@ private:
     workerCount_ = settings_.threads;
     std::vector<int> threadNodes(workerCount_ + 1, -1);
 
+    workerPoolTraceAttached_ = false;
+    workerPoolTraceBase_ = 0;
     bintrace_.init(workerCount_ + 1, settings_.bintraceEventsPerThread,
                    settings_.bintraceEnable);
+    bintrace::set_global_trace(&bintrace_);
 
     shutdown_.store(false, std::memory_order_relaxed);
 
@@ -681,6 +695,7 @@ private:
     }
     frameArenas_->bindCurrentThread(workerCount_); // main
     bintrace_.bindThread(workerCount_);
+    attachWorkerPoolTrace();
     rt::init_fp_env();
     fiberPool_ = std::make_unique<rt::FiberPool>(workerCount_);
   }
@@ -692,6 +707,10 @@ private:
         fiberPool_.reset();
       }
       bintrace_.shutdown();
+      if (bintrace::global_trace() == &bintrace_)
+        bintrace::set_global_trace(nullptr);
+      workerPoolTraceAttached_ = false;
+      workerPoolTraceBase_ = 0;
       return;
     }
     shutdown_.store(true, std::memory_order_release);
@@ -704,6 +723,23 @@ private:
       fiberPool_.reset();
     }
     bintrace_.shutdown();
+    if (bintrace::global_trace() == &bintrace_)
+      bintrace::set_global_trace(nullptr);
+    workerPoolTraceAttached_ = false;
+    workerPoolTraceBase_ = 0;
+  }
+
+  void attachWorkerPoolTrace() {
+    if (!pool_ || !bintrace_.enabled())
+      return;
+    const std::size_t threads = pool_->thread_count();
+    if (threads == 0)
+      return;
+    if (!workerPoolTraceAttached_) {
+      workerPoolTraceBase_ = bintrace_.appendThreads(threads);
+      workerPoolTraceAttached_ = true;
+    }
+    pool_->setTrace(&bintrace_, workerPoolTraceBase_);
   }
 
   void workerLoop() {
@@ -1295,6 +1331,13 @@ private:
   }
 
   void executeFrame() {
+    int pendingTrips = watchdogTripPending_.exchange(0, std::memory_order_acq_rel);
+    while (pendingTrips-- > 0) {
+      bintrace_.log(bintrace::EV_WatchdogTrip,
+                    static_cast<std::uint32_t>(frame_),
+                    static_cast<std::uint64_t>(
+                        watchdogTrips_.load(std::memory_order_acquire)));
+    }
     if (watchdog_) {
       auto budget =
           std::chrono::duration_cast<std::chrono::milliseconds>(outerDt_ * 1.25);
@@ -1554,12 +1597,15 @@ private:
   std::unique_ptr<rt::Watchdog> watchdog_;
   std::atomic<int> watchdogTrips_{0};
   std::atomic<bool> watchdogLimp_{false};
+  std::atomic<int> watchdogTripPending_{0};
   std::unordered_map<std::string, std::size_t> chunkCache_;
   std::string machineId_;
 
   Logger *logger_ = nullptr;
   Profiler *profiler_ = nullptr;
   WorkerPool *pool_ = nullptr;
+  std::size_t workerPoolTraceBase_ = 0;
+  bool workerPoolTraceAttached_ = false;
 };
 
 #if RTFW_ENFORCE_NO_RAW_THREADS

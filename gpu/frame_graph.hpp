@@ -12,6 +12,7 @@
 #include "hal/hal.hpp"
 #include "hal/gpu_stub.hpp"
 #include <rt/fiber_pool.hpp>
+#include <simcore/bintrace.hpp>
 
 namespace simcore::hal::gpu {
 
@@ -83,6 +84,7 @@ public:
         auto total_start = hal::now();
         std::atomic<hal::Duration::rep> gpu_total{0};
         rt::FiberPool* pool_ptr = nullptr;
+        std::size_t pendingFences = 0;
 
         for (std::size_t i = 0; i < passes_.size(); ++i) {
             auto& p = passes_[i];
@@ -113,11 +115,27 @@ public:
                 if (!pool_ptr)
                     pool_ptr = &ensure_pool();
                 auto* pool = pool_ptr;
+                pendingFences++;
                 pool->wait_for_fence(std::move(fence));
             }
         }
-        if (pool_ptr)
+        if (pool_ptr) {
+            if (pendingFences) {
+                if (auto* trace = bintrace::global_trace()) {
+                    trace->log(bintrace::EV_GpuFenceWaitBegin,
+                               static_cast<std::uint32_t>(pendingFences),
+                               static_cast<std::uint64_t>(passes_.size()));
+                }
+            }
             pool_ptr->drain();
+            if (pendingFences) {
+                if (auto* trace = bintrace::global_trace()) {
+                    trace->log(bintrace::EV_GpuFenceWaitEnd,
+                               static_cast<std::uint32_t>(pendingFences),
+                               static_cast<std::uint64_t>(passes_.size()));
+                }
+            }
+        }
         for (std::size_t i = 0; i < passes_.size(); ++i)
             free_dead_resources(i);
         budget.gpu = hal::Duration{gpu_total.load(std::memory_order_acquire)};

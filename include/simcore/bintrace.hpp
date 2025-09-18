@@ -2,9 +2,9 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <memory>
 #include <atomic>
 #include <cstring>
-#include <memory>
 #include <cassert>
 #include <new>
 #include <fstream>
@@ -23,11 +23,20 @@ struct alignas(32) Event {
 };
 
 enum : std::uint32_t {
-    EV_PhaseBegin  = 0x01,
-    EV_PhaseEnd    = 0x02,
-    EV_ChunkStart  = 0x03,
-    EV_ChunkDone   = 0x04,
-    EV_BudgetLadder = 0x05,
+    EV_PhaseBegin        = 0x01,
+    EV_PhaseEnd          = 0x02,
+    EV_ChunkStart        = 0x03,
+    EV_ChunkDone         = 0x04,
+    EV_GovernorRung      = 0x05,
+    EV_BudgetLadder      = EV_GovernorRung,
+    EV_QueuePush         = 0x06,
+    EV_QueuePop          = 0x07,
+    EV_WorkSteal         = 0x08,
+    EV_WatchdogTrip      = 0x09,
+    EV_GpuFenceWaitBegin = 0x0A,
+    EV_GpuFenceWaitEnd   = 0x0B,
+    EV_SnapshotSave      = 0x0C,
+    EV_SnapshotLoad      = 0x0D,
 };
 
 static inline std::uint64_t rdtsc() noexcept {
@@ -40,25 +49,25 @@ public:
 
     void init(std::size_t threads, std::size_t eventsPerThread, bool enabled) {
         enabled_ = enabled;
+        eventsPerThread_ = eventsPerThread;
         buffers_.clear();
-        buffers_.resize(threads); // needs movable/default-constructible Buffer
-        for (std::size_t i=0;i<threads;++i) {
-            Buffer& b = buffers_[i];
-            b.cap = eventsPerThread;
-            b.mem = ::operator new(b.cap * sizeof(Event), std::align_val_t(64));
-            b.base = static_cast<Event*>(b.mem);
-            b.write.store(0, std::memory_order_relaxed);
+        buffers_.reserve(threads);
+        for (std::size_t i = 0; i < threads; ++i) {
+            auto buf = std::make_unique<Buffer>();
+            if (eventsPerThread_) {
+                buf->allocate(eventsPerThread_);
+            }
+            buffers_.emplace_back(std::move(buf));
         }
         tlsBuf_ = nullptr;
         tlsThreadIdx_ = ~std::size_t{0};
     }
 
     void shutdown() {
+        eventsPerThread_ = 0;
         for (auto& b : buffers_) {
-            if (b.mem) {
-                ::operator delete(b.mem, std::align_val_t(64));
-                b.mem = nullptr; b.base = nullptr; b.cap = 0;
-                b.write.store(0, std::memory_order_relaxed);
+            if (b) {
+                b->release();
             }
         }
         buffers_.clear();
@@ -66,11 +75,28 @@ public:
         tlsThreadIdx_ = ~std::size_t{0};
     }
 
+    std::size_t threadCount() const noexcept { return buffers_.size(); }
+
+    std::size_t appendThreads(std::size_t count) {
+        if (count == 0)
+            return buffers_.size();
+        const std::size_t base = buffers_.size();
+        buffers_.reserve(base + count);
+        for (std::size_t i = 0; i < count; ++i) {
+            auto buf = std::make_unique<Buffer>();
+            if (eventsPerThread_) {
+                buf->allocate(eventsPerThread_);
+            }
+            buffers_.emplace_back(std::move(buf));
+        }
+        return base;
+    }
+
     bool enabled() const noexcept { return enabled_; }
 
     void bindThread(std::size_t idx) {
         if (idx >= buffers_.size()) return;
-        tlsBuf_ = &buffers_[idx];
+        tlsBuf_ = buffers_[idx].get();
         tlsThreadIdx_ = idx;
     }
 
@@ -99,7 +125,7 @@ public:
         s.perThreadCount.resize(buffers_.size(), 0);
         std::size_t total = 0;
         for (std::size_t t=0; t<buffers_.size(); ++t) {
-            const Buffer& b = buffers_[t];
+            const Buffer& b = *buffers_[t];
             const std::size_t w = b.write.load(std::memory_order_acquire);
             std::size_t n = (w < b.cap) ? w : b.cap;
             s.perThreadCount[t] = n;
@@ -109,7 +135,7 @@ public:
 
         std::size_t cursor = 0;
         for (std::size_t t=0; t<buffers_.size(); ++t) {
-            const Buffer& b = buffers_[t];
+            const Buffer& b = *buffers_[t];
             const std::size_t w = b.write.load(std::memory_order_acquire);
             const std::size_t cap = b.cap;
             const std::size_t n = s.perThreadCount[t];
@@ -141,7 +167,7 @@ public:
              static_cast<std::uint32_t>(sizeof(Event))};
         f.write(reinterpret_cast<const char*>(&h), sizeof(h));
         for (std::size_t t=0; t<buffers_.size(); ++t) {
-            const Buffer& b = buffers_[t];
+            const Buffer& b = *buffers_[t];
             const std::size_t w = b.write.load(std::memory_order_acquire);
             const std::size_t n = (w < b.cap) ? w : b.cap;
             std::uint64_t cnt = static_cast<std::uint64_t>(n);
@@ -166,31 +192,38 @@ private:
         void*     mem   = nullptr;
         Event*    base  = nullptr;
         std::size_t cap = 0;
-        std::atomic<std::size_t> write;
+        std::atomic<std::size_t> write{0};
 
-        Buffer() : write(0) {}
-
-        // non-copyable (atomic)
+        Buffer() = default;
         Buffer(const Buffer&) = delete;
         Buffer& operator=(const Buffer&) = delete;
 
-        // movable (manual because atomic is non-movable)
-        Buffer(Buffer&& o) noexcept
-            : mem(o.mem), base(o.base), cap(o.cap), write(o.write.load(std::memory_order_relaxed)) {
-            o.mem = nullptr; o.base = nullptr; o.cap = 0; o.write.store(0, std::memory_order_relaxed);
+        ~Buffer() { release(); }
+
+        void allocate(std::size_t newCap) {
+            release();
+            if (newCap == 0)
+                return;
+            cap = newCap;
+            mem = ::operator new(cap * sizeof(Event), std::align_val_t(64));
+            base = static_cast<Event*>(mem);
+            write.store(0, std::memory_order_relaxed);
         }
-        Buffer& operator=(Buffer&& o) noexcept {
-            if (this != &o) {
-                mem = o.mem; base = o.base; cap = o.cap;
-                write.store(o.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                o.mem = nullptr; o.base = nullptr; o.cap = 0; o.write.store(0, std::memory_order_relaxed);
+
+        void release() {
+            if (mem) {
+                ::operator delete(mem, std::align_val_t(64));
+                mem = nullptr;
+                base = nullptr;
+                cap = 0;
+                write.store(0, std::memory_order_relaxed);
             }
-            return *this;
         }
     };
 
-    std::vector<Buffer> buffers_;
+    std::vector<std::unique_ptr<Buffer>> buffers_;
     bool enabled_ = false;
+    std::size_t eventsPerThread_ = 0;
 
     // TLS writer cursor
     static thread_local Buffer* tlsBuf_;
@@ -199,5 +232,29 @@ private:
 
 inline thread_local typename Trace::Buffer* Trace::tlsBuf_ = nullptr;
 inline thread_local std::size_t            Trace::tlsThreadIdx_ = ~std::size_t{0};
+
+namespace detail {
+inline std::atomic<Trace*> g_trace{nullptr};
+} // namespace detail
+
+inline void set_global_trace(Trace* trace) {
+    detail::g_trace.store(trace, std::memory_order_release);
+}
+
+inline Trace* global_trace() {
+    return detail::g_trace.load(std::memory_order_acquire);
+}
+
+inline void log_queue_push(std::uint32_t depth, std::uint64_t capacity = 0) {
+    if (auto* trace = global_trace()) {
+        trace->log(EV_QueuePush, depth, capacity);
+    }
+}
+
+inline void log_queue_pop(std::uint32_t depth, std::uint64_t capacity = 0) {
+    if (auto* trace = global_trace()) {
+        trace->log(EV_QueuePop, depth, capacity);
+    }
+}
 
 } // namespace bintrace
