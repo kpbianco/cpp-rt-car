@@ -36,6 +36,111 @@ if (SIM_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   endif()
 endif()
 
+# Helper to link shared objects against sanitizer runtimes when we need to
+# satisfy the dynamic loader (e.g. for dlopen-based smoke tests).
+function(simcore_link_sanitizer_runtime target)
+  if (NOT SIM_SANITIZERS)
+    return()
+  endif()
+  if (MSVC)
+    return()
+  endif()
+  if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    return()
+  endif()
+
+  set(_runtime_tags)
+  foreach(_san IN LISTS SIM_SANITIZERS)
+    if (_san STREQUAL "address" OR _san STREQUAL "leak")
+      list(APPEND _runtime_tags asan)
+    elseif (_san STREQUAL "thread")
+      list(APPEND _runtime_tags tsan)
+    elseif (_san STREQUAL "memory")
+      list(APPEND _runtime_tags msan)
+    elseif (_san STREQUAL "undefined")
+      list(APPEND _runtime_tags ubsan)
+    elseif (_san STREQUAL "hwaddress")
+      list(APPEND _runtime_tags hwasan)
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _runtime_tags)
+  if (NOT _runtime_tags)
+    return()
+  endif()
+
+  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _arch_lower)
+  if (_arch_lower STREQUAL "x86_64" OR _arch_lower STREQUAL "amd64")
+    set(_arch_token "x86_64")
+  elseif (_arch_lower STREQUAL "aarch64" OR _arch_lower STREQUAL "arm64")
+    set(_arch_token "aarch64")
+  else()
+    set(_arch_token "${_arch_lower}")
+  endif()
+
+  set(_resolved_libs)
+  foreach(_tag IN LISTS _runtime_tags)
+    set(_candidates)
+    if (_tag STREQUAL "asan")
+      set(_candidates
+        "libasan.so"
+        "libclang_rt.asan-${_arch_token}.so"
+        "libclang_rt.asan-${_arch_token}.a"
+        "libclang_rt.asan_cxx-${_arch_token}.so"
+        "libclang_rt.asan_cxx-${_arch_token}.a"
+      )
+    elseif (_tag STREQUAL "ubsan")
+      set(_candidates
+        "libubsan.so"
+        "libclang_rt.ubsan_standalone-${_arch_token}.so"
+        "libclang_rt.ubsan_standalone-${_arch_token}.a"
+        "libclang_rt.ubsan_standalone_cxx-${_arch_token}.so"
+        "libclang_rt.ubsan_standalone_cxx-${_arch_token}.a"
+      )
+    elseif (_tag STREQUAL "tsan")
+      set(_candidates
+        "libtsan.so"
+        "libclang_rt.tsan-${_arch_token}.so"
+        "libclang_rt.tsan-${_arch_token}.a"
+      )
+    elseif (_tag STREQUAL "msan")
+      set(_candidates
+        "libmsan.so"
+        "libclang_rt.msan-${_arch_token}.so"
+        "libclang_rt.msan-${_arch_token}.a"
+      )
+    elseif (_tag STREQUAL "hwasan")
+      set(_candidates
+        "libclang_rt.hwasan-${_arch_token}.so"
+        "libclang_rt.hwasan-${_arch_token}.a"
+      )
+    else()
+      set(_candidates)
+    endif()
+
+    foreach(_candidate IN LISTS _candidates)
+      if (NOT CMAKE_CXX_COMPILER)
+        break()
+      endif()
+      execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_candidate}
+        OUTPUT_VARIABLE _candidate_path
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+      if (_candidate_path AND NOT _candidate_path STREQUAL ${_candidate}
+          AND EXISTS "${_candidate_path}")
+        list(APPEND _resolved_libs "${_candidate_path}")
+        break()
+      endif()
+    endforeach()
+  endforeach()
+
+  if (_resolved_libs)
+    list(REMOVE_DUPLICATES _resolved_libs)
+    target_link_libraries(${target} PRIVATE ${_resolved_libs})
+  endif()
+endfunction()
+
 # IWYU
 if (SIM_ENABLE_IWYU)
   find_program(IWYU_PATH NAMES include-what-you-use iwyu)
@@ -230,6 +335,7 @@ target_include_directories(rtfw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rtfw PRIVATE simcore simcore_platform simcore_rt)
 target_compile_definitions(rtfw PRIVATE RTFW_BUILD=1)
 set_target_properties(rtfw PROPERTIES OUTPUT_NAME rtfw)
+simcore_link_sanitizer_runtime(rtfw)
 
 # Main executable
 add_executable(simcore_app src/main.cpp)
