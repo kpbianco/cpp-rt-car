@@ -79,42 +79,56 @@ function(simcore_link_sanitizer_runtime target)
 
   set(_resolved_libs)
   foreach(_tag IN LISTS _runtime_tags)
-    set(_candidates)
+    set(_clang_candidates)
+    set(_gnu_candidates)
     if (_tag STREQUAL "asan")
-      set(_candidates
-        "libasan.so"
+      set(_clang_candidates
         "libclang_rt.asan-${_arch_token}.so"
         "libclang_rt.asan-${_arch_token}.a"
         "libclang_rt.asan_cxx-${_arch_token}.so"
         "libclang_rt.asan_cxx-${_arch_token}.a"
       )
+      set(_gnu_candidates
+        "libasan.so"
+        "libasan.a"
+      )
     elseif (_tag STREQUAL "ubsan")
-      set(_candidates
-        "libubsan.so"
+      set(_clang_candidates
         "libclang_rt.ubsan_standalone-${_arch_token}.so"
         "libclang_rt.ubsan_standalone-${_arch_token}.a"
         "libclang_rt.ubsan_standalone_cxx-${_arch_token}.so"
         "libclang_rt.ubsan_standalone_cxx-${_arch_token}.a"
       )
+      set(_gnu_candidates
+        "libubsan.so"
+        "libubsan.a"
+      )
     elseif (_tag STREQUAL "tsan")
-      set(_candidates
-        "libtsan.so"
+      set(_clang_candidates
         "libclang_rt.tsan-${_arch_token}.so"
         "libclang_rt.tsan-${_arch_token}.a"
       )
+      set(_gnu_candidates
+        "libtsan.so"
+        "libtsan.a"
+      )
     elseif (_tag STREQUAL "msan")
-      set(_candidates
-        "libmsan.so"
+      set(_clang_candidates
         "libclang_rt.msan-${_arch_token}.so"
         "libclang_rt.msan-${_arch_token}.a"
       )
     elseif (_tag STREQUAL "hwasan")
-      set(_candidates
+      set(_clang_candidates
         "libclang_rt.hwasan-${_arch_token}.so"
         "libclang_rt.hwasan-${_arch_token}.a"
       )
+    endif()
+
+    set(_candidates)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      list(APPEND _candidates ${_clang_candidates} ${_gnu_candidates})
     else()
-      set(_candidates)
+      list(APPEND _candidates ${_gnu_candidates} ${_clang_candidates})
     endif()
 
     foreach(_candidate IN LISTS _candidates)
