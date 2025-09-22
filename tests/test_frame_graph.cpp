@@ -23,8 +23,12 @@ TEST(FrameGraph, TimelineAndResources) {
     EXPECT_EQ(gpu_seen.load(std::memory_order_acquire), 7);
     EXPECT_EQ(fg.cpu_timeline().current(), 1u);
     EXPECT_EQ(fg.gpu_timeline().current(), 1u);
-    EXPECT_GT(budget.cpu.count(), 0);
-    EXPECT_GT(budget.gpu.count(), 0);
+    // Windows steady_clock has a coarser resolution than Linux; allow zero
+    // durations here so the test does not flake when the passes execute faster
+    // than the tick interval while still verifying that they ran via the
+    // timeline checks below.
+    EXPECT_GE(budget.cpu.count(), 0);
+    EXPECT_GE(budget.gpu.count(), 0);
     EXPECT_EQ(fg.overlap().count(), 0);
     EXPECT_EQ(fg.resource(res_idx).buf.data, nullptr);
 }
