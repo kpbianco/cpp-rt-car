@@ -8,6 +8,7 @@
 #include <thread>
 #include "backpressure.hpp"
 #include "debug.hpp"
+#include "kernel_bypass.hpp"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -221,6 +222,105 @@ public:
             const double rate = static_cast<double>(cap) / seconds;
             return rate < 1.0 ? 1.0 : rate;
         }
+    };
+
+    class AsyncKernelBypassSink : public Sink {
+    public:
+        explicit AsyncKernelBypassSink(int fd,
+                                       std::size_t cap = 1024,
+                                       std::chrono::milliseconds pollEvery = std::chrono::milliseconds(10),
+                                       unsigned queueDepth = 64,
+                                       int sendFlags = simcore::KernelBypassSocket::default_send_flags())
+            : fd_(fd),
+              cap_(cap),
+              backpressure_(cap, computeRefillRate(cap, pollEvery)),
+              pollEvery_(pollEvery),
+              sendFlags_(sendFlags),
+              bypass_(queueDepth) {
+            if (fd_ >= 0) {
+                simcore::debug::assert_thread_creation_allowed();
+                worker_ = std::thread([this]{ run(); });
+            }
+        }
+
+        ~AsyncKernelBypassSink() override {
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                stop_ = true;
+            }
+            cv_.notify_all();
+            if (worker_.joinable()) worker_.join();
+            bypass_.drain();
+        }
+
+        void write(const Record& r) override {
+            if (fd_ < 0) return;
+            if (!backpressure_.try_acquire()) {
+                dropped_.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            std::lock_guard<std::mutex> lk(m_);
+            if (queue_.size() >= cap_) {
+                dropped_.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            queue_.push_back(r.msg);
+            cv_.notify_one();
+        }
+
+        std::size_t dropped() const override { return dropped_.load(); }
+
+    private:
+        static double computeRefillRate(std::size_t cap,
+                                        std::chrono::milliseconds interval) {
+            if (cap == 0) return 1.0;
+            const double seconds = static_cast<double>(interval.count()) / 1000.0;
+            if (seconds <= 0.0) return static_cast<double>(cap);
+            const double rate = static_cast<double>(cap) / seconds;
+            return rate < 1.0 ? 1.0 : rate;
+        }
+
+        void run() {
+            std::unique_lock<std::mutex> lk(m_);
+            while (true) {
+                if (queue_.empty()) {
+                    if (stop_) break;
+                    cv_.wait_for(lk, pollEvery_, [this]{ return stop_ || !queue_.empty(); });
+                    if (queue_.empty()) {
+                        lk.unlock();
+                        bypass_.poll();
+                        lk.lock();
+                        continue;
+                    }
+                }
+                auto msg = std::move(queue_.front());
+                queue_.pop_front();
+                lk.unlock();
+                if (!bypass_.submit(fd_, msg, sendFlags_)) {
+                    bypass_.poll();
+                    if (!bypass_.submit(fd_, msg, sendFlags_)) {
+                        dropped_.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+                bypass_.poll();
+                lk.lock();
+            }
+            lk.unlock();
+            bypass_.drain();
+        }
+
+        int fd_;
+        std::deque<std::string> queue_;
+        std::size_t cap_;
+        simcore::TokenBucket backpressure_;
+        std::chrono::milliseconds pollEvery_;
+        int sendFlags_;
+        simcore::KernelBypassSocket bypass_;
+        std::atomic<std::size_t> dropped_{0};
+        std::mutex m_;
+        std::condition_variable cv_;
+        bool stop_ = false;
+        std::thread worker_;
     };
 
     class RingBufferSink : public Sink {
