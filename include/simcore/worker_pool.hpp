@@ -243,11 +243,15 @@ private:
         stealLogged = false;
         continue;
       }
-      if (index < stealsPerThread_.size()) {
+
+      const bool hasOutstanding =
+          outstanding_.load(std::memory_order_acquire) > 0;
+      if (hasOutstanding && index < stealsPerThread_.size()) {
         stealsPerThread_[index].fetch_add(1, std::memory_order_relaxed);
       }
+
       if (auto *trace = trace_.load(std::memory_order_acquire)) {
-        if (outstanding_.load(std::memory_order_acquire) > 0) {
+        if (hasOutstanding) {
           if (!stealLogged) {
             trace->log(bintrace::EV_WorkSteal,
                        static_cast<std::uint32_t>(index),
@@ -257,11 +261,14 @@ private:
         } else {
           stealLogged = false;
         }
+      } else if (!hasOutstanding) {
+        stealLogged = false;
       }
-      if (stopping_.load(std::memory_order_acquire) &&
-          outstanding_.load(std::memory_order_acquire) == 0) {
+
+      if (stopping_.load(std::memory_order_acquire) && !hasOutstanding) {
         break;
       }
+
       std::this_thread::yield();
     }
   }
