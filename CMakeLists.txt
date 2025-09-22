@@ -538,6 +538,9 @@ target_include_directories(trace_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # Tiny sample programs
 add_subdirectory(samples)
 
+# Micro benchmarks
+add_subdirectory(bench)
+
 # Tests
 if (ENABLE_TESTS)
     enable_testing()

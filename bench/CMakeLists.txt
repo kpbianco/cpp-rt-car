@@ -1,0 +1,2 @@
+add_executable(bench_aosoa_vs_soa bench_aosoa_vs_soa.cpp)
+target_link_libraries(bench_aosoa_vs_soa PRIVATE simcore_platform)
