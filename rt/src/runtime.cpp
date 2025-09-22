@@ -76,8 +76,25 @@ DemoPipeline build_demo_pipeline(SimCore& sim) {
         busy_spin(0.70);
     });
 
-    sim.addSerialSubsystem(compose, [state](std::int64_t, SimCore::Seconds) {
+    sim.addSerialSubsystem(compose, [state, &sim](std::int64_t frame,
+                                                  SimCore::Seconds) {
         state->composeCount.fetch_add(1, std::memory_order_relaxed);
+        for (int rung = 1; rung <= 4; ++rung) {
+            auto &seen = state->rungEventsSeen[static_cast<std::size_t>(rung - 1)];
+            auto observed = seen.load(std::memory_order_relaxed);
+            const auto current = sim.rungActivations(rung);
+            while (observed < current) {
+                if (seen.compare_exchange_weak(observed, observed + 1,
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_relaxed)) {
+                    const std::uint64_t frameTag =
+                        frame > 0 ? static_cast<std::uint64_t>(frame - 1) : 0ull;
+                    sim.bintrace().log(bintrace::EV_BudgetLadder,
+                                       static_cast<std::uint32_t>(rung), frameTag);
+                    ++observed;
+                }
+            }
+        }
         busy_spin(0.60);
     });
 

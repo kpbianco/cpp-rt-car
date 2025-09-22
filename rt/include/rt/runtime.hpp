@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -41,6 +42,7 @@ struct DemoPipeline {
         std::atomic<std::uint64_t> ioCount{0};
         std::atomic<std::uint64_t> composeCount{0};
         std::atomic<std::uint64_t> fenceWaits{0};
+        std::array<std::atomic<std::uint64_t>, 4> rungEventsSeen{};
     };
 
     DemoPipeline() = default;
