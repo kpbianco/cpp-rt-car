@@ -36,6 +36,300 @@ if (SIM_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   endif()
 endif()
 
+# Helper to link shared objects against sanitizer runtimes when we need to
+# satisfy the dynamic loader (e.g. for dlopen-based smoke tests).
+function(simcore_link_sanitizer_runtime target)
+  if (NOT SIM_SANITIZERS)
+    return()
+  endif()
+  if (MSVC)
+    return()
+  endif()
+  if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    return()
+  endif()
+
+  set(_runtime_tags)
+  foreach(_san IN LISTS SIM_SANITIZERS)
+    if (_san STREQUAL "address" OR _san STREQUAL "leak")
+      list(APPEND _runtime_tags asan)
+    elseif (_san STREQUAL "thread")
+      list(APPEND _runtime_tags tsan)
+    elseif (_san STREQUAL "memory")
+      list(APPEND _runtime_tags msan)
+    elseif (_san STREQUAL "undefined")
+      list(APPEND _runtime_tags ubsan)
+    elseif (_san STREQUAL "hwaddress")
+      list(APPEND _runtime_tags hwasan)
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _runtime_tags)
+  if (NOT _runtime_tags)
+    return()
+  endif()
+
+  list(JOIN SIM_SANITIZERS "," _san_flags)
+
+  set(_runtime_patterns)
+  foreach(_tag IN LISTS _runtime_tags)
+    if (_tag STREQUAL "asan")
+      list(APPEND _runtime_patterns "asan|asan")
+    elseif (_tag STREQUAL "ubsan")
+      list(APPEND _runtime_patterns "ubsan|ubsan")
+    elseif (_tag STREQUAL "tsan")
+      list(APPEND _runtime_patterns "tsan|tsan")
+    elseif (_tag STREQUAL "msan")
+      list(APPEND _runtime_patterns "msan|msan")
+    elseif (_tag STREQUAL "hwasan")
+      list(APPEND _runtime_patterns "hwasan|hwasan")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _runtime_patterns)
+  if (NOT _runtime_patterns)
+    return()
+  endif()
+
+  set(_handled_tags)
+  set(_runtime_entries)
+  if (CMAKE_CXX_COMPILER)
+    set(_dummy_dir "${CMAKE_BINARY_DIR}/CMakeFiles")
+    file(MAKE_DIRECTORY "${_dummy_dir}")
+    set(_dummy_src "${_dummy_dir}/simcore_sanitize_dummy.cpp")
+    if (NOT EXISTS "${_dummy_src}")
+      file(WRITE "${_dummy_src}" "int simcore_sanitize_dummy() { return 0; }\n")
+    endif()
+    set(_dummy_out "${_dummy_dir}/libsimcore_sanitize_dummy.so")
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} "-###" "-x" "c++" "-" "-shared" "-fsanitize=${_san_flags}" "-fno-omit-frame-pointer" "-o" "${_dummy_out}"
+      INPUT_FILE "${_dummy_src}"
+      OUTPUT_VARIABLE _driver_stdout
+      ERROR_VARIABLE _driver_stderr
+      RESULT_VARIABLE _driver_result
+    )
+    if (_driver_result EQUAL 0)
+      set(_driver_output "${_driver_stdout}\n${_driver_stderr}")
+      string(REGEX MATCHALL "\"([^\"]+)\"" _quoted_tokens "${_driver_output}")
+      set(_in_whole OFF)
+      foreach(_token IN LISTS _quoted_tokens)
+        string(REGEX REPLACE "^\"|\"$" "" _value "${_token}")
+        if (_value MATCHES "simcore_sanitize_dummy")
+          continue()
+        endif()
+        if (_value MATCHES "^-fsanitize")
+          continue()
+        endif()
+        if (_value STREQUAL "--whole-archive" OR _value STREQUAL "-Wl,--whole-archive")
+          set(_in_whole ON)
+          continue()
+        elseif (_value STREQUAL "--no-whole-archive" OR _value STREQUAL "-Wl,--no-whole-archive")
+          set(_in_whole OFF)
+          continue()
+        endif()
+        foreach(_pattern_entry IN LISTS _runtime_patterns)
+          string(REPLACE "|" ";" _pattern_parts "${_pattern_entry}")
+          list(GET _pattern_parts 0 _pattern_tag)
+          list(GET _pattern_parts 1 _pattern_regex)
+          if (_value MATCHES "${_pattern_regex}")
+            list(APPEND _handled_tags "${_pattern_tag}")
+            if (_pattern_tag STREQUAL "asan" AND _value MATCHES "asan_static")
+              break()
+            endif()
+            if (_in_whole)
+              list(APPEND _runtime_entries "WHOLE|${_value}")
+            else()
+              list(APPEND _runtime_entries "NORMAL|${_value}")
+            endif()
+            break()
+          endif()
+        endforeach()
+      endforeach()
+    endif()
+  endif()
+
+  list(REMOVE_DUPLICATES _handled_tags)
+
+  set(_missing_tags)
+  foreach(_tag IN LISTS _runtime_tags)
+    if (NOT _tag IN_LIST _handled_tags)
+      list(APPEND _missing_tags "${_tag}")
+    endif()
+  endforeach()
+
+  set(_used_fallback OFF)
+  if (_missing_tags)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _arch_lower)
+    if (_arch_lower STREQUAL "x86_64" OR _arch_lower STREQUAL "amd64")
+      set(_arch_token "x86_64")
+    elseif (_arch_lower STREQUAL "aarch64" OR _arch_lower STREQUAL "arm64")
+      set(_arch_token "aarch64")
+    else()
+      set(_arch_token "${_arch_lower}")
+    endif()
+
+    foreach(_tag IN LISTS _missing_tags)
+      set(_gnu_candidates)
+      set(_clang_candidates)
+      if (_tag STREQUAL "asan")
+        set(_gnu_candidates
+          "libasan.so"
+          "libasan.a"
+        )
+        set(_clang_candidates
+          "libclang_rt.asan-${_arch_token}.so"
+          "libclang_rt.asan-${_arch_token}.a"
+          "libclang_rt.asan_cxx-${_arch_token}.so"
+          "libclang_rt.asan_cxx-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "ubsan")
+        set(_gnu_candidates
+          "libubsan.so"
+          "libubsan.a"
+        )
+        set(_clang_candidates
+          "libclang_rt.ubsan_standalone-${_arch_token}.so"
+          "libclang_rt.ubsan_standalone-${_arch_token}.a"
+          "libclang_rt.ubsan_standalone_cxx-${_arch_token}.so"
+          "libclang_rt.ubsan_standalone_cxx-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "tsan")
+        set(_gnu_candidates
+          "libtsan.so"
+          "libtsan.a"
+        )
+        set(_clang_candidates
+          "libclang_rt.tsan-${_arch_token}.so"
+          "libclang_rt.tsan-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "msan")
+        set(_clang_candidates
+          "libclang_rt.msan-${_arch_token}.so"
+          "libclang_rt.msan-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "hwasan")
+        set(_clang_candidates
+          "libclang_rt.hwasan-${_arch_token}.so"
+          "libclang_rt.hwasan-${_arch_token}.a"
+        )
+      endif()
+
+      set(_candidates)
+      if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND _candidates ${_clang_candidates} ${_gnu_candidates})
+      else()
+        list(APPEND _candidates ${_gnu_candidates} ${_clang_candidates})
+      endif()
+
+      foreach(_candidate IN LISTS _candidates)
+        execute_process(
+          COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_candidate}
+          OUTPUT_VARIABLE _candidate_path
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          ERROR_QUIET
+        )
+        if (_candidate_path AND NOT _candidate_path STREQUAL ${_candidate}
+            AND EXISTS "${_candidate_path}")
+          set(_entry_flag "NORMAL")
+          if (_candidate_path MATCHES "_static" AND _candidate_path MATCHES "\\.a$")
+            set(_entry_flag "WHOLE")
+          endif()
+          list(APPEND _runtime_entries "${_entry_flag}|${_candidate_path}")
+          list(APPEND _handled_tags "${_tag}")
+          break()
+        endif()
+      endforeach()
+    endforeach()
+    if (_runtime_entries)
+      set(_used_fallback ON)
+    endif()
+  endif()
+
+  list(REMOVE_DUPLICATES _handled_tags)
+
+  if (NOT _runtime_entries)
+    return()
+  endif()
+
+  set(_link_directives)
+  set(_seen_libs)
+  foreach(_entry IN LISTS _runtime_entries)
+    string(REPLACE "|" ";" _parts "${_entry}")
+    list(GET _parts 0 _entry_flag)
+    list(GET _parts 1 _lib)
+
+    set(_needs_whole OFF)
+    if (_entry_flag STREQUAL "WHOLE")
+      set(_needs_whole ON)
+    endif()
+
+    if (_lib MATCHES "^-Wl,")
+      list(APPEND _link_directives "${_lib}")
+      continue()
+    elseif (_lib MATCHES "^-l.+")
+      list(APPEND _link_directives "${_lib}")
+      continue()
+    elseif (NOT (IS_ABSOLUTE "${_lib}" AND EXISTS "${_lib}"))
+      continue()
+    endif()
+
+    set(_final_path)
+    set(_final_is_static OFF)
+    if (_lib MATCHES "\\.a$")
+      get_filename_component(_lib_dir "${_lib}" DIRECTORY)
+      get_filename_component(_lib_name "${_lib}" NAME_WE)
+
+      set(_stem_variants "${_lib_name}")
+      if (_lib_name MATCHES "_static(-|$)")
+        string(REGEX REPLACE "_static(-|$)" "\\1" _no_static "${_lib_name}")
+        list(APPEND _stem_variants "${_no_static}")
+      endif()
+      list(REMOVE_DUPLICATES _stem_variants)
+
+      set(_shared_match)
+      foreach(_stem IN LISTS _stem_variants)
+        file(GLOB _maybe_shared "${_lib_dir}/${_stem}.so" "${_lib_dir}/${_stem}.so.*")
+        if (_maybe_shared)
+          list(SORT _maybe_shared)
+          list(GET _maybe_shared 0 _shared_match)
+          break()
+        endif()
+        file(GLOB _maybe_dylib "${_lib_dir}/${_stem}.dylib" "${_lib_dir}/${_stem}.dylib.*")
+        if (_maybe_dylib)
+          list(SORT _maybe_dylib)
+          list(GET _maybe_dylib 0 _shared_match)
+          break()
+        endif()
+      endforeach()
+
+      if (_shared_match)
+        set(_final_path "${_shared_match}")
+      else()
+        set(_final_path "${_lib}")
+        set(_final_is_static ON)
+      endif()
+    else()
+      set(_final_path "${_lib}")
+    endif()
+
+    if (_final_path AND NOT _final_path IN_LIST _seen_libs)
+      list(APPEND _seen_libs "${_final_path}")
+      if (_final_is_static AND _needs_whole)
+        list(APPEND _link_directives "-Wl,--whole-archive" "${_final_path}" "-Wl,--no-whole-archive")
+      else()
+        list(APPEND _link_directives "${_final_path}")
+      endif()
+    endif()
+  endforeach()
+
+  if (_link_directives)
+    target_link_libraries(${target} PRIVATE ${_link_directives})
+    if (_used_fallback)
+      message(STATUS "Sanitizer runtimes for ${target}: using fallback ${_link_directives}")
+    else()
+      message(STATUS "Sanitizer runtimes for ${target}: ${_link_directives}")
+    endif()
+  endif()
+endfunction()
+
 # IWYU
 if (SIM_ENABLE_IWYU)
   find_program(IWYU_PATH NAMES include-what-you-use iwyu)
@@ -82,18 +376,40 @@ endif()
 # expecting a checked out submodule. This keeps the repository light and
 # avoids build failures when the submodule is missing.
 if (ENABLE_TESTS)
+    option(SIM_DOWNLOAD_GTEST "Download GoogleTest if it is not provided" ON)
+    set(SIM_GTEST_AVAILABLE OFF)
+
     if (EXISTS "${CMAKE_SOURCE_DIR}/external/googletest/CMakeLists.txt")
         add_subdirectory(external/googletest)
+        set(SIM_GTEST_AVAILABLE ON)
+        set(SIM_GTEST_LIBRARIES gtest gtest_main gmock)
     else()
-        include(FetchContent)
-        FetchContent_Declare(
-            googletest
-            URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
-        )
-        # For Windows: Prevent overriding the parent project's compiler/linker
-        # settings on MSVC.
-        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-        FetchContent_MakeAvailable(googletest)
+        find_package(GTest CONFIG QUIET)
+        if (GTest_FOUND)
+            set(SIM_GTEST_AVAILABLE ON)
+            set(SIM_GTEST_LIBRARIES GTest::gtest)
+            if (TARGET GTest::gtest_main)
+                list(APPEND SIM_GTEST_LIBRARIES GTest::gtest_main)
+            endif()
+            if (TARGET GTest::gmock)
+                list(APPEND SIM_GTEST_LIBRARIES GTest::gmock)
+            endif()
+        elseif (SIM_DOWNLOAD_GTEST)
+            include(FetchContent)
+            FetchContent_Declare(
+                googletest
+                URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            )
+            # For Windows: Prevent overriding the parent project's compiler/linker
+            # settings on MSVC.
+            set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+            FetchContent_MakeAvailable(googletest)
+            set(SIM_GTEST_AVAILABLE ON)
+            set(SIM_GTEST_LIBRARIES gtest gtest_main gmock)
+        else()
+            message(WARNING "GoogleTest not available; gtest-based tests will be skipped.")
+        endif()
     endif()
 
     if (ENABLE_RAPIDCHECK)
@@ -120,6 +436,7 @@ add_library(simcore_platform STATIC src/platform_init.cpp)
 target_include_directories(simcore_platform PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(simcore_platform PUBLIC simcore)
+set_target_properties(simcore_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Enable warnings for project sources only
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -197,9 +514,17 @@ target_include_directories(simcore_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hal
 )
 target_link_libraries(simcore_rt PUBLIC simcore_core)
+set_target_properties(simcore_rt PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (UNIX)
     target_link_libraries(simcore_rt PUBLIC dl)
 endif()
+
+add_library(rtfw SHARED src/c_abi.cpp)
+target_include_directories(rtfw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rtfw PRIVATE simcore simcore_platform simcore_rt)
+target_compile_definitions(rtfw PRIVATE RTFW_BUILD=1)
+set_target_properties(rtfw PROPERTIES OUTPUT_NAME rtfw)
+simcore_link_sanitizer_runtime(rtfw)
 
 # Main executable
 add_executable(simcore_app src/main.cpp)
