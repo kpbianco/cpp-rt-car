@@ -79,25 +79,23 @@ PluginHandle PluginManager::load(const std::string& path) {
 }
 
 void PluginManager::unload(PluginHandle& plugin) {
+    if (!plugin.is_loaded()) {
+        return;
+    }
+
+    auto* handle = plugin.handle;
+    auto shutdown = plugin.shutdown;
+    if (shutdown) {
+        shutdown();
+    }
+
 #if defined(_WIN32)
-    if (plugin.handle) {
-        if (plugin.shutdown) {
-            plugin.shutdown();
-        }
-        FreeLibrary(static_cast<HMODULE>(plugin.handle));
-        plugin.handle = nullptr;
-        plugin.shutdown = nullptr;
-    }
+    FreeLibrary(static_cast<HMODULE>(handle));
 #else
-    if (plugin.handle) {
-        if (plugin.shutdown) {
-            plugin.shutdown();
-        }
-        dlclose(plugin.handle);
-        plugin.handle = nullptr;
-        plugin.shutdown = nullptr;
-    }
+    dlclose(handle);
 #endif
+
+    plugin.reset();
 }
 
 } // namespace rt

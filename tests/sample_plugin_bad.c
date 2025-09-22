@@ -19,3 +19,7 @@ EXPORT int rt_plugin_init(const rt_plugin_desc_t* desc) {
 }
 
 EXPORT void rt_plugin_shutdown(void) {}
+
+EXPORT int rt_plugin_is_initialized(void) {
+    return 0;
+}

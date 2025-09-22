@@ -6,7 +6,7 @@
 #define EXPORT
 #endif
 
-static int initialized = 0;
+static int g_initialized = 0;
 
 EXPORT rt_plugin_desc_t rt_plugin_desc = {
     RT_PLUGIN_API_VERSION_MAJOR,
@@ -17,14 +17,14 @@ EXPORT rt_plugin_desc_t rt_plugin_desc = {
 
 EXPORT int rt_plugin_init(const rt_plugin_desc_t* desc) {
     (void)desc;
-    initialized = 1;
+    g_initialized = 1;
     return 0;
 }
 
 EXPORT void rt_plugin_shutdown(void) {
-    initialized = 0;
+    g_initialized = 0;
 }
 
 EXPORT int rt_plugin_is_initialized(void) {
-    return initialized;
+    return g_initialized;
 }
