@@ -12,12 +12,13 @@
 
 TEST(PluginManager, LoadAndUnload) {
     auto plugin = rt::PluginManager::load(PLUGIN_PATH);
+    EXPECT_TRUE(plugin.is_loaded());
     EXPECT_STREQ(plugin.desc.name, "test_sample_plugin");
     auto is_init = reinterpret_cast<int (*)()>(GETSYM(plugin.handle, "rt_plugin_is_initialized"));
     ASSERT_TRUE(is_init);
     EXPECT_EQ(is_init(), 1);
     rt::PluginManager::unload(plugin);
-    EXPECT_EQ(plugin.handle, nullptr);
+    EXPECT_FALSE(plugin.is_loaded());
 }
 
 TEST(PluginManager, VersionMismatch) {
