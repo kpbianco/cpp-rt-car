@@ -13,13 +13,10 @@ worst-case durability testing.
 - A bounded queue that drops excess log records and tracks the drop count
   via `dropped()` so tests can assert on pressure.
 
-## Network / IPC
+For network exporters `Logger::AsyncKernelBypassSink` pairs a bounded queue
+with the `simcore::KernelBypassSocket` helper. The sink pushes log lines to a
+socket using token-bucket backpressure identical to the file sink. On Linux the
+socket helper can opt into io_uring submission by defining
+`SIMCORE_ENABLE_IO_URING` at build time; otherwise it transparently falls back
+to non-blocking `send()` calls so the same interface works across platforms.
 
-The experimental `KernelBypassSocket` (`include/simcore/kernel_bypass.hpp`)
-wraps platform specific kernel-bypass facilities:
-
-- `io_uring` on Linux.
-- I/O completion ports on Windows.
-
-The `poll()` API allows DPDK-style busy polling for NIC-bound telemetry when
-streaming live traces.
