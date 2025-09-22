@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -37,14 +38,21 @@ void expect_pages_on_nodes(void *base, std::size_t bytes,
   for (std::size_t i = 0; i < totalPages; ++i)
     pages[i] = static_cast<char *>(base) + i * page;
   std::vector<int> status(totalPages);
-  numa_move_pages(0, static_cast<unsigned long>(totalPages), pages.data(),
-                  nullptr, status.data(), 0);
+  errno = 0;
+  const long rc =
+      numa_move_pages(0, static_cast<unsigned long>(totalPages), pages.data(),
+                      nullptr, status.data(), 0);
+  ASSERT_EQ(rc, 0) << "numa_move_pages failed: " << std::strerror(errno);
   const std::size_t boundaryPages =
       std::min((firstBytes + page - 1) / page, totalPages);
   for (std::size_t i = 0; i < boundaryPages; ++i)
     EXPECT_EQ(status[i], nodeA);
   for (std::size_t i = boundaryPages; i < totalPages; ++i)
     EXPECT_EQ(status[i], nodeB);
+}
+
+void expect_pages_on_single_node(void *base, std::size_t bytes, int node) {
+  expect_pages_on_nodes(base, bytes, bytes, node, node);
 }
 } // namespace
 
@@ -95,6 +103,72 @@ TEST(NumaIntegration, WorkerArenasAreNodeLocal) {
   for (std::size_t i = 0; i < pages.size(); ++i) {
     ASSERT_GE(capture.nodes[i], 0);
     EXPECT_EQ(status[i], capture.nodes[i]);
+  }
+}
+
+TEST(NumaIntegration, ThreadArenaFirstTouchMatchesRuntimeNode) {
+  if (numa_available() < 0 || numa_num_configured_nodes() < 2) {
+    GTEST_SKIP() << "NUMA not available";
+  }
+
+  const int maxNode = numa_max_node();
+  struct bitmask *cpuMask = numa_allocate_cpumask();
+  if (!cpuMask) {
+    GTEST_SKIP() << "Failed to allocate NUMA CPU mask";
+  }
+
+  std::vector<int> nodes;
+  nodes.reserve(static_cast<std::size_t>(maxNode + 1));
+  for (int node = 0; node <= maxNode; ++node) {
+    if (numa_node_to_cpus(node, cpuMask) != 0)
+      continue;
+    for (unsigned long bit = 0; bit < cpuMask->size; ++bit) {
+      if (numa_bitmask_isbitset(cpuMask, static_cast<unsigned int>(bit))) {
+        nodes.push_back(node);
+        break;
+      }
+    }
+  }
+  numa_free_cpumask(cpuMask);
+
+  if (nodes.size() < 2) {
+    GTEST_SKIP() << "Less than two NUMA nodes with online CPUs";
+  }
+
+  const std::size_t threads = nodes.size();
+  const std::size_t bytesPerThread = 1u << 20; // 1 MiB per arena
+  const std::size_t valuesPerThread = bytesPerThread / sizeof(double);
+
+  rt::FrameArenaPool pool(threads, bytesPerThread, 64, nodes);
+  std::vector<double *> allocations(threads, nullptr);
+  std::vector<int> runtimeNodes(threads, -1);
+
+  rt::numa::parallel_for_nodes(
+      threads, nodes,
+      [&](std::size_t begin, std::size_t end, int assignedNode) {
+        for (std::size_t idx = begin; idx < end; ++idx) {
+          pool.bindCurrentThread(idx);
+          double *data = pool.tls().allocateArray<double>(valuesPerThread);
+          for (std::size_t j = 0; j < valuesPerThread; ++j)
+            data[j] = static_cast<double>(idx);
+          allocations[idx] = data;
+          int cpu = sched_getcpu();
+          int runtimeNode = assignedNode;
+          if (cpu >= 0) {
+            const int cpuNode = numa_node_of_cpu(cpu);
+            if (cpuNode >= 0)
+              runtimeNode = cpuNode;
+          }
+          runtimeNodes[idx] = runtimeNode;
+        }
+      });
+
+  for (std::size_t i = 0; i < threads; ++i) {
+    ASSERT_NE(allocations[i], nullptr);
+    ASSERT_GE(runtimeNodes[i], 0);
+    expect_pages_on_single_node(allocations[i], bytesPerThread,
+                                runtimeNodes[i]);
+    EXPECT_DOUBLE_EQ(allocations[i][0], static_cast<double>(i));
   }
 }
 
