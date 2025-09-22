@@ -68,89 +68,147 @@ function(simcore_link_sanitizer_runtime target)
     return()
   endif()
 
-  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _arch_lower)
-  if (_arch_lower STREQUAL "x86_64" OR _arch_lower STREQUAL "amd64")
-    set(_arch_token "x86_64")
-  elseif (_arch_lower STREQUAL "aarch64" OR _arch_lower STREQUAL "arm64")
-    set(_arch_token "aarch64")
-  else()
-    set(_arch_token "${_arch_lower}")
+  list(JOIN SIM_SANITIZERS "," _san_flags)
+
+  set(_runtime_patterns)
+  foreach(_tag IN LISTS _runtime_tags)
+    if (_tag STREQUAL "asan")
+      list(APPEND _runtime_patterns "asan")
+    elseif (_tag STREQUAL "ubsan")
+      list(APPEND _runtime_patterns "ubsan")
+    elseif (_tag STREQUAL "tsan")
+      list(APPEND _runtime_patterns "tsan")
+    elseif (_tag STREQUAL "msan")
+      list(APPEND _runtime_patterns "msan")
+    elseif (_tag STREQUAL "hwasan")
+      list(APPEND _runtime_patterns "hwasan")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _runtime_patterns)
+  if (NOT _runtime_patterns)
+    return()
+  endif()
+
+  set(_driver_libs)
+  if (CMAKE_CXX_COMPILER)
+    set(_dummy_dir "${CMAKE_BINARY_DIR}/CMakeFiles")
+    file(MAKE_DIRECTORY "${_dummy_dir}")
+    set(_dummy_src "${_dummy_dir}/simcore_sanitize_dummy.cpp")
+    if (NOT EXISTS "${_dummy_src}")
+      file(WRITE "${_dummy_src}" "int simcore_sanitize_dummy() { return 0; }\n")
+    endif()
+    set(_dummy_out "${_dummy_dir}/libsimcore_sanitize_dummy.so")
+
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} -### -x c++ "${_dummy_src}" -shared -fsanitize=${_san_flags} -fno-omit-frame-pointer -o "${_dummy_out}"
+      OUTPUT_VARIABLE _driver_stdout
+      ERROR_VARIABLE _driver_stderr
+      RESULT_VARIABLE _driver_result
+    )
+    if (_driver_result EQUAL 0)
+      set(_driver_output "${_driver_stdout}\n${_driver_stderr}")
+      string(REGEX MATCHALL "\"([^\"]+)\"" _quoted_tokens "${_driver_output}")
+      foreach(_token IN LISTS _quoted_tokens)
+        string(REGEX REPLACE "^\"|\"$" "" _value "${_token}")
+        foreach(_pattern IN LISTS _runtime_patterns)
+          if (_value MATCHES "${_pattern}")
+            list(APPEND _driver_libs "${_value}")
+            break()
+          endif()
+        endforeach()
+      endforeach()
+    endif()
   endif()
 
   set(_resolved_libs)
-  foreach(_tag IN LISTS _runtime_tags)
-    set(_clang_candidates)
-    set(_gnu_candidates)
-    if (_tag STREQUAL "asan")
-      set(_clang_candidates
-        "libclang_rt.asan-${_arch_token}.so"
-        "libclang_rt.asan-${_arch_token}.a"
-        "libclang_rt.asan_cxx-${_arch_token}.so"
-        "libclang_rt.asan_cxx-${_arch_token}.a"
-      )
-      set(_gnu_candidates
-        "libasan.so"
-        "libasan.a"
-      )
-    elseif (_tag STREQUAL "ubsan")
-      set(_clang_candidates
-        "libclang_rt.ubsan_standalone-${_arch_token}.so"
-        "libclang_rt.ubsan_standalone-${_arch_token}.a"
-        "libclang_rt.ubsan_standalone_cxx-${_arch_token}.so"
-        "libclang_rt.ubsan_standalone_cxx-${_arch_token}.a"
-      )
-      set(_gnu_candidates
-        "libubsan.so"
-        "libubsan.a"
-      )
-    elseif (_tag STREQUAL "tsan")
-      set(_clang_candidates
-        "libclang_rt.tsan-${_arch_token}.so"
-        "libclang_rt.tsan-${_arch_token}.a"
-      )
-      set(_gnu_candidates
-        "libtsan.so"
-        "libtsan.a"
-      )
-    elseif (_tag STREQUAL "msan")
-      set(_clang_candidates
-        "libclang_rt.msan-${_arch_token}.so"
-        "libclang_rt.msan-${_arch_token}.a"
-      )
-    elseif (_tag STREQUAL "hwasan")
-      set(_clang_candidates
-        "libclang_rt.hwasan-${_arch_token}.so"
-        "libclang_rt.hwasan-${_arch_token}.a"
-      )
+  foreach(_lib IN LISTS _driver_libs)
+    if (_lib MATCHES "^-Wl,")
+      list(APPEND _resolved_libs "${_lib}")
+    elseif (_lib MATCHES "^-l.+")
+      list(APPEND _resolved_libs "${_lib}")
+    elseif (IS_ABSOLUTE "${_lib}" AND EXISTS "${_lib}")
+      list(APPEND _resolved_libs "${_lib}")
     endif()
-
-    set(_candidates)
-    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND _candidates ${_clang_candidates})
-    else()
-      list(APPEND _candidates ${_gnu_candidates})
-      if (_clang_candidates)
-        list(APPEND _candidates ${_clang_candidates})
-      endif()
-    endif()
-
-    foreach(_candidate IN LISTS _candidates)
-      if (NOT CMAKE_CXX_COMPILER)
-        break()
-      endif()
-      execute_process(
-        COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_candidate}
-        OUTPUT_VARIABLE _candidate_path
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-      )
-      if (_candidate_path AND NOT _candidate_path STREQUAL ${_candidate}
-          AND EXISTS "${_candidate_path}")
-        list(APPEND _resolved_libs "${_candidate_path}")
-        break()
-      endif()
-    endforeach()
   endforeach()
+
+  if (NOT _resolved_libs)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _arch_lower)
+    if (_arch_lower STREQUAL "x86_64" OR _arch_lower STREQUAL "amd64")
+      set(_arch_token "x86_64")
+    elseif (_arch_lower STREQUAL "aarch64" OR _arch_lower STREQUAL "arm64")
+      set(_arch_token "aarch64")
+    else()
+      set(_arch_token "${_arch_lower}")
+    endif()
+
+    foreach(_tag IN LISTS _runtime_tags)
+      set(_gnu_candidates)
+      set(_clang_candidates)
+      if (_tag STREQUAL "asan")
+        set(_gnu_candidates
+          "libasan.so"
+          "libasan.a"
+        )
+        set(_clang_candidates
+          "libclang_rt.asan-${_arch_token}.so"
+          "libclang_rt.asan-${_arch_token}.a"
+          "libclang_rt.asan_cxx-${_arch_token}.so"
+          "libclang_rt.asan_cxx-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "ubsan")
+        set(_gnu_candidates
+          "libubsan.so"
+          "libubsan.a"
+        )
+        set(_clang_candidates
+          "libclang_rt.ubsan_standalone-${_arch_token}.so"
+          "libclang_rt.ubsan_standalone-${_arch_token}.a"
+          "libclang_rt.ubsan_standalone_cxx-${_arch_token}.so"
+          "libclang_rt.ubsan_standalone_cxx-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "tsan")
+        set(_gnu_candidates
+          "libtsan.so"
+          "libtsan.a"
+        )
+        set(_clang_candidates
+          "libclang_rt.tsan-${_arch_token}.so"
+          "libclang_rt.tsan-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "msan")
+        set(_clang_candidates
+          "libclang_rt.msan-${_arch_token}.so"
+          "libclang_rt.msan-${_arch_token}.a"
+        )
+      elseif (_tag STREQUAL "hwasan")
+        set(_clang_candidates
+          "libclang_rt.hwasan-${_arch_token}.so"
+          "libclang_rt.hwasan-${_arch_token}.a"
+        )
+      endif()
+
+      set(_candidates)
+      if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND _candidates ${_clang_candidates} ${_gnu_candidates})
+      else()
+        list(APPEND _candidates ${_gnu_candidates} ${_clang_candidates})
+      endif()
+
+      foreach(_candidate IN LISTS _candidates)
+        execute_process(
+          COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_candidate}
+          OUTPUT_VARIABLE _candidate_path
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          ERROR_QUIET
+        )
+        if (_candidate_path AND NOT _candidate_path STREQUAL ${_candidate}
+            AND EXISTS "${_candidate_path}")
+          list(APPEND _resolved_libs "${_candidate_path}")
+          break()
+        endif()
+      endforeach()
+    endforeach()
+  endif()
 
   if (_resolved_libs)
     list(REMOVE_DUPLICATES _resolved_libs)
