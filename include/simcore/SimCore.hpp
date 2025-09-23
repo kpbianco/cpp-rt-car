@@ -106,7 +106,11 @@ public:
   int preSteps() const { return preSteps_; }
   double recoveredMs() const { return recoveredMs_; }
   double precoveredMs() const { return precoveredMs_; }
-  FrameArena &frameArena() { return frameArenas_->tls(); }
+  FrameArena &frameArena() {
+    RTFW_DEBUG_ASSERT(tls_arena_bound &&
+                      "Thread arena not bound—call bindCurrentThread() before allocating");
+    return frameArenas_->tls();
+  }
   rt::FiberPool &fiberPool() { return *fiberPool_; }
   bintrace::Trace &bintrace() { return bintrace_; }
   bool visualizersEnabled() const { return settings_.visualizers; }
@@ -794,7 +798,9 @@ private:
           set_affinity(std::size_t(cpuList[i % cpuList.size()]));
 #endif
         rt::init_fp_env();
+        tls_arena_bound = false;
         frameArenas_->bindCurrentThread(i);
+        tls_arena_bound = true;
         bintrace_.bindThread(i);
         if (platformInitState_.requested)
           simcore::platform_apply_worker_policy(platformInitState_, logger_,
@@ -802,7 +808,9 @@ private:
         workerLoop();
       });
     }
+    tls_arena_bound = false;
     frameArenas_->bindCurrentThread(workerCount_); // main
+    tls_arena_bound = true;
     bintrace_.bindThread(workerCount_);
     attachWorkerPoolTrace();
     rt::init_fp_env();
@@ -1379,7 +1387,8 @@ private:
                               static_cast<long double>(skew));
       }
 
-      ArenaResource res(frameArenas_->tls());
+      FrameArena &scratchArena = frameArena();
+      ArenaResource res(scratchArena);
       std::pmr::vector<double> partials(&res);
       partials.resize(totalChunks, 0.0);
       std::pmr::vector<std::uint64_t> checksums(&res);
@@ -1391,8 +1400,7 @@ private:
         std::pmr::vector<std::uint64_t> *checksums;
         std::size_t chunk;
       };
-      void *mem =
-          frameArenas_->tls().allocate(sizeof(LeafCtx), alignof(LeafCtx));
+      void *mem = scratchArena.allocate(sizeof(LeafCtx), alignof(LeafCtx));
       auto *leafCtx = new (mem) LeafCtx{rr, &partials, &checksums, chunk};
 
       auto leafThunk = [](void *c, std::size_t b, std::size_t e, std::int64_t f,
