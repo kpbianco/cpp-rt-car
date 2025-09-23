@@ -29,3 +29,11 @@ third‑party dependencies.
 `tools/store_repro_build.py` stores build outputs along with a SHA256
 digest.  The resulting metadata can be kept with performance artifacts
 allowing binary reproducibility checks.
+
+## Code anchors
+
+- Sandboxing: `enable_sandbox`; `include/simcore/sandbox.hpp`
+- Minidump symbols: `write_minidump`; `include/simcore/minidump.hpp`
+- SBOM verification: `main()` runner; `tools/sbom.py`
+- Reproducible artifacts: `main()` workflow; `tools/store_repro_build.py`
+

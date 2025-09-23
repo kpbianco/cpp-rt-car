@@ -7,3 +7,11 @@ The physics module provides engine-agnostic building blocks:
 - **Narrowphase Shells**: `GJKEPANarrowPhase` and `MPRNarrowPhase` expose hooks for common convex collision detectors. `ContactCache` demonstrates temporal coherence and `ConservativeAdvancementCCD` sketches continuous collision detection.
 
 These scaffolds are intentionally lightweight and serve as extension points for real engines.
+
+## Code anchors
+
+- Hamiltonian integrators: `simphys::stormerVerlet`; `include/simcore/physics/integrators.hpp`
+- Constraint solver depth: `simphys::SolverSettings`, `simphys::IslandManager::update`; `include/simcore/physics/constraint_solver.hpp`
+- Narrowphase shells: `simphys::GJKEPANarrowPhase::generateContacts`, `simphys::MPRNarrowPhase::generateContacts`; `include/simcore/physics/collision_pipeline.hpp`
+- Temporal coherence & CCD: `simphys::ContactCache::contacts`, `simphys::ConservativeAdvancementCCD::sweep`; `include/simcore/physics/collision_pipeline.hpp`
+

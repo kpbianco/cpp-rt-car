@@ -11,3 +11,9 @@ Configuration is stored on disk in a simple textual format:
 new configuration objects when it changes.  Basic validation ensures the major
 version matches the previously loaded configuration.  The hot-reload wrapper is
 header-only and has no external dependencies.
+
+## Code anchors
+
+- Config reload: `ConfigHotReloader::load`, `ConfigHotReloader::hot_reload`; `core/include/core/config_hot_reload.hpp`
+- Snapshot access: `ConfigHotReloader::get`; `core/include/core/config_hot_reload.hpp`
+

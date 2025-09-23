@@ -23,3 +23,9 @@ Sanitizers are available when using Clang or GCC. Supported entries include:
 - `cfi` – Control Flow Integrity (requires LTO).
 
 Multiple sanitizers may be combined when they are compatible.
+
+## Code anchors
+
+- Sanitizer configuration: `set(SIM_SANITIZERS ...)`, `add_compile_options` for PGO/sanitizers; `CMakeLists.txt`
+- Target instrumentation: `foreach(_san IN LISTS SIM_SANITIZERS)` handling; `CMakeLists.txt`
+

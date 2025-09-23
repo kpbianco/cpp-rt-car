@@ -41,3 +41,11 @@ Enable include-what-you-use and ODR warnings by toggling the options:
 
 These checks help keep headers minimal and catch One Definition Rule
 violations early.
+
+## Code anchors
+
+- Presets and PGO flow: `configurePresets` entries (`dev`, `release`, `pgo-generate`, `pgo-use`); `CMakePresets.json`, `CMakeLists.txt` (`SIM_PGO`, `SIM_ENABLE_LTO`)
+- Clang toolchain: `CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER`; `cmake/toolchains/clang.cmake`
+- Bloaty analysis: `add_custom_target(bloaty)`; `CMakeLists.txt`
+- Header hygiene toggles: `option(SIM_ENABLE_IWYU)`, `option(SIM_WARN_ODR)`; `CMakeLists.txt`
+

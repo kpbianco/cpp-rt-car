@@ -20,3 +20,9 @@ socket helper can opt into io_uring submission by defining
 `SIMCORE_ENABLE_IO_URING` at build time; otherwise it transparently falls back
 to non-blocking `send()` calls so the same interface works across platforms.
 
+## Code anchors
+
+- File sink: `Logger::AsyncRingFileSink::write`, `Logger::AsyncRingFileSink::run`; `include/simcore/logger.hpp`
+- Kernel-bypass sink: `Logger::AsyncKernelBypassSink::write`, `Logger::AsyncKernelBypassSink::run`; `include/simcore/logger.hpp`
+- Kernel bypass helper: `simcore::KernelBypassSocket::submit`, `simcore::KernelBypassSocket::poll`; `include/simcore/kernel_bypass.hpp`
+

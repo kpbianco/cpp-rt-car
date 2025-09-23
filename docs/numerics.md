@@ -26,3 +26,10 @@ For hard real-time subsystems a small fixed-point type `rt::Q16_16`
 implements deterministic arithmetic without relying on floating point
 hardware.
 
+## Code anchors
+
+- Mixed-precision reductions: `robust::sum_fp32_to_fp64`, `robust::kahan_sum_fp32`; `include/simcore/robust_fp.hpp`
+- Shadow arithmetic: `robust::ulp_distance`; `include/simcore/robust_fp.hpp`
+- Denormals & FMA control: `rt::init_fp_env`, `rt::set_use_fma`; `rt/include/rt/numerics.hpp`
+- Fixed-point option: `rt::Q16_16`; `rt/include/rt/fixed_point.hpp`
+

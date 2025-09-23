@@ -9,3 +9,10 @@ strategies.
   runtime limits and monitoring to detect and contain abuses.
 - **Denial of Service**: Malformed inputs may trigger unexpected states.
   Validate inputs and employ watchdog timers.
+
+## Code anchors
+
+- Plugin mitigations: `rt::PluginManager::load`, `rt::PluginManager::unload`; `rt/src/plugin_manager.cpp`, `rt/include/rt/plugin_api.h`
+- Resource limits: `simcore::TokenBucket::try_acquire`; `include/simcore/backpressure.hpp`
+- Watchdog guardrails: `rt::Watchdog::arm`, `rt::Watchdog::disarm`; `rt/include/rt/watchdog.hpp`
+

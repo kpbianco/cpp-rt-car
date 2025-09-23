@@ -16,3 +16,11 @@ experiments with GPU/accelerator scheduling.  The implementation lives in
 
 The frame graph is a stub and intentionally minimal; it is meant to be
 replaced by a real implementation once a concrete GPU backend is available.
+
+## Code anchors
+
+- Resource lifetime tracking: `FrameGraph::create_resource`, `FrameGraph::free_dead_resources`; `gpu/frame_graph.hpp`
+- Timeline semaphores: `TimelineSemaphore::wait`, `TimelineSemaphore::signal`; `gpu/frame_graph.hpp`
+- Async overlap budget: `FrameGraph::execute`; `gpu/frame_graph.hpp`
+- Mixed compute stubs: `FrameGraph::add_pass`; `gpu/frame_graph.hpp`
+
