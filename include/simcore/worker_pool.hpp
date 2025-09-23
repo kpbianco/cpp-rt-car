@@ -91,7 +91,14 @@ public:
         return;
       }
     }
-    while (!queue_.try_push(std::move(job))) {
+    while (true) {
+      if (queue_.try_push(std::move(job))) {
+        if (auto *trace = trace_.load(std::memory_order_acquire)) {
+          trace->log(bintrace::EV_QueuePush,
+                     static_cast<std::uint32_t>(queue_.size()));
+        }
+        break;
+      }
       std::this_thread::yield();
     }
   }
@@ -139,6 +146,10 @@ public:
             outstanding_.fetch_sub(1, std::memory_order_acq_rel);
             return false;
           }
+          if (auto *trace = trace_.load(std::memory_order_acquire)) {
+            trace->log(bintrace::EV_QueuePush,
+                       static_cast<std::uint32_t>(queue_.size()));
+          }
           return true;
         }
       }
@@ -170,6 +181,10 @@ public:
       if (!queue_.try_push(std::move(job))) {
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
         return false;
+      }
+      if (auto *trace = trace_.load(std::memory_order_acquire)) {
+        trace->log(bintrace::EV_QueuePush,
+                   static_cast<std::uint32_t>(queue_.size()));
       }
       return true;
     }
@@ -235,6 +250,12 @@ private:
       }
       Job job;
       if (queue_.try_pop(job)) {
+        if (bound) {
+          if (auto *trace = trace_.load(std::memory_order_acquire)) {
+            trace->log(bintrace::EV_QueuePop,
+                       static_cast<std::uint32_t>(queue_.size()));
+          }
+        }
         active_.fetch_add(1, std::memory_order_acq_rel);
         if (job.fn)
           job.fn();
