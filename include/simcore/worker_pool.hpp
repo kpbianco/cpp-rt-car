@@ -80,6 +80,7 @@ public:
       }
       if (threads_.size() > 1) {
         simcore::debug::assert_thread_creation_allowed();
+        logEmergencySpawn();
         std::thread([this, job = std::move(job)]() mutable {
           rt::init_fp_env();
           active_.fetch_add(1, std::memory_order_acq_rel);
@@ -132,6 +133,7 @@ public:
               return true;
             }
             simcore::debug::assert_thread_creation_allowed();
+            logEmergencySpawn();
             std::thread([this, job = std::move(job)]() mutable {
               rt::init_fp_env();
               active_.fetch_add(1, std::memory_order_acq_rel);
@@ -168,6 +170,7 @@ public:
           return true;
         }
         simcore::debug::assert_thread_creation_allowed();
+        logEmergencySpawn();
         std::thread([this, job = std::move(job)]() mutable {
           rt::init_fp_env();
           active_.fetch_add(1, std::memory_order_acq_rel);
@@ -237,6 +240,17 @@ public:
   }
 
 private:
+  void logEmergencySpawn() {
+    if (auto *trace = trace_.load(std::memory_order_acquire)) {
+      constexpr std::uint32_t kUnknownThread = ~std::uint32_t{0};
+      const std::uint64_t outstandingCount =
+          static_cast<std::uint64_t>(
+              outstanding_.load(std::memory_order_acquire));
+      trace->log(bintrace::EV_EmergencySpawn, kUnknownThread,
+                 outstandingCount);
+    }
+  }
+
   void workerLoop(std::size_t index) {
     bool bound = false;
     bool stealLogged = false;

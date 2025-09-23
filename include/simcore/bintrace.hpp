@@ -39,6 +39,7 @@ enum : std::uint32_t {
     EV_SnapshotSave      = 0x0C,
     EV_SnapshotLoad      = 0x0D,
     EV_PlatformCrumb     = 0x0E,
+    EV_EmergencySpawn    = 0x0F,
 };
 
 static inline std::uint64_t rdtsc() noexcept {

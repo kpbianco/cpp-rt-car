@@ -15,6 +15,7 @@ inline const char* codeToCat(std::uint32_t code) {
     case bintrace::EV_QueuePush:          return "queue";
     case bintrace::EV_QueuePop:           return "queue";
     case bintrace::EV_WorkSteal:          return "WorkSteal";
+    case bintrace::EV_EmergencySpawn:     return "WorkerPool";
     case bintrace::EV_WatchdogTrip:       return "WatchdogTrip";
     case bintrace::EV_GpuFenceWaitBegin:  return "GpuFenceWaitBegin";
     case bintrace::EV_GpuFenceWaitEnd:    return "GpuFenceWaitEnd";
@@ -35,6 +36,7 @@ inline const char* codeToName(std::uint32_t code) {
     case bintrace::EV_QueuePush:          return "queue_push";
     case bintrace::EV_QueuePop:           return "queue_pop";
     case bintrace::EV_WorkSteal:          return "Work Steal";
+    case bintrace::EV_EmergencySpawn:     return "Emergency Spawn";
     case bintrace::EV_WatchdogTrip:       return "Watchdog Trip";
     case bintrace::EV_GpuFenceWaitBegin:  return "GPU Fence Wait Begin";
     case bintrace::EV_GpuFenceWaitEnd:    return "GPU Fence Wait End";
@@ -65,6 +67,15 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
                 os << ",\"capacity\":" << e.b;
             }
             os << "}";
+            break;
+        case bintrace::EV_EmergencySpawn:
+            os << "{\"thread_idx\":";
+            if (e.a == ~std::uint32_t{0}) {
+                os << -1;
+            } else {
+                os << e.a;
+            }
+            os << ",\"outstanding\":" << e.b << "}";
             break;
         default:
             os << "{\"a\":" << e.a << ",\"b\":" << e.b << "}";
