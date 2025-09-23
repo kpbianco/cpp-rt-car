@@ -354,8 +354,15 @@ public:
         bool wrapped_ = false;
     };
 
+private:
+    using SinkList = std::vector<std::shared_ptr<Sink>>;
+    using SinkListPtr = std::shared_ptr<const SinkList>;
+
+public:
     explicit Logger(Level lvl = static_cast<Level>(LOG_DEFAULT_LEVEL))
-        : level_(static_cast<int>(lvl)) {}
+        : level_(static_cast<int>(lvl)) {
+        storeSinkSnapshot(std::make_shared<const SinkList>());
+    }
 
     void setLevel(Level l) { level_.store(static_cast<int>(l), std::memory_order_relaxed); }
     Level level() const { return static_cast<Level>(level_.load(std::memory_order_relaxed)); }
@@ -363,16 +370,24 @@ public:
     void addSink(std::shared_ptr<Sink> s) {
         std::lock_guard<std::mutex> lk(sinkMutex_);
         sinks_.push_back(std::move(s));
+        updateSinkSnapshotLocked();
     }
 
-    std::size_t dropped() const {
-        std::lock_guard<std::mutex> lk(sinkMutex_);
+    std::size_t total_dropped() const {
+        auto sinksSnapshot = loadSinkSnapshot();
         std::size_t total = 0;
-        for (const auto& s : sinks_) {
-            total += s->dropped();
+        if (!sinksSnapshot) {
+            return total;
+        }
+        for (const auto &sink : *sinksSnapshot) {
+            if (sink) {
+                total += sink->dropped();
+            }
         }
         return total;
     }
+
+    std::size_t dropped() const { return total_dropped(); }
 
     bool willLog(Level l) const {
         return static_cast<int>(l) >= static_cast<int>(level());
@@ -428,8 +443,43 @@ private:
     std::atomic<int> level_;
     std::atomic<std::uint64_t> seq_{0};
     std::vector<std::shared_ptr<Sink>> sinks_;
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+#define LOGGER_HAS_ATOMIC_SHARED_PTR 1
+#elif defined(_MSC_VER)
+#define LOGGER_HAS_ATOMIC_SHARED_PTR 1
+#else
+#define LOGGER_HAS_ATOMIC_SHARED_PTR 0
+#endif
+#if LOGGER_HAS_ATOMIC_SHARED_PTR
+    using SinkSnapshotStorage = std::atomic<SinkListPtr>;
+#else
+    using SinkSnapshotStorage = SinkListPtr;
+#endif
+    SinkSnapshotStorage sinksSnapshot_{};
     mutable std::mutex sinkMutex_;
+
+    void updateSinkSnapshotLocked() {
+        storeSinkSnapshot(std::make_shared<const SinkList>(sinks_));
+    }
+
+    SinkListPtr loadSinkSnapshot() const {
+#if LOGGER_HAS_ATOMIC_SHARED_PTR
+        return sinksSnapshot_.load(std::memory_order_acquire);
+#else
+        return std::atomic_load_explicit(&sinksSnapshot_, std::memory_order_acquire);
+#endif
+    }
+
+    void storeSinkSnapshot(SinkListPtr snapshot) {
+#if LOGGER_HAS_ATOMIC_SHARED_PTR
+        sinksSnapshot_.store(std::move(snapshot), std::memory_order_release);
+#else
+        std::atomic_store_explicit(&sinksSnapshot_, std::move(snapshot), std::memory_order_release);
+#endif
+    }
 };
+
+#undef LOGGER_HAS_ATOMIC_SHARED_PTR
 
 #ifdef LOG_ENABLED
 #define LOG_TRACE(L, ...) do{ if(L) (L)->trace(__VA_ARGS__); }while(0)
