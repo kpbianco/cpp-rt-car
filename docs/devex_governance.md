@@ -26,3 +26,10 @@ API or ABI changes.
   active, including `SimCore.hpp` forbids direct `std::thread` construction.
   Phases must submit asynchronous work through the provided worker pool to keep
   a single scheduling surface and maintain consistent telemetry.
+
+## Code anchors
+
+- System scaffolding: `main()` generator; `tools/new_system.py`
+- Plugin ABI contract: `RT_PLUGIN_API_VERSION_MAJOR`, `rt_plugin_desc_t`; `rt/include/rt/plugin_api.h`
+- Raw thread guard: `simcore::debug::assert_thread_creation_allowed`, `#define thread(...)`; `include/simcore/debug.hpp`, `include/simcore/SimCore.hpp`
+

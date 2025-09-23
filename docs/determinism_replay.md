@@ -13,3 +13,11 @@
 - Seed protocol: combine a global seed with entity/chunk identifiers to guarantee reproducible streams.
 
 This document outlines the minimal requirements for deterministic gameplay and replay within the simulation core.
+
+## Code anchors
+
+- Frame snapshots: `SimCore::saveFrame`, `SimCore::loadFrame`; `include/simcore/SimCore.hpp`
+- Snapshot serialization helpers: `rt::SnapshotWriter::writeVector`, `rt::SnapshotWriter::writeMap`; `rt/include/rt/snapshot.hpp`
+- Rollback harness: `TEST(SnapshotRollback, ReplayHashEquality)`; `tests/test_snapshot.cpp`
+- Counter-based PRNG: `SimCore::prng`, `rt::prng::philox4x32_10`; `include/simcore/SimCore.hpp`, `rt/include/rt/prng.hpp`
+

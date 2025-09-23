@@ -11,3 +11,11 @@ mask loads/stores on the final block which simplifies the generated code.
 Manual prefetching is now guarded by a small working-set heuristic. Prefetch instructions are only issued when the
 array length exceeds a conservative threshold (`PREFETCH_MIN_N`), ensuring small problems do not pay the overhead of
 prefetching.
+
+## Code anchors
+
+- Block-size autotuner: `soa::autotune_block_size`; `include/simcore/soa/autotune.hpp`
+- Benchmark helper: `soa::measure_axpy3`; `include/simcore/soa/autotune.hpp`
+- AoSoA kernel: `soa::axpy3`; `include/simcore/soa/aosoa.hpp`
+- Prefetch heuristic: `sim::PREFETCH_MIN_N`, `sim::prefetch`; `include/simcore/prefetch.hpp`
+

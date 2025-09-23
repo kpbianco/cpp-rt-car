@@ -33,3 +33,10 @@ thread pool pulls tasks from lock-free queues, allowing phases to submit
 independent jobs that execute in parallel while respecting dependency
 edges. Phases wait for their scheduled jobs to finish before advancing,
 keeping frame latency predictable while utilising all CPU cores.
+
+## Code anchors
+
+- Phase DAG: `SimCore::buildTopoLevels`; `include/simcore/SimCore.hpp`
+- Memory layout: `CarSoA`; `include/simcore/car_soa.hpp`
+- Job system: `WorkerPool::workerLoop`, `BoundedMPMCQueue::try_push`; `include/simcore/worker_pool.hpp`, `include/simcore/job_queue.hpp`
+

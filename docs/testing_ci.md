@@ -32,3 +32,9 @@ LibFuzzer harnesses (e.g. `tests/jobqueue_fuzz.cpp`) run under
 ASan/UBSan/TSan.  Any TSan suppressions must carry written justification
 within the repository.
 
+## Code anchors
+
+- Differential testing: `TEST(DifferentialKernelTest, DriftBelowThreshold)`; `tests/test_differential_output.cpp`
+- Chaos testing: `TEST(FaultInjection, RandomDelaysStillRun)`; `tests/test_fault_injection.cpp`
+- Fuzzing harness: `LLVMFuzzerTestOneInput`; `tests/jobqueue_fuzz.cpp`
+

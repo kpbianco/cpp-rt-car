@@ -16,3 +16,11 @@ processor.
 `trace_export::write_ebpf_trace` writes each event on its own line using a
 space separated format: `tsc thread code a b`.  This is suitable for simple
 processing by eBPF-based pipelines.
+
+## Code anchors
+
+- Trace capture: `bintrace::Trace::log`, `bintrace::Trace::snapshot`; `include/simcore/bintrace.hpp`
+- Chrome trace export: `trace_export::write_chrome_trace`; `tools/trace_export.hpp`
+- ETW CSV export: `trace_export::write_etw_trace`; `tools/trace_export.hpp`
+- eBPF text export: `trace_export::write_ebpf_trace`; `tools/trace_export.hpp`
+

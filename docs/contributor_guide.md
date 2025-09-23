@@ -18,3 +18,10 @@
 ## Operations
 - Logs and profiles can be toggled with `ENABLE_LOG` and `ENABLE_PROF` in CMake.
 - For sanitizer builds, use `-DSIM_SANITIZERS=address;undefined`.
+
+## Code anchors
+
+- Build configuration: `option(ENABLE_TESTS)`; `CMakeLists.txt`
+- Logging and profiling toggles: `option(ENABLE_LOG)`, `option(ENABLE_PROF)`; `CMakeLists.txt`
+- Sanitizer flag: `SIM_SANITIZERS` handling; `CMakeLists.txt`
+

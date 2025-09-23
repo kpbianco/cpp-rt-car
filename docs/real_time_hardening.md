@@ -45,3 +45,9 @@ deep C-states.  This behaviour can be toggled at runtime by re-running the
 scripts: invoking them applies the low-latency configuration, while restoring a
 balanced power profile can be done with native tools such as `cpupower` on Linux
 or `powercfg` on Windows.
+
+## Code anchors
+
+- Linux hardening steps: `tools/rt_harden.sh`
+- Windows hardening steps: `tools/rt_harden.ps1`
+

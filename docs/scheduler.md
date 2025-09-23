@@ -19,3 +19,9 @@ exposes a helper `Scheduler::pop_next_with_aging` function that selects the next
 task based on the `(priority + age)` heuristic. This function is used by unit
 tests to verify the aging behaviour.
 
+## Code anchors
+
+- Task representation: `rt::Scheduler::Task`; `rt/include/rt/scheduler.hpp`
+- Aging heuristic: `rt::Scheduler::pop_next_with_aging`; `rt/include/rt/scheduler.hpp`
+- Worker execution: `rt::Scheduler::run`; `rt/include/rt/scheduler.hpp`, `rt/src/scheduler.cpp`
+

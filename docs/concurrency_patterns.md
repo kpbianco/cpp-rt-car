@@ -22,3 +22,9 @@ rate-based refills to avoid burst avalanches.
 
 Refer to the unit tests for usage examples.
 
+## Code anchors
+
+- SeqLock: `SeqLock::write`, `SeqLock::read`; `include/simcore/seqlock.hpp`
+- Hazard-pointer queue: `LockFreeQueue::push`, `LockFreeQueue::pop`; `include/simcore/lockfree_queue.hpp`
+- Back-pressure token bucket: `TokenBucket::try_acquire`; `include/simcore/backpressure.hpp`
+
