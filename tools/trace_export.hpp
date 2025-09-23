@@ -60,11 +60,7 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
         switch (e.code) {
         case bintrace::EV_QueuePush:
         case bintrace::EV_QueuePop:
-            os << "{\"depth\":" << e.a;
-            if (e.b) {
-                os << ",\"capacity\":" << e.b;
-            }
-            os << "}";
+            os << "{\"depth\":" << e.a << "}";
             break;
         default:
             os << "{\"a\":" << e.a << ",\"b\":" << e.b << "}";
