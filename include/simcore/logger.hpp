@@ -363,17 +363,20 @@ public:
     void addSink(std::shared_ptr<Sink> s) {
         std::lock_guard<std::mutex> lk(sinkMutex_);
         sinks_.push_back(std::move(s));
+        updateSinkSnapshotLocked();
     }
 
     std::size_t total_dropped() const {
-        std::vector<std::shared_ptr<Sink>> sinksCopy;
-        {
-            std::lock_guard<std::mutex> lk(sinkMutex_);
-            sinksCopy = sinks_;
-        }
+        auto sinksSnapshot =
+            std::atomic_load_explicit(&sinksSnapshot_, std::memory_order_acquire);
         std::size_t total = 0;
-        for (const auto& s : sinksCopy) {
-            if (s) total += s->dropped();
+        if (!sinksSnapshot) {
+            return total;
+        }
+        for (const auto &sink : *sinksSnapshot) {
+            if (sink) {
+                total += sink->dropped();
+            }
         }
         return total;
     }
@@ -434,7 +437,16 @@ private:
     std::atomic<int> level_;
     std::atomic<std::uint64_t> seq_{0};
     std::vector<std::shared_ptr<Sink>> sinks_;
+    mutable std::shared_ptr<const std::vector<std::shared_ptr<Sink>>> sinksSnapshot_{
+        std::make_shared<const std::vector<std::shared_ptr<Sink>>>()};
     mutable std::mutex sinkMutex_;
+
+    void updateSinkSnapshotLocked() {
+        auto snapshot =
+            std::make_shared<const std::vector<std::shared_ptr<Sink>>>(sinks_);
+        std::atomic_store_explicit(&sinksSnapshot_, std::move(snapshot),
+                                   std::memory_order_release);
+    }
 };
 
 #ifdef LOG_ENABLED
