@@ -12,7 +12,7 @@ inline const char* codeToCat(std::uint32_t code) {
     case bintrace::EV_ChunkStart:         return "ChunkStart";
     case bintrace::EV_ChunkDone:          return "ChunkDone";
     case bintrace::EV_GovernorRung:       return "GovernorRung";
-    case bintrace::EV_QueuePush:
+    case bintrace::EV_QueuePush:          return "queue";
     case bintrace::EV_QueuePop:           return "queue";
     case bintrace::EV_WorkSteal:          return "WorkSteal";
     case bintrace::EV_WatchdogTrip:       return "WatchdogTrip";
@@ -32,8 +32,8 @@ inline const char* codeToName(std::uint32_t code) {
     case bintrace::EV_ChunkStart:         return "Chunk Start";
     case bintrace::EV_ChunkDone:          return "Chunk Done";
     case bintrace::EV_GovernorRung:       return "Governor Rung";
-    case bintrace::EV_QueuePush:          return "Queue Push";
-    case bintrace::EV_QueuePop:           return "Queue Pop";
+    case bintrace::EV_QueuePush:          return "queue_push";
+    case bintrace::EV_QueuePop:           return "queue_pop";
     case bintrace::EV_WorkSteal:          return "Work Steal";
     case bintrace::EV_WatchdogTrip:       return "Watchdog Trip";
     case bintrace::EV_GpuFenceWaitBegin:  return "GPU Fence Wait Begin";
@@ -56,7 +56,21 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
         os << "\"ph\":\"i\",";
         os << "\"tid\":" << e.thread << ',';
         os << "\"ts\":" << e.tsc << ',';
-        os << "\"args\":{\"a\":" << e.a << ",\"b\":" << e.b << "}}";
+        os << "\"args\":";
+        switch (e.code) {
+        case bintrace::EV_QueuePush:
+        case bintrace::EV_QueuePop:
+            os << "{\"depth\":" << e.a;
+            if (e.b) {
+                os << ",\"capacity\":" << e.b;
+            }
+            os << "}";
+            break;
+        default:
+            os << "{\"a\":" << e.a << ",\"b\":" << e.b << "}";
+            break;
+        }
+        os << "}";
     }
     os << "]}";
 }
