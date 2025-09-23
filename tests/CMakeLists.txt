@@ -31,6 +31,7 @@ if (SIM_GTEST_AVAILABLE)
         test_aosoa_autotune.cpp
         test_rt_pool.cpp
         test_rt_arena.cpp
+        test_arena_binding_assert.cpp
         test_rt_overflow_death.cpp
         test_fiber_pool.cpp
         test_bintrace.cpp
