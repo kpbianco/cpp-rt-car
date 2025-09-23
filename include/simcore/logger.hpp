@@ -354,8 +354,14 @@ public:
         bool wrapped_ = false;
     };
 
+private:
+    using SinkList = std::vector<std::shared_ptr<Sink>>;
+    using SinkListPtr = std::shared_ptr<const SinkList>;
+
+public:
     explicit Logger(Level lvl = static_cast<Level>(LOG_DEFAULT_LEVEL))
-        : level_(static_cast<int>(lvl)) {}
+        : level_(static_cast<int>(lvl)),
+          sinksSnapshot_(std::make_shared<const SinkList>()) {}
 
     void setLevel(Level l) { level_.store(static_cast<int>(l), std::memory_order_relaxed); }
     Level level() const { return static_cast<Level>(level_.load(std::memory_order_relaxed)); }
@@ -368,7 +374,7 @@ public:
 
     std::size_t total_dropped() const {
         auto sinksSnapshot =
-            std::atomic_load_explicit(&sinksSnapshot_, std::memory_order_acquire);
+            sinksSnapshot_.load(std::memory_order_acquire);
         std::size_t total = 0;
         if (!sinksSnapshot) {
             return total;
@@ -437,15 +443,12 @@ private:
     std::atomic<int> level_;
     std::atomic<std::uint64_t> seq_{0};
     std::vector<std::shared_ptr<Sink>> sinks_;
-    mutable std::shared_ptr<const std::vector<std::shared_ptr<Sink>>> sinksSnapshot_{
-        std::make_shared<const std::vector<std::shared_ptr<Sink>>>()};
+    mutable std::atomic<SinkListPtr> sinksSnapshot_;
     mutable std::mutex sinkMutex_;
 
     void updateSinkSnapshotLocked() {
-        auto snapshot =
-            std::make_shared<const std::vector<std::shared_ptr<Sink>>>(sinks_);
-        std::atomic_store_explicit(&sinksSnapshot_, std::move(snapshot),
-                                   std::memory_order_release);
+        auto snapshot = std::make_shared<const SinkList>(sinks_);
+        sinksSnapshot_.store(std::move(snapshot), std::memory_order_release);
     }
 };
 
