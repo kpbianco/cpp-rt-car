@@ -3,8 +3,12 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
 #include <new>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #if defined(__linux__) && defined(SIM_USE_NUMA)
@@ -50,6 +54,23 @@ static inline std::size_t os_page_size() noexcept {
 // Optional: page pre-touch, mlock, hugepage advice at init.
 class FrameArena {
 public:
+  enum class AllocationStatus { Ok, Degraded, Failed };
+
+  using FallbackProvider = void *(*)(std::size_t);
+
+  static void setFallbackProvider(FallbackProvider fn) noexcept {
+    fallbackProvider_.store(fn, std::memory_order_release);
+  }
+
+  static void resetFallbackProvider() noexcept {
+    fallbackProvider_.store(nullptr, std::memory_order_release);
+  }
+
+  AllocationStatus lastStatus() const noexcept { return lastStatus_; }
+  bool degraded() const noexcept { return degradeSticky_; }
+  void clearDegraded() noexcept { degradeSticky_ = false; }
+  std::size_t fallbackBytes() const noexcept { return fallbackBytes_; }
+
   FrameArena() = default;
   explicit FrameArena(std::size_t capacityBytes,
                       std::size_t alignment = 64, int numaNode = -1) {
@@ -61,8 +82,11 @@ public:
 
   // Movable (for container init-time only)
   FrameArena(FrameArena &&o) noexcept
-      : buffer_(o.buffer_), capacity_(o.capacity_), head_(o.head_),
-        alignment_(o.alignment_)
+      : degradeActive_(o.degradeActive_), degradeSticky_(o.degradeSticky_),
+        lastStatus_(o.lastStatus_),
+        fallbackAllocs_(std::move(o.fallbackAllocs_)),
+        fallbackBytes_(o.fallbackBytes_), buffer_(o.buffer_),
+        capacity_(o.capacity_), head_(o.head_), alignment_(o.alignment_)
 #if defined(__linux__) && defined(SIM_USE_NUMA)
         , numaNode_(o.numaNode_)
 #endif
@@ -73,6 +97,11 @@ public:
     o.buffer_ = nullptr;
     o.capacity_ = 0;
     o.head_ = 0;
+    o.degradeActive_ = false;
+    o.degradeSticky_ = false;
+    o.lastStatus_ = AllocationStatus::Ok;
+    o.fallbackBytes_ = 0;
+    o.fallbackAllocs_.clear();
 #if defined(__linux__) && defined(SIM_USE_NUMA)
     o.numaNode_ = -1;
 #endif
@@ -88,6 +117,11 @@ public:
       head_ = o.head_;
       o.head_ = 0;
       alignment_ = o.alignment_;
+      degradeActive_ = o.degradeActive_;
+      degradeSticky_ = o.degradeSticky_;
+      lastStatus_ = o.lastStatus_;
+      fallbackAllocs_ = std::move(o.fallbackAllocs_);
+      fallbackBytes_ = o.fallbackBytes_;
 #if defined(__linux__) && defined(SIM_USE_NUMA)
       numaNode_ = o.numaNode_;
       o.numaNode_ = -1;
@@ -95,6 +129,11 @@ public:
 #if defined(__linux__)
       pageSize_ = o.pageSize_;
 #endif
+      o.degradeActive_ = false;
+      o.degradeSticky_ = false;
+      o.lastStatus_ = AllocationStatus::Ok;
+      o.fallbackBytes_ = 0;
+      o.fallbackAllocs_.clear();
     }
     return *this;
   }
@@ -124,38 +163,43 @@ public:
     reserve_(capacityBytes);
   }
 
-  void reset() noexcept { head_ = 0; }
+  void reset() noexcept {
+    head_ = 0;
+    releaseFallback_();
+    degradeActive_ = false;
+    lastStatus_ = AllocationStatus::Ok;
+  }
   std::size_t capacity() const noexcept { return capacity_; }
   std::size_t used() const noexcept { return head_; }
   std::size_t remaining() const noexcept { return capacity_ - head_; }
   std::size_t alignment() const noexcept { return alignment_; }
 
   void *allocate(std::size_t size,
-                 std::size_t align = alignof(std::max_align_t)) noexcept {
-    align = normalize_align(align);
-    const auto base = reinterpret_cast<std::uintptr_t>(buffer_);
-    const std::uintptr_t p = base + head_;
-    const std::uintptr_t aligned =
-        (p + (align - 1)) & ~(static_cast<std::uintptr_t>(align) - 1);
-    const std::size_t alignedHead = static_cast<std::size_t>(aligned - base);
-
-    // Bound check before modifying state to keep behavior deterministic even
-    // under sanitizers
-    if (alignedHead > capacity_ || size > capacity_ - alignedHead) {
-      const std::size_t avail =
-          alignedHead <= capacity_ ? (capacity_ - alignedHead) : 0u;
-      std::fprintf(stderr,
-                   "[RtArena] overflow: req=%zu avail=%zu cap=%zu off=%zu\n",
-                   size, avail, capacity_, alignedHead);
-      std::fflush(stderr);
-      std::abort();
-    }
-
-    head_ = alignedHead + size;
-    return reinterpret_cast<void *>(aligned);
+                 std::size_t align = alignof(std::max_align_t))
+#if defined(NDEBUG)
+      noexcept
+#endif
+  {
+    void *result = nullptr;
+    allocate(size, &result, align);
+    return result;
   }
 
-  template <typename T> T *allocateArray(std::size_t count) noexcept {
+  AllocationStatus allocate(std::size_t size, void **out,
+                            std::size_t align = alignof(std::max_align_t))
+#if defined(NDEBUG)
+      noexcept
+#endif
+  {
+    return allocateImpl_(size, align, out);
+  }
+
+  template <typename T>
+  T *allocateArray(std::size_t count)
+#if defined(NDEBUG)
+      noexcept
+#endif
+  {
     static_assert(!std::is_const<T>::value, "cannot allocate const");
     void *p = allocate(sizeof(T) * count, alignof(T));
     return reinterpret_cast<T *>(p);
@@ -171,6 +215,92 @@ public:
   }
 
 private:
+  AllocationStatus allocateImpl_(std::size_t size, std::size_t align,
+                                 void **out)
+#if defined(NDEBUG)
+      noexcept
+#endif
+  {
+    if (out)
+      *out = nullptr;
+
+    align = normalize_align(align);
+    lastStatus_ = AllocationStatus::Ok;
+
+    if (!degradeActive_) {
+      const auto base = reinterpret_cast<std::uintptr_t>(buffer_);
+      const std::uintptr_t p = base + head_;
+      const std::uintptr_t aligned =
+          (p + (align - 1)) & ~(static_cast<std::uintptr_t>(align) - 1);
+      const std::size_t alignedHead = static_cast<std::size_t>(aligned - base);
+
+      if (alignedHead <= capacity_ && size <= capacity_ - alignedHead) {
+        head_ = alignedHead + size;
+        if (out)
+          *out = reinterpret_cast<void *>(aligned);
+        lastStatus_ = AllocationStatus::Ok;
+        return lastStatus_;
+      }
+
+      const std::size_t avail =
+          alignedHead <= capacity_ ? (capacity_ - alignedHead) : 0u;
+      std::fprintf(stderr,
+                   "[RtArena] overflow: req=%zu avail=%zu cap=%zu off=%zu\n",
+                   size, avail, capacity_, alignedHead);
+      std::fflush(stderr);
+#if defined(NDEBUG)
+      degradeActive_ = true;
+      degradeSticky_ = true;
+#else
+      throw std::bad_alloc();
+#endif
+    }
+
+    void *fallback = allocateFallback_(size, align);
+    if (fallback) {
+      if (out)
+        *out = fallback;
+      lastStatus_ = AllocationStatus::Degraded;
+    } else {
+      lastStatus_ = AllocationStatus::Failed;
+    }
+    return lastStatus_;
+  }
+
+  void *allocateFallback_(std::size_t size, std::size_t align) noexcept {
+    const std::size_t requested = size;
+    if (size == 0)
+      size = align;
+    if (align > std::numeric_limits<std::size_t>::max() - sizeof(void *))
+      return nullptr;
+    const std::size_t padding = align + sizeof(void *);
+    if (size > std::numeric_limits<std::size_t>::max() - padding)
+      return nullptr;
+    const std::size_t total = size + padding;
+    auto provider = fallbackProvider_.load(std::memory_order_acquire);
+    void *raw = provider ? provider(total) : std::malloc(total);
+    if (!raw)
+      return nullptr;
+    auto rawAddr = reinterpret_cast<std::uintptr_t>(raw) + sizeof(void *);
+    auto alignedAddr =
+        (rawAddr + (align - 1)) & ~(static_cast<std::uintptr_t>(align) - 1);
+    auto alignedPtr = reinterpret_cast<void *>(alignedAddr);
+    auto meta = reinterpret_cast<void **>(alignedAddr - sizeof(void *));
+    *meta = raw;
+    fallbackAllocs_.push_back(FallbackAlloc{alignedPtr, raw, requested});
+    fallbackBytes_ += requested;
+    return alignedPtr;
+  }
+
+  void releaseFallback_() noexcept {
+    for (auto &alloc : fallbackAllocs_) {
+      if (alloc.raw)
+        std::free(alloc.raw);
+    }
+    fallbackAllocs_.clear();
+    fallbackBytes_ = 0;
+  }
+
   void reserve_(std::size_t cap) {
     release_();
     capacity_ = cap;
@@ -203,9 +333,13 @@ private:
 #endif
     }
     head_ = 0;
+    degradeActive_ = false;
+    lastStatus_ = AllocationStatus::Ok;
+    degradeSticky_ = false;
   }
 
   void release_() noexcept {
+    releaseFallback_();
     if (buffer_) {
 #if RT_ARENA_MLOCK
 #if defined(__linux__)
@@ -221,9 +355,12 @@ private:
         ::operator delete(buffer_, std::align_val_t(alignment_));
       }
       buffer_ = nullptr;
-      capacity_ = 0;
-      head_ = 0;
     }
+    capacity_ = 0;
+    head_ = 0;
+    degradeActive_ = false;
+    degradeSticky_ = false;
+    lastStatus_ = AllocationStatus::Ok;
   }
 
   void pre_touch_() noexcept {
@@ -239,6 +376,18 @@ private:
       buffer_[capacity_ - 1] = std::byte{0};
   }
 
+  struct FallbackAlloc {
+    void *aligned;
+    void *raw;
+    std::size_t size;
+  };
+
+  bool degradeActive_ = false;
+  bool degradeSticky_ = false;
+  AllocationStatus lastStatus_ = AllocationStatus::Ok;
+  std::vector<FallbackAlloc> fallbackAllocs_{};
+  std::size_t fallbackBytes_ = 0;
+
   std::byte *buffer_ = nullptr;
   std::size_t capacity_ = 0;
   std::size_t head_ = 0;
@@ -249,7 +398,12 @@ private:
 #if defined(__linux__)
   std::size_t pageSize_ = 4096;
 #endif
+
+  static std::atomic<FallbackProvider> fallbackProvider_;
 };
+
+inline std::atomic<FrameArena::FallbackProvider> FrameArena::fallbackProvider_{
+    nullptr};
 
 // -------------- FrameArenaPool --------------
 class FrameArenaPool {
