@@ -82,11 +82,11 @@ public:
 
   // Movable (for container init-time only)
   FrameArena(FrameArena &&o) noexcept
-      : buffer_(o.buffer_), capacity_(o.capacity_), head_(o.head_),
-        alignment_(o.alignment_), degradeActive_(o.degradeActive_),
-        degradeSticky_(o.degradeSticky_), lastStatus_(o.lastStatus_),
+      : degradeActive_(o.degradeActive_), degradeSticky_(o.degradeSticky_),
+        lastStatus_(o.lastStatus_),
         fallbackAllocs_(std::move(o.fallbackAllocs_)),
-        fallbackBytes_(o.fallbackBytes_)
+        fallbackBytes_(o.fallbackBytes_), buffer_(o.buffer_),
+        capacity_(o.capacity_), head_(o.head_), alignment_(o.alignment_)
 #if defined(__linux__) && defined(SIM_USE_NUMA)
         , numaNode_(o.numaNode_)
 #endif
