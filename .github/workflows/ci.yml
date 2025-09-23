@@ -6,6 +6,53 @@ on:
   pull_request:
 
 jobs:
+  determinism-linux:
+    name: Determinism (${{ matrix.compiler }}, FMA=${{ matrix.fma }})
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILD_TYPE: RelWithDebInfo
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        fma: [ON, OFF]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Real-time hardening
+        run: tools/rt_harden.sh
+      - name: Set up compiler
+        run: |
+          if [ "${{matrix.compiler}}" = "clang" ]; then
+            echo "CC=clang" >> $GITHUB_ENV
+            echo "CXX=clang++" >> $GITHUB_ENV
+          else
+            echo "CC=gcc" >> $GITHUB_ENV
+            echo "CXX=g++" >> $GITHUB_ENV
+          fi
+      - name: Configure determinism tests
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+            -DENABLE_TESTS=ON \
+            -DENABLE_RAPIDCHECK=ON \
+            -DSIM_ENABLE_AVX2=${{ matrix.fma }} \
+            -DSIM_SANITIZERS= \
+            -DSIM_WERROR=ON
+      - name: Build determinism tests
+        run: cmake --build build --config ${BUILD_TYPE} --target simcore_tests -- -j2
+      - name: Run determinism tests
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          GTEST_DEATH_TEST_STYLE: threadsafe
+          GTEST_FILTER: CrossMatrixDeterminism/SimCoreDeterminism.HashSameAcrossThreadCounts*
+        run: ctest --test-dir build -C ${BUILD_TYPE} --output-on-failure -R simcore_all
+
   build-linux:
     runs-on: ubuntu-22.04
     defaults:
