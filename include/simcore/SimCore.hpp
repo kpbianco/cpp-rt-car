@@ -328,7 +328,7 @@ public:
           "thermal.events",
           thermalEvents_.load(std::memory_order_acquire));
       const std::uint64_t loggerDrops =
-          logger_ ? static_cast<std::uint64_t>(logger_->dropped()) : 0;
+          logger_ ? static_cast<std::uint64_t>(logger_->total_dropped()) : 0;
       const std::uint64_t traceDrops = bintrace_.dropped();
       registry->set_counter("logger.dropped", loggerDrops);
       registry->set_counter("trace.dropped", traceDrops);
@@ -657,7 +657,7 @@ private:
                           thermalEvents_.load(std::memory_order_acquire));
 
     const std::uint64_t loggerDrops =
-        logger_ ? static_cast<std::uint64_t>(logger_->dropped()) : 0;
+        logger_ ? static_cast<std::uint64_t>(logger_->total_dropped()) : 0;
     const std::uint64_t traceDrops = bintrace_.dropped();
     registry->set_counter("logger.dropped", loggerDrops);
     registry->set_counter("trace.dropped", traceDrops);

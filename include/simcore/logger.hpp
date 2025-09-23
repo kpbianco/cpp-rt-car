@@ -365,14 +365,20 @@ public:
         sinks_.push_back(std::move(s));
     }
 
-    std::size_t dropped() const {
-        std::lock_guard<std::mutex> lk(sinkMutex_);
+    std::size_t total_dropped() const {
+        std::vector<std::shared_ptr<Sink>> sinksCopy;
+        {
+            std::lock_guard<std::mutex> lk(sinkMutex_);
+            sinksCopy = sinks_;
+        }
         std::size_t total = 0;
-        for (const auto& s : sinks_) {
-            total += s->dropped();
+        for (const auto& s : sinksCopy) {
+            if (s) total += s->dropped();
         }
         return total;
     }
+
+    std::size_t dropped() const { return total_dropped(); }
 
     bool willLog(Level l) const {
         return static_cast<int>(l) >= static_cast<int>(level());
