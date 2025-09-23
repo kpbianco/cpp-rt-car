@@ -1,1 +1,1 @@
-{"traceEvents":[{"cat":"PhaseBegin","tid":0,"ts":100},{"cat":"PhaseEnd","tid":0,"ts":150},{"cat":"ChunkStart","tid":1,"ts":200},{"cat":"ChunkDone","tid":1,"ts":300}]}
+{"traceEvents":[{"cat":"PhaseBegin","name":"Phase Begin","ph":"i","tid":0,"ts":100,"args":{"a":0,"b":0}},{"cat":"PhaseEnd","name":"Phase End","ph":"i","tid":0,"ts":150,"args":{"a":0,"b":0}},{"cat":"ChunkStart","name":"Chunk Start","ph":"i","tid":1,"ts":200,"args":{"a":0,"b":0}},{"cat":"ChunkDone","name":"Chunk Done","ph":"i","tid":1,"ts":300,"args":{"a":0,"b":0}}]}
