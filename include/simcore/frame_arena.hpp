@@ -2,6 +2,9 @@
 #include "rt_memory.hpp"
 #include <rt/numa.hpp>
 #include <cassert>
+#ifndef NDEBUG
+#  include <cstdio>
+#endif
 
 #ifndef RTFW_DEBUG_ASSERT
 #  ifdef NDEBUG
@@ -10,7 +13,11 @@
 namespace simcore::detail {
 inline void debug_assert(bool expr) { assert(expr); }
 inline void debug_assert(bool expr, const char *msg) {
-  assert(expr && msg);
+  if (!expr) {
+    std::fputs(msg, stderr);
+    std::fputc('\n', stderr);
+  }
+  assert(expr);
 }
 } // namespace simcore::detail
 #    define RTFW_DEBUG_ASSERT(...) ::simcore::detail::debug_assert(__VA_ARGS__)
