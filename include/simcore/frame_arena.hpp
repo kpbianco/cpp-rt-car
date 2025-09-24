@@ -5,9 +5,15 @@
 
 #ifndef RTFW_DEBUG_ASSERT
 #  ifdef NDEBUG
-#    define RTFW_DEBUG_ASSERT(expr) ((void)0)
+#    define RTFW_DEBUG_ASSERT(...) ((void)0)
 #  else
-#    define RTFW_DEBUG_ASSERT(expr) assert(expr)
+namespace simcore::detail {
+inline void debug_assert(bool expr) { assert(expr); }
+inline void debug_assert(bool expr, const char *msg) {
+  assert(expr && msg);
+}
+} // namespace simcore::detail
+#    define RTFW_DEBUG_ASSERT(...) ::simcore::detail::debug_assert(__VA_ARGS__)
 #  endif
 #endif
 

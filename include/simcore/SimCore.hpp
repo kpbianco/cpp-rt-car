@@ -107,8 +107,9 @@ public:
   double recoveredMs() const { return recoveredMs_; }
   double precoveredMs() const { return precoveredMs_; }
   FrameArena &frameArena() {
-    RTFW_DEBUG_ASSERT(tls_arena_bound &&
-                      "Thread arena not bound—call bindCurrentThread() before allocating");
+    RTFW_DEBUG_ASSERT(
+        tls_arena_bound,
+        "Thread arena not bound—call bindCurrentThread() before allocating");
     return frameArenas_->tls();
   }
   rt::FiberPool &fiberPool() { return *fiberPool_; }

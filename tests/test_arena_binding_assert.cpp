@@ -12,8 +12,9 @@ TEST(FrameArenaBindingAssert, DeathBeforeBinding) {
   EXPECT_DEATH(
       {
         tls_arena_bound = false;
-        RTFW_DEBUG_ASSERT(tls_arena_bound &&
-                          "Thread arena not bound—call bindCurrentThread() before allocating");
+        RTFW_DEBUG_ASSERT(
+            tls_arena_bound,
+            "Thread arena not bound—call bindCurrentThread() before allocating");
         auto &arena = pool.tls();
         (void)arena.allocate(64, 64);
       },
