@@ -36,10 +36,10 @@ overload handling is triggered.
 The runtime can export metrics snapshots as JSON. Two modes are available for
 how rolling histograms and resettable counters are treated between emissions:
 
-| Mode                      | Histogram semantics                                   | Reset behaviour                                             | Typical use            |
-|---------------------------|--------------------------------------------------------|--------------------------------------------------------------|------------------------|
-| `--metrics-json`          | Percentiles (`p50/p95/p99`) accumulate for the entire run. | No reset; counters and histograms remain cumulative totals. | CI baselines or long runs |
-| `--metrics-json-interval` | Percentiles cover only the samples collected since the last emission. | Rolling histograms and resettable counters are cleared after the snapshot is written. | Autotuners and live sweeps |
+| Mode                      | Histogram semantics                                                | Reset behaviour                                               | Typical use                |
+|---------------------------|---------------------------------------------------------------------|----------------------------------------------------------------|----------------------------|
+| `--metrics-json`          | Percentiles (`p50/p95/p99`) accumulate for the entire run.          | No reset; counters and histograms remain cumulative totals.    | CI baselines or long runs  |
+| `--metrics-json-interval` | Percentiles cover only the samples collected since the last emission. | Rolling histograms and resettable counters reset after export. | Autotuners and live sweeps |
 
 ## Log drop accounting
 
