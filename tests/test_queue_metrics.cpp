@@ -49,6 +49,7 @@ TEST(QueueMetrics, PublishesDepthAndSteals) {
   EXPECT_NE(json.find("\"queue_max\""), std::string::npos);
   EXPECT_NE(json.find("\"steals\""), std::string::npos);
   EXPECT_NE(json.find("\"steals_total\""), std::string::npos);
+  EXPECT_NE(json.find("\"emergency_spawns\""), std::string::npos);
   EXPECT_NE(json.find(std::to_string(sample.queueMaxDepth)), std::string::npos);
 
   auto counters = metrics::worker_pool_counters(sample, "pool");
@@ -68,5 +69,9 @@ TEST(QueueMetrics, PublishesDepthAndSteals) {
   ASSERT_NE(itSteals, counters.end());
   EXPECT_EQ(itSteals->value,
             static_cast<std::uint64_t>(sample.totalSteals));
+
+  auto itEmergency = findCounter("pool.emergency_spawns");
+  ASSERT_NE(itEmergency, counters.end());
+  EXPECT_EQ(itEmergency->value, sample.emergencySpawns);
 }
 

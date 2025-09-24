@@ -1,8 +1,12 @@
 #pragma once
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include <rt/numerics.hpp>
@@ -28,6 +32,7 @@ public:
     std::size_t maxQueueDepth;
     std::size_t totalSteals;
     std::vector<std::size_t> stealsPerThread;
+    std::uint64_t emergencySpawns;
   };
 
   WorkerPool(std::size_t numThreads, std::size_t queueSizePow2 = 1024,
@@ -38,6 +43,7 @@ public:
     active_.store(0, std::memory_order_relaxed);
     outstanding_.store(0, std::memory_order_relaxed);
     maxOutstanding_ = maxOutstanding;
+    emergencyLastRefill_ = std::chrono::steady_clock::now();
     for (std::size_t i = 0; i < numThreads; ++i) {
       simcore::debug::assert_thread_creation_allowed();
       threads_.emplace_back([this, i] {
@@ -68,27 +74,11 @@ public:
       outstanding_.fetch_add(1, std::memory_order_acq_rel);
     }
     Job job{std::move(fn), pr, cat};
-    if (pr == Priority::High &&
-        outstanding_.load(std::memory_order_acquire) >= threads_.size()) {
-      if (threads_.size() == 1) {
-        active_.fetch_add(1, std::memory_order_acq_rel);
-        if (job.fn)
-          job.fn();
-        active_.fetch_sub(1, std::memory_order_acq_rel);
-        outstanding_.fetch_sub(1, std::memory_order_acq_rel);
-        return;
-      }
-      if (threads_.size() > 1) {
-        simcore::debug::assert_thread_creation_allowed();
-        logEmergencySpawn();
-        std::thread([this, job = std::move(job)]() mutable {
-          rt::init_fp_env();
-          active_.fetch_add(1, std::memory_order_acq_rel);
-          if (job.fn)
-            job.fn();
-          active_.fetch_sub(1, std::memory_order_acq_rel);
-          outstanding_.fetch_sub(1, std::memory_order_acq_rel);
-        }).detach();
+    if (pr == Priority::High) {
+      const std::size_t outstandingCount =
+          outstanding_.load(std::memory_order_acquire);
+      if (outstandingCount >= threads_.size() &&
+          handleEmergency(job, outstandingCount)) {
         return;
       }
     }
@@ -118,27 +108,13 @@ public:
                                                std::memory_order_acq_rel,
                                                std::memory_order_relaxed)) {
           Job job{std::move(fn), pr, cat};
-          if (pr == Priority::High &&
-              outstanding_.load(std::memory_order_acquire) >= threads_.size()) {
-            if (threads_.size() == 1) {
-              active_.fetch_add(1, std::memory_order_acq_rel);
-              if (job.fn)
-                job.fn();
-              active_.fetch_sub(1, std::memory_order_acq_rel);
-              outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+          if (pr == Priority::High) {
+            const std::size_t outstandingCount =
+                outstanding_.load(std::memory_order_acquire);
+            if (outstandingCount >= threads_.size() &&
+                handleEmergency(job, outstandingCount)) {
               return true;
             }
-            simcore::debug::assert_thread_creation_allowed();
-            logEmergencySpawn();
-            std::thread([this, job = std::move(job)]() mutable {
-              rt::init_fp_env();
-              active_.fetch_add(1, std::memory_order_acq_rel);
-              if (job.fn)
-                job.fn();
-              active_.fetch_sub(1, std::memory_order_acq_rel);
-              outstanding_.fetch_sub(1, std::memory_order_acq_rel);
-            }).detach();
-            return true;
           }
           if (!queue_.try_push(std::move(job))) {
             outstanding_.fetch_sub(1, std::memory_order_acq_rel);
@@ -151,27 +127,13 @@ public:
     } else {
       outstanding_.fetch_add(1, std::memory_order_acq_rel);
       Job job{std::move(fn), pr, cat};
-      if (pr == Priority::High &&
-          outstanding_.load(std::memory_order_acquire) >= threads_.size()) {
-        if (threads_.size() == 1) {
-          active_.fetch_add(1, std::memory_order_acq_rel);
-          if (job.fn)
-            job.fn();
-          active_.fetch_sub(1, std::memory_order_acq_rel);
-          outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+      if (pr == Priority::High) {
+        const std::size_t outstandingCount =
+            outstanding_.load(std::memory_order_acquire);
+        if (outstandingCount >= threads_.size() &&
+            handleEmergency(job, outstandingCount)) {
           return true;
         }
-        simcore::debug::assert_thread_creation_allowed();
-        logEmergencySpawn();
-        std::thread([this, job = std::move(job)]() mutable {
-          rt::init_fp_env();
-          active_.fetch_add(1, std::memory_order_acq_rel);
-          if (job.fn)
-            job.fn();
-          active_.fetch_sub(1, std::memory_order_acq_rel);
-          outstanding_.fetch_sub(1, std::memory_order_acq_rel);
-        }).detach();
-        return true;
       }
       if (!queue_.try_push(std::move(job))) {
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
@@ -224,18 +186,72 @@ public:
       totalSteals += steals;
     }
     s.totalSteals = totalSteals;
+    s.emergencySpawns =
+        emergencySpawns_.load(std::memory_order_acquire);
     return s;
   }
 
 private:
-  void logEmergencySpawn() {
+  static constexpr double kEmergencySpawnRatePerSecond = 2.0;
+  static constexpr double kEmergencySpawnCapacity = 2.0;
+
+  bool tryConsumeEmergencyToken() {
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::now();
+    std::lock_guard<std::mutex> lock(emergencyMutex_);
+    const auto elapsed =
+        std::chrono::duration<double>(now - emergencyLastRefill_).count();
+    if (elapsed > 0.0) {
+      emergencyTokens_ =
+          std::min(kEmergencySpawnCapacity,
+                   emergencyTokens_ + elapsed * kEmergencySpawnRatePerSecond);
+      emergencyLastRefill_ = now;
+    }
+    if (emergencyTokens_ >= 1.0) {
+      emergencyTokens_ -= 1.0;
+      return true;
+    }
+    return false;
+  }
+
+  bool handleEmergency(Job &job, std::size_t outstandingCount) {
+    if (threads_.size() == 1) {
+      active_.fetch_add(1, std::memory_order_acq_rel);
+      if (job.fn)
+        job.fn();
+      active_.fetch_sub(1, std::memory_order_acq_rel);
+      outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+      return true;
+    }
+    if (threads_.size() <= 1)
+      return false;
+
+    const bool rateAllowed = tryConsumeEmergencyToken();
+    logEmergencySpawn(outstandingCount, rateAllowed);
+    if (!rateAllowed)
+      return false;
+
+    simcore::debug::assert_thread_creation_allowed();
+    emergencySpawns_.fetch_add(1, std::memory_order_acq_rel);
+    std::thread([this, job = std::move(job)]() mutable {
+      rt::init_fp_env();
+      active_.fetch_add(1, std::memory_order_acq_rel);
+      if (job.fn)
+        job.fn();
+      active_.fetch_sub(1, std::memory_order_acq_rel);
+      outstanding_.fetch_sub(1, std::memory_order_acq_rel);
+    }).detach();
+    return true;
+  }
+
+  void logEmergencySpawn(std::size_t outstandingCount, bool rateAllowed) {
     if (auto *trace = trace_.load(std::memory_order_acquire)) {
-      constexpr std::uint32_t kUnknownThread = ~std::uint32_t{0};
-      const std::uint64_t outstandingCount =
-          static_cast<std::uint64_t>(
-              outstanding_.load(std::memory_order_acquire));
-      trace->log(bintrace::EV_EmergencySpawn, kUnknownThread,
-                 outstandingCount);
+      const std::uint32_t outstandingTruncated =
+          outstandingCount > std::numeric_limits<std::uint32_t>::max()
+              ? std::numeric_limits<std::uint32_t>::max()
+              : static_cast<std::uint32_t>(outstandingCount);
+      trace->log(bintrace::EV_EmergencySpawn, outstandingTruncated,
+                 rateAllowed ? 1u : 0u);
     }
   }
 
@@ -299,5 +315,9 @@ private:
   std::vector<std::atomic<std::size_t>> stealsPerThread_{};
   std::atomic<bintrace::Trace *> trace_{nullptr};
   std::atomic<std::size_t> traceBase_{0};
+  std::mutex emergencyMutex_;
+  double emergencyTokens_ = kEmergencySpawnCapacity;
+  std::chrono::steady_clock::time_point emergencyLastRefill_{};
+  std::atomic<std::uint64_t> emergencySpawns_{0};
 };
 

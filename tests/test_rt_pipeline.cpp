@@ -76,6 +76,8 @@ TEST(RTPipeline, EndToEndSmokeTest) {
             static_cast<std::uint64_t>(stats.maxQueueDepth));
   EXPECT_EQ(expectCounter("worker.steals_total"),
             static_cast<std::uint64_t>(stats.totalSteals));
+  EXPECT_EQ(expectCounter("worker.emergency_spawns"),
+            stats.emergencySpawns);
   EXPECT_NE(snapshot.counters.find("missed_frames"), snapshot.counters.end());
   EXPECT_NE(snapshot.counters.find("watchdog.trips"), snapshot.counters.end());
   EXPECT_NE(snapshot.counters.find("log_drops"), snapshot.counters.end());

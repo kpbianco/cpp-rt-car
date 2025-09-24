@@ -286,6 +286,7 @@ TEST(MetricsJson, EmitsPhaseStatsAndCounters) {
   expectCounter("watchdog.trips");
   expectCounter("worker.queue_max");
   expectCounter("worker.steals_total");
+  expectCounter("worker.emergency_spawns");
   expectCounter("logger.dropped");
   expectCounter("trace.dropped");
   expectCounter("log_drops");
