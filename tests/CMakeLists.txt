@@ -61,6 +61,7 @@ if (SIM_GTEST_AVAILABLE)
         test_prng_determinism.cpp
         test_snapshot.cpp
         test_trace_export.cpp
+        test_trace_noalloc.cpp
         test_units.cpp
         test_huge_page.cpp
         test_thermal_limp.cpp

@@ -23,6 +23,8 @@ struct alignas(32) Event {
     std::uint32_t _pad{};
 };
 
+static_assert(sizeof(Event) == 32, "Trace events are expected to stay 32 bytes");
+
 enum : std::uint32_t {
     EV_PhaseBegin        = 0x01,
     EV_PhaseEnd          = 0x02,
@@ -114,13 +116,11 @@ public:
         if (!buf) return;
         const std::size_t cap = buf->cap;
         if (cap == 0) {
-            buf->dropped.fetch_add(1, std::memory_order_relaxed);
-            dropped_.fetch_add(1, std::memory_order_relaxed);
+            recordDrop(buf);
             return;
         }
-        if (buf->throttle && !buf->throttle->try_acquire()) {
-            buf->dropped.fetch_add(1, std::memory_order_relaxed);
-            dropped_.fetch_add(1, std::memory_order_relaxed);
+        if (auto* throttle = buf->throttle.get(); throttle && !throttle->try_acquire()) {
+            recordDrop(buf);
             return;
         }
         const std::size_t i   = buf->write.load(std::memory_order_relaxed);
@@ -248,6 +248,11 @@ private:
             dropped.store(0, std::memory_order_relaxed);
         }
     };
+
+    inline void recordDrop(Buffer* buf) noexcept {
+        buf->dropped.fetch_add(1, std::memory_order_relaxed);
+        dropped_.fetch_add(1, std::memory_order_relaxed);
+    }
 
     std::vector<std::unique_ptr<Buffer>> buffers_;
     bool enabled_ = false;
