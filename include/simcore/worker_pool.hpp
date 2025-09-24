@@ -15,6 +15,10 @@
 #include "job_queue.hpp"
 #include "debug.hpp"
 
+#ifndef RTFW_DISABLE_EMERGENCY_SPAWN
+#define RTFW_DISABLE_EMERGENCY_SPAWN 0
+#endif
+
 // Worker pool backed by a bounded MPMC ring buffer.  All work is submitted
 // through the ring which provides a single scheduling surface and enables
 // unified telemetry/backpressure.
@@ -75,16 +79,32 @@ public:
       outstanding_.fetch_add(1, std::memory_order_acq_rel);
     }
     Job job{std::move(fn), pr, cat};
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+    bool redirectedToPriorityLane = false;
+    std::size_t redirectedOutstanding = 0;
+#endif
     if (pr == Priority::High) {
       const std::size_t outstandingCount =
           outstanding_.load(std::memory_order_acquire);
-      if (outstandingCount >= threads_.size() &&
-          handleEmergency(job, outstandingCount)) {
-        return;
+      if (outstandingCount >= threads_.size()) {
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+        redirectedToPriorityLane = true;
+        redirectedOutstanding = outstandingCount;
+#else
+        if (handleEmergency(job, outstandingCount)) {
+          return;
+        }
+#endif
       }
     }
     while (true) {
       if (queue_.try_push(std::move(job))) {
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+        if (redirectedToPriorityLane) {
+          logPriorityEnqueue(redirectedOutstanding, job.priority,
+                             job.category);
+        }
+#endif
         break;
       }
       rt::cpu_relax();
@@ -108,19 +128,35 @@ public:
         if (outstanding_.compare_exchange_weak(cur, cur + 1,
                                                std::memory_order_acq_rel,
                                                std::memory_order_relaxed)) {
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+          bool redirectedToPriorityLane = false;
+          std::size_t redirectedOutstanding = 0;
+#endif
           Job job{std::move(fn), pr, cat};
           if (pr == Priority::High) {
             const std::size_t outstandingCount =
                 outstanding_.load(std::memory_order_acquire);
-            if (outstandingCount >= threads_.size() &&
-                handleEmergency(job, outstandingCount)) {
-              return true;
+            if (outstandingCount >= threads_.size()) {
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+              redirectedToPriorityLane = true;
+              redirectedOutstanding = outstandingCount;
+#else
+              if (handleEmergency(job, outstandingCount)) {
+                return true;
+              }
+#endif
             }
           }
           if (!queue_.try_push(std::move(job))) {
             outstanding_.fetch_sub(1, std::memory_order_acq_rel);
             return false;
           }
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+          if (redirectedToPriorityLane) {
+            logPriorityEnqueue(redirectedOutstanding, job.priority,
+                               job.category);
+          }
+#endif
           return true;
         }
       }
@@ -128,18 +164,34 @@ public:
     } else {
       outstanding_.fetch_add(1, std::memory_order_acq_rel);
       Job job{std::move(fn), pr, cat};
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+      bool redirectedToPriorityLane = false;
+      std::size_t redirectedOutstanding = 0;
+#endif
       if (pr == Priority::High) {
         const std::size_t outstandingCount =
             outstanding_.load(std::memory_order_acquire);
-        if (outstandingCount >= threads_.size() &&
-            handleEmergency(job, outstandingCount)) {
-          return true;
+        if (outstandingCount >= threads_.size()) {
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+          redirectedToPriorityLane = true;
+          redirectedOutstanding = outstandingCount;
+#else
+          if (handleEmergency(job, outstandingCount)) {
+            return true;
+          }
+#endif
         }
       }
       if (!queue_.try_push(std::move(job))) {
         outstanding_.fetch_sub(1, std::memory_order_acq_rel);
         return false;
       }
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+      if (redirectedToPriorityLane) {
+        logPriorityEnqueue(redirectedOutstanding, job.priority,
+                           job.category);
+      }
+#endif
       return true;
     }
   }
@@ -216,6 +268,11 @@ private:
   }
 
   bool handleEmergency(Job &job, std::size_t outstandingCount) {
+#if RTFW_DISABLE_EMERGENCY_SPAWN
+    (void)job;
+    (void)outstandingCount;
+    return false;
+#else
     if (threads_.size() == 1) {
       active_.fetch_add(1, std::memory_order_acq_rel);
       if (job.fn)
@@ -244,6 +301,7 @@ private:
       outstanding_.fetch_sub(1, std::memory_order_acq_rel);
     }).detach();
     return true;
+#endif
   }
 
   static constexpr std::uint32_t encodePriority(Priority priority) {
@@ -291,6 +349,28 @@ private:
       const std::uint64_t payload =
           encodeEmergencySpawnPayload(rateAllowed, priority, category);
       trace->log(bintrace::EV_EmergencySpawn, outstandingTruncated, payload);
+    }
+  }
+
+  static constexpr std::uint64_t
+  encodePriorityEnqueuePayload(Priority priority, Category category) {
+    const std::uint64_t priorityBits =
+        static_cast<std::uint64_t>(encodePriority(priority));
+    const std::uint64_t categoryBits =
+        static_cast<std::uint64_t>(encodeCategory(category)) << 32;
+    return priorityBits | categoryBits;
+  }
+
+  void logPriorityEnqueue(std::size_t outstandingCount, Priority priority,
+                          Category category) {
+    if (auto *trace = trace_.load(std::memory_order_acquire)) {
+      const std::uint32_t outstandingTruncated =
+          outstandingCount > std::numeric_limits<std::uint32_t>::max()
+              ? std::numeric_limits<std::uint32_t>::max()
+              : static_cast<std::uint32_t>(outstandingCount);
+      const std::uint64_t payload =
+          encodePriorityEnqueuePayload(priority, category);
+      trace->log(bintrace::EV_PriorityEnqueue, outstandingTruncated, payload);
     }
   }
 
