@@ -27,6 +27,12 @@ inline to avoid additional allocations. Emergency launches are logged to the
 trace ring and counted in `worker.emergency_spawns` so monitoring can alert on
 sustained overload.
 
+The emergency path can be disabled at build time via the
+`RTFW_DISABLE_EMERGENCY_SPAWN` switch (set it to `1` to disable). When disabled,
+high priority submissions remain on the shared queue even under saturation.
+Instead of `EV_EmergencySpawn`, the trace emits `EV_PriorityEnqueue` events to
+indicate that the job was redirected through the priority lane of the queue.
+
 Tasks are represented by the nested `Scheduler::Task` struct. The scheduler
 exposes a helper `Scheduler::pop_next_with_aging` function that selects the next
 task based on the `(priority + age)` heuristic. This function is used by unit

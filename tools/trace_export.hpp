@@ -16,6 +16,7 @@ inline const char* codeToCat(std::uint32_t code) {
     case bintrace::EV_QueuePop:           return "queue";
     case bintrace::EV_WorkSteal:          return "WorkSteal";
     case bintrace::EV_EmergencySpawn:     return "WorkerPool";
+    case bintrace::EV_PriorityEnqueue:    return "WorkerPool";
     case bintrace::EV_WatchdogTrip:       return "WatchdogTrip";
     case bintrace::EV_GpuFenceWaitBegin:  return "GpuFenceWaitBegin";
     case bintrace::EV_GpuFenceWaitEnd:    return "GpuFenceWaitEnd";
@@ -49,6 +50,7 @@ inline const char* codeToName(std::uint32_t code) {
     case bintrace::EV_QueuePop:           return "queue_pop";
     case bintrace::EV_WorkSteal:          return "Work Steal";
     case bintrace::EV_EmergencySpawn:     return "Emergency Spawn";
+    case bintrace::EV_PriorityEnqueue:    return "Priority Enqueue";
     case bintrace::EV_WatchdogTrip:       return "Watchdog Trip";
     case bintrace::EV_GpuFenceWaitBegin:  return "GPU Fence Wait Begin";
     case bintrace::EV_GpuFenceWaitEnd:    return "GPU Fence Wait End";
@@ -86,6 +88,12 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
                << ",\"category\":" << decodeEmergencyCategory(e.b)
                << ",\"rate_allowed\":"
                << (decodeEmergencyRateAllowed(e.b) ? "true" : "false") << "}";
+            break;
+        case bintrace::EV_PriorityEnqueue:
+            os << "{\"outstanding\":" << e.a
+               << ",\"priority\":" << decodeEmergencyPriority(e.b)
+               << ",\"category\":" << decodeEmergencyCategory(e.b)
+               << "}";
             break;
         default:
             os << "{\"a\":" << e.a << ",\"b\":" << e.b << "}";
