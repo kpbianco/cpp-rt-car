@@ -17,10 +17,35 @@ processor.
 space separated format: `tsc thread code a b`.  This is suitable for simple
 processing by eBPF-based pipelines.
 
+## Queue instrumentation
+
+The worker pool's bounded MPMC ring emits `queue_push` and `queue_pop` trace
+events whenever a job is enqueued or dequeued. These samples include the queue
+depth (`a`) and capacity (`b`), allowing dashboards to visualise saturation and
+alert when the buffer is routinely full.
+
+## Worker pool counters
+
+Emergency launches increment the `worker.emergency_spawns` counter. The value is
+reported via the metrics registry and mirrors the number of detached helper
+threads created by the emergency path, making it straightforward to detect when
+overload handling is triggered.
+
+## Log drop accounting
+
+The `log_drops` counter is the sum of two low-level metrics: `logger.dropped`
+records how many log lines the async logger could not enqueue, while
+`trace.dropped` tracks trace ring buffer losses. Keeping the composite counter
+ensures alerting stays robust even if individual sources fluctuate.
+
 ## Code anchors
 
 - Trace capture: `bintrace::Trace::log`, `bintrace::Trace::snapshot`; `include/simcore/bintrace.hpp`
 - Chrome trace export: `trace_export::write_chrome_trace`; `tools/trace_export.hpp`
 - ETW CSV export: `trace_export::write_etw_trace`; `tools/trace_export.hpp`
 - eBPF text export: `trace_export::write_ebpf_trace`; `tools/trace_export.hpp`
+- Queue events: `bintrace::log_queue_push`, `bintrace::log_queue_pop`; `include/simcore/bintrace.hpp`
+- Ring buffer hooks: `BoundedMPMCQueue::try_push`, `BoundedMPMCQueue::try_pop`; `include/simcore/job_queue.hpp`
+- Emergency counter: `WorkerPool::handleEmergency`; `include/simcore/worker_pool.hpp`
+- Log drop aggregation: `SimCore::setMetrics`, `SimCore::publishCounters`; `include/simcore/SimCore.hpp`
 

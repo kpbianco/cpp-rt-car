@@ -14,6 +14,19 @@ reduce remote NUMA traffic. Tasks have priorities and an aging counter; every
 time a task waits in the queue its age increases, effectively boosting its
 priority so that low priority tasks will eventually run and avoid starvation.
 
+### Emergency path
+
+High priority tasks have access to an emergency execution path that bypasses
+the shared queue when the pool is saturated. If the number of outstanding jobs
+is at least the worker count, the scheduler attempts to spawn a detached helper
+thread to run the task immediately. Spawns are guarded by a token bucket with a
+capacity of two and a refill rate of two per second, ensuring that short bursts
+of overload can be absorbed without allowing unbounded thread creation. When
+the pool only contains a single worker thread the fallback executes the task
+inline to avoid additional allocations. Emergency launches are logged to the
+trace ring and counted in `worker.emergency_spawns` so monitoring can alert on
+sustained overload.
+
 Tasks are represented by the nested `Scheduler::Task` struct. The scheduler
 exposes a helper `Scheduler::pop_next_with_aging` function that selects the next
 task based on the `(priority + age)` heuristic. This function is used by unit
@@ -24,4 +37,6 @@ tests to verify the aging behaviour.
 - Task representation: `rt::Scheduler::Task`; `rt/include/rt/scheduler.hpp`
 - Aging heuristic: `rt::Scheduler::pop_next_with_aging`; `rt/include/rt/scheduler.hpp`
 - Worker execution: `rt::Scheduler::run`; `rt/include/rt/scheduler.hpp`, `rt/src/scheduler.cpp`
+- Emergency handling: `WorkerPool::handleEmergency`, `WorkerPool::tryConsumeEmergencyToken`,
+  `WorkerPool::logEmergencySpawn`; `include/simcore/worker_pool.hpp`
 
