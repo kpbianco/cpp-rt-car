@@ -31,6 +31,16 @@ reported via the metrics registry and mirrors the number of detached helper
 threads created by the emergency path, making it straightforward to detect when
 overload handling is triggered.
 
+## Metrics JSON snapshots
+
+The runtime can export metrics snapshots as JSON. Two modes are available for
+how rolling histograms and resettable counters are treated between emissions:
+
+| Mode                      | Histogram semantics                                                | Reset behaviour                                               | Typical use                |
+|---------------------------|---------------------------------------------------------------------|----------------------------------------------------------------|----------------------------|
+| `--metrics-json`          | Percentiles (`p50/p95/p99`) accumulate for the entire run.          | No reset; counters and histograms remain cumulative totals.    | CI baselines or long runs  |
+| `--metrics-json-interval` | Percentiles cover only the samples collected since the last emission. | Rolling histograms and resettable counters reset after export. | Autotuners and live sweeps |
+
 ## Log drop accounting
 
 The `log_drops` counter is the sum of two low-level metrics: `logger.dropped`
