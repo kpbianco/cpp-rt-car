@@ -3,19 +3,85 @@
 #include <simcore/soa/aosoa.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <latch>
+#include <span>
 #include <thread>
+#include <type_traits>
 #include <vector>
-#include <cmath>
+
+namespace {
+
+constexpr std::size_t kCacheLineSize = 64;
+constexpr std::size_t kMinParallelBytes = 1u << 15; // 32 KiB
+
+constexpr std::size_t align_up(std::size_t value, std::size_t alignment) {
+    return ((value + alignment - 1) / alignment) * alignment;
+}
+
+template <typename T>
+void parallel_first_touch(std::span<T> buffer, WorkerPool &pool) {
+    static_assert(!std::is_const_v<T>, "parallel_first_touch requires mutable data");
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "parallel_first_touch requires trivially copyable elements");
+
+    const std::size_t totalBytes = buffer.size_bytes();
+    if (totalBytes == 0 || totalBytes < kMinParallelBytes || pool.thread_count() <= 1) {
+        return;
+    }
+
+    const std::size_t threads = pool.thread_count();
+    const std::size_t chunkBytes = std::max<std::size_t>(
+        kCacheLineSize, align_up((totalBytes + threads - 1) / threads, kCacheLineSize));
+    const std::size_t taskCount = (totalBytes + chunkBytes - 1) / chunkBytes;
+
+    std::latch done(taskCount);
+    auto *base = reinterpret_cast<std::byte *>(buffer.data());
+
+    for (std::size_t task = 0; task < taskCount; ++task) {
+        const std::size_t begin = task * chunkBytes;
+        const std::size_t end = std::min(totalBytes, begin + chunkBytes);
+        pool.enqueue([base, begin, end, &done]() {
+            auto *data = reinterpret_cast<volatile std::byte *>(base);
+            if (end > begin) {
+                for (std::size_t offset = begin; offset < end; offset += kCacheLineSize) {
+                    data[offset] = std::byte{0};
+                }
+                data[end - 1] = std::byte{0};
+            }
+            done.count_down();
+        });
+    }
+
+    done.wait();
+}
+
+} // namespace
 
 int main() {
     using ParticleAoSoA = soa::Vec3AoSoA<double, 256>;
     constexpr std::size_t kParticleCount = 8192;
     const std::size_t tileCount = (kParticleCount + ParticleAoSoA::tile_size - 1) / ParticleAoSoA::tile_size;
 
+    unsigned hw = std::thread::hardware_concurrency();
+    if (hw < 2)
+        hw = 2;
+    SimCore::Settings settings;
+    settings.hz = 120.0;
+    settings.maxFrames = 240;
+    settings.threads = hw;
+    settings.autoTuneChunks = false;
+    settings.chunkSize = 4;
+
+    WorkerPool pool(settings.threads, 2048);
+
     std::vector<ParticleAoSoA::Tile> positionTiles(tileCount);
     std::vector<ParticleAoSoA::Tile> velocityTiles(tileCount);
+
+    parallel_first_touch(std::span{positionTiles}, pool);
+    parallel_first_touch(std::span{velocityTiles}, pool);
 
     for (auto &tile : positionTiles) {
         std::fill_n(tile.x, ParticleAoSoA::tile_size, 0.0);
@@ -42,17 +108,6 @@ int main() {
         velocities.tiles[tile].z[lane] = 0.0;
     }
 
-    unsigned hw = std::thread::hardware_concurrency();
-    if (hw < 2)
-        hw = 2;
-    SimCore::Settings settings;
-    settings.hz = 120.0;
-    settings.maxFrames = 240;
-    settings.threads = hw;
-    settings.autoTuneChunks = false;
-    settings.chunkSize = 4;
-
-    WorkerPool pool(settings.threads, 2048);
     SimCore sim(settings);
     sim.setWorkerPool(&pool);
 
