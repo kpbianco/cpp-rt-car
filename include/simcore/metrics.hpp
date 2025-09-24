@@ -92,6 +92,11 @@ public:
       ++count_;
   }
 
+  void clear() {
+    next_ = 0;
+    count_ = 0;
+  }
+
   [[nodiscard]] std::size_t sample_count() const { return count_; }
 
   [[nodiscard]] Percentiles percentiles() const {
@@ -175,33 +180,55 @@ public:
   }
 
   Snapshot snapshot() const {
-    std::lock_guard<std::mutex> lock(mutex_);
     Snapshot snap;
-    for (const auto &kv : phases_) {
-      PhaseSnapshot phaseSnap;
-      phaseSnap.percentiles = kv.second.histogram.percentiles();
-      phaseSnap.samples = kv.second.histogram.sample_count();
-      snap.phases.emplace(kv.first, phaseSnap);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      snap = const_cast<Registry *>(this)->snapshot_locked(false);
     }
-    snap.counters = counters_;
     return snap;
   }
 
+  Snapshot snapshot(bool reset) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return snapshot_locked(reset);
+  }
+
   std::string to_json() const {
-    const auto snap = snapshot();
+    Snapshot snap;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      snap = const_cast<Registry *>(this)->snapshot_locked(false);
+    }
+    return snapshot_to_json(snap, false);
+  }
+
+  std::string to_json(bool reset) {
+    Snapshot snap;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      snap = snapshot_locked(reset);
+    }
+    return snapshot_to_json(snap, reset);
+  }
+
+protected:
+  std::string snapshot_to_json(const Snapshot &snap, bool interval) const {
     std::ostringstream os;
     os.setf(std::ios::fixed);
     os << std::setprecision(6);
-    os << "{\"phases\":{";
+    os << '{';
+    if (interval)
+      os << "\"mode\":\"interval\",";
+    os << "\"phases\":{";
     bool first = true;
     for (const auto &kv : snap.phases) {
       if (!first)
         os << ',';
       first = false;
-      os << '\"' << escape_json(kv.first) << "\":{\"p50_ms\":"
-         << kv.second.percentiles.p50 << ",\"p95_ms\":"
-         << kv.second.percentiles.p95 << ",\"p99_ms\":"
-         << kv.second.percentiles.p99 << "}";
+      os << '"' << escape_json(kv.first)
+         << "\":{\"p50_ms\":" << kv.second.percentiles.p50
+         << ",\"p95_ms\":" << kv.second.percentiles.p95
+         << ",\"p99_ms\":" << kv.second.percentiles.p99 << "}";
     }
     os << "},\"counters\":{";
     first = true;
@@ -209,7 +236,7 @@ public:
       if (!first)
         os << ',';
       first = false;
-      os << '\"' << escape_json(kv.first) << "\":" << kv.second;
+      os << '"' << escape_json(kv.first) << "\":" << kv.second;
     }
     os << "}}";
     return os.str();
@@ -220,6 +247,76 @@ private:
     explicit PhaseEntry(std::size_t cap) : histogram(cap) {}
     RollingHistogram histogram;
   };
+
+  Snapshot snapshot_locked(bool reset) {
+    Snapshot snap;
+    for (auto &kv : phases_) {
+      PhaseSnapshot phaseSnap;
+      phaseSnap.percentiles = kv.second.histogram.percentiles();
+      phaseSnap.samples = kv.second.histogram.sample_count();
+      snap.phases.emplace(kv.first, phaseSnap);
+      if (reset)
+        kv.second.histogram.clear();
+    }
+    for (const auto &kv : counters_) {
+      snap.counters.emplace(kv.first, counter_value_for_snapshot_locked(kv.first,
+                                                                       kv.second,
+                                                                       reset));
+    }
+    return snap;
+  }
+
+  std::uint64_t counter_value_for_snapshot_locked(const std::string &name,
+                                                  std::uint64_t value,
+                                                  bool reset) {
+    if (!should_reset_counter(name))
+      return value;
+
+    auto [it, inserted] = counterBaselines_.try_emplace(name, std::uint64_t{0});
+    std::uint64_t &baseline = it->second;
+
+    if (value < baseline)
+      baseline = value;
+
+    std::uint64_t delta = 0;
+    if (is_queue_max_counter(name)) {
+      delta = value > baseline ? value : 0;
+    } else {
+      delta = value - baseline;
+    }
+
+    if (reset)
+      baseline = value;
+
+    return reset ? delta : value;
+  }
+
+  static bool should_reset_counter(std::string_view name) {
+    if (name == "missed_frames" || name == "log_drops" ||
+        name == "watchdog.trips" || name == "watchdog_trips")
+      return true;
+    if (is_queue_max_counter(name))
+      return true;
+    if (is_worker_steal_counter(name))
+      return true;
+    return false;
+  }
+
+  static bool is_queue_max_counter(std::string_view name) {
+    return ends_with(name, "queue_max");
+  }
+
+  static bool is_worker_steal_counter(std::string_view name) {
+    if (ends_with(name, "steals_total"))
+      return true;
+    return name.find(".steals[") != std::string_view::npos;
+  }
+
+  static bool ends_with(std::string_view value, std::string_view suffix) {
+    if (value.size() < suffix.size())
+      return false;
+    return value.substr(value.size() - suffix.size()) == suffix;
+  }
 
   static std::string escape_json(std::string_view value) {
     std::string out;
@@ -266,8 +363,16 @@ private:
 
   std::map<std::string, PhaseEntry> phases_;
   std::map<std::string, std::uint64_t> counters_;
+  std::map<std::string, std::uint64_t> counterBaselines_;
   std::size_t histogramCapacity_;
   mutable std::mutex mutex_;
+};
+
+class Metrics : public Registry {
+public:
+  using Registry::Registry;
+
+  std::string snapshot(bool reset);
 };
 
 } // namespace metrics
