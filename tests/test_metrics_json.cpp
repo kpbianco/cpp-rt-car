@@ -291,3 +291,38 @@ TEST(MetricsJson, EmitsPhaseStatsAndCounters) {
   expectCounter("log_drops");
   expectCounter("thermal.events");
 }
+
+TEST(MetricsJson, IntervalResetsCounters) {
+  SimCore::Settings settings;
+  settings.hz = 240.0;
+  settings.maxFrames = 6;
+  settings.threads = 1;
+  settings.predictiveEnable = false;
+  settings.adaptive = false;
+
+  SimCore sim(settings);
+  metrics::Metrics registry;
+  sim.setMetrics(&registry);
+
+  auto phase = sim.addPhase("Tick");
+  sim.addSerialSubsystem(phase, [](int64_t, SimCore::Seconds) {});
+
+  sim.run();
+
+  const std::string first = registry.snapshot(true);
+  EXPECT_NE(first.find("\"mode\":\"interval\""), std::string::npos);
+
+  const std::string second = registry.snapshot(true);
+  auto countersJson = extractMemberObject(second, "counters");
+  ASSERT_FALSE(countersJson.empty());
+
+  auto missedFrames = parseNumberField(countersJson, "missed_frames");
+  ASSERT_TRUE(missedFrames.has_value());
+  EXPECT_TRUE(missedFrames->isInteger);
+  EXPECT_EQ(missedFrames->value, 0.0);
+
+  auto logDrops = parseNumberField(countersJson, "log_drops");
+  ASSERT_TRUE(logDrops.has_value());
+  EXPECT_TRUE(logDrops->isInteger);
+  EXPECT_EQ(logDrops->value, 0.0);
+}

@@ -433,6 +433,7 @@ target_include_directories(simcore INTERFACE
 )
 
 add_library(simcore_platform STATIC src/platform_init.cpp)
+target_sources(simcore_platform PRIVATE src/metrics.cpp)
 target_include_directories(simcore_platform PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(simcore_platform PUBLIC simcore)

@@ -28,6 +28,7 @@ int main(int argc, char** argv)
     cfg.chunkSize = 128;
 
     bool metricsJson = false;
+    bool metricsJsonInterval = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -39,6 +40,11 @@ int main(int argc, char** argv)
             cfg.pinThreads = true;
         else if (std::strcmp(argv[i], "--metrics-json") == 0)
             metricsJson = true;
+        else if (std::strcmp(argv[i], "--metrics-json-interval") == 0)
+        {
+            metricsJson = true;
+            metricsJsonInterval = true;
+        }
     }
 
     /* ------------ arena + arrays ---------------- */
@@ -54,7 +60,7 @@ int main(int argc, char** argv)
     logger.addSink(std::make_shared<Logger::StdoutSink>());
     Logger *loggerPtr = &logger;
 
-    metrics::Registry metricsRegistry;
+    metrics::Metrics metricsRegistry;
 
     SimCore sim(cfg);
     sim.setLogger(loggerPtr);
@@ -100,7 +106,7 @@ int main(int argc, char** argv)
     sim.run();
 
     if (metricsJson)
-        std::cout << metricsRegistry.to_json() << "\n";
+        std::cout << metricsRegistry.snapshot(metricsJsonInterval) << "\n";
     else
         std::cout << "Final pos0=" << cars.pos[0] << "\n";
     return 0;
