@@ -228,7 +228,8 @@ private:
       return false;
 
     const bool rateAllowed = tryConsumeEmergencyToken();
-    logEmergencySpawn(outstandingCount, rateAllowed);
+    logEmergencySpawn(outstandingCount, rateAllowed, job.priority,
+                      job.category);
     if (!rateAllowed)
       return false;
 
@@ -245,14 +246,51 @@ private:
     return true;
   }
 
-  void logEmergencySpawn(std::size_t outstandingCount, bool rateAllowed) {
+  static constexpr std::uint32_t encodePriority(Priority priority) {
+    switch (priority) {
+    case Priority::Low:
+      return 0u;
+    case Priority::Normal:
+      return 1u;
+    case Priority::High:
+      return 2u;
+    }
+    return 0u;
+  }
+
+  static constexpr std::uint32_t encodeCategory(Category category) {
+    switch (category) {
+    case Category::CPU:
+      return 0u;
+    case Category::GPU:
+      return 1u;
+    case Category::IO:
+      return 2u;
+    }
+    return 0u;
+  }
+
+  static constexpr std::uint64_t
+  encodeEmergencySpawnPayload(bool rateAllowed, Priority priority,
+                              Category category) {
+    const std::uint64_t priorityBits =
+        static_cast<std::uint64_t>(encodePriority(priority));
+    const std::uint64_t categoryBits =
+        static_cast<std::uint64_t>(encodeCategory(category)) << 32;
+    const std::uint64_t rateBit = rateAllowed ? (1ull << 63) : 0ull;
+    return rateBit | categoryBits | priorityBits;
+  }
+
+  void logEmergencySpawn(std::size_t outstandingCount, bool rateAllowed,
+                         Priority priority, Category category) {
     if (auto *trace = trace_.load(std::memory_order_acquire)) {
       const std::uint32_t outstandingTruncated =
           outstandingCount > std::numeric_limits<std::uint32_t>::max()
               ? std::numeric_limits<std::uint32_t>::max()
               : static_cast<std::uint32_t>(outstandingCount);
-      trace->log(bintrace::EV_EmergencySpawn, outstandingTruncated,
-                 rateAllowed ? 1u : 0u);
+      const std::uint64_t payload =
+          encodeEmergencySpawnPayload(rateAllowed, priority, category);
+      trace->log(bintrace::EV_EmergencySpawn, outstandingTruncated, payload);
     }
   }
 
