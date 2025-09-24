@@ -69,13 +69,8 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
             os << "}";
             break;
         case bintrace::EV_EmergencySpawn:
-            os << "{\"thread_idx\":";
-            if (e.a == ~std::uint32_t{0}) {
-                os << -1;
-            } else {
-                os << e.a;
-            }
-            os << ",\"outstanding\":" << e.b << "}";
+            os << "{\"outstanding\":" << e.a
+               << ",\"rate_allowed\":" << (e.b ? "true" : "false") << "}";
             break;
         default:
             os << "{\"a\":" << e.a << ",\"b\":" << e.b << "}";

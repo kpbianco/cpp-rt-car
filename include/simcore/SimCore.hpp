@@ -340,6 +340,7 @@ public:
       registry->set_counter("log_drops", loggerDrops + traceDrops);
       registry->set_counter("worker.queue_max", 0);
       registry->set_counter("worker.steals_total", 0);
+      registry->set_counter("worker.emergency_spawns", 0);
     }
     publishCounters();
   }
@@ -674,6 +675,8 @@ private:
                             static_cast<std::uint64_t>(sample.queueMaxDepth));
       registry->set_counter("worker.steals_total",
                             static_cast<std::uint64_t>(sample.totalSteals));
+      registry->set_counter("worker.emergency_spawns",
+                            sample.emergencySpawns);
       for (std::size_t i = sample.stealsPerThread.size();
            i < lastWorkerStealCounterCount_; ++i) {
         registry->set_counter(workerStealCounterName(i), 0);
@@ -687,6 +690,7 @@ private:
     } else {
       registry->set_counter("worker.queue_max", 0);
       registry->set_counter("worker.steals_total", 0);
+      registry->set_counter("worker.emergency_spawns", 0);
       for (std::size_t i = 0; i < lastWorkerStealCounterCount_; ++i) {
         registry->set_counter(workerStealCounterName(i), 0);
       }

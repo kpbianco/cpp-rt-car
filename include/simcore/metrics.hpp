@@ -24,6 +24,7 @@ struct CounterSample {
 struct WorkerPoolSample {
   std::size_t queueMaxDepth = 0;
   std::size_t totalSteals = 0;
+  std::uint64_t emergencySpawns = 0;
   std::vector<std::size_t> stealsPerThread;
 };
 
@@ -31,6 +32,7 @@ inline WorkerPoolSample make_sample(WorkerPool::Stats stats) {
   WorkerPoolSample sample;
   sample.queueMaxDepth = stats.maxQueueDepth;
   sample.totalSteals = stats.totalSteals;
+  sample.emergencySpawns = stats.emergencySpawns;
   sample.stealsPerThread = std::move(stats.stealsPerThread);
   return sample;
 }
@@ -43,7 +45,7 @@ inline std::vector<CounterSample>
 worker_pool_counters(const WorkerPoolSample &sample,
                      std::string_view prefix = "worker_pool") {
   std::vector<CounterSample> counters;
-  counters.reserve(2 + sample.stealsPerThread.size());
+  counters.reserve(3 + sample.stealsPerThread.size());
   std::string prefixStr(prefix);
   counters.push_back(
       CounterSample{prefixStr + ".queue_max",
@@ -51,6 +53,9 @@ worker_pool_counters(const WorkerPoolSample &sample,
   counters.push_back(
       CounterSample{prefixStr + ".steals_total",
                     static_cast<std::uint64_t>(sample.totalSteals)});
+  counters.push_back(
+      CounterSample{prefixStr + ".emergency_spawns",
+                    sample.emergencySpawns});
   for (std::size_t i = 0; i < sample.stealsPerThread.size(); ++i) {
     std::ostringstream name;
     name << prefixStr << ".steals[" << i << "]";
@@ -68,7 +73,8 @@ inline std::string worker_pool_json(const WorkerPoolSample &sample) {
       os << ',';
     os << sample.stealsPerThread[i];
   }
-  os << "],\"steals_total\":" << sample.totalSteals << "}";
+  os << "],\"steals_total\":" << sample.totalSteals
+     << ",\"emergency_spawns\":" << sample.emergencySpawns << "}";
   return os.str();
 }
 
