@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <rt/arch.hpp>
 #include <rt/numerics.hpp>
 #include "bintrace.hpp"
 #include "job_queue.hpp"
@@ -61,7 +62,7 @@ public:
       for (;;) {
         std::size_t cur = outstanding_.load(std::memory_order_acquire);
         if (cur >= maxOutstanding_) {
-          std::this_thread::yield();
+          rt::cpu_relax();
           continue;
         }
         if (outstanding_.compare_exchange_weak(cur, cur + 1,
@@ -86,7 +87,7 @@ public:
       if (queue_.try_push(std::move(job))) {
         break;
       }
-      std::this_thread::yield();
+      rt::cpu_relax();
     }
   }
 

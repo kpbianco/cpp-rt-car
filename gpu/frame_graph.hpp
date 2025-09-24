@@ -9,6 +9,8 @@
 #include <thread>
 #include <vector>
 
+#include <rt/arch.hpp>
+
 #include "hal/hal.hpp"
 #include "hal/gpu_stub.hpp"
 #include <rt/fiber_pool.hpp>
@@ -26,7 +28,7 @@ struct TimelineSemaphore {
 
     void wait(uint64_t target) {
         while (value.load(std::memory_order_acquire) < target) {
-            std::this_thread::yield();
+            rt::cpu_relax();
         }
     }
 

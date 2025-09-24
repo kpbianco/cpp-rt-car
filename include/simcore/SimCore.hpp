@@ -32,6 +32,7 @@
 #include "rate_governor.hpp"
 #include "highres_clock.hpp"
 #include "worker_pool.hpp"
+#include <rt/arch.hpp>
 #include <rt/fiber_pool.hpp>
 #include <rt/numa.hpp>
 #include <rt/numerics.hpp>
@@ -1346,7 +1347,7 @@ private:
         while (remaining_.load(std::memory_order_acquire) > 0) {
           std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
           if (idx >= totalChunks) {
-            std::this_thread::yield();
+            rt::cpu_relax();
             continue;
           }
           std::size_t begin = idx * active_.chunkSize;
@@ -1438,7 +1439,7 @@ private:
         while (remaining_.load(std::memory_order_acquire) > 0) {
           std::size_t idx = nextChunk_.fetch_add(1, std::memory_order_relaxed);
           if (idx >= totalChunks) {
-            std::this_thread::yield();
+            rt::cpu_relax();
             continue;
           }
           const std::size_t b = idx * chunk;
@@ -1509,7 +1510,7 @@ private:
           });
         }
         while (remaining.load(std::memory_order_acquire) != 0)
-          std::this_thread::yield();
+          rt::cpu_relax();
       }
     }
     if (watchdog_)
