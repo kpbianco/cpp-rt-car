@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <rt/arch.hpp>
+
 namespace rt {
 
 Scheduler::Scheduler(std::size_t threads) {
@@ -60,7 +62,7 @@ void Scheduler::workerLoop(std::size_t index) {
       if (!stealTask(index, task)) {
         if (remaining_.load(std::memory_order_acquire) == 0)
           break; // all tasks done
-        std::this_thread::yield();
+        rt::cpu_relax();
         continue;
       }
     }

@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include <rt/arch.hpp>
+
 #include "bintrace.hpp"
 
 #if defined(_MSC_VER)
@@ -65,6 +67,7 @@ public:
       } else {
         pos = enqueuePos_.load(std::memory_order_relaxed);
       }
+      rt::cpu_relax();
     }
     enqueueCache_ = pos + 1;
     cell->data = std::forward<U>(v);
@@ -104,6 +107,7 @@ public:
       } else {
         pos = dequeuePos_.load(std::memory_order_relaxed);
       }
+      rt::cpu_relax();
     }
     dequeueCache_ = pos + 1;
     out = std::move(cell->data);
