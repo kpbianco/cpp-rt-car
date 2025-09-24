@@ -17,6 +17,7 @@ inline const char* codeToCat(std::uint32_t code) {
     case bintrace::EV_WorkSteal:          return "WorkSteal";
     case bintrace::EV_EmergencySpawn:     return "WorkerPool";
     case bintrace::EV_PriorityEnqueue:    return "WorkerPool";
+    case bintrace::EV_WorkerMeta:         return "WorkerPool";
     case bintrace::EV_WatchdogTrip:       return "WatchdogTrip";
     case bintrace::EV_GpuFenceWaitBegin:  return "GpuFenceWaitBegin";
     case bintrace::EV_GpuFenceWaitEnd:    return "GpuFenceWaitEnd";
@@ -51,6 +52,7 @@ inline const char* codeToName(std::uint32_t code) {
     case bintrace::EV_WorkSteal:          return "Work Steal";
     case bintrace::EV_EmergencySpawn:     return "Emergency Spawn";
     case bintrace::EV_PriorityEnqueue:    return "Priority Enqueue";
+    case bintrace::EV_WorkerMeta:         return "Worker Meta";
     case bintrace::EV_WatchdogTrip:       return "Watchdog Trip";
     case bintrace::EV_GpuFenceWaitBegin:  return "GPU Fence Wait Begin";
     case bintrace::EV_GpuFenceWaitEnd:    return "GPU Fence Wait End";
@@ -65,6 +67,24 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
     os << "{\"traceEvents\":[";
     bool first = true;
     for (const auto& e : snap.events) {
+        if (e.code == bintrace::EV_WorkerMeta) {
+            if (!first) os << ',';
+            first = false;
+            const std::int32_t node = bintrace::decode_worker_meta_node(e.b);
+            os << "{\"cat\":\"" << codeToCat(e.code) << "\",";
+            os << "\"name\":\"thread_name\",";
+            os << "\"ph\":\"M\",";
+            os << "\"tid\":" << e.thread << ',';
+            os << "\"ts\":0,\"args\":{\"name\":\"Worker " << e.a << "\"}}";
+            os << ',';
+            os << "{\"cat\":\"" << codeToCat(e.code) << "\",";
+            os << "\"name\":\"worker_meta\",";
+            os << "\"ph\":\"M\",";
+            os << "\"tid\":" << e.thread << ',';
+            os << "\"ts\":0,\"args\":{\"worker_index\":" << e.a
+               << ",\"numa_node\":" << node << "}}";
+            continue;
+        }
         if (!first) os << ',';
         first = false;
         os << "{\"cat\":\"" << codeToCat(e.code) << "\",";

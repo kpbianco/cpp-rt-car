@@ -9,6 +9,12 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#ifdef __linux__
+#include <sched.h>
+#endif
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+#include <numa.h>
+#endif
 #include <rt/arch.hpp>
 #include <rt/numerics.hpp>
 #include "bintrace.hpp"
@@ -374,6 +380,20 @@ private:
     }
   }
 
+  static std::int32_t current_numa_node() noexcept {
+#if defined(__linux__) && defined(SIM_USE_NUMA)
+    if (numa_available() == -1)
+      return -1;
+    const int cpu = ::sched_getcpu();
+    if (cpu < 0)
+      return -1;
+    const int node = numa_node_of_cpu(cpu);
+    return node >= 0 ? node : -1;
+#else
+    return -1;
+#endif
+  }
+
   void workerLoop(std::size_t index) {
     bool bound = false;
     bool stealLogged = false;
@@ -382,6 +402,10 @@ private:
         if (auto *trace = trace_.load(std::memory_order_acquire)) {
           const std::size_t base = traceBase_.load(std::memory_order_acquire);
           trace->bindThread(base + index);
+          const std::int32_t numaNode = current_numa_node();
+          trace->log(bintrace::EV_WorkerMeta,
+                     static_cast<std::uint32_t>(index),
+                     bintrace::encode_worker_meta(numaNode));
           bound = true;
         }
       }
