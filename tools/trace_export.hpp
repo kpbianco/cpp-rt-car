@@ -26,6 +26,18 @@ inline const char* codeToCat(std::uint32_t code) {
     }
 }
 
+inline bool decodeEmergencyRateAllowed(std::uint64_t payload) {
+    return (payload >> 63) != 0;
+}
+
+inline std::uint32_t decodeEmergencyPriority(std::uint64_t payload) {
+    return static_cast<std::uint32_t>(payload & 0xFFFFFFFFu);
+}
+
+inline std::uint32_t decodeEmergencyCategory(std::uint64_t payload) {
+    return static_cast<std::uint32_t>((payload >> 32) & 0x7FFFFFFFu);
+}
+
 inline const char* codeToName(std::uint32_t code) {
     switch (code) {
     case bintrace::EV_PhaseBegin:         return "Phase Begin";
@@ -70,7 +82,10 @@ inline void write_chrome_trace(const bintrace::Trace::Snapshot& snap, std::ostre
             break;
         case bintrace::EV_EmergencySpawn:
             os << "{\"outstanding\":" << e.a
-               << ",\"rate_allowed\":" << (e.b ? "true" : "false") << "}";
+               << ",\"priority\":" << decodeEmergencyPriority(e.b)
+               << ",\"category\":" << decodeEmergencyCategory(e.b)
+               << ",\"rate_allowed\":"
+               << (decodeEmergencyRateAllowed(e.b) ? "true" : "false") << "}";
             break;
         default:
             os << "{\"a\":" << e.a << ",\"b\":" << e.b << "}";
