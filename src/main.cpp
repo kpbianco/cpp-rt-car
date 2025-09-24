@@ -11,6 +11,17 @@
 #include <iomanip>
 
 /* tiny helpers --------------------------------------------------- */
+static void printHelp(const char* argv0)
+{
+    std::cout << "Usage: " << argv0 << " [options]\n\n"
+              << "Options:\n"
+              << "  --threads <n>              Number of worker threads (default: hardware concurrency).\n"
+              << "  --pin                      Pin worker threads to cores.\n"
+              << "  --metrics-json             Emit a cumulative metrics snapshot at exit (p50/p95/p99 span the full run).\n"
+              << "  --metrics-json-interval    Emit metrics JSON and reset rolling histograms and resettable counters after each emission.\n"
+              << "  --help, -h                 Show this help message.\n";
+}
+
 static std::size_t parseSize(const char* s, std::size_t def)
 {
     if (!s) return def;
@@ -32,7 +43,12 @@ int main(int argc, char** argv)
 
     for (int i = 1; i < argc; ++i)
     {
-        if (std::strcmp(argv[i], "--elements") == 0 && i + 1 < argc)
+        if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
+        {
+            printHelp(argv[0]);
+            return 0;
+        }
+        else if (std::strcmp(argv[i], "--elements") == 0 && i + 1 < argc)
             ; // handled later
         else if (std::strcmp(argv[i], "--threads") == 0 && i + 1 < argc)
             cfg.threads = parseSize(argv[++i], cfg.threads);
