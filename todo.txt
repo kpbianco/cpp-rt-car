@@ -1,1 +1,26 @@
-implement examples into actually utilizing the rt script
+8) Where to contribute (issue categories)
+
+New phases (examples + real kernels): apply the phase template, wire AoSoA math, add trace + metrics, unit + integration tests.
+
+Device adapters: replace GPU stub with CUDA/Vulkan backend keeping the Fence + fiber await contract.
+
+Scheduler research: priority policies, steal heuristics, multi-queue experiments (guard behind flags).
+
+Memory experiments: huge-page policies, per-phase arena sizing, page coloring (Linux).
+
+Numerics: mixed-precision options; “shadow arithmetic” (ULP/interval) test modes.
+
+Observability: PMU counters (cycles/LLC misses) into trace; causal critical path analysis.
+
+Docs & samples: richer end-to-end demos (e.g., tyre-belt, constraint solver shell).
+
+9) Common gotchas (callouts you should challenge)
+
+No raw threads from phases. If you need special priority, use the priority queue—or if you must, the explicit emergency path (visible, rate-limited, disable-able).
+
+Determinism ≠ “it looks stable.” If you didn’t fix the FP env and reductions, you’re not deterministic; your matrix tests enforce this—keep them green.
+
+NUMA only helps if you first-touch correctly. The examples do; every big buffer in your own phases must too.
+
+Logging can kill realtime unless it’s bounded—here it is. Don’t add unbounded sinks.
+
