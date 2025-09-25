@@ -1,0 +1,74 @@
+app:
+  path: "./build/bin/rtfw_demo"
+  warmup_sec: 5
+  run_sec: 20
+  frame_budget_ms: 5.0
+  extra_args:
+    - "--rt"
+
+metrics:
+  hard_constraints:
+    missed_frames: "== 0"
+    watchdog_trips: "== 0"
+    log_drops: "<= 0"
+  objective:
+    expr: "p99_frame_ms / frame_budget_ms"
+    tiebreakers:
+      - "p95_frame_ms / frame_budget_ms"
+      - "stdev_frame_ms"
+      - "queue_max"
+      - "emergency_spawns"
+    maximize: false
+
+params:
+  threads:
+    type: "categorical"
+    values:
+      - "physical"
+      - "physical_plus_smt"
+  chunk_target_us:
+    type: "int"
+    min: 50
+    max: 300
+    step: 10
+  aosoa_block:
+    type: "int"
+    values:
+      - 128
+      - 256
+      - 512
+  steal_threshold:
+    type: "int"
+    min: 0
+    max: 8
+    step: 1
+  prefetch_distance_bytes:
+    type: "int"
+    min: 0
+    max: 4096
+    step: 64
+  huge_pages:
+    type: "bool"
+  governor_target_util:
+    type: "float"
+    min: 0.85
+    max: 0.98
+    step: 0.01
+  governor_hysteresis:
+    type: "float"
+    min: 0.01
+    max: 0.05
+    step: 0.005
+  fma_mode:
+    type: "categorical"
+    values:
+      - "on"
+      - "off"
+      - "auto_no_when_deterministic"
+  emergency_spawn_enabled:
+    type: "bool"
+  arena_per_thread_mb:
+    type: "int"
+    min: 8
+    max: 128
+    step: 8
