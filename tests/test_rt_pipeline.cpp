@@ -8,6 +8,9 @@
 #include <simcore/bintrace.hpp>
 #include <simcore/metrics.hpp>
 #include <simcore/worker_pool.hpp>
+#if defined(SIM_USE_NUMA) && defined(__linux__)
+#include <numa.h>
+#endif
 
 namespace {
 
@@ -88,6 +91,7 @@ TEST(RTPipeline, EndToEndSmokeTest) {
   std::size_t queuePush = 0;
   std::size_t queuePop = 0;
   std::size_t stealEvents = 0;
+  std::size_t workerMetaEvents = 0;
   for (const auto &ev : traceSnap.events) {
     switch (ev.code) {
     case bintrace::EV_GpuFenceWaitBegin:
@@ -108,6 +112,18 @@ TEST(RTPipeline, EndToEndSmokeTest) {
     case bintrace::EV_WorkSteal:
       ++stealEvents;
       break;
+    case bintrace::EV_WorkerMeta: {
+      ++workerMetaEvents;
+      EXPECT_LT(static_cast<std::size_t>(ev.a), workerThreads);
+      const int node = bintrace::decode_worker_meta_node(ev.b);
+      EXPECT_GE(node, -1);
+#if defined(SIM_USE_NUMA) && defined(__linux__)
+      if (numa_available() != -1) {
+        EXPECT_LE(node, numa_max_node());
+      }
+#endif
+      break;
+    }
     default:
       break;
     }
@@ -119,4 +135,5 @@ TEST(RTPipeline, EndToEndSmokeTest) {
   EXPECT_GE(queuePush, 1u);
   EXPECT_GE(queuePop, 1u);
   EXPECT_GE(stealEvents, 1u);
+  EXPECT_EQ(workerMetaEvents, workerThreads);
 }

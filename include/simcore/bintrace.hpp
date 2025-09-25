@@ -43,6 +43,7 @@ enum : std::uint32_t {
     EV_PlatformCrumb     = 0x0E,
     EV_EmergencySpawn    = 0x0F,
     EV_PriorityEnqueue   = 0x10,
+    EV_WorkerMeta        = 0x11,
 };
 
 static inline std::uint64_t rdtsc() noexcept {
@@ -291,6 +292,16 @@ inline void log_queue_pop(std::uint32_t depth, std::uint64_t capacity = 0) {
     if (auto* trace = global_trace()) {
         trace->log(EV_QueuePop, depth, capacity);
     }
+}
+
+inline std::uint64_t encode_worker_meta(std::int32_t numaNode) noexcept {
+    return static_cast<std::uint64_t>(
+        static_cast<std::uint32_t>(static_cast<std::int32_t>(numaNode)));
+}
+
+inline std::int32_t decode_worker_meta_node(std::uint64_t payload) noexcept {
+    return static_cast<std::int32_t>(
+        static_cast<std::uint32_t>(payload & 0xFFFFFFFFu));
 }
 
 } // namespace bintrace
