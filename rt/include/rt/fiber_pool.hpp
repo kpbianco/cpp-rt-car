@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <utility>
+#include <algorithm>
 
 #include <simcore/hal.hpp>
 
@@ -121,6 +122,13 @@ private:
         waiters_.push_back(WaitItem{f, h});
     }
 
+    void remove_waiter(std::coroutine_handle<> h) {
+        std::lock_guard<std::mutex> lock(waitMutex_);
+        auto it = std::remove_if(waiters_.begin(), waiters_.end(),
+                                 [h](const WaitItem& item) { return item.handle == h; });
+        waiters_.erase(it, waiters_.end());
+    }
+
     void worker_loop() {
         for (;;) {
             std::coroutine_handle<> h;
@@ -134,6 +142,7 @@ private:
             }
             h.resume();
             if (h.done()) {
+                remove_waiter(h);
                 h.destroy();
                 if (pending_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     std::lock_guard<std::mutex> lock(pendingMutex_);

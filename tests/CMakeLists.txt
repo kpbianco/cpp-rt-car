@@ -34,6 +34,7 @@ if (SIM_GTEST_AVAILABLE)
         test_arena_binding_assert.cpp
         test_rt_overflow_death.cpp
         test_fiber_pool.cpp
+        test_fiber_pool_race.cpp
         test_bintrace.cpp
         test_budget_degrade.cpp
         test_predictive_adaptive.cpp
