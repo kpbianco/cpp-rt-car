@@ -1,0 +1,6 @@
+objective,ok,reason,threads,chunk_target_us,aosoa_block,steal_threshold,prefetch_distance_bytes,huge_pages,governor_target_util,governor_hysteresis,fma_mode,emergency_spawn_enabled,arena_per_thread_mb,p99_frame_ms,p95_frame_ms,p50_frame_ms,stdev_frame_ms,queue_max,emergency_spawns,log_drops,env.cpu_model,env.os,env.kernel,env.governor
+0.9421,True,,physical,140,256,3,1024,True,0.93,0.02,auto_no_when_deterministic,False,64,4.71,4.38,3.89,0.42,5,0,0,Intel(R) Xeon(R) Gold 6258R,Linux,5.15.0-1051-azure,performance
+0.9475,True,,physical_plus_smt,150,256,2,512,True,0.94,0.025,on,False,48,4.73,4.40,3.95,0.45,6,0,0,Intel(R) Xeon(R) Gold 6258R,Linux,5.15.0-1051-azure,performance
+0.9512,True,,physical,130,512,4,1536,True,0.92,0.02,auto_no_when_deterministic,True,80,4.76,4.41,3.97,0.47,4,1,0,Intel(R) Xeon(R) Gold 6258R,Linux,5.15.0-1051-azure,performance
+0.9588,True,,physical,160,256,5,2048,False,0.9,0.03,off,False,56,4.81,4.48,4.02,0.51,7,0,0,Intel(R) Xeon(R) Gold 6258R,Linux,5.15.0-1051-azure,powersave
+0.9624,True,,physical_plus_smt,120,128,1,768,True,0.95,0.015,on,True,72,4.84,4.52,4.10,0.55,6,1,0,Intel(R) Xeon(R) Gold 6258R,Linux,5.15.0-1051-azure,powersave

@@ -1,0 +1,112 @@
+[
+  {
+    "objective": 0.9421,
+    "params": {
+      "threads": "physical",
+      "chunk_target_us": 140,
+      "aosoa_block": 256,
+      "steal_threshold": 3,
+      "prefetch_distance_bytes": 1024,
+      "huge_pages": true,
+      "governor_target_util": 0.93,
+      "governor_hysteresis": 0.02,
+      "fma_mode": "auto_no_when_deterministic",
+      "emergency_spawn_enabled": false,
+      "arena_per_thread_mb": 64
+    },
+    "metrics": {
+      "p99_frame_ms": 4.71,
+      "queue_max": 5,
+      "emergency_spawns": 0,
+      "log_drops": 0
+    }
+  },
+  {
+    "objective": 0.9475,
+    "params": {
+      "threads": "physical_plus_smt",
+      "chunk_target_us": 150,
+      "aosoa_block": 256,
+      "steal_threshold": 2,
+      "prefetch_distance_bytes": 512,
+      "huge_pages": true,
+      "governor_target_util": 0.94,
+      "governor_hysteresis": 0.025,
+      "fma_mode": "on",
+      "emergency_spawn_enabled": false,
+      "arena_per_thread_mb": 48
+    },
+    "metrics": {
+      "p99_frame_ms": 4.73,
+      "queue_max": 6,
+      "emergency_spawns": 0,
+      "log_drops": 0
+    }
+  },
+  {
+    "objective": 0.9512,
+    "params": {
+      "threads": "physical",
+      "chunk_target_us": 130,
+      "aosoa_block": 512,
+      "steal_threshold": 4,
+      "prefetch_distance_bytes": 1536,
+      "huge_pages": true,
+      "governor_target_util": 0.92,
+      "governor_hysteresis": 0.02,
+      "fma_mode": "auto_no_when_deterministic",
+      "emergency_spawn_enabled": true,
+      "arena_per_thread_mb": 80
+    },
+    "metrics": {
+      "p99_frame_ms": 4.76,
+      "queue_max": 4,
+      "emergency_spawns": 1,
+      "log_drops": 0
+    }
+  },
+  {
+    "objective": 0.9588,
+    "params": {
+      "threads": "physical",
+      "chunk_target_us": 160,
+      "aosoa_block": 256,
+      "steal_threshold": 5,
+      "prefetch_distance_bytes": 2048,
+      "huge_pages": false,
+      "governor_target_util": 0.9,
+      "governor_hysteresis": 0.03,
+      "fma_mode": "off",
+      "emergency_spawn_enabled": false,
+      "arena_per_thread_mb": 56
+    },
+    "metrics": {
+      "p99_frame_ms": 4.81,
+      "queue_max": 7,
+      "emergency_spawns": 0,
+      "log_drops": 0
+    }
+  },
+  {
+    "objective": 0.9624,
+    "params": {
+      "threads": "physical_plus_smt",
+      "chunk_target_us": 120,
+      "aosoa_block": 128,
+      "steal_threshold": 1,
+      "prefetch_distance_bytes": 768,
+      "huge_pages": true,
+      "governor_target_util": 0.95,
+      "governor_hysteresis": 0.015,
+      "fma_mode": "on",
+      "emergency_spawn_enabled": true,
+      "arena_per_thread_mb": 72
+    },
+    "metrics": {
+      "p99_frame_ms": 4.84,
+      "queue_max": 6,
+      "emergency_spawns": 1,
+      "log_drops": 0
+    }
+  }
+]
