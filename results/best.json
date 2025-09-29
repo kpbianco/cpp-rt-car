@@ -1,0 +1,27 @@
+{
+  "objective": 0.9421,
+  "params": {
+    "threads": "physical",
+    "chunk_target_us": 140,
+    "aosoa_block": 256,
+    "steal_threshold": 3,
+    "prefetch_distance_bytes": 1024,
+    "huge_pages": true,
+    "governor_target_util": 0.93,
+    "governor_hysteresis": 0.02,
+    "fma_mode": "auto_no_when_deterministic",
+    "emergency_spawn_enabled": false,
+    "arena_per_thread_mb": 64
+  },
+  "metrics_excerpt": {
+    "p99_frame_ms": 4.71,
+    "p95_frame_ms": 4.38,
+    "p50_frame_ms": 3.89,
+    "stdev_frame_ms": 0.42,
+    "queue_max": 5,
+    "emergency_spawns": 0,
+    "log_drops": 0,
+    "missed_frames": 0,
+    "watchdog_trips": 0
+  }
+}
