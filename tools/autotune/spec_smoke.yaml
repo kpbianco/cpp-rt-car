@@ -1,0 +1,35 @@
+app:
+  path: "./smoke_app.py"
+  warmup_sec: 1
+  run_sec: 2
+  frame_budget_ms: 5.0
+
+metrics:
+  hard_constraints:
+    missed_frames: "== 0"
+    watchdog_trips: "== 0"
+    log_drops: "== 0"
+  objective:
+    expr: "p99_frame_ms"
+    tiebreakers:
+      - "queue_max"
+      - "stdev_frame_ms"
+    maximize: false
+
+params:
+  mode:
+    type: "categorical"
+    values:
+      - "fast"
+      - "balanced"
+      - "safe"
+  threads:
+    type: "int"
+    min: 1
+    max: 4
+    step: 1
+  prefetch_distance:
+    type: "int"
+    min: 0
+    max: 256
+    step: 64

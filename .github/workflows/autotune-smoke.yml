@@ -1,0 +1,43 @@
+name: Autotune Smoke
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  autotune-smoke:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare workspace
+        run: |
+          rm -rf results profiles reports
+      - name: Run autotune smoke workflow
+        run: |
+          python3 tools/autotune/run_experiments.py \
+            --spec tools/autotune/spec_smoke.yaml \
+            --screen 4 \
+            --replicates 1 \
+            --local-iters 1 \
+            --topk 1 \
+            --seed 0 \
+            --warmup-sec 1 \
+            --run-sec 2
+      - name: Upload autotune smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: autotune-smoke-artifacts
+          path: |
+            results/**
+            reports/**
+            profiles/**

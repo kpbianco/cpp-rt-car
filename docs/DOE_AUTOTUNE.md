@@ -28,6 +28,8 @@ python3 tools/autotune/run_experiments.py \
 - `--replicates` — interval metric samples per evaluation; >1 smooths jittery hosts.
 - `--local-iters` — bounded coordinate/local search iterations seeded from the best screening candidate.
 - `--topk` — number of unique candidates to send through robustness validation.
+- `--warmup-sec` — optional override for the warmup duration defined in the spec (seconds).
+- `--run-sec` — optional override for the metrics sampling window (seconds).
 
 > **Interval metrics only.** The runner always calls `rtfw_demo` with `--metrics-json-interval`. Cumulative stats (`--metrics-json`) are intentionally ignored because they hide short-lived regressions and make comparisons between runs ambiguous.
 
