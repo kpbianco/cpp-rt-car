@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime
 import json
 import math
@@ -17,6 +18,8 @@ import sys
 import tempfile
 from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+import hashlib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -37,7 +40,9 @@ from tools.autotune.validate import (  # noqa: E402
     run_validation,
     select_best,
     summarise_candidate,
+    RobustnessSpec,
 )
+from tools.autotune.run_one import extract_seed, extract_scenario  # noqa: E402
 
 RUN_ONE = REPO_ROOT / "tools" / "autotune" / "run_one.py"
 OPTIMIZE = REPO_ROOT / "tools" / "autotune" / "optimize.py"
@@ -53,11 +58,66 @@ class ExperimentLog:
         self.objective = objective
         self.entries: "OrderedDict[Tuple[str, str], Dict[str, Any]]" = OrderedDict()
         self._stage_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._run_cache: Dict[str, Dict[str, Any]] = {}
         self._load_existing()
 
     @staticmethod
     def _canonical_params(params: Mapping[str, Any]) -> str:
         return json.dumps(params, sort_keys=True)
+
+    @staticmethod
+    def _normalise_component(component: Any) -> str:
+        try:
+            return json.dumps(component, sort_keys=True)
+        except TypeError:
+            return json.dumps(str(component))
+
+    def _run_key(
+        self,
+        params: Mapping[str, Any],
+        seed: Any,
+        scenario: Any,
+        spec_digest: Optional[str],
+    ) -> Optional[str]:
+        if not isinstance(params, Mapping):
+            return None
+        if not isinstance(spec_digest, str) or not spec_digest:
+            return None
+        canonical_params = self._canonical_params(params)
+        seed_component = self._normalise_component(seed)
+        scenario_component = self._normalise_component(scenario)
+        return "|".join([spec_digest, canonical_params, seed_component, scenario_component])
+
+    def _index_run(self, run: Mapping[str, Any]) -> None:
+        if not isinstance(run, Mapping):
+            return
+        params = run.get("_params")
+        if not isinstance(params, Mapping):
+            candidate_params = run.get("params")
+            params = candidate_params if isinstance(candidate_params, Mapping) else None
+        if not isinstance(params, Mapping):
+            return
+        seed = run.get("_seed")
+        if seed is None:
+            seed = run.get("seed")
+        scenario = run.get("_scenario")
+        if scenario is None:
+            scenario = run.get("scenario")
+        spec_digest = run.get("_spec_digest") or run.get("spec_digest")
+        key = self._run_key(params, seed, scenario, spec_digest)
+        if key is None:
+            return
+        self._run_cache[key] = copy.deepcopy(dict(run))
+
+    def _index_runs_from_record(self, record: Mapping[str, Any]) -> None:
+        runs = record.get("runs")
+        if isinstance(runs, Sequence):
+            for run in runs:
+                if isinstance(run, Mapping):
+                    self._index_run(run)
+        result = record.get("result")
+        if isinstance(result, Mapping):
+            self._index_run(result)
 
     def _load_existing(self) -> None:
         if not self.path.is_file():
@@ -79,6 +139,7 @@ class ExperimentLog:
                 self.entries[key] = record
                 stage_map = self._stage_cache.setdefault(stage, {})
                 stage_map[self._canonical_params(params)] = record
+                self._index_runs_from_record(record)
 
     def get(self, stage: str, params: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         stage_map = self._stage_cache.get(stage)
@@ -86,11 +147,30 @@ class ExperimentLog:
             return None
         return stage_map.get(self._canonical_params(params))
 
+    def lookup_run(
+        self,
+        params: Mapping[str, Any],
+        seed: Any,
+        scenario: Any,
+        spec_digest: str,
+    ) -> Optional[Dict[str, Any]]:
+        key = self._run_key(params, seed, scenario, spec_digest)
+        if key is None:
+            return None
+        cached = self._run_cache.get(key)
+        if cached is None:
+            return None
+        return copy.deepcopy(cached)
+
+    def remember_run(self, run: Mapping[str, Any]) -> None:
+        self._index_run(run)
+
     def register(self, stage: str, params: Mapping[str, Any], record: Dict[str, Any]) -> None:
         key = (stage, self._canonical_params(params))
         if key not in self.entries:
             self.entries[key] = record
         self._stage_cache.setdefault(stage, {})[self._canonical_params(params)] = record
+        self._index_runs_from_record(record)
 
     def append(self, record: Mapping[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -291,6 +371,7 @@ def evaluate_candidate(
     tiebreakers_eval: Sequence[ExpressionEvaluator],
     replicates: int,
     log: ExperimentLog,
+    spec_digest: str,
 ) -> Dict[str, Any]:
     validated = validate_params(params, param_specs)
     cached = log.get(stage, validated)
@@ -303,8 +384,25 @@ def evaluate_candidate(
         config_path = tmpdir / "config.json"
         config_data = build_config(validated)
         write_json(config_path, config_data)
+        seed = extract_seed(config_data, config_path)
+        scenario_name = extract_scenario(config_data, config_path)
         for _ in range(max(1, replicates)):
-            runs.append(run_single(app, config_path))
+            cached_run = log.lookup_run(validated, seed, scenario_name, spec_digest)
+            if cached_run is not None:
+                runs.append(copy.deepcopy(cached_run))
+                continue
+            result = run_single(app, config_path)
+            if not isinstance(result, Mapping):
+                result = {}
+            result.setdefault("_params", dict(validated))
+            result.setdefault("params", dict(validated))
+            result.setdefault("_seed", seed)
+            result.setdefault("seed", seed)
+            result.setdefault("_scenario", scenario_name)
+            result.setdefault("scenario", scenario_name)
+            result["_spec_digest"] = spec_digest
+            log.remember_run(result)
+            runs.append(copy.deepcopy(result))
 
     aggregated = aggregate_runs(runs, objective, objective_eval, tiebreakers_eval, app.frame_budget_ms)
 
@@ -322,6 +420,7 @@ def evaluate_candidate(
         "metadata": dict(metadata),
         "total_runs": aggregated["total_runs"],
         "successful_runs": aggregated["successful_runs"],
+        "spec_digest": spec_digest,
     }
 
     log.register(stage, validated, record)
@@ -390,6 +489,10 @@ def sanitise_filename(text: str) -> str:
     return cleaned.strip("-") or "unknown"
 
 
+def compute_spec_digest(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def main() -> None:
     args = parse_args()
 
@@ -417,6 +520,7 @@ def main() -> None:
     experiments_log_path = results_dir / "experiments.jsonl"
     experiments_log_path.touch(exist_ok=True)
     log = ExperimentLog(experiments_log_path, objective_spec)
+    spec_digest = compute_spec_digest(spec_path)
 
     rng = random.Random(args.seed)
 
@@ -441,6 +545,7 @@ def main() -> None:
             tiebreakers_eval=tiebreakers_eval,
             replicates=args.replicates,
             log=log,
+            spec_digest=spec_digest,
         )
 
     all_entries = log.all_entries()
@@ -488,6 +593,7 @@ def main() -> None:
         tiebreakers_eval=tiebreakers_eval,
         replicates=args.replicates,
         log=log,
+        spec_digest=spec_digest,
     )
 
     all_entries = log.all_entries()
@@ -510,10 +616,70 @@ def main() -> None:
         cached = log.get("validate", params)
         if cached is not None and cached.get("runs"):
             runs = cached.get("runs", [])
-            run_records = [run for run in runs if isinstance(run, Mapping)]
+            run_records = []
+            for run in runs:
+                if not isinstance(run, Mapping):
+                    continue
+                if "_spec_digest" not in run:
+                    run["_spec_digest"] = spec_digest
+                log.remember_run(run)
+                run_records.append(run)
         else:
-            runs, raw_records = run_validation(app_spec, robustness_spec, params, {"rank": rank, "stage": candidate.get("stage")})
+            run_records_map: Dict[Tuple[str, Optional[int]], Dict[str, Any]] = {}
+            missing: Dict[Any, List[Optional[int]]] = {}
+            for scenario in robustness_spec.scenarios:
+                scenario_name = scenario.name
+                for seed in robustness_spec.seeds:
+                    cached_run = log.lookup_run(params, seed, scenario_name, spec_digest)
+                    if cached_run is not None:
+                        if "_spec_digest" not in cached_run:
+                            cached_run["_spec_digest"] = spec_digest
+                        log.remember_run(cached_run)
+                        run_records_map[(scenario_name, seed)] = cached_run
+                    else:
+                        missing.setdefault(scenario, []).append(seed)
+
+            raw_records: List[Dict[str, Any]] = []
+            if missing:
+                for scenario, seeds in missing.items():
+                    partial_spec = RobustnessSpec(
+                        seeds=tuple(seeds),
+                        scenarios=(scenario,),
+                        seed_env=robustness_spec.seed_env,
+                        seed_arg=robustness_spec.seed_arg,
+                        config_seed_path=robustness_spec.config_seed_path,
+                    )
+                    new_runs, new_raw_records = run_validation(
+                        app_spec,
+                        partial_spec,
+                        params,
+                        {"rank": rank, "stage": candidate.get("stage")},
+                    )
+                    for run in new_runs:
+                        if not isinstance(run, Mapping):
+                            continue
+                        run["_spec_digest"] = spec_digest
+                        log.remember_run(run)
+                        scenario_key = str(run.get("scenario", scenario.name))
+                        seed_key = run.get("seed")
+                        run_records_map[(scenario_key, seed_key)] = run
+                    for raw in new_raw_records:
+                        result = raw.get("result") if isinstance(raw, Mapping) else None
+                        if isinstance(result, Mapping):
+                            result["_spec_digest"] = spec_digest
+                        raw_records.append(raw)
             validation_raw_records.extend(raw_records)
+
+            ordered_runs: List[Dict[str, Any]] = []
+            for scenario in robustness_spec.scenarios:
+                scenario_name = scenario.name
+                for seed in robustness_spec.seeds:
+                    key = (scenario_name, seed)
+                    run = run_records_map.get(key)
+                    if run is not None:
+                        ordered_runs.append(run)
+            run_records = ordered_runs
+            runs = ordered_runs
             aggregated = aggregate_runs(runs, objective_spec, objective_eval, tiebreakers_eval, app_spec.frame_budget_ms)
             record = {
                 "stage": "validate",
@@ -529,6 +695,7 @@ def main() -> None:
                 "metadata": {**metadata, "validated": True},
                 "total_runs": aggregated["total_runs"],
                 "successful_runs": aggregated["successful_runs"],
+                "spec_digest": spec_digest,
             }
             log.register("validate", params, record)
             log.append(record)
