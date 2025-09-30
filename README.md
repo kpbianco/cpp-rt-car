@@ -271,6 +271,8 @@ python3 tools/autotune/run_experiments.py \
   --topk 5
 ```
 
+Use `--warmup-sec` / `--run-sec` to temporarily shorten the sampling window for smoke tests or CI runs.
+
 The orchestration script screens the parameter space, runs local search, validates the best candidates, and writes the final machine profile. All metrics are gathered in **interval mode** (`--metrics-json-interval`) so every sample represents a fresh window; cumulative outputs (`--metrics-json`) are ignored by design to keep the statistics comparable.
 
 ### What lands where

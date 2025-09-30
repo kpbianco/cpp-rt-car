@@ -20,6 +20,7 @@ from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import hashlib
+from dataclasses import replace
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -192,6 +193,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-iters", required=True, type=int, help="Iterations for local search")
     parser.add_argument("--topk", required=True, type=int, help="Top K candidates to validate")
     parser.add_argument("--seed", type=int, default=0, help="Seed for screening candidate generation")
+    parser.add_argument(
+        "--warmup-sec",
+        type=float,
+        default=None,
+        help="Override warmup duration from the spec (seconds)",
+    )
+    parser.add_argument(
+        "--run-sec",
+        type=float,
+        default=None,
+        help="Override run duration from the spec (seconds)",
+    )
     return parser.parse_args()
 
 
@@ -489,8 +502,15 @@ def sanitise_filename(text: str) -> str:
     return cleaned.strip("-") or "unknown"
 
 
-def compute_spec_digest(path: pathlib.Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def compute_spec_digest(
+    path: pathlib.Path, overrides: Optional[Mapping[str, Any]] = None
+) -> str:
+    digest = hashlib.sha256()
+    digest.update(path.read_bytes())
+    if overrides:
+        payload = json.dumps(overrides, sort_keys=True).encode("utf-8")
+        digest.update(payload)
+    return digest.hexdigest()
 
 
 def main() -> None:
@@ -505,6 +525,21 @@ def main() -> None:
         raise SystemExit("Spec YAML must contain a mapping at the top level")
 
     app_spec = parse_app_spec(spec_data, spec_path.parent)
+
+    app_overrides: Dict[str, float] = {}
+    if args.warmup_sec is not None:
+        if args.warmup_sec < 0:
+            raise SystemExit("--warmup-sec must be non-negative")
+        app_overrides["warmup"] = float(args.warmup_sec)
+    if args.run_sec is not None:
+        if args.run_sec <= 0:
+            raise SystemExit("--run-sec must be positive")
+        app_overrides["run"] = float(args.run_sec)
+    if app_overrides:
+        app_spec = replace(app_spec, **app_overrides)
+
+    metadata_overrides = {"app_overrides": dict(app_overrides)} if app_overrides else {}
+
     objective_spec = parse_objective_spec(spec_data)
     objective_eval = ExpressionEvaluator(objective_spec.expression)
     tiebreakers_eval = [ExpressionEvaluator(expr) for expr in objective_spec.tiebreakers]
@@ -520,7 +555,7 @@ def main() -> None:
     experiments_log_path = results_dir / "experiments.jsonl"
     experiments_log_path.touch(exist_ok=True)
     log = ExperimentLog(experiments_log_path, objective_spec)
-    spec_digest = compute_spec_digest(spec_path)
+    spec_digest = compute_spec_digest(spec_path, app_overrides if app_overrides else None)
 
     rng = random.Random(args.seed)
 
@@ -533,7 +568,7 @@ def main() -> None:
     write_json_file(screen_candidates_path, {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "candidates": screen_candidates})
 
     for index, candidate in enumerate(screen_candidates):
-        metadata = {"source": "screen", "index": index}
+        metadata = {**metadata_overrides, "source": "screen", "index": index}
         evaluate_candidate(
             stage="screen",
             params=candidate,
@@ -585,7 +620,7 @@ def main() -> None:
     evaluate_candidate(
         stage="local",
         params=local_params,
-        metadata={"source": "local_opt", "path": str(local_output_path)},
+        metadata={**metadata_overrides, "source": "local_opt", "path": str(local_output_path)},
         app=app_spec,
         param_specs=param_specs,
         objective=objective_spec,
@@ -612,7 +647,7 @@ def main() -> None:
         params = candidate.get("params")
         if not isinstance(params, Mapping):
             continue
-        metadata = {"rank": rank, "source_stage": candidate.get("stage")}
+        metadata = {**metadata_overrides, "rank": rank, "source_stage": candidate.get("stage")}
         cached = log.get("validate", params)
         if cached is not None and cached.get("runs"):
             runs = cached.get("runs", [])
@@ -626,7 +661,7 @@ def main() -> None:
                 run_records.append(run)
         else:
             run_records_map: Dict[Tuple[str, Optional[int]], Dict[str, Any]] = {}
-            missing: Dict[Any, List[Optional[int]]] = {}
+            missing: Dict[str, Dict[str, Any]] = {}
             for scenario in robustness_spec.scenarios:
                 scenario_name = scenario.name
                 for seed in robustness_spec.seeds:
@@ -637,11 +672,17 @@ def main() -> None:
                         log.remember_run(cached_run)
                         run_records_map[(scenario_name, seed)] = cached_run
                     else:
-                        missing.setdefault(scenario, []).append(seed)
+                        record = missing.setdefault(
+                            scenario_name,
+                            {"spec": scenario, "seeds": []},
+                        )
+                        record["seeds"].append(seed)
 
             raw_records: List[Dict[str, Any]] = []
             if missing:
-                for scenario, seeds in missing.items():
+                for record in missing.values():
+                    scenario = record["spec"]
+                    seeds = record["seeds"]
                     partial_spec = RobustnessSpec(
                         seeds=tuple(seeds),
                         scenarios=(scenario,),
@@ -653,7 +694,7 @@ def main() -> None:
                         app_spec,
                         partial_spec,
                         params,
-                        {"rank": rank, "stage": candidate.get("stage")},
+                        {**metadata_overrides, "rank": rank, "stage": candidate.get("stage")},
                     )
                     for run in new_runs:
                         if not isinstance(run, Mapping):
@@ -700,7 +741,12 @@ def main() -> None:
             log.register("validate", params, record)
             log.append(record)
             run_records = runs
-        summary = summarise_candidate(rank - 1, {"rank": rank, "stage": candidate.get("stage")}, params, run_records)
+        summary = summarise_candidate(
+            rank - 1,
+            {**metadata_overrides, "rank": rank, "stage": candidate.get("stage")},
+            params,
+            run_records,
+        )
         validation_summaries.append(summary)
 
     if validation_raw_records:
@@ -776,6 +822,7 @@ def main() -> None:
         "profile": str(profile_path),
         "best_objective": best_payload.get("objective"),
         "best_params": best_params_final,
+        "app_overrides": app_overrides,
     }
     write_json_file(summary_path, summary_payload)
 
@@ -784,6 +831,7 @@ def main() -> None:
         "best_objective": best_payload.get("objective"),
         "best_params": best_params_final,
         "analysis_dir": str(reports_dir),
+        "app_overrides": app_overrides,
     }
     print(json.dumps(ci_summary, sort_keys=True))
 
