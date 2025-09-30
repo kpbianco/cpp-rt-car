@@ -160,8 +160,10 @@ private:
         using namespace std::chrono_literals;
         while (!stopping_.load(std::memory_order_acquire)) {
             std::vector<std::coroutine_handle<>> ready;
+            bool hasWaiters = false;
             {
                 std::lock_guard<std::mutex> lock(waitMutex_);
+                hasWaiters = !waiters_.empty();
                 for (auto it = waiters_.begin(); it != waiters_.end();) {
                     if (it->fence->is_signaled()) {
                         ready.push_back(it->handle);
@@ -173,7 +175,10 @@ private:
             }
             for (auto h : ready)
                 schedule(h);
-            std::this_thread::sleep_for(1ms);
+            if (hasWaiters)
+                std::this_thread::yield();
+            else
+                std::this_thread::sleep_for(1ms);
         }
     }
 
