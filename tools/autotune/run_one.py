@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Additional arguments forwarded verbatim to the application.",
     )
+    parser.add_argument(
+        "--scenario",
+        default=None,
+        help="Scenario name supplied when launching the application.",
+    )
     return parser.parse_args()
 
 
@@ -63,13 +68,22 @@ def load_json(path: pathlib.Path) -> Dict[str, Any]:
         return {}
 
 
-def run_command(cmd: List[str], capture: bool = False) -> subprocess.CompletedProcess[str]:
+def run_command(
+    cmd: List[str],
+    capture: bool = False,
+    *,
+    extra_env: Optional[Dict[str, str]] = None,
+) -> subprocess.CompletedProcess[str]:
     try:
+        env = os.environ.copy()
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             cmd,
             check=True,
             capture_output=capture,
             text=True,
+            env=env,
         )
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr if exc.stderr else ""
@@ -282,6 +296,12 @@ def main() -> None:
     config_data = load_json(config_path)
     params = extract_params(config_path, config_data)
 
+    scenario = args.scenario or extract_scenario(config_data, config_path)
+    if not scenario:
+        scenario = "default"
+
+    scenario_env = {"SCENARIO": scenario}
+
     budget_ms = None
     if isinstance(config_data, dict):
         budget_ms = flatten_dict_search(config_data, ["frame_budget_ms"])
@@ -298,10 +318,10 @@ def main() -> None:
 
     if args.warmup > 0:
         warmup_cmd = base_cmd + ["--run", format_duration(args.warmup)]
-        run_command(warmup_cmd, capture=False)
+        run_command(warmup_cmd, capture=False, extra_env=scenario_env)
 
     run_cmd = base_cmd + ["--metrics-json-interval", "--run", format_duration(args.run)]
-    completed = run_command(run_cmd, capture=True)
+    completed = run_command(run_cmd, capture=True, extra_env=scenario_env)
 
     payload = find_first_json_line(completed.stdout)
     metrics_summary = extract_metrics(payload)
@@ -322,7 +342,7 @@ def main() -> None:
         "_summary": metrics_summary,
         "_params": params,
         "_seed": extract_seed(config_data, config_path),
-        "_scenario": extract_scenario(config_data, config_path),
+        "_scenario": scenario,
         "_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "env": collect_env_info(),
         "_schema": "v1",

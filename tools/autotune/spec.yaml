@@ -6,6 +6,14 @@ app:
   extra_args:
     - "--rt"
 
+scenarios:
+  - name: "default"
+    description: "Baseline scenario representative of standard gameplay."
+  - name: "heavy_gpu"
+    description: "Emphasizes GPU-intensive rendering workloads."
+  - name: "heavy_io"
+    description: "Focuses on streaming and IO-heavy behaviour."
+
 metrics:
   hard_constraints:
     missed_frames: "== 0"
