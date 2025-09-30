@@ -20,7 +20,7 @@ from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import hashlib
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -49,6 +49,13 @@ RUN_ONE = REPO_ROOT / "tools" / "autotune" / "run_one.py"
 OPTIMIZE = REPO_ROOT / "tools" / "autotune" / "optimize.py"
 ANALYZE = REPO_ROOT / "tools" / "autotune" / "analyze.py"
 MAKE_CONFIG = REPO_ROOT / "tools" / "autotune" / "make_config.py"
+
+
+@dataclass(frozen=True)
+class BaselineSource:
+    description: str
+    config_path: Optional[pathlib.Path] = None
+    params: Optional[Mapping[str, Any]] = None
 
 
 class ExperimentLog:
@@ -183,6 +190,167 @@ class ExperimentLog:
 
     def all_entries(self) -> List[Dict[str, Any]]:
         return list(self.entries.values())
+
+
+def _read_json_mapping(path: pathlib.Path) -> Optional[Mapping[str, Any]]:
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, Mapping):
+        return data
+    return None
+
+
+def _extract_params_from_payload(payload: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    params = payload.get("params") if isinstance(payload, Mapping) else None
+    if isinstance(params, Mapping):
+        return dict(params)
+    return None
+
+
+def _baseline_directories(app: AppSpec) -> List[pathlib.Path]:
+    candidates: List[pathlib.Path] = []
+    profiles_dir = REPO_ROOT / "profiles"
+    configs_dir = REPO_ROOT / "configs"
+    app_configs = app.path.parent / "configs"
+    build_configs = app.path.parent.parent / "configs"
+    for directory in (profiles_dir, configs_dir, app_configs, build_configs):
+        if directory and directory not in candidates:
+            candidates.append(directory)
+    return candidates
+
+
+def detect_baseline_source(app: AppSpec, results_dir: pathlib.Path) -> Optional[BaselineSource]:
+    directories = _baseline_directories(app)
+
+    env_profile = os.environ.get("RTFW_PROFILE")
+    if env_profile:
+        env_candidates: List[pathlib.Path] = []
+        env_path = pathlib.Path(env_profile)
+        env_candidates.append(env_path)
+        if not env_path.suffix:
+            env_candidates.append(env_path.with_suffix(".json"))
+        for directory in directories:
+            env_candidates.append(directory / env_profile)
+            if not env_profile.endswith(".json"):
+                env_candidates.append(directory / f"{env_profile}.json")
+        for candidate in env_candidates:
+            if candidate.is_file():
+                payload = _read_json_mapping(candidate)
+                params = _extract_params_from_payload(payload) if payload else None
+                return BaselineSource(
+                    description=f"RTFW_PROFILE={env_profile}",
+                    config_path=candidate,
+                    params=params,
+                )
+
+    cpu = sanitise_filename(platform.machine() or "cpu")
+    system = sanitise_filename(platform.system() or "os")
+    machine_candidates = [f"{cpu}-{system}.json", f"{cpu}-{system}"]
+    for name in machine_candidates:
+        for directory in directories:
+            candidate = directory / name
+            if candidate.is_file():
+                payload = _read_json_mapping(candidate)
+                params = _extract_params_from_payload(payload) if payload else None
+                return BaselineSource(
+                    description="machine profile",
+                    config_path=candidate,
+                    params=params,
+                )
+
+    for name in ("default_safe.json", "default_fast.json", "default.json"):
+        for directory in directories:
+            candidate = directory / name
+            if candidate.is_file():
+                payload = _read_json_mapping(candidate)
+                params = _extract_params_from_payload(payload) if payload else None
+                return BaselineSource(
+                    description=name,
+                    config_path=candidate,
+                    params=params,
+                )
+
+    best_path = results_dir / "best.json"
+    best_payload = _read_json_mapping(best_path)
+    if isinstance(best_payload, Mapping):
+        params = _extract_params_from_payload(best_payload)
+        if params:
+            return BaselineSource(description="results/best.json", params=params)
+
+    return None
+
+
+def run_baseline_gate(
+    app: AppSpec,
+    param_specs: Mapping[str, Any],
+    results_dir: pathlib.Path,
+) -> None:
+    source = detect_baseline_source(app, results_dir)
+    if source is None:
+        return
+
+    params_for_diag: Optional[Dict[str, Any]] = None
+    config_path_str: Optional[str] = None
+
+    with tempfile.TemporaryDirectory(prefix="autotune_baseline_") as tmpdir_str:
+        tmpdir = pathlib.Path(tmpdir_str)
+        config_path = source.config_path
+        if config_path is None:
+            params = source.params
+            if not isinstance(params, Mapping):
+                return
+            try:
+                validated = validate_params(params, param_specs)
+            except SystemExit as exc:
+                raise SystemExit(
+                    f"Baseline parameters from {source.description} failed validation: {exc}"
+                ) from exc
+            params_for_diag = dict(validated)
+            config_data = build_config(validated)
+            config_path = tmpdir / "baseline_config.json"
+            write_json(config_path, config_data)
+        else:
+            params_for_diag = (
+                dict(source.params)
+                if isinstance(source.params, Mapping)
+                else params_for_diag
+            )
+
+        config_path_str = str(config_path)
+        result = run_single(app, config_path)
+
+    if not isinstance(result, Mapping):
+        raise SystemExit("Baseline run did not produce a valid result payload")
+
+    if result.get("ok"):
+        return
+
+    reason = result.get("reason")
+    metrics_payload = result.get("metrics")
+    metrics = metrics_payload if isinstance(metrics_payload, Mapping) else None
+    command = result.get("command")
+    diag_lines = [
+        "Baseline configuration failed sanity gate.",
+        f"Source: {source.description}",
+    ]
+    if config_path_str:
+        diag_lines.append(f"Config: {config_path_str}")
+    if params_for_diag:
+        diag_lines.append(f"Params: {json.dumps(params_for_diag, sort_keys=True)}")
+    if reason:
+        diag_lines.append(f"Reason: {reason}")
+    if metrics:
+        diag_lines.append(f"Metrics: {json.dumps(metrics, sort_keys=True)}")
+    if isinstance(command, Sequence):
+        diag_lines.append("Command: " + " ".join(str(part) for part in command))
+    message = "\n".join(diag_lines)
+    print(message, file=sys.stderr)
+    raise SystemExit("Baseline configuration failed, aborting autotune")
 
 
 def parse_args() -> argparse.Namespace:
@@ -551,6 +719,8 @@ def main() -> None:
     profiles_dir = REPO_ROOT / "profiles"
     reports_dir = REPO_ROOT / "reports"
     ensure_directories([results_dir, profiles_dir, reports_dir])
+
+    run_baseline_gate(app_spec, param_specs, results_dir)
 
     experiments_log_path = results_dir / "experiments.jsonl"
     experiments_log_path.touch(exist_ok=True)
