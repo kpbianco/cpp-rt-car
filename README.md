@@ -259,24 +259,29 @@ ctest --test-dir build -j --output-on-failure
 
 ## 15. DOE / Autotune Workflow
 
-**Goal**: find **robust defaults** per hardware class and optional **per-machine** profiles.
+### ⚡ 60-second Quickstart
 
-1) **Freeze env**: disable turbo/EPP changes, isolate cores/IRQs, warm-up 2–3 min.  
-2) **Define objectives**: p99 ≤ budget, missed frames, variance, (optional) power.  
-3) **Screen factors**: threads, SMT, AoSoA block, chunk target µs, prefetch distance, hugepages, steal threshold, governor gains, FTZ/DAZ/FMA gates.  
-4) **Automate runs** using **interval metrics**:
-   ```bash
-   # Example pseudo-workflow
-   for cfg in $(./tools/gen_grid.py); do
-     ./build/bin/rtfw_demo --config "$cfg" --warmup 5s >/dev/null
-     ./build/bin/rtfw_demo --metrics-json-interval --run 20s >> results.jsonl
-   done
-   ./tools/analyze_results.py results.jsonl --pareto --recommend > learned_profile.json
-   ```
-5) **Persist** the best robust profile to `~/.rtfw/profiles/<cpu>-<os>.json`.  
-6) **Ship**: keep `default_safe`/`default_fast` + load per-machine profile if present.
+```bash
+# assumes you already built ./build/bin/rtfw_demo
+python3 tools/autotune/run_experiments.py \
+  --spec tools/autotune/spec.yaml \
+  --screen 32 \
+  --replicates 3 \
+  --local-iters 40 \
+  --topk 5
+```
 
-**Note**: this repo already emits everything DOE needs (interval p95/p99, queue/steal, drops, rungs). You only need small scripts to generate configs and aggregate results.
+The orchestration script screens the parameter space, runs local search, validates the best candidates, and writes the final machine profile. All metrics are gathered in **interval mode** (`--metrics-json-interval`) so every sample represents a fresh window; cumulative outputs (`--metrics-json`) are ignored by design to keep the statistics comparable.
+
+### What lands where
+
+- **Profiles** → `profiles/<cpu>-<os>.json` (drop-in machine profile for runtime startup).
+- **Results log** → `results/experiments.jsonl` plus helpers such as `results/top_candidates.json` and `results/summary.json` for CI-friendly summaries.
+- **Reports** → `reports/` contains Pareto front JSON/CSV and the best-scoring candidate breakdown for offline analysis.
+
+### Want the long version?
+
+See [`docs/DOE_AUTOTUNE.md`](docs/DOE_AUTOTUNE.md) for pre-flight checks, interpreting objectives, and extending the factor space.
 
 ---
 
