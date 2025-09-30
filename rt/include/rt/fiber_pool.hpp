@@ -123,10 +123,14 @@ private:
     }
 
     void remove_waiter(std::coroutine_handle<> h) {
+        if (!h)
+            return;
         std::lock_guard<std::mutex> lock(waitMutex_);
+        auto* addr = h.address();
         auto it = std::remove_if(waiters_.begin(), waiters_.end(),
-                                 [h](const WaitItem& item) { return item.handle == h; });
-        waiters_.erase(it, waiters_.end());
+                                 [addr](const WaitItem& item) { return item.handle.address() == addr; });
+        if (it != waiters_.end())
+            waiters_.erase(it, waiters_.end());
     }
 
     void worker_loop() {
