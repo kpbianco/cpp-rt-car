@@ -3,6 +3,7 @@
 #include <simcore/bintrace.hpp>
 #include <simcore/hal.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
@@ -19,8 +20,8 @@ TEST(GPUOverlap, FiberFenceAwaitYieldsWork) {
     FrameGraph fg;
     constexpr auto gpu_time = 80ms;
     constexpr auto cpu_time = 60ms;
-    constexpr auto epsilon = 20ms;
     constexpr auto tolerance = 15ms;
+    constexpr auto epsilon = 20ms;
 
     fg.add_pass(
         []() {},
@@ -51,7 +52,8 @@ TEST(GPUOverlap, FiberFenceAwaitYieldsWork) {
 
     EXPECT_GE(cpu_ms, static_cast<double>((cpu_time - tolerance).count()));
     EXPECT_GE(gpu_ms, static_cast<double>((gpu_time - tolerance).count()));
-    EXPECT_LT(total_ms, static_cast<double>((cpu_time + gpu_time - epsilon).count()));
+    const auto max_budget = std::max(cpu_ms, gpu_ms);
+    EXPECT_LT(total_ms, max_budget + static_cast<double>((tolerance + epsilon).count()));
     EXPECT_GE(overlap_ms, static_cast<double>((cpu_time - tolerance).count()));
 
     std::size_t fenceBegin = 0;
