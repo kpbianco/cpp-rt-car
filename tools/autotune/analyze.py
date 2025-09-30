@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import pathlib
 from collections import OrderedDict
 from dataclasses import dataclass
 from statistics import mean
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 
 @dataclass
@@ -102,10 +103,15 @@ def load_spec(path: pathlib.Path) -> Dict[str, Any]:
     return {"params": params}
 
 
-def load_experiments(path: pathlib.Path) -> List[Experiment]:
+def compute_spec_digest(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_experiments(path: pathlib.Path, expected_digest: Optional[str] = None) -> List[Experiment]:
     if not path.is_file():
         raise SystemExit(f"Experiments file not found: {path}")
     experiments: List[Experiment] = []
+    seen: Set[str] = set()
     with path.open("r", encoding="utf-8") as fh:
         for lineno, line in enumerate(fh, start=1):
             stripped = line.strip()
@@ -117,6 +123,16 @@ def load_experiments(path: pathlib.Path) -> List[Experiment]:
                 raise SystemExit(f"Invalid JSON on line {lineno}: {exc}") from exc
             if not isinstance(payload, dict):
                 raise SystemExit(f"Expected object on line {lineno}")
+            params = payload.get("params")
+            if isinstance(params, dict):
+                digest = payload.get("spec_digest")
+                if not isinstance(digest, str):
+                    digest = expected_digest
+                if isinstance(digest, str):
+                    key = json.dumps(params, sort_keys=True) + "|" + digest
+                    if key in seen:
+                        continue
+                    seen.add(key)
             experiments.append(Experiment(payload))
     if not experiments:
         raise SystemExit("No experiments found in input")
@@ -277,7 +293,8 @@ def main() -> None:
     args = parse_args()
     spec = load_spec(args.spec)
     params_spec = spec.get("params", {}) if isinstance(spec, dict) else {}
-    experiments = load_experiments(args.in_path)
+    spec_digest = compute_spec_digest(args.spec)
+    experiments = load_experiments(args.in_path, spec_digest)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
