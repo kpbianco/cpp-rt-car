@@ -29,6 +29,16 @@ from tools.autotune.make_config import (  # noqa: E402
 )
 
 
+def get_metrics_summary(run: Mapping[str, Any]) -> Mapping[str, Any]:
+    summary = run.get("_summary")
+    if isinstance(summary, Mapping):
+        return summary
+    metrics = run.get("metrics")
+    if isinstance(metrics, Mapping):
+        return metrics
+    return {}
+
+
 @dataclass(frozen=True)
 class ObjectiveSpec:
     expression: str
@@ -337,8 +347,8 @@ class Evaluator:
                 ok = False
                 if failure_reason is None:
                     failure_reason = str(result.get("reason", "unspecified failure"))
-            metrics = result.get("metrics")
-            if not isinstance(metrics, Mapping):
+            metrics = get_metrics_summary(result)
+            if not metrics:
                 continue
             objective_value, tiebreakers = self._evaluate_metrics(metrics)
             objective_samples.append(objective_value)

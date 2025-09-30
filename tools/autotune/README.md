@@ -35,3 +35,28 @@ Enumerates the tunable configuration parameters. Each key defines a parameter wi
 * `bool` — Boolean toggle (no additional fields required).
 
 These definitions drive the design-of-experiments sampling, local search bounds, and downstream validation.
+
+## JSONL result schema
+
+Every invocation of `run_one.py` produces a single JSON object describing the sampled run. These rows are appended verbatim to
+`results/experiments.jsonl` and `results/validation_runs.jsonl`. Each record follows the stable schema below:
+
+```
+{
+  "ok": bool,
+  "objective": float | Infinity,
+  "metrics": { ... raw interval JSON from the application ... },
+  "_summary": { ... derived metrics such as p50_frame_ms ... },
+  "_params": { ... resolved parameter values ... },
+  "_seed": int,
+  "_scenario": str,
+  "_ts": "<ISO8601 timestamp>",
+  "env": { "cpu": str, "cores": int, "os": str },
+  "_schema": "v1"
+}
+```
+
+`objective` is set to `Infinity` when hard constraints fail. `_summary` mirrors the previous aggregate metrics payload and is used
+by the optimisation routines, while `metrics` keeps the raw interval JSON emitted by the realtime application for traceability.
+Append operations are crash-safe: each line is flushed and `fsync`'d before the next record is written so that interrupted runs
+cannot corrupt the log.

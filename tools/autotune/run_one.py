@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import math
+import os
 import pathlib
+import platform
 import subprocess
 import sys
 from typing import Any, Dict, Iterable, List, Optional
@@ -122,6 +125,82 @@ def extract_params(config_path: pathlib.Path, config_data: Dict[str, Any]) -> Di
     return {}
 
 
+def _try_parse_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        integer = int(value)
+        if math.isclose(value, integer):
+            return integer
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _try_parse_str(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def _find_nested_value(data: Any, keys: Iterable[str], parser) -> Optional[Any]:
+    if isinstance(data, dict):
+        for key in keys:
+            if key in data:
+                parsed = parser(data[key])
+                if parsed is not None:
+                    return parsed
+        for value in data.values():
+            found = _find_nested_value(value, keys, parser)
+            if found is not None:
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = _find_nested_value(item, keys, parser)
+            if found is not None:
+                return found
+    return None
+
+
+def extract_seed(config_data: Dict[str, Any], config_path: pathlib.Path) -> int:
+    seed = _find_nested_value(config_data, ["seed", "random_seed", "rng_seed"], _try_parse_int)
+    if seed is not None:
+        return seed
+    stem = config_path.stem
+    if "_" in stem:
+        candidate = stem.rsplit("_", 1)[-1]
+        parsed = _try_parse_int(candidate)
+        if parsed is not None:
+            return parsed
+    return -1
+
+
+def extract_scenario(config_data: Dict[str, Any], config_path: pathlib.Path) -> str:
+    scenario = _find_nested_value(config_data, ["scenario", "scenario_name"], _try_parse_str)
+    if scenario is not None:
+        return scenario
+    return config_path.stem or "default"
+
+
+def collect_env_info() -> Dict[str, Any]:
+    uname = platform.uname()
+    cpu_name = uname.processor or uname.machine or "unknown"
+    cores = os.cpu_count() or 0
+    os_name = platform.platform()
+    return {
+        "cpu": str(cpu_name),
+        "cores": int(cores),
+        "os": str(os_name),
+    }
+
+
 def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
     phases = payload.get("phases", {})
     counters = payload.get("counters", {})
@@ -225,19 +304,28 @@ def main() -> None:
     completed = run_command(run_cmd, capture=True)
 
     payload = find_first_json_line(completed.stdout)
-    metrics = extract_metrics(payload)
+    metrics_summary = extract_metrics(payload)
     if budget_ms is not None:
-        metrics["frame_budget_ms"] = budget_ms
+        metrics_summary["frame_budget_ms"] = budget_ms
 
-    objective = compute_objective(metrics, budget_ms)
-    failures = evaluate_constraints(metrics, budget_ms)
+    objective = compute_objective(metrics_summary, budget_ms)
+    failures = evaluate_constraints(metrics_summary, budget_ms)
+
+    ok = not failures
+    if failures:
+        objective = math.inf
 
     result: Dict[str, Any] = {
-        "ok": not failures,
+        "ok": ok,
         "objective": objective,
-        "metrics": metrics,
-        "params": params,
-        "config_path": str(config_path),
+        "metrics": payload,
+        "_summary": metrics_summary,
+        "_params": params,
+        "_seed": extract_seed(config_data, config_path),
+        "_scenario": extract_scenario(config_data, config_path),
+        "_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "env": collect_env_info(),
+        "_schema": "v1",
     }
     if failures:
         result["reason"] = "; ".join(failures)

@@ -7,6 +7,7 @@ import argparse
 import datetime
 import json
 import math
+import os
 import pathlib
 import platform
 import random
@@ -96,6 +97,8 @@ class ExperimentLog:
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, sort_keys=True))
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
 
     def all_entries(self) -> List[Dict[str, Any]]:
         return list(self.entries.values())
@@ -128,6 +131,16 @@ def safe_float(value: Any) -> Optional[float]:
     return None
 
 
+def get_metrics_summary(run: Mapping[str, Any]) -> Mapping[str, Any]:
+    summary = run.get("_summary")
+    if isinstance(summary, Mapping):
+        return summary
+    metrics = run.get("metrics")
+    if isinstance(metrics, Mapping):
+        return metrics
+    return {}
+
+
 def aggregate_runs(
     runs: Sequence[Mapping[str, Any]],
     objective: ObjectiveSpec,
@@ -153,8 +166,8 @@ def aggregate_runs(
             if isinstance(reason, str) and reason:
                 reasons.append(reason)
         ok = ok and run_ok
-        metrics = run.get("metrics")
-        if not isinstance(metrics, Mapping):
+        metrics = get_metrics_summary(run)
+        if not metrics:
             continue
         context: Dict[str, Any] = dict(metrics)
         if frame_budget is not None and "frame_budget_ms" not in context:
@@ -368,6 +381,8 @@ def append_jsonl(path: pathlib.Path, records: Sequence[Mapping[str, Any]]) -> No
         for record in records:
             fh.write(json.dumps(record, sort_keys=True))
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
 
 
 def sanitise_filename(text: str) -> str:
