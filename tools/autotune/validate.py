@@ -34,6 +34,16 @@ from tools.autotune.optimize import AppSpec, parse_app_spec  # noqa: E402
 RUN_ONE = REPO_ROOT / "tools" / "autotune" / "run_one.py"
 
 
+def get_metrics_summary(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    summary = payload.get("_summary")
+    if isinstance(summary, Mapping):
+        return summary
+    metrics = payload.get("metrics")
+    if isinstance(metrics, Mapping):
+        return metrics
+    return {}
+
+
 @dataclass(frozen=True)
 class ScenarioSpec:
     name: str
@@ -368,9 +378,7 @@ def run_validation(
                             "reason": f"Failed to parse JSON output: {stdout}",
                         }
 
-                metrics = payload.get("metrics")
-                if not isinstance(metrics, Mapping):
-                    metrics = {}
+                metrics = get_metrics_summary(payload)
                 objective_value = payload.get("objective")
                 if isinstance(objective_value, (int, float)) and not math.isnan(objective_value):
                     objective = float(objective_value)
@@ -509,6 +517,8 @@ def append_experiments_log(path: pathlib.Path, records: Sequence[Mapping[str, An
         for record in records:
             fh.write(json.dumps(record))
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
 
 
 def write_candidate_summaries(path: pathlib.Path, summaries: Sequence[Mapping[str, Any]]) -> None:
