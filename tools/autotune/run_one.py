@@ -262,10 +262,10 @@ def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def compute_objective(metrics: Dict[str, Any], budget_ms: Optional[float]) -> float:
-    p99 = metrics.get("p99_frame_ms", 0.0)
+    p99 = float(metrics.get("p99_frame_ms", 0.0))
     if budget_ms and budget_ms > 0.0:
-        return budget_ms / max(p99, 1e-9)
-    return 1.0 / (1.0 + max(p99, 0.0))
+        return p99 / budget_ms
+    return p99
 
 
 def evaluate_constraints(metrics: Dict[str, Any], budget_ms: Optional[float]) -> List[str]:
