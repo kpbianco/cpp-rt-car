@@ -113,8 +113,8 @@ def run_command(
         raise SystemExit("\n".join(msg)) from exc
 
 
-def find_first_json_line(output: str) -> Dict[str, Any]:
-    for line in output.splitlines():
+def find_last_json_line(output: str) -> Dict[str, Any]:
+    for line in reversed(output.splitlines()):
         stripped = line.strip()
         if not stripped:
             continue
@@ -371,7 +371,7 @@ def main() -> None:
     run_cmd = base_cmd + ["--metrics-json-interval", "--run", format_duration(args.run)]
     completed = run_command(run_cmd, capture=True, extra_env=scenario_env)
 
-    payload = find_first_json_line(completed.stdout)
+    payload = find_last_json_line(completed.stdout)
     metrics_summary = extract_metrics(payload)
     if budget_ms is not None:
         metrics_summary["frame_budget_ms"] = budget_ms
