@@ -7,12 +7,16 @@ app:
     - "--rt"
 
 scenarios:
-  - name: "default"
+  - name: "base"
     description: "Baseline scenario representative of standard gameplay."
   - name: "heavy_gpu"
     description: "Emphasizes GPU-intensive rendering workloads."
   - name: "heavy_io"
     description: "Focuses on streaming and IO-heavy behaviour."
+
+robustness:
+  seeds: [101, 202, 303]
+  scenarios: ["base"]
 
 metrics:
   hard_constraints:

@@ -313,12 +313,43 @@ def parse_scenarios(payload: Any) -> Tuple[ScenarioSpec, ...]:
     return tuple(scenarios)
 
 
+def _resolve_robustness_scenarios(
+    payload: Any, lookup: Mapping[str, ScenarioSpec]
+) -> Tuple[ScenarioSpec, ...]:
+    if payload is None:
+        return parse_scenarios(None)
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+        raise SystemExit("robustness.scenarios must be a sequence")
+
+    resolved: List[ScenarioSpec] = []
+    for entry in payload:
+        if isinstance(entry, str):
+            name = entry.strip()
+            if not name:
+                raise SystemExit("Scenario names must be non-empty strings")
+            scenario = lookup.get(name)
+            if scenario is None:
+                scenario = ScenarioSpec(name=name)
+            resolved.append(scenario)
+            continue
+        if not isinstance(entry, Mapping):
+            raise SystemExit("robustness.scenarios entries must be mappings or strings")
+        parsed = parse_scenarios([entry])
+        resolved.extend(parsed)
+
+    if not resolved:
+        return (ScenarioSpec(name="default"),)
+    return tuple(resolved)
+
+
 def parse_robustness(spec_data: Mapping[str, Any]) -> RobustnessSpec:
     payload = spec_data.get("robustness")
+    top_level_scenarios = parse_scenarios(spec_data.get("scenarios"))
+    scenario_lookup = {scenario.name: scenario for scenario in top_level_scenarios}
     if payload is None:
         return RobustnessSpec(
             seeds=(None,),
-            scenarios=(ScenarioSpec(name="default"),),
+            scenarios=top_level_scenarios,
             seed_env=None,
             seed_arg=None,
             config_seed_path=None,
@@ -333,7 +364,7 @@ def parse_robustness(spec_data: Mapping[str, Any]) -> RobustnessSpec:
     if seed_arg is not None and (not isinstance(seed_arg, str) or not seed_arg):
         raise SystemExit("robustness.seed_arg must be a non-empty string if provided")
     config_seed_path = parse_path(payload.get("config_seed_path"))
-    scenarios = parse_scenarios(payload.get("scenarios"))
+    scenarios = _resolve_robustness_scenarios(payload.get("scenarios"), scenario_lookup)
     return RobustnessSpec(
         seeds=seeds,
         scenarios=scenarios,
@@ -448,6 +479,8 @@ def run_validation(
                 scenario_extras = apply_placeholders(list(scenario.extra_args), seed)
                 extras.extend(str(item) for item in scenario_extras)
 
+                scenario_name = scenario.name
+
                 cmd = [
                     sys.executable,
                     str(RUN_ONE),
@@ -460,6 +493,8 @@ def run_validation(
                     "--run",
                     str(run_duration),
                 ]
+                if scenario_name:
+                    cmd.extend(["--scenario", scenario_name])
                 if extras:
                     cmd.append("--extra")
                     cmd.extend(extras)
@@ -468,8 +503,12 @@ def run_validation(
                 if robustness.seed_env and seed is not None:
                     env[robustness.seed_env] = str(seed)
                 scenario_env = apply_placeholders(dict(scenario.env), seed)
+                if "SCENARIO" not in scenario_env and scenario_name:
+                    scenario_env["SCENARIO"] = scenario_name
                 for key, value in scenario_env.items():
                     env[str(key)] = str(value)
+                if scenario_name:
+                    env.setdefault("SCENARIO", scenario_name)
 
                 try:
                     completed = subprocess.run(
@@ -519,6 +558,7 @@ def run_validation(
                     "candidate_label": label,
                     "seed": seed,
                     "scenario": scenario.name,
+                    "_scenario": scenario_name,
                     "ok": ok,
                     "objective": objective,
                     "metrics": metrics,
@@ -529,10 +569,12 @@ def run_validation(
                 runs.append(run_record)
 
                 tracked_env_keys: Iterable[str]
+                env_keys = set(scenario_env.keys())
+                if scenario_name:
+                    env_keys.add("SCENARIO")
                 if robustness.seed_env:
-                    tracked_env_keys = [robustness.seed_env, *scenario_env.keys()]
-                else:
-                    tracked_env_keys = list(scenario_env.keys())
+                    env_keys.add(robustness.seed_env)
+                tracked_env_keys = sorted(env_keys)
 
                 raw_record = {
                     "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -549,6 +591,7 @@ def run_validation(
                         "index": scenario_index,
                     },
                     "seed": seed,
+                    "_scenario": scenario_name,
                 }
                 raw_records.append(raw_record)
     return runs, raw_records
