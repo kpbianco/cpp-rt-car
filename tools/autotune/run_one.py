@@ -12,7 +12,18 @@ import pathlib
 import platform
 import subprocess
 import sys
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.autotune.make_config import load_simple_yaml  # noqa: E402
+from tools.autotune.validate import (  # noqa: E402
+    ConstraintEvaluator,
+    parse_hard_constraints,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,6 +56,12 @@ def parse_args() -> argparse.Namespace:
         "--scenario",
         default=None,
         help="Scenario name supplied when launching the application.",
+    )
+    parser.add_argument(
+        "--spec",
+        type=pathlib.Path,
+        default=pathlib.Path(__file__).with_name("spec.yaml"),
+        help="Path to the autotune specification describing hard constraints.",
     )
     return parser.parse_args()
 
@@ -268,25 +285,48 @@ def compute_objective(metrics: Dict[str, Any], budget_ms: Optional[float]) -> fl
     return p99
 
 
-def evaluate_constraints(metrics: Dict[str, Any], budget_ms: Optional[float]) -> List[str]:
+def load_spec(path: pathlib.Path) -> Mapping[str, Any]:
+    data = load_simple_yaml(path)
+    if not isinstance(data, Mapping):
+        raise SystemExit("Spec YAML must contain a mapping at the top level")
+    return data
+
+
+def evaluate_constraints(
+    metrics: Mapping[str, Any],
+    frame_budget_ms: Optional[float],
+    constraints: Sequence[ConstraintEvaluator],
+) -> List[str]:
     failures: List[str] = []
-    if budget_ms and metrics["p99_frame_ms"] > budget_ms:
+    if not constraints:
+        return failures
+    for constraint in constraints:
+        try:
+            ok = constraint.evaluate(metrics, frame_budget_ms)
+        except Exception:
+            ok = False
+        if ok:
+            continue
+        if constraint.metric not in metrics:
+            failures.append(
+                f"missing metric '{constraint.metric}' for constraint '{constraint.expression}'"
+            )
+            continue
+        value = metrics.get(constraint.metric)
         failures.append(
-            f"p99_frame_ms {metrics['p99_frame_ms']:.3f} exceeds budget {budget_ms:.3f}"
+            f"constraint '{constraint.metric} {constraint.expression}' failed (value={value!r})"
         )
-    if metrics["missed_frames"] > 0:
-        failures.append(f"missed_frames={metrics['missed_frames']}")
-    if metrics["watchdog_trips"] > 0:
-        failures.append(f"watchdog_trips={metrics['watchdog_trips']}")
-    if metrics["log_drops"] > 0:
-        failures.append(f"log_drops={metrics['log_drops']}")
-    if metrics["emergency_spawns"] > 0:
-        failures.append(f"emergency_spawns={metrics['emergency_spawns']}")
     return failures
 
 
 def main() -> None:
     args = parse_args()
+
+    spec_path = pathlib.Path(args.spec)
+    if not spec_path.is_file():
+        raise SystemExit(f"Spec file not found: {spec_path}")
+    spec_data = load_spec(spec_path)
+    hard_constraints = parse_hard_constraints(spec_data)
 
     app_path = pathlib.Path(args.app)
     if not app_path.exists():
@@ -303,14 +343,22 @@ def main() -> None:
     scenario_env = {"SCENARIO": scenario}
 
     budget_ms = None
+    app_spec = spec_data.get("app") if isinstance(spec_data, Mapping) else None
+    if isinstance(app_spec, Mapping):
+        spec_budget = app_spec.get("frame_budget_ms")
+        if isinstance(spec_budget, (int, float)) and spec_budget > 0.0:
+            budget_ms = float(spec_budget)
+    config_budget = None
     if isinstance(config_data, dict):
-        budget_ms = flatten_dict_search(config_data, ["frame_budget_ms"])
-        if budget_ms is None:
+        config_budget = flatten_dict_search(config_data, ["frame_budget_ms"])
+        if config_budget is None:
             hz = flatten_dict_search(config_data, ["hz"])
             if hz and hz > 0.0:
-                budget_ms = 1000.0 / hz
-    if budget_ms is not None and budget_ms <= 0.0:
-        budget_ms = None
+                config_budget = 1000.0 / hz
+    if config_budget is not None and config_budget <= 0.0:
+        config_budget = None
+    if config_budget is not None:
+        budget_ms = config_budget
 
     extras = list(args.extra or [])
 
@@ -329,7 +377,12 @@ def main() -> None:
         metrics_summary["frame_budget_ms"] = budget_ms
 
     objective = compute_objective(metrics_summary, budget_ms)
-    failures = evaluate_constraints(metrics_summary, budget_ms)
+    constraint_metrics: Dict[str, Any] = {}
+    if isinstance(payload, dict):
+        constraint_metrics.update(payload)
+    constraint_metrics.update(metrics_summary)
+
+    failures = evaluate_constraints(constraint_metrics, budget_ms, hard_constraints)
 
     ok = not failures
     if failures:

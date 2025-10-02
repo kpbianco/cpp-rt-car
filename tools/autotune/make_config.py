@@ -149,20 +149,61 @@ def parse_sequence(entries: List[Tuple[int, str]], index: int, indent: int) -> T
         value_part = content[2:].strip()
         index += 1
         if value_part:
-            items.append(parse_scalar(value_part))
-        else:
-            if index >= len(entries):
-                items.append({})
-                break
-            next_indent, next_content = entries[index]
-            if next_indent <= current_indent:
-                items.append({})
-                continue
-            if next_content.startswith("- "):
-                value, index = parse_sequence(entries, index, next_indent)
+            if ":" in value_part:
+                key_part, _, value_token = value_part.partition(":")
+                key = key_part.strip()
+                value_token = value_token.strip()
+                item: Dict[str, Any] = {}
+                if value_token:
+                    item[key] = parse_scalar(value_token)
+                else:
+                    if index >= len(entries) or entries[index][0] <= current_indent:
+                        item[key] = {}
+                    else:
+                        next_indent, next_content = entries[index]
+                        if next_content.startswith("- "):
+                            value, index = parse_sequence(entries, index, next_indent)
+                        else:
+                            value, index = parse_mapping(entries, index, next_indent)
+                        item[key] = value
+                while index < len(entries):
+                    next_indent, next_content = entries[index]
+                    if next_indent <= current_indent or next_content.startswith("- "):
+                        break
+                    if ":" not in next_content:
+                        raise SystemExit(f"Expected ':' in line: {next_content}")
+                    field_key_part, _, field_value_token = next_content.partition(":")
+                    field_key = field_key_part.strip()
+                    field_value_token = field_value_token.strip()
+                    index += 1
+                    if field_value_token:
+                        item[field_key] = parse_scalar(field_value_token)
+                        continue
+                    if index >= len(entries) or entries[index][0] <= next_indent:
+                        item[field_key] = {}
+                        continue
+                    deeper_indent, deeper_content = entries[index]
+                    if deeper_content.startswith("- "):
+                        value, index = parse_sequence(entries, index, deeper_indent)
+                    else:
+                        value, index = parse_mapping(entries, index, deeper_indent)
+                    item[field_key] = value
+                items.append(item)
             else:
-                value, index = parse_mapping(entries, index, next_indent)
-            items.append(value)
+                items.append(parse_scalar(value_part))
+            continue
+        if index >= len(entries):
+            items.append({})
+            break
+        next_indent, next_content = entries[index]
+        if next_indent <= current_indent:
+            items.append({})
+            continue
+        if next_content.startswith("- "):
+            value, index = parse_sequence(entries, index, next_indent)
+        else:
+            value, index = parse_mapping(entries, index, next_indent)
+        items.append(value)
     return items, index
 
 
