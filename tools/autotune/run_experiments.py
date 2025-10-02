@@ -290,6 +290,7 @@ def detect_baseline_source(app: AppSpec, results_dir: pathlib.Path) -> Optional[
 def run_baseline_gate(
     app: AppSpec,
     param_specs: Mapping[str, Any],
+    spec_path: pathlib.Path,
     results_dir: pathlib.Path,
 ) -> None:
     source = detect_baseline_source(app, results_dir)
@@ -324,7 +325,7 @@ def run_baseline_gate(
             )
 
         config_path_str = str(config_path)
-        result = run_single(app, config_path)
+        result = run_single(app, config_path, spec_path)
 
     if not isinstance(result, Mapping):
         raise SystemExit("Baseline run did not produce a valid result payload")
@@ -493,7 +494,7 @@ def aggregate_runs(
     }
 
 
-def run_single(app: AppSpec, config_path: pathlib.Path) -> Dict[str, Any]:
+def run_single(app: AppSpec, config_path: pathlib.Path, spec_path: pathlib.Path) -> Dict[str, Any]:
     cmd: List[str] = [
         sys.executable,
         str(RUN_ONE),
@@ -505,6 +506,8 @@ def run_single(app: AppSpec, config_path: pathlib.Path) -> Dict[str, Any]:
         str(app.warmup),
         "--run",
         str(app.run),
+        "--spec",
+        str(spec_path),
     ]
     if app.extra_args:
         cmd.append("--extra")
@@ -555,6 +558,7 @@ def evaluate_candidate(
     replicates: int,
     log: ExperimentLog,
     spec_digest: str,
+    spec_path: pathlib.Path,
 ) -> Dict[str, Any]:
     validated = validate_params(params, param_specs)
     cached = log.get(stage, validated)
@@ -574,7 +578,7 @@ def evaluate_candidate(
             if cached_run is not None:
                 runs.append(copy.deepcopy(cached_run))
                 continue
-            result = run_single(app, config_path)
+            result = run_single(app, config_path, spec_path)
             if not isinstance(result, Mapping):
                 result = {}
             result.setdefault("_params", dict(validated))
@@ -724,7 +728,7 @@ def main() -> None:
     reports_dir = REPO_ROOT / "reports"
     ensure_directories([results_dir, profiles_dir, reports_dir])
 
-    run_baseline_gate(app_spec, param_specs, results_dir)
+    run_baseline_gate(app_spec, param_specs, spec_path, results_dir)
 
     experiments_log_path = results_dir / "experiments.jsonl"
     experiments_log_path.touch(exist_ok=True)
@@ -755,6 +759,7 @@ def main() -> None:
             replicates=args.replicates,
             log=log,
             spec_digest=spec_digest,
+            spec_path=spec_path,
         )
 
     all_entries = log.all_entries()
@@ -803,6 +808,7 @@ def main() -> None:
         replicates=args.replicates,
         log=log,
         spec_digest=spec_digest,
+        spec_path=spec_path,
     )
 
     all_entries = log.all_entries()
