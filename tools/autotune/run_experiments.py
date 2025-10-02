@@ -37,11 +37,13 @@ from tools.autotune.make_config import (  # noqa: E402
 from tools.autotune.optimize import AppSpec, ObjectiveSpec, parse_app_spec, parse_objective_spec  # noqa: E402
 from tools.autotune.optimize import ExpressionEvaluator  # type: ignore[attr-defined]  # noqa: E402
 from tools.autotune.validate import (  # noqa: E402
+    ObjectiveEvaluator,
+    RobustnessSpec,
+    parse_hard_constraints,
     parse_robustness,
     run_validation,
     select_best,
     summarise_candidate,
-    RobustnessSpec,
 )
 from tools.autotune.run_one import extract_seed, extract_scenario  # noqa: E402
 
@@ -710,6 +712,8 @@ def main() -> None:
 
     objective_spec = parse_objective_spec(spec_data)
     objective_eval = ExpressionEvaluator(objective_spec.expression)
+    validation_objective = ObjectiveEvaluator(objective_spec, app_spec.frame_budget_ms)
+    hard_constraints = parse_hard_constraints(spec_data)
     tiebreakers_eval = [ExpressionEvaluator(expr) for expr in objective_spec.tiebreakers]
 
     param_specs = load_param_spec(spec_path)
@@ -916,6 +920,8 @@ def main() -> None:
             {**metadata_overrides, "rank": rank, "stage": candidate.get("stage")},
             params,
             run_records,
+            validation_objective,
+            hard_constraints,
         )
         validation_summaries.append(summary)
 
