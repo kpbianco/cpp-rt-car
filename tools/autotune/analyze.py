@@ -13,12 +13,13 @@ import sys
 from collections import OrderedDict
 from dataclasses import dataclass
 from statistics import mean
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.autotune.common_eval import compute_objective, evaluate_constraints
 from tools.autotune.make_config import load_simple_yaml
 
 
@@ -26,6 +27,7 @@ from tools.autotune.make_config import load_simple_yaml
 class SpecInfo:
     params: "OrderedDict[str, Any]"
     maximize: bool
+    raw: Mapping[str, Any]
 
 
 @dataclass
@@ -36,11 +38,16 @@ class Experiment:
 
     @property
     def ok(self) -> bool:
+        if "_computed_ok" in self.raw:
+            return bool(self.raw.get("_computed_ok"))
         return bool(self.raw.get("ok"))
 
     @property
     def objective(self) -> float:
-        value = self.raw.get("objective")
+        if "_computed_objective" in self.raw:
+            value = self.raw.get("_computed_objective")
+        else:
+            value = self.raw.get("objective")
         if isinstance(value, (int, float)):
             return float(value)
         raise ValueError("Experiment missing numeric objective")
@@ -52,8 +59,28 @@ class Experiment:
 
     @property
     def metrics(self) -> Dict[str, Any]:
-        metrics = self.raw.get("metrics", {})
-        return metrics if isinstance(metrics, dict) else {}
+        merged: Dict[str, Any] = {}
+        metrics_payload = self.raw.get("metrics")
+        if isinstance(metrics_payload, Mapping):
+            merged.update(metrics_payload)
+        summary = self.raw.get("_summary")
+        if isinstance(summary, Mapping):
+            merged.update(summary)
+        return merged
+
+    def recompute(self, spec: Mapping[str, Any]) -> None:
+        metrics = self.metrics
+        spec_ok, failures = evaluate_constraints(spec, metrics)
+        objective_value = compute_objective(spec, metrics)
+        original_ok = bool(self.raw.get("ok"))
+        overall_ok = original_ok and spec_ok
+        self.raw["_constraints_ok"] = spec_ok
+        self.raw["_computed_ok"] = overall_ok
+        self.raw["_computed_objective"] = objective_value
+        if failures:
+            self.raw["_constraint_failures"] = failures
+            messages = [info["message"] for info in failures.values()]
+            self.raw.setdefault("reason", "; ".join(messages))
 
     def pareto_tuple(self, maximize: bool) -> Tuple[float, float, float, float]:
         metrics = self.metrics
@@ -110,7 +137,7 @@ def load_spec(path: pathlib.Path) -> SpecInfo:
             if isinstance(maximize_value, bool):
                 maximize = maximize_value
 
-    return SpecInfo(params=params, maximize=maximize)
+    return SpecInfo(params=params, maximize=maximize, raw=data)
 
 
 def compute_spec_digest(path: pathlib.Path) -> str:
@@ -313,6 +340,8 @@ def main() -> None:
     params_spec = spec.params
     spec_digest = compute_spec_digest(args.spec)
     experiments = load_experiments(args.in_path, spec_digest)
+    for experiment in experiments:
+        experiment.recompute(spec.raw)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 

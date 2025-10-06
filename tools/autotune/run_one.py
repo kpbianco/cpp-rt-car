@@ -12,7 +12,7 @@ import pathlib
 import platform
 import subprocess
 import sys
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -20,9 +20,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.autotune.make_config import load_simple_yaml  # noqa: E402
-from tools.autotune.validate import (  # noqa: E402
-    ConstraintEvaluator,
-    parse_hard_constraints,
+from tools.autotune.common_eval import (  # noqa: E402
+    compute_objective,
+    evaluate_constraints,
 )
 
 
@@ -278,45 +278,11 @@ def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
     return metrics
 
 
-def compute_objective(metrics: Dict[str, Any], budget_ms: Optional[float]) -> float:
-    p99 = float(metrics.get("p99_frame_ms", 0.0))
-    if budget_ms and budget_ms > 0.0:
-        return p99 / budget_ms
-    return p99
-
-
 def load_spec(path: pathlib.Path) -> Mapping[str, Any]:
     data = load_simple_yaml(path)
     if not isinstance(data, Mapping):
         raise SystemExit("Spec YAML must contain a mapping at the top level")
     return data
-
-
-def evaluate_constraints(
-    metrics: Mapping[str, Any],
-    frame_budget_ms: Optional[float],
-    constraints: Sequence[ConstraintEvaluator],
-) -> List[str]:
-    failures: List[str] = []
-    if not constraints:
-        return failures
-    for constraint in constraints:
-        try:
-            ok = constraint.evaluate(metrics, frame_budget_ms)
-        except Exception:
-            ok = False
-        if ok:
-            continue
-        if constraint.metric not in metrics:
-            failures.append(
-                f"missing metric '{constraint.metric}' for constraint '{constraint.expression}'"
-            )
-            continue
-        value = metrics.get(constraint.metric)
-        failures.append(
-            f"constraint '{constraint.metric} {constraint.expression}' failed (value={value!r})"
-        )
-    return failures
 
 
 def main() -> None:
@@ -326,8 +292,6 @@ def main() -> None:
     if not spec_path.is_file():
         raise SystemExit(f"Spec file not found: {spec_path}")
     spec_data = load_spec(spec_path)
-    hard_constraints = parse_hard_constraints(spec_data)
-
     app_path = pathlib.Path(args.app)
     if not app_path.exists():
         raise SystemExit(f"Application not found: {app_path}")
@@ -376,15 +340,14 @@ def main() -> None:
     if budget_ms is not None:
         metrics_summary["frame_budget_ms"] = budget_ms
 
-    objective = compute_objective(metrics_summary, budget_ms)
     constraint_metrics: Dict[str, Any] = {}
     if isinstance(payload, dict):
         constraint_metrics.update(payload)
     constraint_metrics.update(metrics_summary)
 
-    failures = evaluate_constraints(constraint_metrics, budget_ms, hard_constraints)
-
-    ok = not failures
+    ok, failures = evaluate_constraints(spec_data, constraint_metrics)
+    objective = compute_objective(spec_data, constraint_metrics)
+    failure_messages = [details["message"] for details in failures.values()]
     if failures:
         objective = math.inf
 
@@ -400,8 +363,9 @@ def main() -> None:
         "env": collect_env_info(),
         "_schema": "v1",
     }
-    if failures:
-        result["reason"] = "; ".join(failures)
+    if failure_messages:
+        result["reason"] = "; ".join(failure_messages)
+        result["constraint_failures"] = failures
 
     json.dump(result, sys.stdout)
     sys.stdout.write("\n")
