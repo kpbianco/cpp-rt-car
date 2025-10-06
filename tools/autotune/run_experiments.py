@@ -934,7 +934,7 @@ def main() -> None:
     if validation_raw_records:
         append_jsonl(validation_runs_path, validation_raw_records)
 
-    best_validation = select_best(validation_summaries)
+    best_validation = select_best(validation_summaries, objective_spec.maximize)
     write_json_file(
         validation_summaries_path,
         {
