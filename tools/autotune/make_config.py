@@ -343,7 +343,7 @@ def build_config(params: Mapping[str, Any]) -> Dict[str, Any]:
         "fma_mode": ("numerics", "fma"),
         "arena_per_thread_mb": ("memory", "arena_per_thread_mb"),
         "huge_pages": ("memory", "huge_pages"),
-        "emergency_spawn_enabled": ("emergency", "enabled"),
+        "emergency_spawn_enabled": ("scheduler", "emergency_spawn"),
         "governor_target_util": ("governor", "target_util"),
         "governor_hysteresis": ("governor", "hysteresis"),
     }
@@ -352,6 +352,10 @@ def build_config(params: Mapping[str, Any]) -> Dict[str, Any]:
         if name not in params:
             continue
         set_path(config, path, params[name])
+
+    if "prefetch_distance_bytes" in params:
+        enabled = params["prefetch_distance_bytes"] > 0
+        set_path(config, ("prefetch", "enabled"), enabled)
 
     # Emit the original params alongside the resolved config for traceability.
     config["params"] = dict(params)
