@@ -112,8 +112,10 @@ def detect_os_name() -> str:
 
 
 def normalise_token(value: str) -> str:
-    cleaned = value.strip().lower()
-    cleaned = re.sub(r"[^a-z0-9_]+", "-", cleaned)
+    cleaned = value.strip()
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in cleaned
+    )
     cleaned = re.sub(r"-+", "-", cleaned).strip("-")
     return cleaned or "unknown"
 
