@@ -9,10 +9,23 @@ import hashlib
 import json
 import math
 import pathlib
+import sys
 from collections import OrderedDict
 from dataclasses import dataclass
 from statistics import mean
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.autotune.make_config import load_simple_yaml
+
+
+@dataclass
+class SpecInfo:
+    params: "OrderedDict[str, Any]"
+    maximize: bool
 
 
 @dataclass
@@ -42,12 +55,13 @@ class Experiment:
         metrics = self.raw.get("metrics", {})
         return metrics if isinstance(metrics, dict) else {}
 
-    def pareto_tuple(self) -> Tuple[float, float, float, float]:
+    def pareto_tuple(self, maximize: bool) -> Tuple[float, float, float, float]:
         metrics = self.metrics
         queue = _safe_metric(metrics, "queue_max")
         emergency = _safe_metric(metrics, "emergency_spawns")
         drops = _safe_metric(metrics, "log_drops")
-        return (self.objective, queue, emergency, drops)
+        objective_value = -self.objective if maximize else self.objective
+        return (objective_value, queue, emergency, drops)
 
 
 def _safe_metric(metrics: Dict[str, Any], key: str) -> float:
@@ -76,31 +90,27 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_spec(path: pathlib.Path) -> Dict[str, Any]:
-    if not path.is_file():
-        raise SystemExit(f"Spec file not found: {path}")
+def load_spec(path: pathlib.Path) -> SpecInfo:
+    data = load_simple_yaml(path)
+    if not isinstance(data, dict):
+        raise SystemExit("Spec YAML must contain a mapping at the top level")
 
+    params_section = data.get("params")
     params: "OrderedDict[str, Any]" = OrderedDict()
-    inside_params = False
-    params_indent = 0
-    with path.open("r", encoding="utf-8") as fh:
-        for raw_line in fh:
-            if not raw_line.strip() or raw_line.lstrip().startswith("#"):
-                continue
-            indent = len(raw_line) - len(raw_line.lstrip(" "))
-            stripped = raw_line.strip()
-            if not inside_params:
-                if stripped == "params:":
-                    inside_params = True
-                    params_indent = indent
-                continue
-            if indent <= params_indent:
-                break
-            if indent == params_indent + 2 and stripped.endswith(":"):
-                name = stripped[:-1].strip()
-                if name:
-                    params[name] = {}
-    return {"params": params}
+    if isinstance(params_section, dict):
+        for name in params_section.keys():
+            params[name] = {}
+
+    maximize = False
+    metrics = data.get("metrics")
+    if isinstance(metrics, dict):
+        objective_payload = metrics.get("objective")
+        if isinstance(objective_payload, dict):
+            maximize_value = objective_payload.get("maximize")
+            if isinstance(maximize_value, bool):
+                maximize = maximize_value
+
+    return SpecInfo(params=params, maximize=maximize)
 
 
 def compute_spec_digest(path: pathlib.Path) -> str:
@@ -139,21 +149,22 @@ def load_experiments(path: pathlib.Path, expected_digest: Optional[str] = None) 
     return experiments
 
 
-def compute_best(experiments: Sequence[Experiment]) -> Experiment:
+def compute_best(experiments: Sequence[Experiment], maximize: bool) -> Experiment:
     ok_results = [exp for exp in experiments if exp.ok]
     if not ok_results:
         raise SystemExit("No successful experiments (ok=true) found")
-    return min(ok_results, key=lambda exp: exp.objective)
+    selector = max if maximize else min
+    return selector(ok_results, key=lambda exp: exp.objective)
 
 
-def pareto_frontier(experiments: Iterable[Experiment]) -> List[Experiment]:
+def pareto_frontier(experiments: Iterable[Experiment], maximize: bool) -> List[Experiment]:
     frontier: List[Experiment] = []
-    for exp in sorted(experiments, key=lambda e: e.objective):
-        candidate = exp.pareto_tuple()
+    for exp in sorted(experiments, key=lambda e: e.objective, reverse=maximize):
+        candidate = exp.pareto_tuple(maximize)
         dominated = False
         new_frontier: List[Experiment] = []
         for current in frontier:
-            current_tuple = current.pareto_tuple()
+            current_tuple = current.pareto_tuple(maximize)
             if dominates(current_tuple, candidate):
                 dominated = True
                 break
@@ -236,6 +247,7 @@ def write_summary_csv(
     path: pathlib.Path,
     params_spec: Dict[str, Any],
     experiments: Sequence[Experiment],
+    maximize: bool,
     limit: int = 10,
 ) -> None:
     columns = ["objective", "ok", "reason"]
@@ -252,7 +264,13 @@ def write_summary_csv(
     ]
     columns.extend(metric_columns)
 
-    ranked = sorted(experiments, key=lambda exp: (not exp.ok, exp.objective))[:limit]
+    def rank_key(exp: Experiment) -> Tuple[bool, float]:
+        objective_value = exp.objective
+        if maximize:
+            objective_value = -objective_value
+        return (not exp.ok, objective_value)
+
+    ranked = sorted(experiments, key=rank_key)[:limit]
 
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns)
@@ -292,19 +310,19 @@ def write_summary_json(
 def main() -> None:
     args = parse_args()
     spec = load_spec(args.spec)
-    params_spec = spec.get("params", {}) if isinstance(spec, dict) else {}
+    params_spec = spec.params
     spec_digest = compute_spec_digest(args.spec)
     experiments = load_experiments(args.in_path, spec_digest)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    best = compute_best(experiments)
-    pareto = pareto_frontier([exp for exp in experiments if exp.ok])
+    best = compute_best(experiments, spec.maximize)
+    pareto = pareto_frontier([exp for exp in experiments if exp.ok], spec.maximize)
     histograms = build_histograms(params_spec, experiments)
 
     write_best(args.out_dir / "best.json", best)
     write_pareto(args.out_dir / "pareto.json", pareto)
-    write_summary_csv(args.out_dir / "summary.csv", params_spec, experiments)
+    write_summary_csv(args.out_dir / "summary.csv", params_spec, experiments, spec.maximize)
     write_summary_json(
         args.out_dir / "summary.json",
         best,
