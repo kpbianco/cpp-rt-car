@@ -35,6 +35,7 @@ from tools.autotune.optimize import (  # noqa: E402
     parse_app_spec,
     parse_objective_spec,
 )
+from tools.autotune.common_io import append_jsonl as append_jsonl_record  # noqa: E402
 
 RUN_ONE = REPO_ROOT / "tools" / "autotune" / "run_one.py"
 
@@ -694,13 +695,8 @@ def select_best(
 
 
 def append_experiments_log(path: pathlib.Path, records: Sequence[Mapping[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        for record in records:
-            fh.write(json.dumps(record))
-            fh.write("\n")
-            fh.flush()
-            os.fsync(fh.fileno())
+    for record in records:
+        append_jsonl_record(path, record)
 
 
 def write_candidate_summaries(path: pathlib.Path, summaries: Sequence[Mapping[str, Any]]) -> None:

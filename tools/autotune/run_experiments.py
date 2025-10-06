@@ -27,6 +27,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.autotune import screening  # noqa: E402
+from tools.autotune.common_io import append_jsonl as append_jsonl_record  # noqa: E402
 from tools.autotune.make_config import (  # noqa: E402
     build_config,
     load_simple_yaml,
@@ -183,12 +184,7 @@ class ExperimentLog:
         self._index_runs_from_record(record)
 
     def append(self, record: Mapping[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, sort_keys=True))
-            fh.write("\n")
-            fh.flush()
-            os.fsync(fh.fileno())
+        append_jsonl_record(self.path, record, sort_keys=True)
 
     def all_entries(self) -> List[Dict[str, Any]]:
         return list(self.entries.values())
@@ -662,13 +658,8 @@ def write_json_file(path: pathlib.Path, payload: Any) -> None:
 def append_jsonl(path: pathlib.Path, records: Sequence[Mapping[str, Any]]) -> None:
     if not records:
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        for record in records:
-            fh.write(json.dumps(record, sort_keys=True))
-            fh.write("\n")
-            fh.flush()
-            os.fsync(fh.fileno())
+    for record in records:
+        append_jsonl_record(path, record, sort_keys=True)
 
 
 def sanitise_filename(text: str) -> str:
