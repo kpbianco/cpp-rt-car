@@ -24,15 +24,7 @@ jobs:
           rm -rf results profiles reports
       - name: Run autotune smoke workflow
         run: |
-          python3 tools/autotune/run_experiments.py \
-            --spec tools/autotune/spec_smoke.yaml \
-            --screen 4 \
-            --replicates 1 \
-            --local-iters 1 \
-            --topk 1 \
-            --seed 0 \
-            --warmup-sec 1 \
-            --run-sec 2
+          tools/autotune/run_smoke.sh
       - name: Upload autotune smoke artifacts
         uses: actions/upload-artifact@v4
         with:
