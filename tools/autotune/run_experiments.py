@@ -476,11 +476,9 @@ def aggregate_runs(
 
     reason_text = " ; ".join(sorted(set(reasons))) if reasons else None
 
-    score_components = [aggregated_objective, *aggregated_tiebreakers]
-    if objective.maximize:
-        score_key = [(-value) if math.isfinite(value) else value for value in score_components]
-    else:
-        score_key = score_components
+    score_key = [
+        value if math.isfinite(value) else penalty for value in [aggregated_objective, *aggregated_tiebreakers]
+    ]
 
     return {
         "ok": ok,
@@ -615,25 +613,27 @@ def evaluate_candidate(
     return record
 
 
-def score_tuple(entry: Mapping[str, Any]) -> Tuple[float, ...]:
+def score_tuple(entry: Mapping[str, Any], maximize: bool) -> Tuple[float, ...]:
     raw = entry.get("score_key")
     if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
         components: List[float] = []
         for value in raw:
             numeric = safe_float(value)
             if numeric is None:
-                numeric = 1e12
+                numeric = -1e12 if maximize else 1e12
             components.append(numeric)
         return tuple(components)
     objective_value = entry.get("objective")
     numeric = safe_float(objective_value)
     if numeric is None:
-        numeric = 1e12
+        numeric = -1e12 if maximize else 1e12
     return (numeric,)
 
 
-def select_unique_best(entries: Iterable[Mapping[str, Any]], limit: int) -> List[Dict[str, Any]]:
-    ordered = sorted(entries, key=score_tuple)
+def select_unique_best(
+    entries: Iterable[Mapping[str, Any]], limit: int, maximize: bool
+) -> List[Dict[str, Any]]:
+    ordered = sorted(entries, key=lambda entry: score_tuple(entry, maximize), reverse=maximize)
     seen: set[str] = set()
     results: List[Dict[str, Any]] = []
     for entry in ordered:
@@ -764,7 +764,7 @@ def main() -> None:
 
     all_entries = log.all_entries()
     screen_entries = [entry for entry in all_entries if entry.get("stage") == "screen"]
-    best_screen = select_unique_best(screen_entries, 1)
+    best_screen = select_unique_best(screen_entries, 1, objective_spec.maximize)
     if not best_screen:
         raise SystemExit("No successful screening results recorded")
     best_params = best_screen[0]["params"]
@@ -812,7 +812,7 @@ def main() -> None:
     )
 
     all_entries = log.all_entries()
-    top_candidates = select_unique_best(all_entries, args.topk)
+    top_candidates = select_unique_best(all_entries, args.topk, objective_spec.maximize)
     top_candidates_path = results_dir / "top_candidates.json"
     write_json_file(top_candidates_path, {"candidates": top_candidates})
 

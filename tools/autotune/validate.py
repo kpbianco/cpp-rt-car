@@ -670,14 +670,21 @@ def summarise_candidate(
     return summary
 
 
-def select_best(summaries: Sequence[Mapping[str, Any]]) -> Optional[Mapping[str, Any]]:
+def select_best(
+    summaries: Sequence[Mapping[str, Any]], maximize: bool
+) -> Optional[Mapping[str, Any]]:
     if not summaries:
         return None
 
     def sort_key(summary: Mapping[str, Any]) -> Tuple[float, float, float, int]:
         fail_rate = float(summary.get("fail_rate", 1.0))
         median = summary.get("median_objective")
-        median_value = float(median) if isinstance(median, (int, float)) else math.inf
+        if isinstance(median, (int, float)):
+            median_value = float(median)
+        else:
+            median_value = math.inf if not maximize else -math.inf
+        if maximize:
+            median_value = -median_value
         iqr = summary.get("iqr_objective")
         iqr_value = float(iqr) if isinstance(iqr, (int, float)) else math.inf
         index = int(summary.get("candidate_index", 0))
@@ -758,7 +765,7 @@ def main() -> None:
         summaries.append(summary)
         experiments_records.extend(raw_records)
 
-    best = select_best(summaries)
+    best = select_best(summaries, objective_spec.maximize)
 
     write_candidate_summaries(args.out, summaries)
     append_experiments_log(pathlib.Path("results") / "experiments.jsonl", experiments_records)
