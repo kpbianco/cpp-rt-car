@@ -22,14 +22,13 @@ params:
     values:
       - "fast"
       - "balanced"
-      - "safe"
   threads:
     type: "int"
     min: 1
-    max: 4
+    max: 2
     step: 1
   prefetch_distance:
     type: "int"
     min: 0
-    max: 256
-    step: 64
+    max: 64
+    step: 32
