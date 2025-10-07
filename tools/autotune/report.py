@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime as _dt
+import hashlib
 import json
 import math
 import pathlib
+import platform as _platform
+import sys
 from dataclasses import dataclass
 from typing import Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
@@ -224,6 +228,31 @@ def collect_env(summary_rows: Iterable[Mapping[str, str]]) -> List[Tuple[str, Li
     return sorted(((key, values) for key, values in env_values.items()), key=lambda item: item[0])
 
 
+def _extract_env_value(
+    summary_rows: Sequence[Mapping[str, str]],
+    desired_parts: Sequence[str],
+) -> Optional[str]:
+    for row in summary_rows:
+        for key, raw_value in row.items():
+            if not raw_value:
+                continue
+            lowered = key.lower()
+            if not (lowered.startswith("env") or lowered.startswith("environment")):
+                continue
+            if any(part in lowered for part in desired_parts):
+                value = raw_value.strip()
+                if value:
+                    return value
+    return None
+
+
+def extract_hardware_brief(summary_rows: Sequence[Mapping[str, str]]) -> str:
+    cpu = _extract_env_value(summary_rows, ("cpu", "processor", "model")) or "unknown"
+    cores = _extract_env_value(summary_rows, ("cores", "threads")) or "unknown"
+    operating_system = _extract_env_value(summary_rows, ("os", "operating_system", "platform")) or "unknown"
+    return f"hardware: CPU `{cpu}`, cores `{cores}`, OS `{operating_system}`"
+
+
 def format_value(value: object) -> str:
     if value is None:
         return "—"
@@ -283,6 +312,19 @@ def build_best_rows(
             if key not in BEST_METRIC_KEYS:
                 rows.append((key, format_value(value)))
     return rows
+
+
+def extract_best_key_metrics(best_payload: Mapping[str, object]) -> Mapping[str, str]:
+    metrics = best_payload.get("metrics_excerpt")
+    if not isinstance(metrics, Mapping):
+        metrics = best_payload.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return {}
+    key_metrics = {}
+    for key in ("p50_frame_ms", "p95_frame_ms", "p99_frame_ms", "queue_max", "log_drops", "emergency_spawns"):
+        if key in metrics:
+            key_metrics[key] = format_value(metrics.get(key))
+    return key_metrics
 
 
 def build_pareto_rows(
@@ -384,10 +426,23 @@ def main() -> None:
 
     env_rows = collect_env(summary_rows)
     best_rows = build_best_rows(best, param_order)
+    best_key_metrics = extract_best_key_metrics(best)
     pareto_rows = build_pareto_rows(pareto, param_order)
     budget_lines = render_budget_section(spec)
 
     lines: List[str] = []
+    spec_digest = hashlib.sha256(args.spec.read_bytes()).hexdigest()[:16]
+    python_version = sys.version.split()[0]
+    platform_string = _platform.platform()
+    generated_at = _dt.datetime.now(tz=_dt.timezone.utc).isoformat()
+    hardware_brief = extract_hardware_brief(summary_rows)
+
+    lines.append(f"spec_digest: `{spec_digest}`")
+    lines.append(f"python: `{python_version}`")
+    lines.append(f"platform: `{platform_string}`")
+    lines.append(f"generated_at: `{generated_at}`")
+    lines.append(hardware_brief)
+    lines.append("")
     lines.append("# Autotuning Summary")
     lines.append("")
     lines.append(
@@ -435,11 +490,18 @@ def main() -> None:
         lines.append("Pareto frontier data was empty.")
 
     lines.append("")
-    lines.append("## How to use")
+    lines.append("## Use this profile")
     lines.append("")
     lines.append("```bash")
     lines.append("./build/bin/rtfw_demo --config profiles/<cpu>-<os>.json --rt --metrics-json")
     lines.append("```")
+    if best_key_metrics:
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| --- | --- |")
+        for key in ("p50_frame_ms", "p95_frame_ms", "p99_frame_ms", "queue_max", "log_drops", "emergency_spawns"):
+            if key in best_key_metrics:
+                lines.append(f"| `{key}` | {best_key_metrics[key]} |")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("\n".join(lines) + "\n", encoding="utf-8")
