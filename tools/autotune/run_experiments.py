@@ -281,15 +281,129 @@ def detect_baseline_source(app: AppSpec, results_dir: pathlib.Path) -> Optional[
     return None
 
 
+def _is_simple_param_value(value: Any) -> bool:
+    if isinstance(value, (str, int, float, bool)):
+        return True
+    return False
+
+
+def _iter_profile_default_payloads(payload: Any, description: str) -> Iterable[Tuple[str, Mapping[str, Any]]]:
+    stack: List[Tuple[str, Any]] = [(description, payload)]
+    seen: set[int] = set()
+    while stack:
+        desc, current = stack.pop()
+        if isinstance(current, Mapping):
+            identity = id(current)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            yield desc, current
+            for key, value in current.items():
+                if isinstance(value, Mapping) or (
+                    isinstance(value, Sequence)
+                    and not isinstance(value, (str, bytes, bytearray))
+                ):
+                    child_desc = f"{desc}.{key}" if desc else str(key)
+                    stack.append((child_desc, value))
+        elif isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+            identity = id(current)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            for index, value in enumerate(current):
+                if isinstance(value, Mapping) or (
+                    isinstance(value, Sequence)
+                    and not isinstance(value, (str, bytes, bytearray))
+                ):
+                    child_desc = f"{desc}[{index}]" if desc else f"[{index}]"
+                    stack.append((child_desc, value))
+
+
+def _extract_profile_params(
+    payload: Mapping[str, Any], param_specs: Mapping[str, Any]
+) -> Optional[Dict[str, Any]]:
+    candidates: List[Mapping[str, Any]] = []
+    params_section = payload.get("params")
+    if isinstance(params_section, Mapping):
+        candidates.append(params_section)
+    candidates.append(payload)
+
+    for candidate in candidates:
+        filtered: Dict[str, Any] = {}
+        for name, value in candidate.items():
+            if name not in param_specs:
+                continue
+            if isinstance(value, Mapping) or (
+                isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+            ):
+                continue
+            if not _is_simple_param_value(value):
+                continue
+            filtered[name] = value
+        if filtered:
+            return filtered
+    return None
+
+
+def _coerce_profile_params(
+    params: Mapping[str, Any],
+    param_specs: Mapping[str, Any],
+    description: str,
+) -> Dict[str, Any]:
+    coerced: Dict[str, Any] = {}
+    for name, value in params.items():
+        spec = param_specs.get(name)
+        if spec is None:
+            continue
+        try:
+            coerced[name] = spec.coerce(value)
+        except SystemExit as exc:
+            raise SystemExit(
+                f"Baseline parameter '{name}' from {description} failed validation: {exc}"
+            ) from exc
+    return coerced
+
+
+def baseline_source_from_spec_defaults(
+    spec_data: Mapping[str, Any],
+    param_specs: Mapping[str, Any],
+) -> Optional[BaselineSource]:
+    defaults_payload = spec_data.get("profile_defaults") if isinstance(spec_data, Mapping) else None
+    if defaults_payload is None:
+        return None
+
+    any_mapping = False
+    for description, mapping in _iter_profile_default_payloads(
+        defaults_payload, "spec profile defaults"
+    ):
+        any_mapping = True
+        params = _extract_profile_params(mapping, param_specs)
+        if not params:
+            continue
+        coerced = _coerce_profile_params(params, param_specs, description)
+        return BaselineSource(description=description, params=coerced)
+
+    if any_mapping:
+        return BaselineSource(description="spec profile defaults", params={})
+    return None
+
+
 def run_baseline_gate(
     app: AppSpec,
     param_specs: Mapping[str, Any],
+    spec_data: Mapping[str, Any],
     spec_path: pathlib.Path,
     results_dir: pathlib.Path,
 ) -> None:
-    source = detect_baseline_source(app, results_dir)
+    source = baseline_source_from_spec_defaults(spec_data, param_specs)
     if source is None:
-        return
+        source = detect_baseline_source(app, results_dir)
+    allow_partial_params = False
+    if source is None:
+        source = BaselineSource(description="empty parameter set", params={})
+        allow_partial_params = True
+    elif source.description.startswith("spec profile defaults"):
+        allow_partial_params = True
 
     params_for_diag: Optional[Dict[str, Any]] = None
     config_path_str: Optional[str] = None
@@ -300,13 +414,16 @@ def run_baseline_gate(
         if config_path is None:
             params = source.params
             if not isinstance(params, Mapping):
-                return
-            try:
-                validated = validate_params(params, param_specs)
-            except SystemExit as exc:
-                raise SystemExit(
-                    f"Baseline parameters from {source.description} failed validation: {exc}"
-                ) from exc
+                params = {}
+            validated = params
+            if validated:
+                try:
+                    validated = validate_params(validated, param_specs)
+                except SystemExit:
+                    if not allow_partial_params:
+                        raise
+                    # Allow partial parameter sets derived from defaults; they were already coerced.
+                    validated = dict(params)
             params_for_diag = dict(validated)
             config_data = build_config(validated)
             config_path = tmpdir / "baseline_config.json"
@@ -715,7 +832,7 @@ def main() -> None:
     reports_dir = REPO_ROOT / "reports"
     ensure_directories([results_dir, profiles_dir, reports_dir])
 
-    run_baseline_gate(app_spec, param_specs, spec_path, results_dir)
+    run_baseline_gate(app_spec, param_specs, spec_data, spec_path, results_dir)
 
     experiments_log_path = results_dir / "experiments.jsonl"
     experiments_log_path.touch(exist_ok=True)
