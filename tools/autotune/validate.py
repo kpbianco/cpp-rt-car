@@ -21,6 +21,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.autotune.common_eval import (  # noqa: E402
+    compute_objective as compute_spec_objective,
+    evaluate_constraints as evaluate_spec_constraints,
+)
 from tools.autotune.make_config import (  # noqa: E402
     build_config,
     load_simple_yaml,
@@ -50,127 +54,11 @@ def get_metrics_summary(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return {}
 
 
-class ExpressionEvaluator:
-    def __init__(self, expression: str, *, label: str) -> None:
-        self._code = compile(expression, label, "eval")
-
-    def __call__(self, variables: Mapping[str, Any]) -> float:
-        safe_globals = {"__builtins__": {}}
-        safe_locals = {**variables, "min": min, "max": max, "abs": abs, "math": math}
-        result = eval(self._code, safe_globals, safe_locals)
-        if isinstance(result, (int, float)):
-            return float(result)
-        raise ValueError(f"Expression must evaluate to numeric result, got {result!r}")
-
-
-class ObjectiveEvaluator:
-    def __init__(self, spec: ObjectiveSpec, frame_budget_ms: Optional[float]) -> None:
-        self.spec = spec
-        self.frame_budget_ms = frame_budget_ms
-        self._objective = ExpressionEvaluator(spec.expression, label="<objective>")
-        self._tiebreakers = [
-            ExpressionEvaluator(expr, label=f"<objective_tiebreaker_{index}>")
-            for index, expr in enumerate(spec.tiebreakers)
-        ]
-
-    def _context(self, metrics: Mapping[str, Any]) -> Dict[str, Any]:
-        context: Dict[str, Any] = dict(metrics)
-        if (
-            self.frame_budget_ms is not None
-            and "frame_budget_ms" not in context
-            and isinstance(self.frame_budget_ms, (int, float))
-        ):
-            context["frame_budget_ms"] = float(self.frame_budget_ms)
-        return context
-
-    def evaluate(self, metrics: Mapping[str, Any]) -> Tuple[float, List[float]]:
-        context = self._context(metrics)
-        objective_value = self._objective(context)
-        tiebreakers = [evaluator(context) for evaluator in self._tiebreakers]
-        return objective_value, tiebreakers
-
-
-class ConstraintEvaluator:
-    def __init__(self, metric: str, expression: str) -> None:
-        self.metric = metric
-        prepared = expression.strip()
-        if not prepared:
-            raise SystemExit(
-                f"Constraint expression for metric '{metric}' must be a non-empty string"
-            )
-        if prepared[0] in "=<>":
-            prepared = f"value {prepared}"
-        self.expression = prepared
-        self._code = compile(prepared, f"<constraint {metric}>", "eval")
-
-    def evaluate(self, metrics: Mapping[str, Any], frame_budget_ms: Optional[float]) -> bool:
-        if not isinstance(metrics, Mapping):
-            return False
-        if self.metric not in metrics:
-            return False
-        value = metrics[self.metric]
-        try:
-            numeric_value = float(value)
-        except (TypeError, ValueError):
-            return False
-        context: Dict[str, Any] = dict(metrics)
-        context[self.metric] = numeric_value
-        context["value"] = numeric_value
-        if (
-            frame_budget_ms is not None
-            and "frame_budget_ms" not in context
-            and isinstance(frame_budget_ms, (int, float))
-        ):
-            context["frame_budget_ms"] = float(frame_budget_ms)
-        safe_globals = {"__builtins__": {}}
-        safe_locals = {**context, "min": min, "max": max, "abs": abs, "math": math}
-        try:
-            result = eval(self._code, safe_globals, safe_locals)
-        except Exception:
-            return False
-        return bool(result)
-
-
-def parse_hard_constraints(spec_data: Mapping[str, Any]) -> Tuple[ConstraintEvaluator, ...]:
-    metrics_payload = ensure_mapping(spec_data.get("metrics"), "metrics")
-    raw_constraints = metrics_payload.get("hard_constraints")
-    if raw_constraints is None:
-        return ()
-    if not isinstance(raw_constraints, Mapping):
-        raise SystemExit("metrics.hard_constraints must be a mapping if provided")
-    constraints: List[ConstraintEvaluator] = []
-    for name, expr in raw_constraints.items():
-        if not isinstance(name, str) or not name:
-            raise SystemExit("Constraint metric names must be non-empty strings")
-        if not isinstance(expr, str):
-            raise SystemExit(
-                f"Constraint expression for metric '{name}' must be a string"
-            )
-        constraints.append(ConstraintEvaluator(name, expr))
-    return tuple(constraints)
-
-
-def recompute_run_objective(
-    run: Mapping[str, Any],
-    objective: ObjectiveEvaluator,
-    constraints: Sequence[ConstraintEvaluator],
-) -> Optional[float]:
+def recompute_run_objective(run: Mapping[str, Any], spec: Mapping[str, Any]) -> float:
     metrics = run.get("metrics")
     if not isinstance(metrics, Mapping):
-        return None
-    try:
-        objective_value, _ = objective.evaluate(metrics)
-    except (NameError, ValueError, TypeError, ZeroDivisionError, OverflowError):
         return math.inf
-    frame_budget_ms = getattr(objective, "frame_budget_ms", None)
-    for constraint in constraints:
-        try:
-            ok = constraint.evaluate(metrics, frame_budget_ms)
-        except Exception:
-            ok = False
-        if not ok:
-            return math.inf
-    return float(objective_value)
+    return compute_spec_objective(spec, metrics)
 
 
 @dataclass(frozen=True)
@@ -616,31 +504,49 @@ def summarise_candidate(
     entry: Mapping[str, Any],
     params: Mapping[str, Any],
     runs: Sequence[Mapping[str, Any]],
-    objective: ObjectiveEvaluator,
-    constraints: Sequence[ConstraintEvaluator],
+    spec: Mapping[str, Any],
 ) -> Dict[str, Any]:
     total_runs = len(runs)
-    failures = sum(1 for run in runs if not run.get("ok", False))
-    fail_rate = float(failures / total_runs) if total_runs else 1.0
+    failure_count = 0
 
     objectives: List[float] = []
-    for run in runs:
-        recomputed = recompute_run_objective(run, objective, constraints)
-        if isinstance(run, MutableMapping):
-            run["computed_objective"] = recomputed
-        if isinstance(recomputed, (int, float)) and not math.isnan(float(recomputed)):
-            objectives.append(float(recomputed))
-    median_objective = float(statistics.median(objectives)) if objectives else None
-    _, _, iqr_objective = quantile_range(objectives)
-
     metrics_samples: Dict[str, List[float]] = {}
+
     for run in runs:
-        metrics = run.get("metrics")
-        if not isinstance(metrics, Mapping):
-            continue
+        metrics_payload = run.get("metrics") if isinstance(run, Mapping) else None
+        metrics: Dict[str, Any] = {}
+        if isinstance(metrics_payload, Mapping):
+            metrics.update(metrics_payload)
+        summary_payload = run.get("_summary") if isinstance(run, Mapping) else None
+        if isinstance(summary_payload, Mapping):
+            metrics.update(summary_payload)
+
+        spec_ok, failures = evaluate_spec_constraints(spec, metrics)
+        objective_value = recompute_run_objective(run, spec)
+        original_ok = bool(run.get("ok", False)) if isinstance(run, Mapping) else False
+        overall_ok = spec_ok and original_ok
+
+        if isinstance(run, MutableMapping):
+            run["computed_objective"] = objective_value
+            run["computed_ok"] = overall_ok
+            run["constraints_ok"] = spec_ok
+            if failures:
+                run["constraint_failures"] = failures
+                messages = [info["message"] for info in failures.values()]
+                run.setdefault("reason", "; ".join(messages))
+
+        if not overall_ok:
+            failure_count += 1
+
+        if isinstance(objective_value, (int, float)) and not math.isnan(float(objective_value)):
+            objectives.append(float(objective_value))
+
         for key, value in metrics.items():
             if isinstance(value, (int, float)) and not math.isnan(float(value)):
                 metrics_samples.setdefault(key, []).append(float(value))
+
+    median_objective = float(statistics.median(objectives)) if objectives else None
+    _, _, iqr_objective = quantile_range(objectives)
 
     metrics_summary: Dict[str, Any] = {}
     for name, samples in sorted(metrics_samples.items()):
@@ -657,12 +563,14 @@ def summarise_candidate(
 
     metadata = {k: v for k, v in entry.items() if k != "params"}
 
+    fail_rate = float(failure_count / total_runs) if total_runs else 1.0
+
     summary = {
         "candidate_index": index,
         "params": params,
         "metadata": metadata,
         "num_runs": total_runs,
-        "num_failures": failures,
+        "num_failures": failure_count,
         "fail_rate": fail_rate,
         "median_objective": median_objective,
         "iqr_objective": iqr_objective,
@@ -736,8 +644,6 @@ def main() -> None:
     app_spec = parse_app_spec(spec_data, args.spec.parent)
     robustness_spec = parse_robustness(spec_data)
     objective_spec = parse_objective_spec(spec_data)
-    objective_evaluator = ObjectiveEvaluator(objective_spec, app_spec.frame_budget_ms)
-    hard_constraints = parse_hard_constraints(spec_data)
 
     param_specs = load_param_spec(args.spec)
 
@@ -750,14 +656,7 @@ def main() -> None:
         params_raw = candidate_params(entry)
         validated = validate_params(params_raw, param_specs)
         runs, raw_records = run_validation(app_spec, robustness_spec, validated, entry)
-        summary = summarise_candidate(
-            index,
-            entry,
-            validated,
-            runs,
-            objective_evaluator,
-            hard_constraints,
-        )
+        summary = summarise_candidate(index, entry, validated, runs, spec_data)
         summaries.append(summary)
         experiments_records.extend(raw_records)
 
