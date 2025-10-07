@@ -81,7 +81,21 @@ class ExperimentLog:
         except TypeError:
             return json.dumps(str(component))
 
-    def _run_key(
+    @staticmethod
+    def _hash_components(
+        spec_digest: str, canonical_params: str, seed_component: str, scenario_component: str
+    ) -> str:
+        digest = hashlib.sha256()
+        digest.update(spec_digest.encode("utf-8"))
+        digest.update(b"|")
+        digest.update(canonical_params.encode("utf-8"))
+        digest.update(b"|")
+        digest.update(seed_component.encode("utf-8"))
+        digest.update(b"|")
+        digest.update(scenario_component.encode("utf-8"))
+        return digest.hexdigest()
+
+    def _run_hash(
         self,
         params: Mapping[str, Any],
         seed: Any,
@@ -95,17 +109,27 @@ class ExperimentLog:
         canonical_params = self._canonical_params(params)
         seed_component = self._normalise_component(seed)
         scenario_component = self._normalise_component(scenario)
-        return "|".join([spec_digest, canonical_params, seed_component, scenario_component])
+        return self._hash_components(spec_digest, canonical_params, seed_component, scenario_component)
 
-    def _index_run(self, run: Mapping[str, Any]) -> None:
-        if not isinstance(run, Mapping):
-            return
+    def compute_run_hash(
+        self,
+        params: Mapping[str, Any],
+        seed: Any,
+        scenario: Any,
+        spec_digest: Optional[str],
+    ) -> Optional[str]:
+        return self._run_hash(params, seed, scenario, spec_digest)
+
+    @staticmethod
+    def _extract_run_identity(
+        run: Mapping[str, Any]
+    ) -> Optional[Tuple[Mapping[str, Any], Any, Any, Optional[str]]]:
         params = run.get("_params")
         if not isinstance(params, Mapping):
             candidate_params = run.get("params")
             params = candidate_params if isinstance(candidate_params, Mapping) else None
         if not isinstance(params, Mapping):
-            return
+            return None
         seed = run.get("_seed")
         if seed is None:
             seed = run.get("seed")
@@ -113,10 +137,29 @@ class ExperimentLog:
         if scenario is None:
             scenario = run.get("scenario")
         spec_digest = run.get("_spec_digest") or run.get("spec_digest")
-        key = self._run_key(params, seed, scenario, spec_digest)
-        if key is None:
+        return params, seed, scenario, spec_digest
+
+    def _index_run(self, run: Mapping[str, Any]) -> None:
+        if not isinstance(run, Mapping):
             return
-        self._run_cache[key] = copy.deepcopy(dict(run))
+        run_hash = run.get("_run_hash")
+        if not isinstance(run_hash, str) or not run_hash:
+            run_hash = run.get("run_hash")
+        identity = self._extract_run_identity(run)
+        if run_hash is None and identity is None:
+            return
+        if run_hash is None and identity is not None:
+            params, seed, scenario, spec_digest = identity
+            run_hash = self._run_hash(params, seed, scenario, spec_digest)
+        if not isinstance(run_hash, str) or not run_hash:
+            return
+        if isinstance(run, dict):
+            run.setdefault("_run_hash", run_hash)
+            run.setdefault("run_hash", run_hash)
+        cached = copy.deepcopy(dict(run))
+        cached.setdefault("_run_hash", run_hash)
+        cached.setdefault("run_hash", run_hash)
+        self._run_cache[run_hash] = cached
 
     def _index_runs_from_record(self, record: Mapping[str, Any]) -> None:
         runs = record.get("runs")
@@ -163,13 +206,16 @@ class ExperimentLog:
         scenario: Any,
         spec_digest: str,
     ) -> Optional[Dict[str, Any]]:
-        key = self._run_key(params, seed, scenario, spec_digest)
-        if key is None:
+        run_hash = self._run_hash(params, seed, scenario, spec_digest)
+        if run_hash is None:
             return None
-        cached = self._run_cache.get(key)
+        cached = self._run_cache.get(run_hash)
         if cached is None:
             return None
-        return copy.deepcopy(cached)
+        result = copy.deepcopy(cached)
+        result.setdefault("_run_hash", run_hash)
+        result.setdefault("run_hash", run_hash)
+        return result
 
     def remember_run(self, run: Mapping[str, Any]) -> None:
         self._index_run(run)
