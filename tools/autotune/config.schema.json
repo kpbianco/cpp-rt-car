@@ -6,96 +6,114 @@
     "threads",
     "chunking",
     "layout",
-    "scheduler",
     "prefetch",
-    "memory",
-    "numerics",
+    "scheduler",
     "governor",
-    "params"
+    "numerics",
+    "memory",
+    "tracing"
   ],
   "properties": {
     "threads": {
-      "type": "string"
+      "type": ["string", "integer"]
     },
     "chunking": {
       "type": "object",
-      "required": ["target_p90_us"],
+      "required": [
+        "target_p90_us",
+        "min_items",
+        "max_items"
+      ],
       "properties": {
-        "target_p90_us": {
-          "type": "integer"
-        }
+        "target_p90_us": {"type": "integer"},
+        "min_items": {"type": "integer"},
+        "max_items": {"type": "integer"}
       },
       "additionalProperties": true
     },
     "layout": {
       "type": "object",
-      "required": ["aosoa_block"],
+      "required": [
+        "aosoa_block",
+        "align_bytes",
+        "pad_to_simd"
+      ],
       "properties": {
-        "aosoa_block": {
-          "type": "integer"
-        }
-      },
-      "additionalProperties": true
-    },
-    "scheduler": {
-      "type": "object",
-      "required": ["steal_threshold"],
-      "properties": {
-        "steal_threshold": {
-          "type": "integer"
-        },
-        "emergency_spawn": {
-          "type": "boolean"
-        }
+        "aosoa_block": {"type": "integer"},
+        "align_bytes": {"type": "integer"},
+        "pad_to_simd": {"type": "boolean"}
       },
       "additionalProperties": true
     },
     "prefetch": {
       "type": "object",
-      "required": ["distance_bytes", "enabled"],
+      "required": [
+        "enabled",
+        "distance_bytes"
+      ],
       "properties": {
-        "distance_bytes": {
-          "type": "integer"
-        },
-        "enabled": {
-          "type": "boolean"
-        }
+        "enabled": {"type": "boolean"},
+        "distance_bytes": {"type": "integer"}
       },
       "additionalProperties": true
     },
-    "memory": {
+    "scheduler": {
       "type": "object",
-      "required": ["arena_per_thread_mb", "huge_pages"],
+      "required": [
+        "steal_threshold",
+        "emergency_spawn"
+      ],
       "properties": {
-        "arena_per_thread_mb": {
-          "type": "integer"
-        },
-        "huge_pages": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": true
-    },
-    "numerics": {
-      "type": "object",
-      "required": ["fma"],
-      "properties": {
-        "fma": {
-          "type": "string"
-        }
+        "steal_threshold": {"type": "integer"},
+        "emergency_spawn": {"type": "boolean"}
       },
       "additionalProperties": true
     },
     "governor": {
       "type": "object",
-      "required": ["target_util", "hysteresis"],
+      "required": [
+        "target_util",
+        "hysteresis"
+      ],
       "properties": {
-        "target_util": {
-          "type": "number"
-        },
-        "hysteresis": {
-          "type": "number"
-        }
+        "target_util": {"type": "number"},
+        "hysteresis": {"type": "number"}
+      },
+      "additionalProperties": true
+    },
+    "numerics": {
+      "type": "object",
+      "required": [
+        "ftz_daz",
+        "fma"
+      ],
+      "properties": {
+        "ftz_daz": {"type": "boolean"},
+        "fma": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "memory": {
+      "type": "object",
+      "required": [
+        "huge_pages",
+        "arena_per_thread_mb",
+        "numa",
+        "pretouch"
+      ],
+      "properties": {
+        "huge_pages": {"type": "boolean"},
+        "arena_per_thread_mb": {"type": "integer"},
+        "numa": {"type": "string"},
+        "pretouch": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "tracing": {
+      "type": "object",
+      "required": ["bintrace"],
+      "properties": {
+        "bintrace": {"type": "boolean"}
       },
       "additionalProperties": true
     },

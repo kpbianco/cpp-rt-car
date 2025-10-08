@@ -7,13 +7,9 @@ import argparse
 import json
 import pathlib
 import sys
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 DEFAULT_SCHEMA_PATH = pathlib.Path(__file__).with_name("config.schema.json")
-
-
-class ValidationError(Exception):
-    """Raised when a payload does not satisfy the schema."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,84 +49,96 @@ def _is_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _validate_type(value: Any, expected: str, path: str) -> None:
+def _type_matches(value: Any, expected: str) -> bool:
     if expected == "object":
-        if not isinstance(value, Mapping):
-            raise ValidationError(f"{path} must be an object")
-        return
+        return isinstance(value, Mapping)
     if expected == "array":
-        if not isinstance(value, list):
-            raise ValidationError(f"{path} must be an array")
-        return
+        return isinstance(value, list)
     if expected == "string":
-        if not isinstance(value, str):
-            raise ValidationError(f"{path} must be a string")
-        return
+        return isinstance(value, str)
     if expected == "integer":
-        if not _is_integer(value):
-            raise ValidationError(f"{path} must be an integer")
-        return
+        return _is_integer(value)
     if expected == "number":
-        if not _is_number(value):
-            raise ValidationError(f"{path} must be a number")
-        return
+        return _is_number(value)
     if expected == "boolean":
-        if not isinstance(value, bool):
-            raise ValidationError(f"{path} must be a boolean")
-        return
+        return isinstance(value, bool)
     if expected == "null":
-        if value is not None:
-            raise ValidationError(f"{path} must be null")
-        return
-    raise ValidationError(f"{path} uses unsupported schema type '{expected}'")
+        return value is None
+    raise ValueError(f"Unsupported schema type '{expected}'")
 
 
-def validate(instance: Any, schema: Mapping[str, Any], path: str = "$") -> None:
+def _format_expected(types: Iterable[str]) -> str:
+    items = list(types)
+    if not items:
+        return "unknown"
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f" or {items[-1]}"
+
+
+def validate(instance: Any, schema: Mapping[str, Any], path: str = "$") -> list[str]:
+    errors: list[str] = []
+
     schema_type = schema.get("type")
-    if isinstance(schema_type, str):
-        _validate_type(instance, schema_type, path)
+    allowed_types: list[str] | None
+    if isinstance(schema_type, list):
+        allowed_types = [str(t) for t in schema_type]
+    elif isinstance(schema_type, str):
+        allowed_types = [schema_type]
+    else:
+        allowed_types = None
+
+    if allowed_types:
+        if not any(_type_matches(instance, candidate) for candidate in allowed_types):
+            errors.append(
+                f"{path}: expected {_format_expected(allowed_types)}, got {type(instance).__name__}"
+            )
+            return errors
+
     if "enum" in schema:
         options = schema["enum"]
         if instance not in options:
-            raise ValidationError(f"{path} must be one of {options!r}")
-    if schema_type == "object" or (
-        schema_type is None and "properties" in schema
+            errors.append(f"{path}: expected one of {options!r}, got {instance!r}")
+            return errors
+
+    if (allowed_types and allowed_types == ["array"]) or (
+        allowed_types is None and "items" in schema
+    ):
+        if not isinstance(instance, list):
+            errors.append(f"{path}: expected array, got {type(instance).__name__}")
+            return errors
+        item_schema = schema.get("items")
+        if isinstance(item_schema, Mapping):
+            for index, item in enumerate(instance):
+                child_path = f"{path}[{index}]"
+                errors.extend(validate(item, item_schema, child_path))
+        return errors
+
+    if (allowed_types and allowed_types == ["object"]) or (
+        allowed_types is None and "properties" in schema
     ):
         if not isinstance(instance, Mapping):
-            raise ValidationError(f"{path} must be an object")
+            errors.append(f"{path}: expected object, got {type(instance).__name__}")
+            return errors
         required = schema.get("required", [])
         for name in required:
             if name not in instance:
-                raise ValidationError(f"{path}.{name} is a required property")
+                errors.append(f"{path}.{name}: missing required property")
         properties = schema.get("properties", {})
         additional = schema.get("additionalProperties", True)
         for key, value in instance.items():
             if key in properties:
                 child_path = f"{path}.{key}"
-                validate(value, properties[key], child_path)
+                errors.extend(validate(value, properties[key], child_path))
             else:
                 if isinstance(additional, Mapping):
                     child_path = f"{path}.{key}"
-                    validate(value, additional, child_path)
+                    errors.extend(validate(value, additional, child_path))
                 elif additional is False:
-                    raise ValidationError(f"{path}.{key} is not an allowed property")
-        return
-    if schema_type == "array" or (
-        schema_type is None and "items" in schema
-    ):
-        if not isinstance(instance, list):
-            raise ValidationError(f"{path} must be an array")
-        item_schema = schema.get("items")
-        if item_schema is not None:
-            for index, item in enumerate(instance):
-                child_path = f"{path}[{index}]"
-                validate(item, item_schema, child_path)
-        return
-    if schema_type in {"string", "integer", "number", "boolean", "null"}:
-        return
-    if schema_type is None:
-        return
-    raise ValidationError(f"{path} uses unsupported schema construction")
+                    errors.append(f"{path}.{key}: additional properties are not allowed")
+        return errors
+
+    return errors
 
 
 def main() -> None:
@@ -138,10 +146,11 @@ def main() -> None:
     schema_payload = load_json(args.schema)
     config_payload = load_json(args.config)
 
-    try:
-        validate(config_payload, schema_payload, "$")
-    except ValidationError as exc:
-        print(f"Validation failed: {exc}", file=sys.stderr)
+    errors = validate(config_payload, schema_payload, "$")
+    if errors:
+        print("Validation failed:", file=sys.stderr)
+        for message in errors:
+            print(f" - {message}", file=sys.stderr)
         sys.exit(1)
 
 

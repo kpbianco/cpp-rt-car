@@ -390,12 +390,24 @@ def build_config(params: Mapping[str, Any]) -> Dict[str, Any]:
             continue
         set_path(config, path, params[name])
 
+    chunking = config.setdefault("chunking", {})
+    chunking.setdefault("min_items", 1)
+    chunking.setdefault("max_items", 1024)
+
+    layout = config.setdefault("layout", {})
+    layout.setdefault("align_bytes", 64)
+    layout.setdefault("pad_to_simd", True)
+
+    prefetch = config.setdefault("prefetch", {})
     if "prefetch_distance_bytes" in params:
         enabled = params["prefetch_distance_bytes"] > 0
         set_path(config, ("prefetch", "enabled"), enabled)
+    prefetch.setdefault("distance_bytes", 0)
+    prefetch.setdefault("enabled", prefetch.get("distance_bytes", 0) > 0)
 
     scheduler = config.setdefault("scheduler", {})
     scheduler.setdefault("priority_policy", "normal")
+    scheduler.setdefault("emergency_spawn", True)
 
     numerics = config.setdefault("numerics", {})
     numerics.setdefault("ftz_daz", True)
@@ -455,7 +467,11 @@ def run_self_test() -> None:
 
     require(("threads",), "physical")
     require(("chunking", "target_p90_us"), 100)
+    require(("chunking", "min_items"), 1)
+    require(("chunking", "max_items"), 1024)
     require(("layout", "aosoa_block"), 256)
+    require(("layout", "align_bytes"), 64)
+    require(("layout", "pad_to_simd"), True)
     require(("prefetch", "distance_bytes"), 128)
     require(("prefetch", "enabled"), True)
     require(("scheduler", "steal_threshold"), 4)
