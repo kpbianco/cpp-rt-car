@@ -9,6 +9,12 @@
 #include <iostream>
 #include <cstring>
 #include <iomanip>
+#include <fstream>
+#include <filesystem>
+#include <iterator>
+#include <type_traits>
+
+#include <rt/snapshot.hpp>
 
 /* tiny helpers --------------------------------------------------- */
 static void printHelp(const char* argv0)
@@ -19,6 +25,8 @@ static void printHelp(const char* argv0)
               << "  --pin                      Pin worker threads to cores.\n"
               << "  --metrics-json             Emit a cumulative metrics snapshot at exit (p50/p95/p99 span the full run).\n"
               << "  --metrics-json-interval    Emit metrics JSON and reset rolling histograms and resettable counters after each emission.\n"
+              << "  --snapshot-in <path>       Load a binary snapshot before running.\n"
+              << "  --snapshot-out <path>      Save the final binary snapshot.\n"
               << "  --help, -h                 Show this help message.\n";
 }
 
@@ -40,6 +48,8 @@ int main(int argc, char** argv)
 
     bool metricsJson = false;
     bool metricsJsonInterval = false;
+    std::filesystem::path snapshotIn;
+    std::filesystem::path snapshotOut;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -61,6 +71,10 @@ int main(int argc, char** argv)
             metricsJson = true;
             metricsJsonInterval = true;
         }
+        else if (std::strcmp(argv[i], "--snapshot-in") == 0 && i + 1 < argc)
+            snapshotIn = argv[++i];
+        else if (std::strcmp(argv[i], "--snapshot-out") == 0 && i + 1 < argc)
+            snapshotOut = argv[++i];
     }
 
     /* ------------ arena + arrays ---------------- */
@@ -119,11 +133,107 @@ int main(int argc, char** argv)
         }
     });
 
+    auto writeVector = [](rt::SnapshotWriter &w, const auto &vec) {
+        using VecType = std::remove_reference_t<decltype(vec)>;
+        using Value = typename VecType::value_type;
+        std::uint64_t n = static_cast<std::uint64_t>(vec.size());
+        w.write(n);
+        if (n == 0) return;
+        static_assert(std::is_trivially_copyable_v<Value>, "snapshot vector requires trivially copyable type");
+        const auto *ptr = reinterpret_cast<const std::uint8_t *>(vec.data());
+        w.data.insert(w.data.end(), ptr, ptr + n * sizeof(Value));
+    };
+
+    auto readVector = [](rt::SnapshotReader &r, auto &vec) {
+        using VecType = std::remove_reference_t<decltype(vec)>;
+        using Value = typename VecType::value_type;
+        std::uint64_t n = 0;
+        r.read(n);
+        vec.resize(static_cast<std::size_t>(n));
+        if (n == 0) return;
+        static_assert(std::is_trivially_copyable_v<Value>, "snapshot vector requires trivially copyable type");
+        std::memcpy(vec.data(), r.data.data() + r.offset, n * sizeof(Value));
+        r.offset += n * sizeof(Value);
+    };
+
+    constexpr std::uint32_t kSnapshotMagic = 0x52544657u; // 'RTFW'
+
+    if (!snapshotIn.empty())
+    {
+        std::ifstream in(snapshotIn, std::ios::binary);
+        if (!in)
+        {
+            std::cerr << "Failed to open snapshot input: " << snapshotIn << "\n";
+            return 1;
+        }
+        std::vector<std::uint8_t> buffer((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (buffer.size() < sizeof(kSnapshotMagic))
+        {
+            std::cerr << "Snapshot input truncated: " << snapshotIn << "\n";
+            return 1;
+        }
+        rt::SnapshotReader reader(buffer);
+        std::uint32_t magic = 0;
+        reader.read(magic);
+        if (magic != kSnapshotMagic)
+        {
+            std::cerr << "Snapshot magic mismatch for " << snapshotIn << "\n";
+            return 1;
+        }
+
+        std::vector<std::uint8_t> simState;
+        readVector(reader, simState);
+        sim.loadFrame(simState);
+        readVector(reader, thr);
+        readVector(reader, force);
+        readVector(reader, cars.pos);
+        readVector(reader, cars.vel);
+        readVector(reader, cars.sparse);
+        readVector(reader, cars.dense);
+        reader.read(cars.defaultPos);
+        reader.read(cars.defaultVel);
+    }
+
     sim.run();
+
+    auto buildSnapshot = [&]() {
+        rt::SnapshotWriter writer;
+        writer.write(kSnapshotMagic);
+        writeVector(writer, sim.saveFrame());
+        writeVector(writer, thr);
+        writeVector(writer, force);
+        writeVector(writer, cars.pos);
+        writeVector(writer, cars.vel);
+        writeVector(writer, cars.sparse);
+        writeVector(writer, cars.dense);
+        writer.write(cars.defaultPos);
+        writer.write(cars.defaultVel);
+        return writer.data;
+    };
+
+    auto snapshotData = buildSnapshot();
+    std::uint64_t hash = rt::hash64(snapshotData);
+
+    if (!snapshotOut.empty())
+    {
+        std::ofstream out(snapshotOut, std::ios::binary | std::ios::trunc);
+        if (!out)
+        {
+            std::cerr << "Failed to open snapshot output: " << snapshotOut << "\n";
+            return 1;
+        }
+        out.write(reinterpret_cast<const char *>(snapshotData.data()), static_cast<std::streamsize>(snapshotData.size()));
+        if (!out)
+        {
+            std::cerr << "Failed to write snapshot output: " << snapshotOut << "\n";
+            return 1;
+        }
+    }
 
     if (metricsJson)
         std::cout << metricsRegistry.snapshot(metricsJsonInterval) << "\n";
     else
         std::cout << "Final pos0=" << cars.pos[0] << "\n";
+    std::cout << "Final hash=" << std::hex << std::setfill('0') << std::setw(16) << hash << std::dec << "\n";
     return 0;
 }

@@ -528,8 +528,8 @@ set_target_properties(rtfw PROPERTIES OUTPUT_NAME rtfw)
 simcore_link_sanitizer_runtime(rtfw)
 
 # Main executable
-add_executable(simcore_app src/main.cpp)
-target_link_libraries(simcore_app PRIVATE simcore_platform)
+add_executable(rtfw_demo src/main.cpp)
+target_link_libraries(rtfw_demo PRIVATE simcore_platform)
 
 # Sample trace dump utility
 add_executable(trace_dump src/trace_dump.cpp)
@@ -551,10 +551,10 @@ endif()
 # Optional Bloaty size analysis
 find_program(BLOATY_EXE NAMES bloaty)
 if (BLOATY_EXE)
-  add_custom_target(bloaty
-    COMMAND ${BLOATY_EXE} $<TARGET_FILE:simcore_app> -d compileunits,symbols -n 0.1
-    DEPENDS simcore_app
-    COMMENT "Run Bloaty on simcore_app")
+add_custom_target(bloaty
+    COMMAND ${BLOATY_EXE} $<TARGET_FILE:rtfw_demo> -d compileunits,symbols -n 0.1
+    DEPENDS rtfw_demo
+    COMMENT "Run Bloaty on rtfw_demo")
 endif()
 
 add_custom_target(tests

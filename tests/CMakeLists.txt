@@ -76,6 +76,7 @@ if (SIM_GTEST_AVAILABLE)
         test_scheduler.cpp
         test_rt_pipeline.cpp
         test_platform_gate.cpp
+        integration/test_determinism.cpp
     )
 
     if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
@@ -100,7 +101,11 @@ if (SIM_GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/tests
         ${CMAKE_SOURCE_DIR}
     )
-    target_compile_definitions(simcore_tests PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_compile_definitions(simcore_tests PRIVATE
+        PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        PROJECT_BINARY_DIR="${CMAKE_BINARY_DIR}"
+        CMAKE_CFG_INTDIR="${CMAKE_CFG_INTDIR}"
+    )
 
     add_library(test_sample_plugin SHARED sample_plugin.c)
     target_include_directories(test_sample_plugin PRIVATE ${CMAKE_SOURCE_DIR}/rt/include)
