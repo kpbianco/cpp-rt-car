@@ -295,12 +295,10 @@ def detect_baseline_source(app: AppSpec, results_dir: pathlib.Path) -> Optional[
                 )
 
     tokens = common_host.host_tokens()
-    cpu_slug = tokens["cpu_slug"]
-    os_name = tokens["os_name"]
-    machine_candidates = [
-        f"{cpu_slug}-{os_name}.json",
-        f"{cpu_slug}-{os_name}",
-    ]
+    profile_filename = f"{tokens['cpu_slug']}-{tokens['os_name']}.json"
+    machine_candidates = [profile_filename]
+    if profile_filename.endswith(".json"):
+        machine_candidates.append(profile_filename[:-5])
     for name in machine_candidates:
         for directory in directories:
             candidate = directory / name
@@ -1143,7 +1141,8 @@ def _run_pipeline(
         best_params_final = {}
 
     tokens = common_host.host_tokens()
-    profile_path = profiles_dir / f"{tokens['cpu_slug']}-{tokens['os_name']}.json"
+    profile_filename = f"{tokens['cpu_slug']}-{tokens['os_name']}.json"
+    profile_path = profiles_dir / profile_filename
 
     subprocess.run(
         [

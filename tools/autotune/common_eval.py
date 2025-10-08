@@ -254,6 +254,18 @@ def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> fl
     return float(value)
 
 
+def prepare_metrics_context(
+    spec: Mapping[str, Any], metrics: Mapping[str, Any]
+) -> Tuple[Optional[Dict[str, Any]], Optional[float]]:
+    if not isinstance(metrics, Mapping):
+        return None, None
+    context: Dict[str, Any] = dict(metrics)
+    frame_budget = _resolve_frame_budget(spec, context)
+    if frame_budget is not None and "frame_budget_ms" not in context:
+        context["frame_budget_ms"] = frame_budget
+    return context, frame_budget
+
+
 __all__ = [
     "ExpressionEvaluator",
     "ConstraintEvaluator",
