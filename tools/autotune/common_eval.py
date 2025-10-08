@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import math
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Set, Tuple
 
 SAFE_GLOBALS = {"__builtins__": {}}
 SAFE_FUNCTIONS = {"min": min, "max": max, "abs": abs, "math": math}
@@ -182,6 +183,16 @@ def evaluate_constraints(
     return (len(failures) == 0), failures
 
 
+def _extract_identifiers(expression: str) -> Set[str]:
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ObjectiveEvaluationError(
+            f"Objective expression '{expression}' could not be parsed: {exc}"
+        ) from exc
+    return {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+
 def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> float:
     if not isinstance(metrics, Mapping):
         raise ObjectiveEvaluationError("Objective metrics payload must be a mapping")
@@ -196,13 +207,10 @@ def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> fl
         except Exception:
             return math.inf
     expr = _objective_expression(spec)
+    identifiers = _extract_identifiers(expr)
     evaluator = ExpressionEvaluator(expr, label="<objective>")
 
-    referenced_names = {
-        name
-        for name in getattr(evaluator, "_code").co_names
-        if name not in SAFE_FUNCTIONS
-    }
+    referenced_names = {name for name in identifiers if name not in SAFE_FUNCTIONS}
     missing = sorted(name for name in referenced_names if name not in context)
     if missing:
         formatted = ", ".join(missing)
