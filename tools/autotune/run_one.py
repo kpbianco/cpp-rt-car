@@ -224,8 +224,21 @@ def extract_scenario(config_data: Dict[str, Any], config_path: pathlib.Path) -> 
 
 def collect_env_info() -> Dict[str, Any]:
     tokens = common_host.host_tokens()
+    cpu_model = tokens.get("cpu_model", "unknown-cpu")
+    cpu_slug = tokens.get("cpu_slug") or common_host.slugify_cpu(cpu_model)
+    os_name = tokens.get("os_name", "unknown-os")
     cores = os.cpu_count() or 0
-    return {**tokens, "cores": int(cores)}
+
+    env: Dict[str, Any] = {
+        "cpu_model": cpu_model,
+        "cpu_slug": cpu_slug,
+        "os_name": os_name,
+        "cores": int(cores),
+    }
+    # Preserve legacy keys used by downstream tooling while exposing richer tokens.
+    env.setdefault("cpu", cpu_model)
+    env.setdefault("os", os_name)
+    return env
 
 
 def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:

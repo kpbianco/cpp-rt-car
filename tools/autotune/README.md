@@ -51,7 +51,14 @@ Every invocation of `run_one.py` produces a single JSON object describing the sa
   "_seed": int,
   "_scenario": str,
   "_ts": "<ISO8601 timestamp>",
-  "env": { "cpu": str, "cores": int, "os": str },
+  "env": {
+    "cpu_model": str,
+    "cpu_slug": str,
+    "os_name": str,
+    "cores": int,
+    "cpu": str,  # legacy alias of cpu_model
+    "os": str    # legacy alias of os_name
+  },
   "_schema": "v1"
 }
 ```
