@@ -101,10 +101,32 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert autotune parameters into runtime configuration JSON."
     )
-    parser.add_argument("--spec", required=True, type=pathlib.Path)
-    parser.add_argument("--params-json", required=True)
-    parser.add_argument("--out", required=True, type=pathlib.Path)
-    return parser.parse_args()
+    parser.add_argument("--spec", type=pathlib.Path)
+    parser.add_argument("--params-json")
+    parser.add_argument("--out", type=pathlib.Path)
+    parser.add_argument(
+        "--dump-mapped-params",
+        action="store_true",
+        help=(
+            "Print the names of parameters mapped by build_config and exit. "
+            "Useful for coverage checks."
+        ),
+    )
+    args = parser.parse_args()
+
+    if not args.dump_mapped_params:
+        missing = [
+            flag
+            for flag in ("spec", "params_json", "out")
+            if getattr(args, flag) is None
+        ]
+        if missing:
+            parser.error(
+                "--spec, --params-json and --out are required unless "
+                "--dump-mapped-params is provided"
+            )
+
+    return args
 
 
 def parse_scalar(token: str) -> Any:
@@ -332,23 +354,30 @@ def set_path(target: MutableMapping[str, Any], path: Iterable[str], value: Any) 
     current[leaf] = value
 
 
+PARAM_TO_CONFIG_PATH: Mapping[str, Tuple[str, ...]] = {
+    "threads": ("threads",),
+    "chunk_target_us": ("chunking", "target_p90_us"),
+    "aosoa_block": ("layout", "aosoa_block"),
+    "steal_threshold": ("scheduler", "steal_threshold"),
+    "prefetch_distance_bytes": ("prefetch", "distance_bytes"),
+    "fma_mode": ("numerics", "fma"),
+    "arena_per_thread_mb": ("memory", "arena_per_thread_mb"),
+    "huge_pages": ("memory", "huge_pages"),
+    "emergency_spawn_enabled": ("scheduler", "emergency_spawn"),
+    "governor_target_util": ("governor", "target_util"),
+    "governor_hysteresis": ("governor", "hysteresis"),
+}
+
+#: Names of autotune parameters that build_config knows how to translate. When
+#: adding new knobs to spec.yaml, extend this set (and PARAM_TO_CONFIG_PATH) so
+#: coverage checks continue to pass.
+MAPPED_PARAMS = frozenset(PARAM_TO_CONFIG_PATH.keys())
+
+
 def build_config(params: Mapping[str, Any]) -> Dict[str, Any]:
     config: Dict[str, Any] = {}
-    mapping = {
-        "threads": ("threads",),
-        "chunk_target_us": ("chunking", "target_p90_us"),
-        "aosoa_block": ("layout", "aosoa_block"),
-        "steal_threshold": ("scheduler", "steal_threshold"),
-        "prefetch_distance_bytes": ("prefetch", "distance_bytes"),
-        "fma_mode": ("numerics", "fma"),
-        "arena_per_thread_mb": ("memory", "arena_per_thread_mb"),
-        "huge_pages": ("memory", "huge_pages"),
-        "emergency_spawn_enabled": ("scheduler", "emergency_spawn"),
-        "governor_target_util": ("governor", "target_util"),
-        "governor_hysteresis": ("governor", "hysteresis"),
-    }
 
-    for name, path in mapping.items():
+    for name, path in PARAM_TO_CONFIG_PATH.items():
         if name not in params:
             continue
         set_path(config, path, params[name])
@@ -371,6 +400,10 @@ def write_json(path: pathlib.Path, data: Mapping[str, Any]) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.dump_mapped_params:
+        for name in sorted(MAPPED_PARAMS):
+            print(name)
+        return
     specs = load_spec(args.spec)
     params = parse_params(args.params_json)
     validated = validate_params(params, specs)
