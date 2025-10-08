@@ -6,18 +6,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import pathlib
-import platform
-import re
 import sys
 from typing import Any, Iterable, Mapping, Sequence
 
 if __package__ is None or __package__ == "":
     sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
     from tools.autotune.make_config import build_config
+    from tools.autotune import common_host
 else:
     from .make_config import build_config
+    from . import common_host
 
 
 
@@ -59,65 +58,6 @@ def parse_args() -> argparse.Namespace:
         help="Show the resolved destination without writing files.",
     )
     return parser.parse_args()
-
-
-def detect_cpu_model() -> str:
-    candidates: list[str] = []
-
-    cpuinfo = pathlib.Path("/proc/cpuinfo")
-    if cpuinfo.exists():
-        try:
-            for line in cpuinfo.read_text(encoding="utf-8", errors="ignore").splitlines():
-                key, sep, value = line.partition(":")
-                if not sep:
-                    continue
-                lower_key = key.strip().lower()
-                candidate = value.strip()
-                if lower_key in {"model name", "hardware", "cpu part"} and candidate:
-                    return candidate
-                if lower_key == "processor" and candidate and not candidate.isdigit():
-                    candidates.append(candidate)
-        except OSError:
-            pass
-
-    fallbacks = (
-        platform.processor,
-        platform.machine,
-        lambda: platform.uname().processor,
-    )
-    for getter in fallbacks:
-        try:
-            value = getter()
-        except OSError:
-            continue
-        if value:
-            candidates.append(str(value))
-
-    if candidates:
-        return candidates[0]
-    return "unknown-cpu"
-
-
-def detect_os_name() -> str:
-    try:
-        name = platform.system()
-    except OSError:
-        name = ""
-    if name:
-        return name
-    try:
-        return os.uname().sysname
-    except OSError:
-        return "unknown-os"
-
-
-def normalise_token(value: str) -> str:
-    cleaned = value.strip()
-    cleaned = "".join(
-        ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in cleaned
-    )
-    cleaned = re.sub(r"-+", "-", cleaned).strip("-")
-    return cleaned or "unknown"
 
 
 def extract_params(payload: Any) -> Mapping[str, Any] | None:
@@ -188,13 +128,17 @@ def main() -> None:
     params = load_best_params(search_paths)
     config = build_config(params)
 
-    cpu_name = args.cpu_override or detect_cpu_model()
-    os_name = args.os_override or detect_os_name()
+    tokens = common_host.host_tokens().copy()
+    if args.cpu_override:
+        override = args.cpu_override.strip()
+        tokens["cpu_model"] = override or tokens["cpu_model"]
+        tokens["cpu_slug"] = common_host.slugify_cpu(override or tokens["cpu_model"])
+    if args.os_override:
+        override_os = args.os_override.strip()
+        if override_os:
+            tokens["os_name"] = common_host.normalise_os_name(override_os)
 
-    cpu_token = normalise_token(cpu_name)
-    os_token = normalise_token(os_name)
-
-    destination = args.profiles_dir / f"{cpu_token}-{os_token}.json"
+    destination = args.profiles_dir / f"{tokens['cpu_slug']}-{tokens['os_name']}.json"
 
     if args.dry_run:
         print(destination)

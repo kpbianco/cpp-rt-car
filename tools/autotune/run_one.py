@@ -9,7 +9,6 @@ import json
 import math
 import os
 import pathlib
-import platform
 import subprocess
 import sys
 from typing import Any, Dict, Iterable, List, Mapping, Optional
@@ -20,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.autotune.make_config import load_simple_yaml  # noqa: E402
+from tools.autotune import common_host  # noqa: E402
 from tools.autotune.common_eval import (  # noqa: E402
     compute_objective,
     evaluate_constraints,
@@ -221,15 +221,9 @@ def extract_scenario(config_data: Dict[str, Any], config_path: pathlib.Path) -> 
 
 
 def collect_env_info() -> Dict[str, Any]:
-    uname = platform.uname()
-    cpu_name = uname.processor or uname.machine or "unknown"
+    tokens = common_host.host_tokens()
     cores = os.cpu_count() or 0
-    os_name = platform.platform()
-    return {
-        "cpu": str(cpu_name),
-        "cores": int(cores),
-        "os": str(os_name),
-    }
+    return {**tokens, "cores": int(cores)}
 
 
 def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:

@@ -10,7 +10,6 @@ import json
 import math
 import os
 import pathlib
-import platform
 import random
 import statistics
 import subprocess
@@ -27,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.autotune import screening  # noqa: E402
+from tools.autotune import common_host  # noqa: E402
 from tools.autotune.common_io import append_jsonl as append_jsonl_record  # noqa: E402
 from tools.autotune.make_config import (  # noqa: E402
     build_config,
@@ -290,9 +290,13 @@ def detect_baseline_source(app: AppSpec, results_dir: pathlib.Path) -> Optional[
                     params=params,
                 )
 
-    cpu = sanitise_filename(platform.machine() or "cpu")
-    system = sanitise_filename(platform.system() or "os")
-    machine_candidates = [f"{cpu}-{system}.json", f"{cpu}-{system}"]
+    tokens = common_host.host_tokens()
+    cpu_slug = tokens["cpu_slug"]
+    os_name = tokens["os_name"]
+    machine_candidates = [
+        f"{cpu_slug}-{os_name}.json",
+        f"{cpu_slug}-{os_name}",
+    ]
     for name in machine_candidates:
         for directory in directories:
             candidate = directory / name
@@ -1117,9 +1121,8 @@ def main() -> None:
     if not isinstance(best_params_final, Mapping):
         best_params_final = {}
 
-    cpu = sanitise_filename(platform.machine() or "cpu")
-    system = sanitise_filename(platform.system() or "os")
-    profile_path = profiles_dir / f"{cpu}-{system}.json"
+    tokens = common_host.host_tokens()
+    profile_path = profiles_dir / f"{tokens['cpu_slug']}-{tokens['os_name']}.json"
 
     subprocess.run(
         [
