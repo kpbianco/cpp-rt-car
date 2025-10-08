@@ -393,6 +393,41 @@ def build_config(params: Mapping[str, Any]) -> Dict[str, Any]:
         enabled = params["prefetch_distance_bytes"] > 0
         set_path(config, ("prefetch", "enabled"), enabled)
 
+    chunking_cfg = config.setdefault("chunking", {})
+    chunking_cfg.setdefault("min_items", 1)
+    chunking_cfg.setdefault("max_items", 4096)
+
+    layout_cfg = config.setdefault("layout", {})
+    layout_cfg.setdefault("align_bytes", 64)
+    layout_cfg.setdefault("pad_to_simd", True)
+
+    prefetch_cfg = config.setdefault("prefetch", {})
+    prefetch_cfg.setdefault("enabled", False)
+    prefetch_cfg.setdefault("distance_bytes", 0)
+
+    scheduler_cfg = config.setdefault("scheduler", {})
+    scheduler_cfg.setdefault("steal_threshold", 0)
+    scheduler_cfg.setdefault("emergency_spawn", False)
+
+    governor_cfg = config.setdefault("governor", {})
+    governor_cfg.setdefault("target_util", 0.0)
+    governor_cfg.setdefault("hysteresis", 0.0)
+
+    numerics_cfg = config.setdefault("numerics", {})
+    numerics_cfg.setdefault("ftz_daz", True)
+    numerics_cfg.setdefault("fma", "auto")
+
+    memory_cfg = config.setdefault("memory", {})
+    memory_cfg.setdefault("arena_per_thread_mb", 0)
+    memory_cfg.setdefault("huge_pages", False)
+    memory_cfg.setdefault("numa", "first_touch")
+    memory_cfg.setdefault("pretouch", True)
+
+    tracing_cfg = config.setdefault("tracing", {})
+    tracing_cfg.setdefault("bintrace", True)
+
+    config.setdefault("threads", "physical")
+
     # Emit the original params alongside the resolved config for traceability.
     config["params"] = dict(params)
     return config
@@ -425,14 +460,18 @@ def run_self_test() -> None:
 
     payload = json.dumps(sample_params)
     parsed = parse_params(payload)
-    validated = validate_params(parsed, specs)
-    config = build_config(validated)
+    validated_params = validate_params(parsed, specs)
+    config = build_config(validated_params)
 
     prefetch_enabled = config.get("prefetch", {}).get("enabled")
     if prefetch_enabled is not True:
         raise SystemExit("prefetch.enabled should be true when distance_bytes > 0")
 
-    zero_params = dict(validated)
+    bintrace_enabled = config.get("tracing", {}).get("bintrace")
+    if bintrace_enabled is not True:
+        raise SystemExit("tracing.bintrace should default to true for autotune configs")
+
+    zero_params = dict(validated_params)
     zero_params["prefetch_distance_bytes"] = 0
     zero_config = build_config(zero_params)
     zero_prefetch = zero_config.get("prefetch", {}).get("enabled")
