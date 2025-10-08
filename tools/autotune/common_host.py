@@ -121,13 +121,32 @@ def slugify_cpu(cpu_model: str) -> str:
     return text or "unknown_cpu"
 
 
-@lru_cache(maxsize=1)
-def host_tokens() -> Dict[str, str]:
+@lru_cache(maxsize=None)
+def _host_tokens_cached(cpu_override: str, os_override: str) -> tuple[str, str, str]:
+    """Internal helper to memoise host token detection and overrides."""
+
+    cpu_model = cpu_override or detect_cpu_model()
+    if cpu_model:
+        cpu_model = cpu_model.strip() or detect_cpu_model()
+    else:
+        cpu_model = detect_cpu_model()
+
+    os_name = os_override or detect_os_name()
+    if os_name:
+        os_name = normalise_os_name(os_name)
+    else:
+        os_name = detect_os_name()
+
+    cpu_slug = slugify_cpu(cpu_model)
+    return cpu_model, cpu_slug, os_name
+
+
+def host_tokens(cpu_override: str | None = None, os_override: str | None = None) -> Dict[str, str]:
     """Return the detected host CPU/OS identifiers used across tools."""
 
-    cpu_model = detect_cpu_model()
-    os_name = detect_os_name()
-    cpu_slug = slugify_cpu(cpu_model)
+    cpu_arg = (cpu_override or "").strip()
+    os_arg = (os_override or "").strip()
+    cpu_model, cpu_slug, os_name = _host_tokens_cached(cpu_arg, os_arg)
     return {
         "cpu_model": cpu_model,
         "cpu_slug": cpu_slug,

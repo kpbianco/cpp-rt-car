@@ -39,7 +39,7 @@ The workflow writes three directories at the repository root:
 
 | Directory | Purpose | Key files |
 | --- | --- | --- |
-| `profiles/` | Drop-in machine profiles named `<cpu>-<os>.json`. The runtime auto-loads these alongside stock `default_safe`/`default_fast`. | `profiles/x86_64-Linux.json` (example) |
+| `profiles/` | Drop-in machine profiles named `<cpu>-<os>.json`. The runtime auto-loads these alongside stock `default_safe`/`default_fast`. | `profiles/zen3_linux-linux.json` (example) |
 | `results/` | Raw experiment log and orchestration breadcrumbs suitable for CI diffing or ad-hoc plots. | `experiments.jsonl`, `summary.json`, `top_candidates.json`, `validation_summary.json` |
 | `reports/` | Aggregated analytics from `tools/autotune/analyze.py` — Pareto sets, CSV summaries, best run report. | `pareto.json`, `summary.csv`, `best.json` |
 
@@ -61,7 +61,13 @@ For one-off sweeps or custom analytics, inspect `results/experiments.jsonl` with
 After the run finishes, copy the generated profile into your deployment target or point `RTFW_PROFILE` at the emitted JSON. The runtime loads this alongside existing configs:
 
 ```bash
-RTFW_PROFILE=$(uname -m)-$(uname -s) ./build/bin/rtfw_demo --rt --metrics-json
+PROFILE_NAME=$(python3 - <<'PY'
+from tools.autotune import common_host
+tokens = common_host.host_tokens()
+print(f"{tokens['cpu_slug']}-{tokens['os_name']}.json")
+PY
+)
+RTFW_PROFILE=$PROFILE_NAME ./build/bin/rtfw_demo --rt --metrics-json
 ```
 
 Because the profile was derived from interval metrics, keep monitoring both cumulative and interval outputs in production to ensure no long-horizon drift.
