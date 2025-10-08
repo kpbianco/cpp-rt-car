@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Autotune runtime configuration",
+  "type": "object",
+  "required": [
+    "threads",
+    "chunking",
+    "layout",
+    "scheduler",
+    "prefetch",
+    "memory",
+    "numerics",
+    "governor",
+    "params"
+  ],
+  "properties": {
+    "threads": {
+      "type": "string"
+    },
+    "chunking": {
+      "type": "object",
+      "required": ["target_p90_us"],
+      "properties": {
+        "target_p90_us": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "layout": {
+      "type": "object",
+      "required": ["aosoa_block"],
+      "properties": {
+        "aosoa_block": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scheduler": {
+      "type": "object",
+      "required": ["steal_threshold"],
+      "properties": {
+        "steal_threshold": {
+          "type": "integer"
+        },
+        "emergency_spawn": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "prefetch": {
+      "type": "object",
+      "required": ["distance_bytes", "enabled"],
+      "properties": {
+        "distance_bytes": {
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "memory": {
+      "type": "object",
+      "required": ["arena_per_thread_mb", "huge_pages"],
+      "properties": {
+        "arena_per_thread_mb": {
+          "type": "integer"
+        },
+        "huge_pages": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "numerics": {
+      "type": "object",
+      "required": ["fma"],
+      "properties": {
+        "fma": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "governor": {
+      "type": "object",
+      "required": ["target_util", "hysteresis"],
+      "properties": {
+        "target_util": {
+          "type": "number"
+        },
+        "hysteresis": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "params": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

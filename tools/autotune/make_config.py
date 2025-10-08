@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import pathlib
+import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Tuple
 
@@ -112,9 +113,15 @@ def parse_args() -> argparse.Namespace:
             "Useful for coverage checks."
         ),
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run internal sanity checks and exit",
+    )
+
     args = parser.parse_args()
 
-    if not args.dump_mapped_params:
+    if not args.dump_mapped_params and not args.self_test:
         missing = [
             flag
             for flag in ("spec", "params_json", "out")
@@ -398,11 +405,56 @@ def write_json(path: pathlib.Path, data: Mapping[str, Any]) -> None:
         fh.write("\n")
 
 
+def run_self_test() -> None:
+    spec_path = pathlib.Path(__file__).with_name("spec.yaml")
+    specs = load_spec(spec_path)
+
+    sample_params = {
+        "threads": "physical",
+        "chunk_target_us": 140,
+        "aosoa_block": 256,
+        "steal_threshold": 3,
+        "prefetch_distance_bytes": 256,
+        "huge_pages": True,
+        "governor_target_util": 0.9,
+        "governor_hysteresis": 0.02,
+        "fma_mode": "on",
+        "emergency_spawn_enabled": False,
+        "arena_per_thread_mb": 64,
+    }
+
+    payload = json.dumps(sample_params)
+    parsed = parse_params(payload)
+    validated = validate_params(parsed, specs)
+    config = build_config(validated)
+
+    prefetch_enabled = config.get("prefetch", {}).get("enabled")
+    if prefetch_enabled is not True:
+        raise SystemExit("prefetch.enabled should be true when distance_bytes > 0")
+
+    zero_params = dict(validated)
+    zero_params["prefetch_distance_bytes"] = 0
+    zero_config = build_config(zero_params)
+    zero_prefetch = zero_config.get("prefetch", {}).get("enabled")
+    if zero_prefetch is not False:
+        raise SystemExit("prefetch.enabled should be false when distance_bytes == 0")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = pathlib.Path(tmpdir) / "config.json"
+        write_json(path, config)
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    if loaded != config:
+        raise SystemExit("write_json did not round-trip configuration data")
+
+
 def main() -> None:
     args = parse_args()
     if args.dump_mapped_params:
         for name in sorted(MAPPED_PARAMS):
             print(name)
+        return
+    if args.self_test:
+        run_self_test()
         return
     specs = load_spec(args.spec)
     params = parse_params(args.params_json)
