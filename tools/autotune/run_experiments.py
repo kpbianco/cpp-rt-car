@@ -37,6 +37,10 @@ from tools.autotune.make_config import (  # noqa: E402
 )
 from tools.autotune.optimize import AppSpec, ObjectiveSpec, parse_app_spec, parse_objective_spec  # noqa: E402
 from tools.autotune.optimize import ExpressionEvaluator  # type: ignore[attr-defined]  # noqa: E402
+from tools.autotune.common_eval import (  # noqa: E402
+    OBJECTIVE_ERROR_EXIT_CODE,
+    ObjectiveEvaluationError,
+)
 from tools.autotune.validate import (  # noqa: E402
     RobustnessSpec,
     parse_robustness,
@@ -677,6 +681,9 @@ def run_single(app: AppSpec, config_path: pathlib.Path, spec_path: pathlib.Path)
     except subprocess.CalledProcessError as exc:
         stdout = exc.stdout.strip() if exc.stdout else ""
         stderr = exc.stderr.strip() if exc.stderr else ""
+        if exc.returncode == OBJECTIVE_ERROR_EXIT_CODE:
+            message = stderr or stdout or "Objective evaluation failed"
+            raise ObjectiveEvaluationError(message) from exc
         reason_parts = ["run_one failed"]
         if stdout:
             reason_parts.append(f"stdout: {stdout}")
@@ -843,10 +850,11 @@ def compute_spec_digest(
     return digest.hexdigest()
 
 
-def main() -> None:
-    args = parse_args()
-
-    spec_path = args.spec.resolve()
+def _run_pipeline(
+    args: argparse.Namespace,
+    spec_path: pathlib.Path,
+    error_context: Dict[str, Optional[str]],
+) -> None:
     if not spec_path.is_file():
         raise SystemExit(f"Spec file not found: {spec_path}")
 
@@ -871,6 +879,7 @@ def main() -> None:
     metadata_overrides = {"app_overrides": dict(app_overrides)} if app_overrides else {}
 
     objective_spec = parse_objective_spec(spec_data)
+    error_context["objective_expr"] = objective_spec.expression
     objective_eval = ExpressionEvaluator(objective_spec.expression)
     tiebreakers_eval = [ExpressionEvaluator(expr) for expr in objective_spec.tiebreakers]
 
@@ -897,7 +906,13 @@ def main() -> None:
         rng=rng,
     )
     screen_candidates_path = results_dir / "screening_candidates.json"
-    write_json_file(screen_candidates_path, {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "candidates": screen_candidates})
+    write_json_file(
+        screen_candidates_path,
+        {
+            "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "candidates": screen_candidates,
+        },
+    )
 
     for index, candidate in enumerate(screen_candidates):
         metadata = {**metadata_overrides, "source": "screen", "index": index}
@@ -1055,7 +1070,13 @@ def main() -> None:
                         ordered_runs.append(run)
             run_records = ordered_runs
             runs = ordered_runs
-            aggregated = aggregate_runs(runs, objective_spec, objective_eval, tiebreakers_eval, app_spec.frame_budget_ms)
+            aggregated = aggregate_runs(
+                runs,
+                objective_spec,
+                objective_eval,
+                tiebreakers_eval,
+                app_spec.frame_budget_ms,
+            )
             record = {
                 "stage": "validate",
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -1168,6 +1189,22 @@ def main() -> None:
         "app_overrides": app_overrides,
     }
     print(json.dumps(ci_summary, sort_keys=True))
+
+
+def main() -> None:
+    args = parse_args()
+    spec_path = args.spec.resolve()
+    error_context: Dict[str, Optional[str]] = {"objective_expr": None}
+    try:
+        _run_pipeline(args, spec_path, error_context)
+    except ObjectiveEvaluationError as exc:
+        expression = error_context.get("objective_expr") or "<unknown>"
+        message = str(exc).strip() or "Objective evaluation failed"
+        print(
+            f"Objective evaluation error for spec '{spec_path}': expression '{expression}' failed: {message}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from exc
 
 
 if __name__ == "__main__":

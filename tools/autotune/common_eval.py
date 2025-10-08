@@ -9,6 +9,13 @@ SAFE_GLOBALS = {"__builtins__": {}}
 SAFE_FUNCTIONS = {"min": min, "max": max, "abs": abs, "math": math}
 
 
+class ObjectiveEvaluationError(ValueError):
+    """Raised when the objective expression cannot be evaluated safely."""
+
+
+OBJECTIVE_ERROR_EXIT_CODE = 97
+
+
 class ExpressionEvaluator:
     def __init__(self, expression: str, *, label: str = "<expression>") -> None:
         prepared = (expression or "").strip()
@@ -177,7 +184,7 @@ def evaluate_constraints(
 
 def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> float:
     if not isinstance(metrics, Mapping):
-        return math.inf
+        raise ObjectiveEvaluationError("Objective metrics payload must be a mapping")
     frame_budget = _resolve_frame_budget(spec, metrics)
     context: Dict[str, Any] = dict(metrics)
     if frame_budget is not None and "frame_budget_ms" not in context:
@@ -190,12 +197,28 @@ def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> fl
             return math.inf
     expr = _objective_expression(spec)
     evaluator = ExpressionEvaluator(expr, label="<objective>")
+
+    referenced_names = {
+        name
+        for name in getattr(evaluator, "_code").co_names
+        if name not in SAFE_FUNCTIONS
+    }
+    missing = sorted(name for name in referenced_names if name not in context)
+    if missing:
+        formatted = ", ".join(missing)
+        raise ObjectiveEvaluationError(
+            f"Objective expression '{expr}' references unknown identifiers: {formatted}"
+        )
     try:
         value = evaluator(context)
-    except (NameError, ValueError, TypeError, ZeroDivisionError, OverflowError):
-        return math.inf
-    if math.isnan(value):
-        return math.inf
+    except (NameError, ValueError, TypeError, ZeroDivisionError, OverflowError) as exc:
+        raise ObjectiveEvaluationError(
+            f"Objective expression '{expr}' could not be evaluated: {exc}"
+        ) from exc
+    if math.isnan(value) or math.isinf(value):
+        raise ObjectiveEvaluationError(
+            "Objective evaluated to NaN/Inf; check spec or metrics keys"
+        )
     return float(value)
 
 
@@ -205,4 +228,6 @@ __all__ = [
     "parse_hard_constraints",
     "evaluate_constraints",
     "compute_objective",
+    "ObjectiveEvaluationError",
+    "OBJECTIVE_ERROR_EXIT_CODE",
 ]

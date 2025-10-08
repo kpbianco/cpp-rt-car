@@ -21,6 +21,8 @@ if str(REPO_ROOT) not in sys.path:
 from tools.autotune.make_config import load_simple_yaml  # noqa: E402
 from tools.autotune import common_host  # noqa: E402
 from tools.autotune.common_eval import (  # noqa: E402
+    OBJECTIVE_ERROR_EXIT_CODE,
+    ObjectiveEvaluationError,
     compute_objective,
     evaluate_constraints,
 )
@@ -340,7 +342,11 @@ def main() -> None:
     constraint_metrics.update(metrics_summary)
 
     ok, failures = evaluate_constraints(spec_data, constraint_metrics)
-    objective = compute_objective(spec_data, constraint_metrics)
+    try:
+        objective = compute_objective(spec_data, constraint_metrics)
+    except ObjectiveEvaluationError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(OBJECTIVE_ERROR_EXIT_CODE) from exc
     failure_messages = [details["message"] for details in failures.values()]
     if failures:
         objective = math.inf
