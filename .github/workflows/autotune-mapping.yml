@@ -1,0 +1,24 @@
+name: AT-MAP5
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  autotune-mapping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run autotune mapping self-test
+        run: |
+          python tools/autotune/make_config.py --self-test
+          python tools/autotune/mapping_smoke.py

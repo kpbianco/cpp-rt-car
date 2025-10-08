@@ -176,12 +176,9 @@ def evaluate_constraints(
 
 
 def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> float:
-    if not isinstance(metrics, Mapping):
+    context, frame_budget = prepare_metrics_context(spec, metrics)
+    if context is None:
         return math.inf
-    frame_budget = _resolve_frame_budget(spec, metrics)
-    context: Dict[str, Any] = dict(metrics)
-    if frame_budget is not None and "frame_budget_ms" not in context:
-        context["frame_budget_ms"] = frame_budget
     for constraint in parse_hard_constraints(spec):
         try:
             if not constraint.evaluate(context, frame_budget):
@@ -199,10 +196,23 @@ def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> fl
     return float(value)
 
 
+def prepare_metrics_context(
+    spec: Mapping[str, Any], metrics: Mapping[str, Any]
+) -> Tuple[Optional[Dict[str, Any]], Optional[float]]:
+    if not isinstance(metrics, Mapping):
+        return None, None
+    context: Dict[str, Any] = dict(metrics)
+    frame_budget = _resolve_frame_budget(spec, context)
+    if frame_budget is not None and "frame_budget_ms" not in context:
+        context["frame_budget_ms"] = frame_budget
+    return context, frame_budget
+
+
 __all__ = [
     "ExpressionEvaluator",
     "ConstraintEvaluator",
     "parse_hard_constraints",
     "evaluate_constraints",
     "compute_objective",
+    "prepare_metrics_context",
 ]

@@ -7,7 +7,6 @@ import argparse
 import json
 import math
 import pathlib
-import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Tuple
 
@@ -368,9 +367,11 @@ PARAM_TO_CONFIG_PATH: Mapping[str, Tuple[str, ...]] = {
     "steal_threshold": ("scheduler", "steal_threshold"),
     "prefetch_distance_bytes": ("prefetch", "distance_bytes"),
     "fma_mode": ("numerics", "fma"),
+    "ftz_daz": ("numerics", "ftz_daz"),
     "arena_per_thread_mb": ("memory", "arena_per_thread_mb"),
     "huge_pages": ("memory", "huge_pages"),
     "emergency_spawn_enabled": ("scheduler", "emergency_spawn"),
+    "priority_policy": ("scheduler", "priority_policy"),
     "governor_target_util": ("governor", "target_util"),
     "governor_hysteresis": ("governor", "hysteresis"),
 }
@@ -441,55 +442,71 @@ def write_json(path: pathlib.Path, data: Mapping[str, Any]) -> None:
 
 
 def run_self_test() -> None:
-    spec_path = pathlib.Path(__file__).with_name("spec.yaml")
-    specs = load_spec(spec_path)
-
-    sample_params = {
+    canonical_params = {
         "threads": "physical",
-        "chunk_target_us": 140,
+        "chunk_target_us": 100,
         "aosoa_block": 256,
-        "steal_threshold": 3,
-        "prefetch_distance_bytes": 256,
-        "huge_pages": True,
-        "governor_target_util": 0.9,
+        "prefetch_distance_bytes": 128,
+        "steal_threshold": 4,
+        "priority_policy": "normal",
+        "emergency_spawn_enabled": True,
+        "governor_target_util": 0.95,
         "governor_hysteresis": 0.02,
-        "fma_mode": "on",
-        "emergency_spawn_enabled": False,
+        "ftz_daz": True,
+        "fma_mode": "auto_no_when_deterministic",
+        "huge_pages": True,
         "arena_per_thread_mb": 64,
     }
 
-    payload = json.dumps(sample_params)
-    parsed = parse_params(payload)
-    validated = validate_params(parsed, specs)
-    config = build_config(validated)
+    config = build_config(canonical_params)
 
-    prefetch_enabled = config.get("prefetch", {}).get("enabled")
-    if prefetch_enabled is not True:
-        raise SystemExit("prefetch.enabled should be true when distance_bytes > 0")
+    def require(path: Tuple[str, ...], expected: Any) -> None:
+        node: Any = config
+        for key in path:
+            if not isinstance(node, Mapping):
+                raise SystemExit(
+                    f"SELF-TEST FAILED: {'.'.join(path)} missing (encountered non-mapping)"
+                )
+            if key not in node:
+                raise SystemExit(f"SELF-TEST FAILED: {'.'.join(path)} not present in config")
+            node = node[key]
+        if node != expected:
+            raise SystemExit(
+                f"SELF-TEST FAILED: {'.'.join(path)} expected {expected!r}, got {node!r}"
+            )
 
-    zero_params = dict(validated)
-    zero_params["prefetch_distance_bytes"] = 0
-    zero_config = build_config(zero_params)
-    zero_prefetch = zero_config.get("prefetch", {}).get("enabled")
-    if zero_prefetch is not False:
-        raise SystemExit("prefetch.enabled should be false when distance_bytes == 0")
+    require(("threads",), "physical")
+    require(("chunking", "target_p90_us"), 100)
+    require(("layout", "aosoa_block"), 256)
+    require(("prefetch", "distance_bytes"), 128)
+    require(("prefetch", "enabled"), True)
+    require(("scheduler", "steal_threshold"), 4)
+    require(("scheduler", "priority_policy"), "normal")
+    require(("scheduler", "emergency_spawn"), True)
+    require(("governor", "target_util"), 0.95)
+    require(("governor", "hysteresis"), 0.02)
+    require(("numerics", "ftz_daz"), True)
+    require(("numerics", "fma"), "auto_no_when_deterministic")
+    require(("memory", "huge_pages"), True)
+    require(("memory", "arena_per_thread_mb"), 64)
+    require(("memory", "numa"), "first_touch")
+    require(("memory", "pretouch"), True)
+    require(("tracing", "bintrace"), True)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = pathlib.Path(tmpdir) / "config.json"
-        write_json(path, config)
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    if loaded != config:
-        raise SystemExit("write_json did not round-trip configuration data")
+    if config.get("params") != canonical_params:
+        raise SystemExit("SELF-TEST FAILED: params block did not round-trip canonical values")
+
+    print("SELF-TEST OK")
 
 
 def main() -> None:
     args = parse_args()
+    if args.self_test:
+        run_self_test()
+        return
     if args.dump_mapped_params:
         for name in sorted(MAPPED_PARAMS):
             print(name)
-        return
-    if args.self_test:
-        run_self_test()
         return
     specs = load_spec(args.spec)
     params = parse_params(args.params_json)

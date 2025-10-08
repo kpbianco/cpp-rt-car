@@ -128,17 +128,12 @@ def main() -> None:
     params = load_best_params(search_paths)
     config = build_config(params)
 
-    tokens = common_host.host_tokens().copy()
-    if args.cpu_override:
-        override = args.cpu_override.strip()
-        tokens["cpu_model"] = override or tokens["cpu_model"]
-        tokens["cpu_slug"] = common_host.slugify_cpu(override or tokens["cpu_model"])
-    if args.os_override:
-        override_os = args.os_override.strip()
-        if override_os:
-            tokens["os_name"] = common_host.normalise_os_name(override_os)
-
-    destination = args.profiles_dir / f"{tokens['cpu_slug']}-{tokens['os_name']}.json"
+    tokens = common_host.host_tokens(
+        cpu_override=args.cpu_override,
+        os_override=args.os_override,
+    )
+    profile_filename = f"{tokens['cpu_slug']}-{tokens['os_name']}.json"
+    destination = args.profiles_dir / profile_filename
 
     if args.dry_run:
         print(destination)
