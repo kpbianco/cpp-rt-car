@@ -87,6 +87,37 @@ def run_mapping_coverage_check() -> None:
     _run_command("check_mapping_coverage", [sys.executable, str(script)])
 
 
+def run_round_trip_dry_run(config_path: pathlib.Path) -> None:
+    demo_binary = REPO_ROOT / "build/bin/rtfw_demo"
+    if not demo_binary.is_file():
+        print("Skipping round-trip dry run: build/bin/rtfw_demo not found.")
+        return
+
+    tmp_config = pathlib.Path("/tmp/autocfg.json")
+    tmp_config.parent.mkdir(parents=True, exist_ok=True)
+    tmp_config.write_bytes(config_path.read_bytes())
+
+    try:
+        _run_command(
+            "rtfw_demo round-trip dry run",
+            [
+                str(demo_binary),
+                "--config",
+                str(tmp_config),
+                "--warmup",
+                "1s",
+                "--metrics-json-interval",
+                "--run",
+                "1s",
+            ],
+        )
+    finally:
+        try:
+            tmp_config.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def main() -> int:
     try:
         run_make_config_self_test()
@@ -127,12 +158,17 @@ def main() -> int:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = pathlib.Path(tmpdir)
+            config_paths = {}
             for name, params in param_sets:
                 out_path = tmpdir_path / f"{name}.json"
                 generate_config(params, out_path)
                 validate_config(out_path)
                 if name == "prefetch-zero":
                     check_prefetch_disabled(out_path)
+                config_paths[name] = out_path
+            round_trip_source = config_paths.get("prefetch-positive")
+            if round_trip_source is not None:
+                run_round_trip_dry_run(round_trip_source)
         run_mapping_coverage_check()
     except StepError as exc:
         print(f"MAPPING SMOKE FAILED: {exc}", file=sys.stderr)
