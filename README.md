@@ -285,6 +285,16 @@ The orchestration script screens the parameter space, runs local search, validat
 
 See [`docs/DOE_AUTOTUNE.md`](docs/DOE_AUTOTUNE.md) for pre-flight checks, interpreting objectives, and extending the factor space.
 
+### Autotune Mapping Tests
+
+Run the lightweight mapping checks before committing spec or tooling changes to
+ensure the generated configs still satisfy the JSON Schema guard rails:
+
+```bash
+python tools/autotune/make_config.py --self-test
+python tools/autotune/mapping_smoke.py
+```
+
 ---
 
 ## 16. C-ABI Embedding

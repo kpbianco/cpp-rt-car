@@ -13,13 +13,18 @@ import sys
 from collections import OrderedDict
 from dataclasses import dataclass
 from statistics import mean
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.autotune.common_eval import compute_objective, evaluate_constraints
+from tools.autotune.common_eval import (
+    ExpressionEvaluator,
+    compute_objective,
+    evaluate_constraints,
+    prepare_metrics_context,
+)
 from tools.autotune.make_config import load_simple_yaml
 
 
@@ -176,12 +181,73 @@ def load_experiments(path: pathlib.Path, expected_digest: Optional[str] = None) 
     return experiments
 
 
-def compute_best(experiments: Sequence[Experiment], maximize: bool) -> Experiment:
+RANK_EPSILON = 1e-6
+
+
+def _objective_bucket(value: float) -> float:
+    if not math.isfinite(value):
+        return math.inf
+    scaled = value / RANK_EPSILON
+    if scaled >= 0:
+        bucket = math.floor(scaled + 1e-12)
+    else:
+        bucket = math.ceil(scaled - 1e-12)
+    return float(bucket)
+
+
+def build_rank_key(spec: Mapping[str, Any], maximize: bool) -> Callable[[Experiment], Tuple[Any, ...]]:
+    metrics_payload = spec.get("metrics")
+    objective_payload: Mapping[str, Any] = {}
+    if isinstance(metrics_payload, Mapping):
+        candidate = metrics_payload.get("objective")
+        if isinstance(candidate, Mapping):
+            objective_payload = candidate
+
+    tiebreakers_raw = objective_payload.get("tiebreakers", [])
+    if tiebreakers_raw is None:
+        tiebreakers_raw = []
+    if not isinstance(tiebreakers_raw, Sequence) or isinstance(tiebreakers_raw, (str, bytes)):
+        raise SystemExit("metrics.objective.tiebreakers must be a sequence if provided")
+
+    evaluators: List[ExpressionEvaluator] = []
+    for index, expression in enumerate(tiebreakers_raw):
+        if not isinstance(expression, str):
+            raise SystemExit("Each tiebreaker expression must be a string")
+        evaluators.append(ExpressionEvaluator(expression, label=f"<tiebreaker {index}>"))
+
+    def evaluate_tiebreakers(exp: Experiment) -> Tuple[float, ...]:
+        if not evaluators:
+            return ()
+        context, _ = prepare_metrics_context(spec, exp.metrics)
+        if context is None:
+            return tuple(math.inf for _ in evaluators)
+        results: List[float] = []
+        for evaluator in evaluators:
+            try:
+                value = evaluator(context)
+            except (NameError, ValueError, TypeError, ZeroDivisionError, OverflowError):
+                value = math.inf
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
+                value = math.inf
+            results.append(float(value))
+        return tuple(results)
+
+    def key(exp: Experiment) -> Tuple[Any, ...]:
+        primary = -exp.objective if maximize else exp.objective
+        bucket = _objective_bucket(primary)
+        tiebreaker_values = evaluate_tiebreakers(exp)
+        return (not exp.ok, bucket, *tiebreaker_values, primary)
+
+    return key
+
+
+def compute_best(
+    experiments: Sequence[Experiment], rank_key: Callable[[Experiment], Tuple[Any, ...]]
+) -> Experiment:
     ok_results = [exp for exp in experiments if exp.ok]
     if not ok_results:
         raise SystemExit("No successful experiments (ok=true) found")
-    selector = max if maximize else min
-    return selector(ok_results, key=lambda exp: exp.objective)
+    return min(ok_results, key=rank_key)
 
 
 def pareto_frontier(experiments: Iterable[Experiment], maximize: bool) -> List[Experiment]:
@@ -274,7 +340,7 @@ def write_summary_csv(
     path: pathlib.Path,
     params_spec: Dict[str, Any],
     experiments: Sequence[Experiment],
-    maximize: bool,
+    rank_key: Callable[[Experiment], Tuple[Any, ...]],
     limit: int = 10,
 ) -> None:
     columns = ["objective", "ok", "reason"]
@@ -290,12 +356,6 @@ def write_summary_csv(
         "log_drops",
     ]
     columns.extend(metric_columns)
-
-    def rank_key(exp: Experiment) -> Tuple[bool, float]:
-        objective_value = exp.objective
-        if maximize:
-            objective_value = -objective_value
-        return (not exp.ok, objective_value)
 
     ranked = sorted(experiments, key=rank_key)[:limit]
 
@@ -345,13 +405,15 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    best = compute_best(experiments, spec.maximize)
+    rank_key = build_rank_key(spec.raw, spec.maximize)
+
+    best = compute_best(experiments, rank_key)
     pareto = pareto_frontier([exp for exp in experiments if exp.ok], spec.maximize)
     histograms = build_histograms(params_spec, experiments)
 
     write_best(args.out_dir / "best.json", best)
     write_pareto(args.out_dir / "pareto.json", pareto)
-    write_summary_csv(args.out_dir / "summary.csv", params_spec, experiments, spec.maximize)
+    write_summary_csv(args.out_dir / "summary.csv", params_spec, experiments, rank_key)
     write_summary_json(
         args.out_dir / "summary.json",
         best,
