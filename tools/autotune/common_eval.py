@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 import math
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Set, Tuple
 
 SAFE_GLOBALS = {"__builtins__": {}}
 SAFE_FUNCTIONS = {"min": min, "max": max, "abs": abs, "math": math}
+
+
+class ObjectiveEvaluationError(ValueError):
+    """Raised when the objective expression cannot be evaluated safely."""
+
+
+OBJECTIVE_ERROR_EXIT_CODE = 97
 
 
 class ExpressionEvaluator:
@@ -119,6 +127,27 @@ def _resolve_frame_budget(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -
     return None
 
 
+def prepare_metrics_context(
+    spec: Mapping[str, Any], metrics: Mapping[str, Any]
+) -> Tuple[Optional[Dict[str, Any]], Optional[float]]:
+    """Return a prepared metrics mapping and resolved frame budget.
+
+    The helper mirrors the behaviour expected by the autotune callers that need a
+    metrics mapping augmented with the resolved ``frame_budget_ms`` when
+    available.  A ``None`` context is returned when the provided metrics payload
+    is not a mapping, allowing older call sites to treat the objective as
+    unsatisfied without immediately raising.
+    """
+
+    if not isinstance(metrics, Mapping):
+        return None, None
+    context: Dict[str, Any] = dict(metrics)
+    frame_budget = _resolve_frame_budget(spec, context)
+    if frame_budget is not None and "frame_budget_ms" not in context:
+        context["frame_budget_ms"] = frame_budget
+    return context, frame_budget
+
+
 def _objective_expression(spec: Mapping[str, Any]) -> str:
     metrics_payload = spec.get("metrics")
     if not isinstance(metrics_payload, Mapping):
@@ -175,13 +204,26 @@ def evaluate_constraints(
     return (len(failures) == 0), failures
 
 
+def _extract_identifiers(expression: str) -> Set[str]:
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ObjectiveEvaluationError(
+            f"Objective expression '{expression}' could not be parsed: {exc}"
+        ) from exc
+    return {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+
 def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> float:
     if not isinstance(metrics, Mapping):
-        return math.inf
-    frame_budget = _resolve_frame_budget(spec, metrics)
-    context: Dict[str, Any] = dict(metrics)
-    if frame_budget is not None and "frame_budget_ms" not in context:
-        context["frame_budget_ms"] = frame_budget
+        raise ObjectiveEvaluationError("Objective metrics payload must be a mapping")
+    context, frame_budget = prepare_metrics_context(spec, metrics)
+    if context is None:
+        raise ObjectiveEvaluationError("Objective metrics payload must be a mapping")
+    # ``prepare_metrics_context`` guarantees ``context`` is a mapping when it is
+    # not ``None``. Mypy/Pylance don't run here, but the assertion aids static
+    # checkers and human readers alike.
+    assert isinstance(context, Mapping)
     for constraint in parse_hard_constraints(spec):
         try:
             if not constraint.evaluate(context, frame_budget):
@@ -189,14 +231,39 @@ def compute_objective(spec: Mapping[str, Any], metrics: Mapping[str, Any]) -> fl
         except Exception:
             return math.inf
     expr = _objective_expression(spec)
+    identifiers = _extract_identifiers(expr)
     evaluator = ExpressionEvaluator(expr, label="<objective>")
+
+    referenced_names = {name for name in identifiers if name not in SAFE_FUNCTIONS}
+    missing = sorted(name for name in referenced_names if name not in context)
+    if missing:
+        formatted = ", ".join(missing)
+        raise ObjectiveEvaluationError(
+            f"Objective expression '{expr}' references unknown identifiers: {formatted}"
+        )
     try:
         value = evaluator(context)
-    except (NameError, ValueError, TypeError, ZeroDivisionError, OverflowError):
-        return math.inf
-    if math.isnan(value):
-        return math.inf
+    except (NameError, ValueError, TypeError, ZeroDivisionError, OverflowError) as exc:
+        raise ObjectiveEvaluationError(
+            f"Objective expression '{expr}' could not be evaluated: {exc}"
+        ) from exc
+    if math.isnan(value) or math.isinf(value):
+        raise ObjectiveEvaluationError(
+            "Objective evaluated to NaN/Inf; check spec or metrics keys"
+        )
     return float(value)
+
+
+def prepare_metrics_context(
+    spec: Mapping[str, Any], metrics: Mapping[str, Any]
+) -> Tuple[Optional[Dict[str, Any]], Optional[float]]:
+    if not isinstance(metrics, Mapping):
+        return None, None
+    context: Dict[str, Any] = dict(metrics)
+    frame_budget = _resolve_frame_budget(spec, context)
+    if frame_budget is not None and "frame_budget_ms" not in context:
+        context["frame_budget_ms"] = frame_budget
+    return context, frame_budget
 
 
 __all__ = [
@@ -205,4 +272,7 @@ __all__ = [
     "parse_hard_constraints",
     "evaluate_constraints",
     "compute_objective",
+    "prepare_metrics_context",
+    "ObjectiveEvaluationError",
+    "OBJECTIVE_ERROR_EXIT_CODE",
 ]
