@@ -1,13 +1,18 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
+#include <random>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
-#include <system_error>
 
 #include <rt/snapshot.hpp>
 
@@ -90,14 +95,24 @@ std::vector<std::uint8_t> read_binary(const std::filesystem::path &path) {
                                      std::istreambuf_iterator<char>());
 }
 
+std::filesystem::path make_temp_snapshot_path(const std::string_view prefix) {
+    auto dir = std::filesystem::temp_directory_path();
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<std::uint64_t> dist;
+
+    std::ostringstream oss;
+    oss << prefix << std::hex << dist(gen) << ".bin";
+    return dir / oss.str();
+}
+
 std::vector<std::uint8_t> run_demo_collect(const std::vector<std::string> &extra_args) {
     auto binary = find_demo_binary();
     if (binary.empty()) {
         return {};
     }
 
-    auto tmp = std::filesystem::temp_directory_path() /
-               std::filesystem::unique_path("rtfw_demo_%%%%%%%%.bin");
+    auto tmp = make_temp_snapshot_path("rtfw_demo_");
 
     std::vector<std::string> args;
     args.reserve(extra_args.size() + 4);
@@ -148,8 +163,7 @@ TEST(DeterminismE2E, SnapshotReloadMatchesGolden) {
     ASSERT_FALSE(golden.empty());
     const auto golden_hash = rt::hash64(golden);
 
-    auto tmp = std::filesystem::temp_directory_path() /
-               std::filesystem::unique_path("rtfw_golden_%%%%%%%%.bin");
+    auto tmp = make_temp_snapshot_path("rtfw_golden_");
     {
         std::ofstream out(tmp, std::ios::binary);
         ASSERT_TRUE(out.is_open()) << "Failed to open temp snapshot file: " << tmp;
