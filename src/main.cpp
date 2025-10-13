@@ -204,10 +204,129 @@ int main(int argc, char** argv)
 
     sim.run();
 
+    auto canonicalizeSimState = [](std::vector<std::uint8_t> &snapshot) {
+        // SimCore snapshots encode scheduler bookkeeping such as chosen chunk sizes
+        // and per-phase totals. Those fields depend on the active worker-count, so
+        // erase them to keep the serialized state identical across thread topologies.
+        constexpr std::size_t magicSize = sizeof(kSnapshotMagic);
+        if (snapshot.size() <= magicSize + sizeof(std::uint64_t)) {
+            return;
+        }
+
+        auto readU64 = [](const std::uint8_t *ptr) {
+            std::uint64_t v = 0;
+            std::memcpy(&v, ptr, sizeof(v));
+            return v;
+        };
+        auto writeU64 = [](std::uint8_t *ptr, std::uint64_t value) {
+            std::memcpy(ptr, &value, sizeof(value));
+        };
+        auto writeF64 = [](std::uint8_t *ptr, double value) {
+            std::memcpy(ptr, &value, sizeof(value));
+        };
+
+        std::size_t offset = magicSize;
+        std::uint64_t simLen = readU64(snapshot.data() + offset);
+        offset += sizeof(std::uint64_t);
+        if (snapshot.size() < offset + simLen) {
+            return;
+        }
+
+        std::uint8_t *simBytes = snapshot.data() + offset;
+        std::size_t simSize = static_cast<std::size_t>(simLen);
+        std::size_t cursor = 0;
+
+        auto advance = [&](std::size_t bytes) {
+            if (cursor > simSize || simSize - cursor < bytes) {
+                cursor = simSize;
+                return false;
+            }
+            cursor += bytes;
+            return true;
+        };
+        auto readU64Sim = [&](std::uint64_t &out) {
+            if (!advance(sizeof(std::uint64_t))) {
+                out = 0;
+                return false;
+            }
+            std::memcpy(&out, simBytes + cursor - sizeof(std::uint64_t), sizeof(std::uint64_t));
+            return true;
+        };
+        auto zeroU64At = [&](std::size_t pos) {
+            if (pos + sizeof(std::uint64_t) <= simSize) {
+                writeU64(simBytes + pos, 0);
+            }
+        };
+        auto zeroF64At = [&](std::size_t pos) {
+            if (pos + sizeof(double) <= simSize) {
+                writeF64(simBytes + pos, 0.0);
+            }
+        };
+
+        std::uint64_t ignored = 0;
+        for (int i = 0; i < 4; ++i) {
+            readU64Sim(ignored);
+        }
+
+        std::uint64_t phaseCount = 0;
+        if (!readU64Sim(phaseCount)) {
+            return;
+        }
+
+        for (std::uint64_t i = 0; i < phaseCount; ++i) {
+            std::uint64_t sampleLen = 0;
+            if (!readU64Sim(sampleLen)) {
+                return;
+            }
+            if (!advance(static_cast<std::size_t>(sampleLen) * sizeof(std::uint64_t))) {
+                return;
+            }
+
+            if (!readU64Sim(ignored)) { // element count
+                return;
+            }
+            if (!advance(sizeof(std::uint8_t))) { // enabled flag
+                return;
+            }
+
+            std::size_t chosenPos = cursor;
+            if (!readU64Sim(ignored)) {
+                return;
+            }
+            zeroU64At(chosenPos);
+
+            std::size_t totalPos = cursor;
+            if (!readU64Sim(ignored)) {
+                return;
+            }
+            zeroU64At(totalPos);
+
+            std::size_t skewPos = cursor;
+            if (!readU64Sim(ignored)) {
+                return;
+            }
+            zeroU64At(skewPos);
+
+            std::size_t cusumPos = cursor;
+            if (!advance(sizeof(double))) {
+                return;
+            }
+            zeroF64At(cusumPos);
+
+            if (cursor < simSize) {
+                simBytes[cursor] = 0; // pinned flag
+            }
+            if (!advance(sizeof(std::uint8_t))) {
+                return;
+            }
+        }
+    };
+
     auto buildSnapshot = [&]() {
         rt::SnapshotWriter writer;
         writer.write(kSnapshotMagic);
-        writeVector(writer, sim.saveFrame());
+        auto simState = sim.saveFrame();
+        writer.writeVector(simState);
         writeVector(writer, thr);
         writeVector(writer, force);
         writeVector(writer, cars.pos);
@@ -216,6 +335,8 @@ int main(int argc, char** argv)
         writeVector(writer, cars.dense);
         writer.write(cars.defaultPos);
         writer.write(cars.defaultVel);
+
+        canonicalizeSimState(writer.data);
         return writer.data;
     };
 
