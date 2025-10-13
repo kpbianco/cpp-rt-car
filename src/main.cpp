@@ -9,6 +9,10 @@
 #include <iostream>
 #include <cstring>
 #include <iomanip>
+#include <string>
+#include <cstdint>
+#include <fstream>
+#include <iterator>
 
 /* tiny helpers --------------------------------------------------- */
 static void printHelp(const char* argv0)
@@ -19,6 +23,8 @@ static void printHelp(const char* argv0)
               << "  --pin                      Pin worker threads to cores.\n"
               << "  --metrics-json             Emit a cumulative metrics snapshot at exit (p50/p95/p99 span the full run).\n"
               << "  --metrics-json-interval    Emit metrics JSON and reset rolling histograms and resettable counters after each emission.\n"
+              << "  --snapshot-out <file>      Write the final simulation snapshot to <file>.\n"
+              << "  --snapshot-in <file>       Load the simulation snapshot from <file> before running.\n"
               << "  --help, -h                 Show this help message.\n";
 }
 
@@ -40,6 +46,8 @@ int main(int argc, char** argv)
 
     bool metricsJson = false;
     bool metricsJsonInterval = false;
+    std::string snapshotOutPath;
+    std::string snapshotInPath;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -60,6 +68,15 @@ int main(int argc, char** argv)
         {
             metricsJson = true;
             metricsJsonInterval = true;
+        }
+        else if (std::strcmp(argv[i], "--snapshot-out") == 0 && i + 1 < argc)
+            snapshotOutPath = argv[++i];
+        else if (std::strcmp(argv[i], "--snapshot-in") == 0 && i + 1 < argc)
+            snapshotInPath = argv[++i];
+        else if (std::strcmp(argv[i], "--snapshot-out") == 0 || std::strcmp(argv[i], "--snapshot-in") == 0)
+        {
+            std::cerr << "Missing path for " << argv[i] << "\n";
+            return 1;
         }
     }
 
@@ -119,7 +136,41 @@ int main(int argc, char** argv)
         }
     });
 
+    if (!snapshotInPath.empty())
+    {
+        std::ifstream in(snapshotInPath, std::ios::binary);
+        if (!in)
+        {
+            std::cerr << "Failed to open snapshot input file: " << snapshotInPath << "\n";
+            return 1;
+        }
+        std::vector<std::uint8_t> snapshotData((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (snapshotData.empty())
+        {
+            std::cerr << "Snapshot input file is empty: " << snapshotInPath << "\n";
+            return 1;
+        }
+        sim.loadFrame(snapshotData);
+    }
+
     sim.run();
+
+    if (!snapshotOutPath.empty())
+    {
+        auto data = sim.saveFrame();
+        std::ofstream out(snapshotOutPath, std::ios::binary);
+        if (!out)
+        {
+            std::cerr << "Failed to open snapshot output file: " << snapshotOutPath << "\n";
+            return 1;
+        }
+        out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+        if (!out)
+        {
+            std::cerr << "Failed to write snapshot output file: " << snapshotOutPath << "\n";
+            return 1;
+        }
+    }
 
     if (metricsJson)
         std::cout << metricsRegistry.snapshot(metricsJsonInterval) << "\n";

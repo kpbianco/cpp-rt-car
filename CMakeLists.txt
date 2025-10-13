@@ -530,6 +530,7 @@ simcore_link_sanitizer_runtime(rtfw)
 # Main executable
 add_executable(simcore_app src/main.cpp)
 target_link_libraries(simcore_app PRIVATE simcore_platform)
+set_target_properties(simcore_app PROPERTIES OUTPUT_NAME rtfw_demo)
 
 # Sample trace dump utility
 add_executable(trace_dump src/trace_dump.cpp)
@@ -546,6 +547,7 @@ add_subdirectory(bench)
 if (ENABLE_TESTS)
     enable_testing()
     add_subdirectory(tests)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeterminismTargets.cmake)
 endif()
 
 # Optional Bloaty size analysis
