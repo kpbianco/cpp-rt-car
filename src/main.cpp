@@ -27,6 +27,7 @@ static void printHelp(const char* argv0)
               << "  --metrics-json-interval    Emit metrics JSON and reset rolling histograms and resettable counters after each emission.\n"
               << "  --snapshot-in <path>       Load a binary snapshot before running.\n"
               << "  --snapshot-out <path>      Save the final binary snapshot.\n"
+              << "  --fma                      Enable fused multiply-add operations.\n"
               << "  --help, -h                 Show this help message.\n";
 }
 
@@ -45,6 +46,11 @@ int main(int argc, char** argv)
     cfg.hz        = 1000.0;
     cfg.maxFrames = 3000;
     cfg.chunkSize = 128;
+    cfg.rateGovernorEnable = false;
+    cfg.predictiveEnable   = false;
+    cfg.budgetMonitor      = false;
+    cfg.autoTuneChunks     = false;
+    cfg.spinMicros         = 0;
 
     bool metricsJson = false;
     bool metricsJsonInterval = false;
@@ -75,6 +81,8 @@ int main(int argc, char** argv)
             snapshotIn = argv[++i];
         else if (std::strcmp(argv[i], "--snapshot-out") == 0 && i + 1 < argc)
             snapshotOut = argv[++i];
+        else if (std::strcmp(argv[i], "--fma") == 0)
+            cfg.useFMA = true;
     }
 
     /* ------------ arena + arrays ---------------- */

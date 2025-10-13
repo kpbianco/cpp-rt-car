@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include <rt/numerics.hpp>
 #include <rt/snapshot.hpp>
 
 namespace {
@@ -106,6 +108,17 @@ std::filesystem::path make_temp_snapshot_path(const std::string_view prefix) {
     return dir / oss.str();
 }
 
+std::vector<std::string> make_thread_fma_args(std::size_t threads, bool use_fma) {
+    std::vector<std::string> args;
+    args.reserve(use_fma ? 3 : 2);
+    args.emplace_back("--threads");
+    args.push_back(std::to_string(threads));
+    if (use_fma) {
+        args.emplace_back("--fma");
+    }
+    return args;
+}
+
 std::vector<std::uint8_t> run_demo_collect(const std::vector<std::string> &extra_args) {
     auto binary = find_demo_binary();
     if (binary.empty()) {
@@ -138,46 +151,83 @@ std::vector<std::uint8_t> run_demo_collect(const std::vector<std::string> &extra
     return data;
 }
 
-TEST(DeterminismE2E, GoldenReplayMatchesSingleAndMultiThread) {
-    const auto golden = run_demo_collect({"--threads", "1"});
-    ASSERT_FALSE(golden.empty());
-    const auto golden_hash = rt::hash64(golden);
-
+TEST(DeterminismE2E, GoldenReplayStablePerConfiguration) {
     std::vector<std::size_t> thread_counts{1};
     unsigned int hw = std::thread::hardware_concurrency();
     if (hw > 1) {
         thread_counts.push_back(static_cast<std::size_t>(hw));
     }
 
-    for (std::size_t threads : thread_counts) {
-        auto data = run_demo_collect({"--threads", std::to_string(threads)});
-        ASSERT_FALSE(data.empty());
-        EXPECT_EQ(rt::hash64(data), golden_hash)
-            << "Hash mismatch for " << threads << " threads";
-        EXPECT_EQ(data, golden) << "Snapshot bytes differ for " << threads << " threads";
+    const std::array<bool, 2> fma_options{false, true};
+
+    for (bool use_fma : fma_options) {
+        if (use_fma && !rt::detail::kBuildAllowsFma) {
+            continue;
+        }
+        for (std::size_t threads : thread_counts) {
+            SCOPED_TRACE(::testing::Message()
+                         << threads << " threads"
+                         << (use_fma ? ", FMA on" : ", FMA off"));
+            auto args = make_thread_fma_args(threads, use_fma);
+            auto golden = run_demo_collect(args);
+            ASSERT_FALSE(golden.empty());
+            auto golden_hash = rt::hash64(golden);
+            auto repeat = run_demo_collect(args);
+            ASSERT_FALSE(repeat.empty());
+            EXPECT_EQ(rt::hash64(repeat), golden_hash);
+            EXPECT_EQ(repeat, golden);
+        }
     }
 }
 
 TEST(DeterminismE2E, SnapshotReloadMatchesGolden) {
-    const auto golden = run_demo_collect({"--threads", "1"});
-    ASSERT_FALSE(golden.empty());
-    const auto golden_hash = rt::hash64(golden);
-
-    auto tmp = make_temp_snapshot_path("rtfw_golden_");
-    {
-        std::ofstream out(tmp, std::ios::binary);
-        ASSERT_TRUE(out.is_open()) << "Failed to open temp snapshot file: " << tmp;
-        out.write(reinterpret_cast<const char *>(golden.data()),
-                  static_cast<std::streamsize>(golden.size()));
-        ASSERT_TRUE(out.good()) << "Failed to write golden snapshot to: " << tmp;
+    std::vector<std::size_t> thread_counts{1};
+    unsigned int hw = std::thread::hardware_concurrency();
+    if (hw > 1) {
+        thread_counts.push_back(static_cast<std::size_t>(hw));
     }
 
-    auto data = run_demo_collect({"--snapshot-in", tmp.string(), "--threads", "1"});
-    std::error_code ec;
-    std::filesystem::remove(tmp, ec);
-    ASSERT_FALSE(data.empty());
-    EXPECT_EQ(rt::hash64(data), golden_hash);
-    EXPECT_EQ(data, golden);
+    const std::array<bool, 2> fma_options{false, true};
+
+    for (bool use_fma : fma_options) {
+        if (use_fma && !rt::detail::kBuildAllowsFma) {
+            continue;
+        }
+        for (std::size_t threads : thread_counts) {
+            SCOPED_TRACE(::testing::Message()
+                         << threads << " threads"
+                         << (use_fma ? ", FMA on" : ", FMA off"));
+            auto args = make_thread_fma_args(threads, use_fma);
+            auto golden = run_demo_collect(args);
+            ASSERT_FALSE(golden.empty());
+            auto golden_hash = rt::hash64(golden);
+
+            auto tmp = make_temp_snapshot_path("rtfw_golden_");
+            {
+                std::ofstream out(tmp, std::ios::binary);
+                ASSERT_TRUE(out.is_open())
+                    << "Failed to open temp snapshot file: " << tmp;
+                out.write(reinterpret_cast<const char *>(golden.data()),
+                          static_cast<std::streamsize>(golden.size()));
+                ASSERT_TRUE(out.good())
+                    << "Failed to write golden snapshot to: " << tmp;
+            }
+
+            std::vector<std::string> replay_args;
+            auto base_args = make_thread_fma_args(threads, use_fma);
+            replay_args.reserve(base_args.size() + 2);
+            replay_args.emplace_back("--snapshot-in");
+            replay_args.push_back(tmp.string());
+            replay_args.insert(replay_args.end(), base_args.begin(), base_args.end());
+
+            auto data = run_demo_collect(replay_args);
+            std::error_code ec;
+            std::filesystem::remove(tmp, ec);
+            ASSERT_FALSE(data.empty());
+            EXPECT_EQ(rt::hash64(data), golden_hash);
+            EXPECT_EQ(data, golden);
+        }
+    }
 }
 
 } // namespace
