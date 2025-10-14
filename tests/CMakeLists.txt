@@ -77,6 +77,7 @@ if (SIM_GTEST_AVAILABLE)
         test_rt_pipeline.cpp
         test_platform_gate.cpp
         integration/test_determinism.cpp
+        integration/test_rt_safety.cpp
     )
 
     if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
