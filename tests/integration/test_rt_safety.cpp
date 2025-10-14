@@ -96,7 +96,7 @@ TEST(RTSafety, WorstCaseStressRecovers) {
     busy_for(0.25);
     if (frame < 6) {
       for (std::size_t i = 0; i < kQueueSize * 2; ++i) {
-        pool.submit([] { busy_for(0.35); }, WorkerPool::Priority::High,
+        pool.submit([] { busy_for(0.35); }, WorkerPool::Priority::Normal,
                     WorkerPool::Category::CPU);
       }
     }
