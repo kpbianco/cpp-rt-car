@@ -14,6 +14,19 @@ reduce remote NUMA traffic. Tasks have priorities and an aging counter; every
 time a task waits in the queue its age increases, effectively boosting its
 priority so that low priority tasks will eventually run and avoid starvation.
 
+## Thread-scaling experiments
+
+Run `python tools/scaling/run_scaling.py` after building `rtfw_demo` to measure
+how the worker pool scales with the available cores. The helper sweeps powers of
+two worker counts with simultaneous multithreading disabled and enabled,
+capturing the interval `p99` frame time along with a variance estimate. Each run
+prints a compact summary table and writes plotting inputs to
+`results/scaling/<timestamp>.csv` plus a companion JSON blob for raw metrics.
+
+These artefacts make it easy to spot when additional threads stop improving the
+frame tail latency, and the JSON payload keeps the phase-level metrics available
+for deeper dives.
+
 ### Emergency path
 
 High priority tasks have access to an emergency execution path that bypasses
