@@ -15,6 +15,10 @@ import sys
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+DEFAULT_BINARY = pathlib.Path("build/bin/rtfw_demo")
+
+
 def _positive_int(value: Optional[int], fallback: int) -> int:
     if value is None or value <= 0:
         return fallback
@@ -30,8 +34,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--binary",
-        default="build/bin/rtfw_demo",
-        help="Path to the realtime demo binary (default: %(default)s)",
+        default=None,
+        help=f"Path to the realtime demo binary (default: {DEFAULT_BINARY})",
     )
     parser.add_argument(
         "--max-threads",
@@ -133,6 +137,83 @@ def parse_thread_overrides(value: Optional[str]) -> Optional[List[int]]:
     if not candidates:
         raise SystemExit("No valid thread counts supplied via --threads")
     return candidates
+
+
+def _expand_path(path: pathlib.Path) -> List[pathlib.Path]:
+    expanded = path.expanduser()
+    if expanded.is_absolute():
+        return [expanded]
+
+    cwd_variant = (pathlib.Path.cwd() / expanded).resolve()
+    variants: List[pathlib.Path] = [cwd_variant]
+
+    repo_variant = (REPO_ROOT / expanded).resolve()
+    if repo_variant not in variants:
+        variants.append(repo_variant)
+    return variants
+
+
+def _default_binary_candidates() -> List[pathlib.Path]:
+    bases = [
+        pathlib.Path("build/bin"),
+        pathlib.Path("build"),
+        pathlib.Path("build/RelWithDebInfo/bin"),
+        pathlib.Path("build/RelWithDebInfo"),
+        pathlib.Path("build/Release/bin"),
+        pathlib.Path("build/Release"),
+        pathlib.Path("build/Debug/bin"),
+        pathlib.Path("build/Debug"),
+        pathlib.Path("build/dev/bin"),
+        pathlib.Path("build/dev"),
+        pathlib.Path("build/release/bin"),
+        pathlib.Path("build/release"),
+        pathlib.Path("build/pgo-gen/bin"),
+        pathlib.Path("build/pgo-gen"),
+        pathlib.Path("build/pgo-use/bin"),
+        pathlib.Path("build/pgo-use"),
+        pathlib.Path("bin"),
+        pathlib.Path("."),
+    ]
+
+    candidates: List[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+    for base in bases:
+        candidate = base / "rtfw_demo"
+        if candidate not in seen:
+            seen.add(candidate)
+            candidates.append(candidate)
+    return candidates
+
+
+def resolve_binary_path(binary: pathlib.Path, *, allow_fallback: bool) -> pathlib.Path:
+    raw_candidates: List[pathlib.Path] = [binary]
+    if allow_fallback:
+        raw_candidates.extend(_default_binary_candidates())
+
+    ordered: List[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+    for raw in raw_candidates:
+        for variant in _expand_path(raw):
+            options = [variant]
+            if not variant.suffix:
+                options.append(variant.with_suffix(".exe"))
+            for option in options:
+                resolved = option.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                ordered.append(resolved)
+
+    for candidate in ordered:
+        if candidate.exists():
+            return candidate
+
+    checked = "\n  - ".join(str(path) for path in ordered) if ordered else ""
+    message = ["Demo binary not found."]
+    if ordered:
+        message.append("Checked paths:")
+        message.append(f"  - {checked}")
+    raise SystemExit("\n".join(message))
 
 
 def detect_git_commit() -> Optional[str]:
@@ -414,7 +495,8 @@ def print_summary(rows: Sequence[Dict[str, Any]]) -> None:
 def main() -> None:
     args = parse_args()
 
-    binary = pathlib.Path(args.binary)
+    binary_arg = pathlib.Path(args.binary) if args.binary else DEFAULT_BINARY
+    binary = resolve_binary_path(binary_arg, allow_fallback=args.binary is None)
     logical = detect_logical_cores(args.max_threads)
     physical = detect_physical_cores(args.physical_threads, logical)
 

@@ -22,13 +22,14 @@ jobs:
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DSIM_WERROR=ON
+            -DSIM_WERROR=ON \
+            -DENABLE_TESTS=OFF \
+            -DSIM_DOWNLOAD_GTEST=OFF
       - name: Build rtfw_demo
         run: cmake --build build --config RelWithDebInfo --target simcore_app -- -j2
       - name: Run scaling smoke
         run: |
           python tools/scaling/run_scaling.py \
-            --binary ./build/bin/rtfw_demo \
             --duration 2s \
             --threads 1,2 \
             --smt off \
