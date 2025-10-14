@@ -104,33 +104,25 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
     rt::SnapshotReader reader(raw);
     rt::SnapshotWriter writer;
 
-    const std::uint64_t zero64 = 0;
-    const double zeroDouble = 0.0;
-    const std::uint8_t zero8 = 0;
-
-    auto copyScalar = [&](auto value) {
-        writer.write(value);
-    };
-
     std::uint64_t frame = 0;
     reader.read(frame);
-    copyScalar(frame);
+    writer.write<std::uint64_t>(frame);
 
     std::uint64_t rngSeed = 0;
     reader.read(rngSeed);
-    copyScalar(rngSeed);
+    writer.write<std::uint64_t>(rngSeed);
 
     std::uint64_t subSteps = 0;
     reader.read(subSteps);
-    copyScalar(subSteps);
+    writer.write<std::uint64_t>(subSteps);
 
     std::uint64_t preSteps = 0;
     reader.read(preSteps);
-    copyScalar(preSteps);
+    writer.write<std::uint64_t>(preSteps);
 
     std::uint64_t phaseCount = 0;
     reader.read(phaseCount);
-    copyScalar(phaseCount);
+    writer.write<std::uint64_t>(phaseCount);
 
     for (std::uint64_t i = 0; i < phaseCount; ++i)
     {
@@ -141,11 +133,11 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
 
         std::uint64_t elemCount = 0;
         reader.read(elemCount);
-        copyScalar(elemCount);
+        writer.write<std::uint64_t>(elemCount);
 
         std::uint8_t enabled = 0;
         reader.read(enabled);
-        copyScalar(enabled);
+        writer.write<std::uint8_t>(enabled);
 
         std::uint64_t chunk = 0;
         reader.read(chunk);
@@ -163,11 +155,11 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
         reader.read(pinned);
         (void)pinned;
 
-        copyScalar(zero64);
-        copyScalar(zero64);
-        copyScalar(zero64);
-        writer.write(zeroDouble);
-        copyScalar(zero8);
+        writer.write<std::uint64_t>(0);
+        writer.write<std::uint64_t>(0);
+        writer.write<std::uint64_t>(0);
+        writer.write<double>(0.0);
+        writer.write<std::uint8_t>(0);
     }
 
     std::vector<double> costWindow;
@@ -177,39 +169,39 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
 
     std::uint64_t costHead = 0;
     reader.read(costHead);
-    copyScalar(zero64);
+    writer.write<std::uint64_t>(0);
 
     std::uint64_t costCount = 0;
     reader.read(costCount);
-    copyScalar(zero64);
+    writer.write<std::uint64_t>(0);
 
     double costSum = 0.0;
     reader.read(costSum);
-    writer.write(zeroDouble);
+    writer.write<double>(0.0);
 
     std::uint8_t primed = 0;
     reader.read(primed);
-    copyScalar(zero8);
+    writer.write<std::uint8_t>(0);
 
     std::uint64_t degradeRung = 0;
     reader.read(degradeRung);
-    copyScalar(zero64);
+    writer.write<std::uint64_t>(0);
 
     std::uint64_t bursts = 0;
     reader.read(bursts);
-    copyScalar(zero64);
+    writer.write<std::uint64_t>(0);
 
     std::uint64_t extraSteps = 0;
     reader.read(extraSteps);
-    copyScalar(zero64);
+    writer.write<std::uint64_t>(0);
 
     double recoveredMs = 0.0;
     reader.read(recoveredMs);
-    writer.write(zeroDouble);
+    writer.write<double>(0.0);
 
     double precoveredMs = 0.0;
     reader.read(precoveredMs);
-    writer.write(zeroDouble);
+    writer.write<double>(0.0);
 
     return writer.data;
 }
