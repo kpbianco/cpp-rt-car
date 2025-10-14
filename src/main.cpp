@@ -104,6 +104,10 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
     rt::SnapshotReader reader(raw);
     rt::SnapshotWriter writer;
 
+    const std::uint64_t zero64 = 0;
+    const double zeroDouble = 0.0;
+    const std::uint8_t zero8 = 0;
+
     auto copyScalar = [&](auto value) {
         writer.write(value);
     };
@@ -159,9 +163,6 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
         reader.read(pinned);
         (void)pinned;
 
-        std::uint64_t zero64 = 0;
-        double zeroDouble = 0.0;
-        std::uint8_t zero8 = 0;
         copyScalar(zero64);
         copyScalar(zero64);
         copyScalar(zero64);
@@ -176,7 +177,6 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
 
     std::uint64_t costHead = 0;
     reader.read(costHead);
-    std::uint64_t zero64 = 0;
     copyScalar(zero64);
 
     std::uint64_t costCount = 0;
@@ -185,33 +185,31 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
 
     double costSum = 0.0;
     reader.read(costSum);
-    double zeroDouble = 0.0;
     writer.write(zeroDouble);
 
     std::uint8_t primed = 0;
     reader.read(primed);
-    std::uint8_t zero8 = 0;
     copyScalar(zero8);
 
     std::uint64_t degradeRung = 0;
     reader.read(degradeRung);
-    copyScalar(degradeRung);
+    copyScalar(zero64);
 
     std::uint64_t bursts = 0;
     reader.read(bursts);
-    copyScalar(bursts);
+    copyScalar(zero64);
 
     std::uint64_t extraSteps = 0;
     reader.read(extraSteps);
-    copyScalar(extraSteps);
+    copyScalar(zero64);
 
     double recoveredMs = 0.0;
     reader.read(recoveredMs);
-    writer.write(recoveredMs);
+    writer.write(zeroDouble);
 
     double precoveredMs = 0.0;
     reader.read(precoveredMs);
-    writer.write(precoveredMs);
+    writer.write(zeroDouble);
 
     return writer.data;
 }
