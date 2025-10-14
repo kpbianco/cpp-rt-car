@@ -1,3 +1,5 @@
+#define RTFW_DISABLE_EMERGENCY_SPAWN 1
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
