@@ -23,3 +23,6 @@ simcore_app
 /tests/cmake_install.cmake
 /tests/simcore_tests
 /tests/trace.btrc
+
+# Local analysis artefacts
+results/scaling/
