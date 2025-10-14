@@ -12,7 +12,7 @@
 #include <simcore/logger.hpp>
 #include <simcore/metrics.hpp>
 #include <simcore/worker_pool.hpp>
-#include <hal/gpu_stub.hpp>
+#include <hal/hal.hpp>
 
 namespace {
 
@@ -109,9 +109,21 @@ TEST(RTSafety, WorstCaseStressRecovers) {
     }
   });
 
+  auto submitGpuFence = [&](double busyMs) {
+    auto fence = simcore::hal::fence_create();
+    auto fenceCopy = fence;
+    pool.submit(
+        [fenceCopy, busyMs]() mutable {
+          busy_for(busyMs);
+          simcore::hal::fence_signal(fenceCopy);
+        },
+        WorkerPool::Priority::Normal, WorkerPool::Category::GPU);
+    return fence;
+  };
+
   sim.addSerialSubsystem(gpu, [&](std::int64_t frame, SimCore::Seconds) {
-    auto fenceSlow = simcore::hal::gpu::submit([] { busy_for(1.4); });
-    auto fenceStall = simcore::hal::gpu::submit([] { busy_for(1.0); });
+    auto fenceSlow = submitGpuFence(1.4);
+    auto fenceStall = submitGpuFence(1.0);
     sim.bintrace().log(bintrace::EV_GpuFenceWaitBegin, 2u,
                        static_cast<std::uint64_t>(frame));
     sim.fiberPool().wait_for_fence(std::move(fenceSlow));
