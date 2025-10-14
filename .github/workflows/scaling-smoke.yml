@@ -1,0 +1,42 @@
+name: Scaling smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scaling-smoke:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DSIM_WERROR=ON
+      - name: Build rtfw_demo
+        run: cmake --build build --config RelWithDebInfo --target rtfw_demo -- -j2
+      - name: Run scaling smoke
+        run: |
+          python tools/scaling/run_scaling.py \
+            --binary ./build/bin/rtfw_demo \
+            --duration 2s \
+            --threads 1,2 \
+            --smt off \
+            --out-dir out/scaling_smoke
+      - name: Validate scaling artifacts
+        run: python tools/scaling/validate_scaling_artifacts.py --in out/scaling_smoke
+      - name: Upload scaling artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaling-smoke
+          path: out/scaling_smoke

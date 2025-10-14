@@ -9,9 +9,10 @@ import datetime as _dt
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
 def _positive_int(value: Optional[int], fallback: int) -> int:
@@ -46,13 +47,38 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
+        dest="output_dir",
         default="results/scaling",
         help="Directory that will receive the CSV/JSON artifacts.",
+    )
+    parser.add_argument(
+        "--out-dir",
+        dest="output_dir",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--tag",
         default=None,
         help="Optional label to append to the artifact filenames.",
+    )
+    parser.add_argument(
+        "--threads",
+        default=None,
+        help=(
+            "Comma-separated list of worker thread counts to sweep. "
+            "Overrides automatic sweep generation."
+        ),
+    )
+    parser.add_argument(
+        "--smt",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Control whether SMT-on, SMT-off, or both sweeps are executed.",
+    )
+    parser.add_argument(
+        "--duration",
+        default=None,
+        help="Optional duration to forward to the demo binary (e.g. 2s).",
     )
     parser.add_argument(
         "--demo-arg",
@@ -81,6 +107,32 @@ def parse_args() -> argparse.Namespace:
         help="Indentation level for the JSON artifact (default: %(default)s).",
     )
     return parser.parse_args()
+
+
+def parse_thread_overrides(value: Optional[str]) -> Optional[List[int]]:
+    if not value:
+        return None
+
+    candidates: List[int] = []
+    seen: set[int] = set()
+    for raw in value.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        try:
+            parsed = int(item)
+        except ValueError as exc:
+            raise SystemExit(f"Invalid thread count {item!r} in --threads argument") from exc
+        if parsed <= 0:
+            raise SystemExit(f"Thread counts must be positive: {parsed}")
+        if parsed in seen:
+            continue
+        seen.add(parsed)
+        candidates.append(parsed)
+
+    if not candidates:
+        raise SystemExit("No valid thread counts supplied via --threads")
+    return candidates
 
 
 def detect_git_commit() -> Optional[str]:
@@ -170,6 +222,7 @@ def run_demo(
     threads: int,
     *,
     pin: bool,
+    duration: Optional[str],
     extra_args: Optional[Sequence[str]],
     env: Mapping[str, str],
 ) -> Mapping[str, Any]:
@@ -177,6 +230,8 @@ def run_demo(
         raise SystemExit(f"Demo binary not found: {binary}")
 
     cmd: List[str] = [str(binary), "--threads", str(threads), "--metrics-json-interval"]
+    if duration:
+        cmd.extend(["--duration", duration])
     if pin:
         cmd.append("--pin")
     if extra_args:
@@ -242,6 +297,10 @@ def summarise_metrics(payload: Mapping[str, Any]) -> Dict[str, float]:
         "p99_frame_ms": p99,
         "stdev_frame_ms": stdev,
         "variance_frame_ms2": variance,
+        "p50_ms": p50,
+        "p95_ms": p95,
+        "p99_ms": p99,
+        "variance": variance,
     }
     return summary
 
@@ -271,7 +330,12 @@ def compute_speedups(rows: List[Dict[str, Any]]) -> None:
 def write_csv(path: pathlib.Path, rows: Sequence[Dict[str, Any]]) -> None:
     fieldnames = [
         "mode",
+        "smt",
         "threads",
+        "p50_ms",
+        "p95_ms",
+        "p99_ms",
+        "variance",
         "p50_frame_ms",
         "p95_frame_ms",
         "p99_frame_ms",
@@ -300,10 +364,15 @@ def assemble_json(
         "runs": [
             {
                 "mode": row["mode"],
+                "smt": row["smt"],
                 "threads": row["threads"],
                 "summary": {
                     key: row[key]
                     for key in (
+                        "p50_ms",
+                        "p95_ms",
+                        "p99_ms",
+                        "variance",
                         "p50_frame_ms",
                         "p95_frame_ms",
                         "p99_frame_ms",
@@ -349,8 +418,10 @@ def main() -> None:
     logical = detect_logical_cores(args.max_threads)
     physical = detect_physical_cores(args.physical_threads, logical)
 
-    smt_on_sweep = build_sweep(logical)
-    smt_off_sweep = build_sweep(min(physical, logical))
+    manual_threads = parse_thread_overrides(args.threads)
+
+    smt_on_sweep = manual_threads or build_sweep(logical)
+    smt_off_sweep = manual_threads or build_sweep(min(physical, logical))
 
     output_dir = pathlib.Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -365,10 +436,13 @@ def main() -> None:
     rows: List[Dict[str, Any]] = []
     raw_metrics: Dict[Tuple[str, int], Mapping[str, Any]] = {}
 
-    modes = [
-        ("smt_off", smt_off_sweep),
-        ("smt_on", smt_on_sweep),
-    ]
+    modes: List[Tuple[str, Iterable[int]]] = []
+    if args.smt in ("auto", "off"):
+        modes.append(("smt_off", smt_off_sweep))
+    if args.smt in ("auto", "on"):
+        modes.append(("smt_on", smt_on_sweep))
+    if not modes:
+        raise SystemExit("No SMT modes selected for execution")
 
     for mode, sweep in modes:
         seen: set[int] = set()
@@ -382,12 +456,17 @@ def main() -> None:
                 binary,
                 threads,
                 pin=args.pin,
+                duration=args.duration,
                 extra_args=args.demo_args,
                 env=env,
             )
             raw_metrics[(mode, threads)] = payload
             summary = summarise_metrics(payload)
-            summary.update({"mode": mode, "threads": threads})
+            summary.update({
+                "mode": mode,
+                "smt": "on" if mode == "smt_on" else "off",
+                "threads": threads,
+            })
             rows.append(summary)
 
     rows.sort(key=lambda row: (row["mode"], row["threads"]))
@@ -403,6 +482,9 @@ def main() -> None:
         "git_commit": detect_git_commit(),
         "pin": bool(args.pin),
         "extra_args": list(args.demo_args or []),
+        "threads_override": list(manual_threads or []),
+        "smt_mode": args.smt,
+        "duration": args.duration,
     }
     assemble_json(
         json_path,
@@ -412,9 +494,18 @@ def main() -> None:
         indent=args.json_indent,
     )
 
+    canonical_csv = output_dir / "scaling.csv"
+    canonical_json = output_dir / "scaling.json"
+    if csv_path != canonical_csv:
+        shutil.copyfile(csv_path, canonical_csv)
+    if json_path != canonical_json:
+        shutil.copyfile(json_path, canonical_json)
+
     print()
     print(f"Wrote CSV: {csv_path}")
     print(f"Wrote JSON: {json_path}")
+    print(f"Updated canonical CSV: {canonical_csv}")
+    print(f"Updated canonical JSON: {canonical_json}")
     print()
     print_summary(rows)
 
