@@ -123,7 +123,9 @@ TEST(DeterminismIntegration, SnapshotReplayMatchesGolden) {
     if (threads < 2)
         threads = 2;
 
-    runDemo({"--threads", std::to_string(threads), "--snapshot-out", threadedPath.string()});
+    runDemo({"--snapshot-in", baselinePath.string(),
+             "--threads", std::to_string(threads),
+             "--snapshot-out", threadedPath.string()});
     std::vector<std::uint8_t> threaded;
     ASSERT_NO_THROW(threaded = readFile(threadedPath));
     EXPECT_EQ(hashBytes(baseline), hashBytes(threaded)) << diffSummary(baseline, threaded);
