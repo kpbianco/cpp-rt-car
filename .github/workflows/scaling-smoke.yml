@@ -24,7 +24,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DSIM_WERROR=ON
       - name: Build rtfw_demo
-        run: cmake --build build --config RelWithDebInfo --target rtfw_demo -- -j2
+        run: cmake --build build --config RelWithDebInfo --target simcore_app -- -j2
       - name: Run scaling smoke
         run: |
           python tools/scaling/run_scaling.py \
