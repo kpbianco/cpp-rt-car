@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -15,22 +16,20 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char **environ;
+#endif
+
 #ifndef RTFW_DEMO_PATH
 #error "RTFW_DEMO_PATH must be defined"
 #endif
 
 namespace {
-
-std::string quoteArg(const std::string &arg) {
-    std::string quoted = "\"";
-    for (char c : arg) {
-        if (c == '\\' || c == '\"')
-            quoted.push_back('\\');
-        quoted.push_back(c);
-    }
-    quoted.push_back('\"');
-    return quoted;
-}
 
 std::filesystem::path makeTempFile(const std::string &tag) {
     static std::atomic<std::uint64_t> counter{0};
@@ -90,14 +89,52 @@ void runDemo(const std::vector<std::string> &args) {
     ASSERT_TRUE(std::filesystem::exists(binary))
         << "rtfw_demo binary missing at " << binary;
 
-    std::string cmd = quoteArg(binary.string());
-    for (const auto &arg : args) {
-        cmd.push_back(' ');
-        cmd += quoteArg(arg);
-    }
+    std::ostringstream cmdDesc;
+    cmdDesc << binary.string();
+    for (const auto &arg : args)
+        cmdDesc << ' ' << arg;
+    const std::string cmdText = cmdDesc.str();
 
-    int rc = std::system(cmd.c_str());
-    ASSERT_EQ(rc, 0) << "Command failed (" << rc << "): " << cmd;
+#ifdef _WIN32
+    std::vector<std::wstring> wideArgs;
+    wideArgs.reserve(args.size() + 1);
+    wideArgs.emplace_back(binary.wstring());
+    for (const auto &arg : args)
+        wideArgs.emplace_back(arg.begin(), arg.end());
+
+    std::vector<const wchar_t *> argv;
+    argv.reserve(wideArgs.size() + 1);
+    for (auto &w : wideArgs)
+        argv.push_back(w.c_str());
+    argv.push_back(nullptr);
+
+    intptr_t rc = _wspawnv(_P_WAIT, wideArgs[0].c_str(), argv.data());
+    ASSERT_NE(rc, -1) << "_wspawnv failed with errno " << errno;
+    ASSERT_EQ(rc, 0) << "Command failed (" << rc << "): " << cmdText;
+#else
+    std::vector<std::string> fullArgs;
+    fullArgs.reserve(args.size() + 1);
+    fullArgs.emplace_back(binary.string());
+    fullArgs.insert(fullArgs.end(), args.begin(), args.end());
+
+    std::vector<char *> argv;
+    argv.reserve(fullArgs.size() + 1);
+    for (auto &s : fullArgs)
+        argv.push_back(s.data());
+    argv.push_back(nullptr);
+
+    pid_t pid = 0;
+    int spawnRc = posix_spawn(&pid, fullArgs[0].c_str(), nullptr, nullptr,
+                              argv.data(), environ);
+    ASSERT_EQ(spawnRc, 0) << "posix_spawn failed with " << spawnRc;
+
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid) << "waitpid failed";
+    ASSERT_TRUE(WIFEXITED(status)) << "Process terminated abnormally";
+    ASSERT_EQ(WEXITSTATUS(status), 0) << "Command failed ("
+                                      << WEXITSTATUS(status) << "): "
+                                      << cmdText;
+#endif
 }
 
 } // namespace
