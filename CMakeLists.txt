@@ -539,8 +539,23 @@ foreach(lib rtfw_shared rtfw_static)
             $<INSTALL_INTERFACE:include>
     )
     target_compile_definitions(${lib} PRIVATE RTFW_BUILD=1)
-    set_target_properties(${lib} PROPERTIES OUTPUT_NAME rtfw POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(${lib} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endforeach()
+
+set_target_properties(rtfw_shared PROPERTIES OUTPUT_NAME rtfw)
+set_target_properties(rtfw_static PROPERTIES OUTPUT_NAME rtfw_static)
+
+if (MSVC)
+    # Give each binary its own program database to avoid clashes when
+    # multi-config generators build both variants in the same output tree.
+    set_target_properties(rtfw_shared PROPERTIES
+        COMPILE_PDB_NAME rtfw_shared
+        PDB_NAME rtfw_shared
+    )
+    set_target_properties(rtfw_static PROPERTIES
+        COMPILE_PDB_NAME rtfw_static
+    )
+endif()
 
 target_link_libraries(rtfw_shared PRIVATE simcore simcore_platform simcore_rt)
 target_link_libraries(rtfw_static PUBLIC simcore simcore_platform simcore_rt)
