@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(car_sim_core LANGUAGES C CXX)
 
+include(GNUInstallDirs)
+
 # Options (toggle logging / profiler / tests)
 option(ENABLE_LOG "Enable logging" ON)
 option(ENABLE_PROF "Enable profiler" ON)
@@ -426,16 +428,18 @@ endif()
 # Header-only core library
 add_library(simcore INTERFACE)
 target_include_directories(simcore INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/hal
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hal>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/gpu>
+    $<INSTALL_INTERFACE:include>
 )
 
 add_library(simcore_platform STATIC src/platform_init.cpp)
 target_sources(simcore_platform PRIVATE src/metrics.cpp)
 target_include_directories(simcore_platform PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
 target_link_libraries(simcore_platform PUBLIC simcore)
 set_target_properties(simcore_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -491,7 +495,9 @@ target_compile_features(simcore INTERFACE cxx_std_20)
 
 # Core module (math, containers)
 add_library(simcore_core INTERFACE)
-target_include_directories(simcore_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
+target_include_directories(simcore_core INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+    $<INSTALL_INTERFACE:include>)
 
 # Runtime module providing C API surface
 set(RT_SOURCES
@@ -509,10 +515,11 @@ endif()
 
 add_library(simcore_rt STATIC ${RT_SOURCES})
 target_include_directories(simcore_rt PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/core/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/hal
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hal>
+    $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(simcore_rt PUBLIC simcore_core)
 set_target_properties(simcore_rt PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -520,12 +527,28 @@ if (UNIX)
     target_link_libraries(simcore_rt PUBLIC dl)
 endif()
 
-add_library(rtfw SHARED src/c_abi.cpp)
-target_include_directories(rtfw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(rtfw PRIVATE simcore simcore_platform simcore_rt)
-target_compile_definitions(rtfw PRIVATE RTFW_BUILD=1)
-set_target_properties(rtfw PROPERTIES OUTPUT_NAME rtfw)
-simcore_link_sanitizer_runtime(rtfw)
+set(RTFW_SOURCES src/c_abi.cpp)
+
+add_library(rtfw_shared SHARED ${RTFW_SOURCES})
+add_library(rtfw_static STATIC ${RTFW_SOURCES})
+
+foreach(lib rtfw_shared rtfw_static)
+    target_include_directories(${lib}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_compile_definitions(${lib} PRIVATE RTFW_BUILD=1)
+    set_target_properties(${lib} PROPERTIES OUTPUT_NAME rtfw POSITION_INDEPENDENT_CODE ON)
+endforeach()
+
+target_link_libraries(rtfw_shared PRIVATE simcore simcore_platform simcore_rt)
+target_link_libraries(rtfw_static PUBLIC simcore simcore_platform simcore_rt)
+
+set_target_properties(rtfw_shared PROPERTIES EXPORT_NAME rtfw)
+add_library(rtfw ALIAS rtfw_shared)
+
+simcore_link_sanitizer_runtime(rtfw_shared)
 
 # Main executable
 add_executable(simcore_app src/main.cpp)
@@ -566,3 +589,117 @@ add_custom_target(tests
     COMMAND ctest --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Configure, build and run all tests")
+
+include(CMakePackageConfigHelpers)
+
+set(RTFW_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/rtfw")
+
+install(
+    TARGETS rtfw_shared rtfw_static simcore_platform simcore_rt
+    EXPORT rtfwTargets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(
+    TARGETS simcore simcore_core
+    EXPORT rtfwTargets
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(
+    DIRECTORY include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hh"
+        PATTERN "*.hpp"
+        PATTERN "*.hxx"
+        PATTERN "*.inl"
+        PATTERN "*.ipp"
+        PATTERN "*.tpp"
+)
+
+install(
+    DIRECTORY rt/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hh"
+        PATTERN "*.hpp"
+        PATTERN "*.hxx"
+        PATTERN "*.inl"
+        PATTERN "*.ipp"
+        PATTERN "*.tpp"
+)
+
+install(
+    DIRECTORY core/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hh"
+        PATTERN "*.hpp"
+        PATTERN "*.hxx"
+        PATTERN "*.inl"
+        PATTERN "*.ipp"
+        PATTERN "*.tpp"
+)
+
+install(
+    FILES api/cabi.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/api
+)
+
+install(
+    DIRECTORY hal/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hal
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hh"
+        PATTERN "*.hpp"
+        PATTERN "*.hxx"
+        PATTERN "*.inl"
+        PATTERN "*.ipp"
+        PATTERN "*.tpp"
+)
+
+install(
+    DIRECTORY gpu/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gpu
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hh"
+        PATTERN "*.hpp"
+        PATTERN "*.hxx"
+        PATTERN "*.inl"
+        PATTERN "*.ipp"
+        PATTERN "*.tpp"
+)
+
+configure_package_config_file(
+    cmake/rtfwConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/rtfwConfig.cmake
+    INSTALL_DESTINATION ${RTFW_INSTALL_CMAKEDIR}
+    PATH_VARS CMAKE_INSTALL_INCLUDEDIR
+)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/rtfwConfig.cmake
+    DESTINATION ${RTFW_INSTALL_CMAKEDIR}
+)
+
+install(
+    EXPORT rtfwTargets
+    NAMESPACE rtfw::
+    DESTINATION ${RTFW_INSTALL_CMAKEDIR}
+)
+
+export(
+    EXPORT rtfwTargets
+    NAMESPACE rtfw::
+    FILE ${CMAKE_CURRENT_BINARY_DIR}/rtfwTargets.cmake
+)
