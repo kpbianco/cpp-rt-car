@@ -5,6 +5,7 @@ CMakeFiles/
 CTestTestfile.cmake
 Testing/
 Makefile
+!/Makefile
 cmake_install.cmake
 
 # Compiled artifacts
@@ -26,3 +27,4 @@ simcore_app
 
 # Local analysis artefacts
 results/scaling/
+/reports/characterize/
