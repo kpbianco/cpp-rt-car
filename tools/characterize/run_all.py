@@ -9,8 +9,10 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
+import time
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
@@ -159,6 +161,8 @@ def run_demo(
     extra_args: Optional[Sequence[str]] = None,
     env: Optional[Mapping[str, str]] = None,
 ) -> Tuple[subprocess.CompletedProcess[str], Mapping[str, Any]]:
+    if not binary.exists():
+        raise SystemExit(f"Demo binary not found: {binary}")
     cmd: List[str] = [str(binary), "--threads", str(threads)]
     if metrics_mode == "cumulative":
         cmd.append("--metrics-json")
@@ -334,9 +338,6 @@ def perform_safety(
             }
         )
 
-    if aggregate_missed > allowed_missed:
-        allowed_missed = aggregate_missed
-
     payload = {
         "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
         "binary": str(binary),
@@ -368,8 +369,9 @@ def call_scaling(
     manual_threads: Optional[int],
     extra_args: Optional[Sequence[str]],
     env: Mapping[str, str],
-) -> Mapping[str, Any]:
+) -> Tuple[Mapping[str, Any], pathlib.Path, pathlib.Path]:
     scaling_dir = ensure_directory(out_dir / "scaling")
+    start_time = time.time()
     cmd: List[str] = [
         sys.executable,
         str(SCALING_SCRIPT),
@@ -400,15 +402,31 @@ def call_scaling(
 
     subprocess.run(cmd, check=True)
 
-    scaling_json = scaling_dir / "scaling.json"
-    scaling_csv = scaling_dir / "scaling.csv"
-    if not scaling_json.exists():
-        raise SystemExit(f"Scaling JSON artifact not found: {scaling_json}")
-    if not scaling_csv.exists():
-        raise SystemExit(f"Scaling CSV artifact not found: {scaling_csv}")
-    with scaling_json.open("r", encoding="utf-8") as fh:
+    def select_latest(pattern: str, *, exclude: Optional[Sequence[str]] = None) -> pathlib.Path:
+        exclude_names = set(exclude or [])
+        candidates = [
+            path
+            for path in scaling_dir.glob(pattern)
+            if path.name not in exclude_names and path.stat().st_mtime >= start_time - 1
+        ]
+        if not candidates:
+            raise SystemExit(f"Expected scaling artifact matching {pattern!r} in {scaling_dir}")
+        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        return candidates[0]
+
+    source_json = select_latest("*.json", exclude=["scaling.json"])
+    source_csv = select_latest("*.csv", exclude=["scaling.csv"])
+
+    canonical_json = scaling_dir / "scaling.json"
+    canonical_csv = scaling_dir / "scaling.csv"
+
+    shutil.copy2(source_json, canonical_json)
+    shutil.copy2(source_csv, canonical_csv)
+
+    with canonical_json.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
-    return data
+
+    return data, canonical_json, canonical_csv
 
 
 def assemble_summary(
@@ -421,14 +439,16 @@ def assemble_summary(
     threads_selected: int,
     replay: Mapping[str, Any],
     safety: Mapping[str, Any],
-    scaling_data: Mapping[str, Any],
+    scaling_payload: Mapping[str, Any],
+    scaling_json_path: pathlib.Path,
+    scaling_csv_path: pathlib.Path,
 ) -> Dict[str, Any]:
     artifacts = {
         "replay": relative_path(out_dir / "replay.json", out_dir),
         "rt_safety": relative_path(out_dir / "rt_safety.json", out_dir),
         "scaling": {
-            "json": relative_path(out_dir / "scaling" / "scaling.json", out_dir),
-            "csv": relative_path(out_dir / "scaling" / "scaling.csv", out_dir),
+            "json": relative_path(scaling_json_path, out_dir),
+            "csv": relative_path(scaling_csv_path, out_dir),
         },
     }
 
@@ -447,7 +467,7 @@ def assemble_summary(
             "replay_bit_equal": bool(replay.get("bit_equal")),
             "safety_deadlocks": safety.get("summary", {}).get("deadlocks"),
             "safety_missed_frames": safety.get("summary", {}).get("missed_frames"),
-            "scaling_runs": len(scaling_data.get("runs", [])),
+            "scaling_runs": len(scaling_payload.get("runs", [])),
         },
     }
 
@@ -487,7 +507,7 @@ def main() -> None:
         extra_args=args.extra_args,
     )
 
-    scaling_data = call_scaling(
+    scaling_data, scaling_json_path, scaling_csv_path = call_scaling(
         binary=binary,
         out_dir=out_dir,
         duration=args.duration,
@@ -506,7 +526,9 @@ def main() -> None:
         threads_selected=selected_threads,
         replay=replay,
         safety=safety,
-        scaling_data=scaling_data,
+        scaling_payload=scaling_data,
+        scaling_json_path=scaling_json_path,
+        scaling_csv_path=scaling_csv_path,
     )
 
     print(f"Characterization artifacts written to {out_dir}")
