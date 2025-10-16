@@ -2,7 +2,7 @@
   "schema_version": 1,
   "threads": "physical_plus_smt",
   "chunking": {
-    "target_p90_us": 140,
+    "target_p90_us": 150,
     "min_items": 48,
     "max_items": 4096
   },
@@ -13,25 +13,25 @@
   },
   "prefetch": {
     "enabled": true,
-    "distance_bytes": 1536
+    "distance_bytes": 512
   },
   "scheduler": {
     "type": "work_steal",
     "steal_threshold": 2,
-    "emergency_spawn": true,
+    "emergency_spawn": false,
     "aging": true
   },
   "governor": {
-    "target_util": 0.95,
+    "target_util": 0.94,
     "hysteresis": 0.025
   },
   "numerics": {
     "ftz_daz": true,
-    "fma": "auto"
+    "fma": "on"
   },
   "memory": {
     "huge_pages": true,
-    "arena_per_thread_mb": 64,
+    "arena_per_thread_mb": 48,
     "numa": "first_touch",
     "pretouch": true
   },
@@ -40,15 +40,15 @@
   },
   "params": {
     "threads": 0,
-    "chunk_target_us": 140,
+    "chunk_target_us": 150,
     "aosoa_block": 256,
     "steal_threshold": 2,
-    "prefetch_distance_bytes": 1536,
+    "prefetch_distance_bytes": 512,
     "huge_pages": true,
-    "governor_target_util": 0.95,
+    "governor_target_util": 0.94,
     "governor_hysteresis": 0.025,
-    "fma_mode": "auto",
-    "emergency_spawn_enabled": true,
-    "arena_per_thread_mb": 64
+    "fma_mode": "on",
+    "emergency_spawn_enabled": false,
+    "arena_per_thread_mb": 48
   }
 }

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "threads": "physical",
   "chunking": {
-    "target_p90_us": 180,
+    "target_p90_us": 140,
     "min_items": 64,
     "max_items": 4096
   },
@@ -22,7 +22,7 @@
     "aging": true
   },
   "governor": {
-    "target_util": 0.9,
+    "target_util": 0.93,
     "hysteresis": 0.02
   },
   "numerics": {
@@ -40,12 +40,12 @@
   },
   "params": {
     "threads": 0,
-    "chunk_target_us": 180,
+    "chunk_target_us": 140,
     "aosoa_block": 256,
     "steal_threshold": 3,
     "prefetch_distance_bytes": 1024,
     "huge_pages": true,
-    "governor_target_util": 0.9,
+    "governor_target_util": 0.93,
     "governor_hysteresis": 0.02,
     "fma_mode": "auto_no_when_deterministic",
     "emergency_spawn_enabled": false,

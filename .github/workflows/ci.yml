@@ -180,3 +180,23 @@ jobs:
       - name: Run embedding sample
         working-directory: build-release
         run: ./samples/sample_embed_c
+
+  defaults-smoke:
+    name: Default profiles smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Real-time hardening
+        run: tools/rt_harden.sh
+      - name: Configure demo
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_TESTS=OFF \
+            -DSIM_WERROR=ON
+      - name: Build demo
+        run: cmake --build build --config RelWithDebInfo --target simcore_app -- -j2
+      - name: Validate default profiles
+        run: python3 tools/ci/check_defaults.py
