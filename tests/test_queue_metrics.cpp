@@ -20,9 +20,9 @@ TEST(QueueMetrics, PublishesDepthAndSteals) {
   constexpr int jobs = 96;
 
   std::promise<void> releasePromise;
-  auto blocker = releasePromise.get_future();
+  auto blocker = releasePromise.get_future().share();
 
-  pool.enqueue([&executed, blocker = std::move(blocker)]() mutable {
+  pool.enqueue([&executed, blocker]() {
     executed.fetch_add(1, std::memory_order_relaxed);
     blocker.wait();
     std::this_thread::sleep_for(2ms);
