@@ -147,3 +147,36 @@ jobs:
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
         continue-on-error: true
+
+  cabi-release:
+    name: C ABI smoke (${{ matrix.compiler }})
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Real-time hardening
+        run: tools/rt_harden.sh
+      - name: Set up compiler
+        run: |
+          if [ "${{matrix.compiler}}" = "clang" ]; then
+            echo "CC=clang" >> $GITHUB_ENV
+            echo "CXX=clang++" >> $GITHUB_ENV
+          else
+            echo "CC=gcc" >> $GITHUB_ENV
+            echo "CXX=g++" >> $GITHUB_ENV
+          fi
+      - name: Configure Release embedding sample
+        run: |
+          cmake -S . -B build-release \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TESTS=OFF \
+            -DSIM_WERROR=ON
+      - name: Build embedding sample
+        run: cmake --build build-release --config Release --target sample_embed_c -- -j2
+      - name: Run embedding sample
+        working-directory: build-release
+        run: ./samples/sample_embed_c
