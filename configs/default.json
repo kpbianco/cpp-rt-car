@@ -39,7 +39,7 @@
     "bintrace": true
   },
   "params": {
-    "threads": "physical",
+    "threads": 0,
     "chunk_target_us": 160,
     "aosoa_block": 256,
     "steal_threshold": 3,
