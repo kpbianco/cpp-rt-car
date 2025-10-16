@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "threads": "physical",
+  "chunking": {
+    "target_p90_us": 180,
+    "min_items": 64,
+    "max_items": 4096
+  },
+  "layout": {
+    "aosoa_block": 256,
+    "align_bytes": 64,
+    "pad_to_simd": true
+  },
+  "prefetch": {
+    "enabled": true,
+    "distance_bytes": 1024
+  },
+  "scheduler": {
+    "type": "work_steal",
+    "steal_threshold": 3,
+    "emergency_spawn": false,
+    "aging": true
+  },
+  "governor": {
+    "target_util": 0.9,
+    "hysteresis": 0.02
+  },
+  "numerics": {
+    "ftz_daz": true,
+    "fma": "auto_no_when_deterministic"
+  },
+  "memory": {
+    "huge_pages": true,
+    "arena_per_thread_mb": 64,
+    "numa": "first_touch",
+    "pretouch": true
+  },
+  "tracing": {
+    "bintrace": true
+  },
+  "params": {
+    "threads": 0,
+    "chunk_target_us": 180,
+    "aosoa_block": 256,
+    "steal_threshold": 3,
+    "prefetch_distance_bytes": 1024,
+    "huge_pages": true,
+    "governor_target_util": 0.9,
+    "governor_hysteresis": 0.02,
+    "fma_mode": "auto_no_when_deterministic",
+    "emergency_spawn_enabled": false,
+    "arena_per_thread_mb": 64
+  }
+}
