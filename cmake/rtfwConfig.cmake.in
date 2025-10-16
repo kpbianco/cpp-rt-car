@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+set_and_check(RTFW_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set(RTFW_INCLUDE_DIRS "${RTFW_INCLUDE_DIR}")
+
+include("${CMAKE_CURRENT_LIST_DIR}/rtfwTargets.cmake")
+
+check_required_components(rtfw)

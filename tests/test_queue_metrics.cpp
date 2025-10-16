@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -18,18 +19,23 @@ TEST(QueueMetrics, PublishesDepthAndSteals) {
   std::atomic<int> executed{0};
   constexpr int jobs = 96;
 
-  for (int i = 0; i < jobs; ++i) {
-    if (i < 8) {
-      pool.enqueue([&] {
-        executed.fetch_add(1, std::memory_order_relaxed);
-        std::this_thread::sleep_for(1ms);
-      });
-    } else {
-      pool.enqueue([&] {
-        executed.fetch_add(1, std::memory_order_relaxed);
-      });
-    }
+  std::promise<void> releasePromise;
+  auto blocker = releasePromise.get_future().share();
+
+  pool.enqueue([&executed, blocker]() {
+    executed.fetch_add(1, std::memory_order_relaxed);
+    blocker.wait();
+    std::this_thread::sleep_for(2ms);
+  });
+
+  for (int i = 1; i < jobs; ++i) {
+    pool.enqueue([&] {
+      executed.fetch_add(1, std::memory_order_relaxed);
+    });
   }
+
+  std::this_thread::sleep_for(5ms);
+  releasePromise.set_value();
 
   pool.drain();
   auto stats = pool.stats();
