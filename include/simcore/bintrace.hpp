@@ -8,7 +8,6 @@
 #include <cassert>
 #include <new>
 #include <fstream>
-#include "backpressure.hpp"
 #include "highres_clock.hpp"
 
 namespace bintrace {
@@ -57,15 +56,13 @@ public:
     void init(std::size_t threads, std::size_t eventsPerThread, bool enabled) {
         enabled_ = enabled;
         eventsPerThread_ = eventsPerThread;
-        throttleRate_ = eventsPerThread_ ? static_cast<double>(eventsPerThread_)
-                                         : 1.0;
         dropped_.store(0, std::memory_order_relaxed);
         buffers_.clear();
         buffers_.reserve(threads);
         for (std::size_t i = 0; i < threads; ++i) {
             auto buf = std::make_unique<Buffer>();
             if (eventsPerThread_) {
-                buf->allocate(eventsPerThread_, throttleRate_);
+                buf->allocate(eventsPerThread_);
             }
             buffers_.emplace_back(std::move(buf));
         }
@@ -84,7 +81,6 @@ public:
         tlsBuf_ = nullptr;
         tlsThreadIdx_ = ~std::size_t{0};
         dropped_.store(0, std::memory_order_relaxed);
-        throttleRate_ = 1.0;
     }
 
     std::size_t threadCount() const noexcept { return buffers_.size(); }
@@ -97,7 +93,7 @@ public:
         for (std::size_t i = 0; i < count; ++i) {
             auto buf = std::make_unique<Buffer>();
             if (eventsPerThread_) {
-                buf->allocate(eventsPerThread_, throttleRate_);
+                buf->allocate(eventsPerThread_);
             }
             buffers_.emplace_back(std::move(buf));
         }
@@ -118,10 +114,6 @@ public:
         if (!buf) return;
         const std::size_t cap = buf->cap;
         if (cap == 0) {
-            recordDrop(buf);
-            return;
-        }
-        if (auto* throttle = buf->throttle.get(); throttle && !throttle->try_acquire()) {
             recordDrop(buf);
             return;
         }
@@ -217,7 +209,6 @@ private:
         Event*    base  = nullptr;
         std::size_t cap = 0;
         std::atomic<std::size_t> write{0};
-        std::unique_ptr<simcore::TokenBucket> throttle;
         std::atomic<std::uint64_t> dropped{0};
 
         Buffer() = default;
@@ -226,7 +217,7 @@ private:
 
         ~Buffer() { release(); }
 
-        void allocate(std::size_t newCap, double refillRate) {
+        void allocate(std::size_t newCap) {
             release();
             if (newCap == 0)
                 return;
@@ -234,7 +225,6 @@ private:
             mem = ::operator new(cap * sizeof(Event), std::align_val_t(64));
             base = static_cast<Event*>(mem);
             write.store(0, std::memory_order_relaxed);
-            throttle = std::make_unique<simcore::TokenBucket>(newCap, refillRate);
             dropped.store(0, std::memory_order_relaxed);
         }
 
@@ -246,7 +236,6 @@ private:
                 cap = 0;
                 write.store(0, std::memory_order_relaxed);
             }
-            throttle.reset();
             dropped.store(0, std::memory_order_relaxed);
         }
     };
@@ -259,7 +248,6 @@ private:
     std::vector<std::unique_ptr<Buffer>> buffers_;
     bool enabled_ = false;
     std::size_t eventsPerThread_ = 0;
-    double throttleRate_ = 1.0;
     std::atomic<std::uint64_t> dropped_{0};
 
     // TLS writer cursor
