@@ -5,6 +5,10 @@
 #include <thread>
 #include <functional>
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 // High resolution monotonic clock with optional TSC backing.
 // Calibrates TSC frequency at init and falls back to std::chrono on drift.
 class HighResClock {
