@@ -4,9 +4,11 @@
 #include <simcore/arena.hpp>
 #include <simcore/car_soa.hpp>
 #include <rt/snapshot.hpp>
+#include <rtfw/version.h>
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <vector>
 #include <cmath>
 #include <iostream>
@@ -16,6 +18,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
 
@@ -26,10 +29,11 @@ static void printHelp(const char* argv0)
               << "Options:\n"
               << "  --threads <n>              Number of worker threads (default: hardware concurrency).\n"
               << "  --pin                      Pin worker threads to cores.\n"
-              << "  --metrics-json             Emit a cumulative metrics snapshot at exit (p50/p95/p99 span the full run).\n"
-              << "  --metrics-json-interval    Emit metrics JSON and reset rolling histograms and resettable counters after each emission.\n"
+              << "  --metrics-json             Emit metrics at exit (phase percentiles use the latest 120 samples).\n"
+              << "  --metrics-json-interval    Emit metrics, then reset rolling histograms and resettable counter baselines.\n"
               << "  --snapshot-out <file>      Write the final simulation snapshot to <file>.\n"
               << "  --snapshot-in <file>       Load the simulation snapshot from <file> before running.\n"
+              << "  --version                  Print the RTFW version.\n"
               << "  --help, -h                 Show this help message.\n";
 }
 
@@ -259,12 +263,22 @@ void storeSnapshotFile(const std::string &path,
 
 } // namespace
 
-static std::size_t parseSize(const char* s, std::size_t def)
+static bool parseSize(const char* s, std::size_t& value)
 {
-    if (!s) return def;
+    if (!s || *s == '\0')
+        return false;
+    for (const char* p = s; *p != '\0'; ++p)
+        if (*p < '0' || *p > '9')
+            return false;
+    errno = 0;
     char* e = nullptr;
     unsigned long long v = std::strtoull(s, &e, 10);
-    return (e && *e == 0) ? static_cast<std::size_t>(v) : def;
+    if (errno == ERANGE || !e || *e != '\0' || v == 0 ||
+        v > static_cast<unsigned long long>(
+                std::numeric_limits<std::size_t>::max()))
+        return false;
+    value = static_cast<std::size_t>(v);
+    return true;
 }
 
 int main(int argc, char** argv)
@@ -294,10 +308,19 @@ int main(int argc, char** argv)
             printHelp(argv[0]);
             return 0;
         }
-        else if (std::strcmp(argv[i], "--elements") == 0 && i + 1 < argc)
-            ; // handled later
-        else if (std::strcmp(argv[i], "--threads") == 0 && i + 1 < argc)
-            cfg.threads = parseSize(argv[++i], cfg.threads);
+        else if (std::strcmp(argv[i], "--version") == 0)
+        {
+            std::cout << RTFW_VERSION_STRING << "\n";
+            return 0;
+        }
+        else if (std::strcmp(argv[i], "--threads") == 0)
+        {
+            if (i + 1 >= argc || !parseSize(argv[++i], cfg.threads))
+            {
+                std::cerr << "--threads requires a positive integer\n";
+                return 1;
+            }
+        }
         else if (std::strcmp(argv[i], "--pin") == 0)
             cfg.pinThreads = true;
         else if (std::strcmp(argv[i], "--metrics-json") == 0)
@@ -314,6 +337,11 @@ int main(int argc, char** argv)
         else if (std::strcmp(argv[i], "--snapshot-out") == 0 || std::strcmp(argv[i], "--snapshot-in") == 0)
         {
             std::cerr << "Missing path for " << argv[i] << "\n";
+            return 1;
+        }
+        else
+        {
+            std::cerr << "Unknown option: " << argv[i] << "\n";
             return 1;
         }
     }
@@ -340,6 +368,7 @@ int main(int argc, char** argv)
 
     auto input   = sim.addPhase("Input");
     auto physics = sim.addPhase("Physics");
+    sim.addDependency(input, physics);
     sim.setPhaseElementCount(physics, N);
 
     /* -------------- subsystems ------------------ */

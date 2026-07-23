@@ -1,35 +1,44 @@
 # Developer Experience and Governance
 
-This project provides a lightweight template for adding new systems via the
-`tools/new_system.py` generator. Consistent coding style and comprehensive
-testing are required for all contributions.
+`tools/new_system.py` is a small scaffolding helper. Public behavior is governed
+by the [product contract](product_contract.md), accepted
+[ADRs](adr/README.md), tests, and semantic versioning.
 
-Plugins must adhere to the C ABI defined in `rt/plugin_api.h` and carry strict
-`abi_major` and `abi_minor` version numbers. Breaking changes require bumping
-the major version.
+## Contribution workflow
 
-## Contribution Workflow
+1. Create a focused branch.
+2. State whether the change is current behavior, experimental behavior, or
+   target architecture.
+3. Add tests for present-tense behavior and update affected contract docs.
+4. Run the documented configure, build, and test commands.
+5. Call out API/ABI, allocation, scheduling, determinism, and telemetry-schema
+   impact in the pull request.
 
-1. Create a feature branch and implement the change.
-2. Run `cmake` and `ctest` before submitting a pull request.
-3. Ensure new code has unit tests and documentation.
-4. Follow semantic versioning for public interfaces, including plugins.
+Repository branch-protection and reviewer rules are managed on GitHub. This
+repository does not currently define a two-maintainer quorum, so documentation
+must not invent one.
 
-## Governance
+## ABI policy
 
-Changes are reviewed by maintainers. A quorum of two maintainers must approve
-API or ABI changes.
+The plugin and C surfaces are experimental in 0.1. Their major/minor fields
+support compatibility checks but do not yet constitute a stable ABI promise.
+Milestone M11 freezes exported symbols, ownership, structure sizing,
+capabilities, errors, and compatibility policy.
 
-## Scheduling Invariants
+## Thread-creation guard
 
-* Development builds define `RTFW_ENFORCE_NO_RAW_THREADS`. When this flag is
-  active, including `SimCore.hpp` forbids direct `std::thread` construction.
-  Phases must submit asynchronous work through the provided worker pool to keep
-  a single scheduling surface and maintain consistent telemetry.
+`RTFW_ENFORCE_NO_RAW_THREADS` defaults on when assertions are enabled and is
+also forced for a negative compile test (`simcore_thread_violation`). It is a
+macro-based diagnostic, not a complete prohibition: it catches direct
+`std::thread(...)` constructor expressions after `SimCore.hpp`, but not every
+declaration pattern, and several runtime components intentionally create their
+own threads. The target lifecycle replaces this partial guard with explicit
+executor and service-lane ownership.
 
 ## Code anchors
 
-- System scaffolding: `main()` generator; `tools/new_system.py`
-- Plugin ABI contract: `RT_PLUGIN_API_VERSION_MAJOR`, `rt_plugin_desc_t`; `rt/include/rt/plugin_api.h`
-- Raw thread guard: `simcore::debug::assert_thread_creation_allowed`, `#define thread(...)`; `include/simcore/debug.hpp`, `include/simcore/SimCore.hpp`
-
+- Scaffolding helper: `tools/new_system.py`
+- Plugin ABI draft: `rt/include/rt/plugin_api.h`
+- Negative raw-thread test: `tests/thread_violation.cpp`,
+  `tests/CMakeLists.txt`
+- ABI milestone: [roadmap](roadmap.md)

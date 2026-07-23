@@ -1,40 +1,45 @@
-# Testing and CI Beyond Correctness
+# Testing and CI Evidence
 
-This project goes beyond traditional unit tests.  The following
-strategies are used to harden the runtime and catch regressions early.
+CI is regression evidence for selected builds and behaviors. It is not a
+latency qualification and does not prove the complete product contract.
 
-## Differential Tests
+## Current coverage
 
-`tests/test_differential_output.cpp` loads kernel results and compares
-them against a baseline stored under `tests/golden/`.  The test computes
-the maximum absolute drift and fails when it exceeds a threshold.  This
-keeps refactors honest when small numerical deltas could mask behavioural
-regressions.  The check runs automatically under the GoogleTest suite in
-CI.
+- GoogleTest unit and integration tests cover phase execution, queues, arenas,
+  numerics, snapshots, trace, metrics, mock devices, plugins, and utilities.
+- `test_differential_output.cpp` compares a sample numerical kernel with a
+  checked-in golden result under an absolute drift threshold.
+- fault-injection tests exercise selected allocator, delay, and transient-error
+  paths.
+- the determinism matrix runs a filtered integration test across selected
+  compiler and AVX2/FMA build variants. Each job validates behavior within its
+  own binary; CI does not compare hashes between compiler jobs.
+- Linux and Windows jobs exercise selected Debug/RelWithDebInfo builds.
+- C ABI, autotune-tooling, scaling-artifact, and documentation-contract jobs
+  provide focused smoke coverage.
 
-## Chaos Tests
+## What CI does not currently establish
 
-Fault injection and other chaos-style checks live alongside the normal
-unit tests.  For example `tests/test_fault_injection.cpp` exercises
-allocator failures and other transient errors.  Similar patterns can be
-extended to simulate stalls or thread preemption storms.
+- No job measures a statistically controlled worst-case or confidence-bound
+  latency gate on dedicated hardware.
+- Sanitizer jobs do not cover every sanitizer, platform, or code path.
+- The libFuzzer target is optional and is not a continuous fuzzing service.
+- Passing snapshot tests do not establish a safe, stable interchange format.
+- Passing mock-GPU tests do not exercise a hardware device.
+- Best-effort host-hardening steps on shared runners are not RT evidence.
 
-## Performance CI Stability
+## Adding evidence
 
-Benchmarks should be executed multiple times and evaluated using robust
-statistics (e.g. Hodges–Lehmann estimator) rather than a single sample.
-CI gates on the confidence interval of these runs instead of raw
-wall-clock timings.
-
-## Fuzzing and Sanitizers
-
-LibFuzzer harnesses (e.g. `tests/jobqueue_fuzz.cpp`) run under
-ASan/UBSan/TSan.  Any TSan suppressions must carry written justification
-within the repository.
+A present-tense feature claim should point to a test that fails when the
+behavior disappears. A determinism claim must name its tier and comparison
+matrix. A performance or RT claim must retain raw data, environment identity,
+predeclared thresholds, and the measurement procedure.
 
 ## Code anchors
 
-- Differential testing: `TEST(DifferentialKernelTest, DriftBelowThreshold)`; `tests/test_differential_output.cpp`
-- Chaos testing: `TEST(FaultInjection, RandomDelaysStillRun)`; `tests/test_fault_injection.cpp`
-- Fuzzing harness: `LLVMFuzzerTestOneInput`; `tests/jobqueue_fuzz.cpp`
-
+- Main workflows: `.github/workflows/ci.yml`
+- Documentation contract: `.github/workflows/docs-contract.yml`
+- Differential test: `tests/test_differential_output.cpp`
+- Fault injection: `tests/test_fault_injection.cpp`
+- Determinism integration: `tests/integration/test_determinism.cpp`
+- Optional fuzz harness: `tests/jobqueue_fuzz.cpp`

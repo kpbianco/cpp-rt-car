@@ -51,11 +51,6 @@ def parse_args() -> argparse.Namespace:
         help="Directory that will receive characterization artifacts.",
     )
     parser.add_argument(
-        "--duration",
-        default="10s",
-        help="Sample duration forwarded to scaling sweeps (default: %(default)s).",
-    )
-    parser.add_argument(
         "--threads",
         default="auto",
         help="Worker thread count for replay/safety runs (default: auto-detect physical cores).",
@@ -364,7 +359,6 @@ def call_scaling(
     *,
     binary: pathlib.Path,
     out_dir: pathlib.Path,
-    duration: str,
     smt: str,
     manual_threads: Optional[int],
     extra_args: Optional[Sequence[str]],
@@ -379,8 +373,6 @@ def call_scaling(
         str(binary),
         "--output-dir",
         str(scaling_dir),
-        "--duration",
-        str(duration),
         "--smt",
         smt,
         "--tag",
@@ -434,7 +426,6 @@ def assemble_summary(
     out_dir: pathlib.Path,
     binary: pathlib.Path,
     profile: Optional[str],
-    duration: str,
     threads_arg: str,
     threads_selected: int,
     replay: Mapping[str, Any],
@@ -456,7 +447,6 @@ def assemble_summary(
         "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
         "binary": str(binary),
         "profile": profile,
-        "duration": duration,
         "threads": {
             "requested": threads_arg,
             "selected": threads_selected,
@@ -510,7 +500,6 @@ def main() -> None:
     scaling_data, scaling_json_path, scaling_csv_path = call_scaling(
         binary=binary,
         out_dir=out_dir,
-        duration=args.duration,
         smt=args.smt,
         manual_threads=selected_threads if args.threads and args.threads != "auto" else None,
         extra_args=args.extra_args,
@@ -521,7 +510,6 @@ def main() -> None:
         out_dir=out_dir,
         binary=binary,
         profile=args.profile,
-        duration=args.duration,
         threads_arg=args.threads,
         threads_selected=selected_threads,
         replay=replay,

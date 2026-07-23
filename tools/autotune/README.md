@@ -1,69 +1,62 @@
-# Autotune Specification
+# Autotune Tooling
 
-This directory contains configuration and orchestration scripts for the runtime autotuning workflow.  The `spec.yaml` file is the machine-readable source of truth for the tuner describing how to execute the application, what metrics to enforce, and the parameter space to explore.
+This directory implements a design-of-experiments, scoring, search, validation,
+and reporting pipeline. `spec_smoke.yaml` plus `smoke_app.py` are the supported
+end-to-end test target in RTFW 0.1.
 
-## File: `spec.yaml`
+`spec.yaml` is a target integration design, not an operational `rtfw_demo`
+configuration. The demo does not yet implement the `--config`, `--run`, or
+`--rt` arguments issued by `run_one.py`, and it does not load the generated
+profile. See the [status guide](../../docs/DOE_AUTOTUNE.md).
 
-The YAML document is organized into three top-level sections:
+## Specification
 
-### `app`
-Describes how to run the realtime application when gathering interval metrics.
+A spec has these main sections:
 
-| Field | Description |
-| --- | --- |
-| `path` | Executable path to the demo binary that emits metrics. |
-| `warmup_sec` | Seconds to run before samples are collected, allowing the app to reach steady state. |
-| `run_sec` | Seconds of metric sampling after warmup. |
-| `frame_budget_ms` | Target frame duration used in objective normalization. |
-| `extra_args` | Additional CLI arguments always passed to the executable. |
+- `app`: executable path, warm-up and measurement durations, frame budget, and
+  extra arguments;
+- `metrics`: hard constraints and an ordered scalar objective;
+- `params`: categorical, integer, floating-point, or Boolean factors;
+- optional scenarios and robustness seeds.
 
-### `metrics`
-Defines success criteria and the optimization objective derived from the reported metrics.
+The current factor mapper can emit configuration fields for threads, chunking,
+layout, scheduler experiments, prefetch, numerical settings, arenas, huge
+pages, emergency helpers, and governor controls. Schema-valid output does not
+mean the production runtime consumes those fields.
 
-* `hard_constraints` — Map of metric names to comparison expressions that must hold for a run to be considered valid.
-* `objective` — Specifies how scores are computed:
-  * `expr` — Primary scalar objective expression (lower is better when `maximize: false`).
-  * `tiebreakers` — Ordered list of secondary expressions used when two configurations share the same primary objective.
-  * `maximize` — Boolean indicating whether higher (`true`) or lower (`false`) values are preferred.
+## Supported smoke
 
-### `params`
-Enumerates the tunable configuration parameters. Each key defines a parameter with one of the following types:
-
-* `categorical` — Explicit list of `values` to choose from.
-* `int` — Integer parameter with inclusive `min`/`max` bounds and an optional `step` size.
-* `float` — Floating-point parameter with inclusive bounds and step size.
-* `bool` — Boolean toggle (no additional fields required).
-
-These definitions drive the design-of-experiments sampling, local search bounds, and downstream validation.
-
-## JSONL result schema
-
-Every invocation of `run_one.py` produces a single JSON object describing the sampled run. These rows are appended verbatim to
-`results/experiments.jsonl` and `results/validation_runs.jsonl`. Each record follows the stable schema below:
-
-```
-{
-  "ok": bool,
-  "objective": float | Infinity,
-  "metrics": { ... raw interval JSON from the application ... },
-  "_summary": { ... derived metrics such as p50_frame_ms ... },
-  "_params": { ... resolved parameter values ... },
-  "_seed": int,
-  "_scenario": str,
-  "_ts": "<ISO8601 timestamp>",
-  "env": {
-    "cpu_model": str,
-    "cpu_slug": str,
-    "os_name": str,
-    "cores": int,
-    "cpu": str,  # legacy alias of cpu_model
-    "os": str    # legacy alias of os_name
-  },
-  "_schema": "v1"
-}
+```bash
+tools/autotune/run_smoke.sh
+python3 tools/autotune/make_config.py --self-test
+python3 tools/autotune/mapping_smoke.py
 ```
 
-`objective` is set to `Infinity` when hard constraints fail. `_summary` mirrors the previous aggregate metrics payload and is used
-by the optimisation routines, while `metrics` keeps the raw interval JSON emitted by the realtime application for traceability.
-Append operations are crash-safe: each line is flushed and `fsync`'d before the next record is written so that interrupted runs
-cannot corrupt the log.
+The first command targets the synthetic app. The latter commands verify
+mapping coverage and schema behavior. The planned real-demo dry run is disabled
+unless `RTFW_ENABLE_PLANNED_AUTOTUNE_ROUNDTRIP=1`; enabling it in 0.1 is
+expected to fail because the runtime interface is not implemented.
+
+## Result records
+
+Each `run_one.py` invocation emits a JSON object containing:
+
+- `ok` and `objective`;
+- raw application `metrics`;
+- derived `_summary`;
+- sampled `_params`, `_seed`, `_scenario`, and `_ts`;
+- host `env` metadata;
+- `_schema: "v1"`.
+
+JSONL append operations flush and `fsync` each record. This protects the log
+from a partially buffered final record; it does not make a trial valid or
+reproducible. Consumers must verify provenance, schema, constraints, and dropped
+telemetry.
+
+## Runtime integration gate
+
+Before switching `spec.yaml` from planned to supported, CI must build
+`rtfw_demo`, run at least one generated config through it, prove every tunable
+changes the resolved runtime policy, verify bounded warm-up/measurement
+semantics, and validate direct frame/deadline metrics. This is tracked in the
+[roadmap](../../docs/roadmap.md).

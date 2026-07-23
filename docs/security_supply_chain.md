@@ -1,39 +1,44 @@
-# Security and Supply Chain
+# Security and Supply-Chain Status
 
-This project includes a small collection of facilities aimed at
-improving the security posture and supply‑chain hygiene of the runtime
-and its tooling.
+RTFW 0.1 has security-oriented experiments and CI helpers, not a hardened
+plugin sandbox or complete supply-chain policy.
 
-## Sandboxing
+## Process restriction experiment
 
-The header `simcore/sandbox.hpp` exposes `enable_sandbox()` which
-restricts the current process. On Linux it installs a minimal `seccomp`
-filter; on Windows a Job Object is created so that tools terminate if
-the parent process exits.
+On Linux, `enable_sandbox()` attempts to install a very small seccomp allowlist
+for read, write, exit, exit-group, and signal return. Such a policy applies to
+the current process and is too narrow for the runtime's normal thread, memory,
+clock, file, and device behavior. It is not invoked by the runtime lifecycle
+and must be treated as an isolated test helper.
 
-## Minidump symbol support
+On Windows, the helper assigns the current process to a Job Object configured
+to terminate with the job. That is lifecycle containment, not a security
+sandbox or plugin isolation boundary.
 
-`write_minidump()` now accepts an optional list of symbol paths. These
-are embedded in the dump file so that a private symbol server can be
-consulted when resolving crash reports.
+Plugins run in process and therefore share the host's authority. Only trusted
+plugins should be loaded.
 
-## SBOM and signature verification
+## Crash text helper
 
-`tools/sbom.py` produces a JSON Software Bill of Materials describing
-pinned git submodules. When provided with `tools/sbom_expected.json`
-the script verifies that the repository is using known commits for its
-third‑party dependencies.
+`write_minidump()` writes symbol-path strings and, on Unix-like systems, a text
+backtrace. It is not a platform minidump format, is not async-signal-safe, and
+may disclose paths. It must not be described as a production crash handler.
 
-## Reproducible build artifacts
+## Supply-chain helpers
 
-`tools/store_repro_build.py` stores build outputs along with a SHA256
-digest.  The resulting metadata can be kept with performance artifacts
-allowing binary reproducibility checks.
+- CI can generate an SPDX JSON SBOM with `anchore/sbom-action`.
+- `tools/sbom.py` inventories git submodules and can compare them with a
+  repository allowlist.
+- `tools/store_repro_build.py` records artifact hashes and metadata.
+
+These are useful inputs, but signing, provenance attestation, release-key
+policy, vulnerability response, and reproducible-build verification remain
+release-engineering work.
 
 ## Code anchors
 
-- Sandboxing: `enable_sandbox`; `include/simcore/sandbox.hpp`
-- Minidump symbols: `write_minidump`; `include/simcore/minidump.hpp`
-- SBOM verification: `main()` runner; `tools/sbom.py`
-- Reproducible artifacts: `main()` workflow; `tools/store_repro_build.py`
-
+- Process restriction experiment: `include/simcore/sandbox.hpp`
+- Crash text helper: `include/simcore/minidump.hpp`
+- Submodule SBOM check: `tools/sbom.py`
+- Artifact metadata: `tools/store_repro_build.py`
+- Threat boundaries: [threat model](threat_model.md)

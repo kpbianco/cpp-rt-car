@@ -1,13 +1,14 @@
 #pragma once
 
 #include <stdint.h>
+#include <rtfw/version.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define RT_VERSION_MAJOR 1
-#define RT_VERSION_MINOR 0
+#define RT_VERSION_MAJOR RTFW_VERSION_MAJOR
+#define RT_VERSION_MINOR RTFW_VERSION_MINOR
 
 typedef struct {
     uint8_t jobs;
@@ -25,4 +26,3 @@ rt_capabilities_c rt_query_capabilities(void);
 #ifdef __cplusplus
 }
 #endif
-

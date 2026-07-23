@@ -1,42 +1,86 @@
-# Architecture Overview
+# Architecture
 
-## Phase DAG
+This page separates the 0.1 implementation from the accepted target
+architecture. The normative target is the
+[product contract](product_contract.md); the decisions behind it are recorded
+in [ADRs](adr/README.md).
+
+## Current 0.1 implementation
+
+`SimCore` owns a phase graph, an internal range-worker team, frame arenas,
+metrics hooks, tracing, pacing, adaptation, snapshots, and a separate
+`FiberPool`. It creates worker threads in its constructor and `run()` owns a
+self-paced loop.
+
+Phases are grouped into topological levels. Dependencies order those levels,
+while enabled phases in one level may run concurrently. A phase can contain:
+
+- serial callbacks;
+- chunked range callbacks;
+- ordinary reductions;
+- deterministic range reductions.
+
+The demo exercises independent input, physics, AI, and audio work followed by
+dependent constraint, integration, and telemetry phases.
+
+### Important limitations
+
+- `buildTopoLevels()` does not report a cycle as a configuration error.
+- `SimCore`, `WorkerPool`, `rt::Scheduler`, and `FiberPool` are separate
+  scheduling surfaces with different task and lifetime rules.
+- `WorkerPool` has one bounded global FIFO queue. Its normal dequeue path does
+  not honor `Job::priority`; its “steal” counter measures unsuccessful polling
+  while work is outstanding, not successful cross-worker steals.
+- `SimCore::run()` sleeps and advances its own wall-clock schedule, so it is
+  not yet suitable as a host-driven engine step.
+- construction and some running paths allocate, lock, perform file I/O, or
+  create threads. The frame arena can use heap fallback after Release overflow.
+- global trace and floating-point state prevent clean isolation of multiple
+  runtime instances.
+- the HAL memory flags are no-ops, and the GPU path is a detached CPU-thread
+  mock.
+
+These are tracked in the [roadmap](roadmap.md), not hidden behind feature
+claims.
+
+## Target architecture
+
+The target lifecycle is configure, finalize, start, run, and stop:
+
+```mermaid
+flowchart TD
+  A["Configure graph and backends"] --> B["Finalize and validate"]
+  B --> C["Allocate bounded plan"]
+  C --> D["Start fixed execution contexts"]
+  D --> E["Step compiled graph"]
+  E --> F["Stop and drain"]
 ```
-[Input] -> [Simulation] -> [Output]
-               |
-         [Physics]
-               |
-        [Constraint]
-```
 
-The engine processes data in a directed acyclic graph (DAG). Each node
-represents a phase; edges model dependencies and data flow.
+Finalization compiles phase dependencies and resource hazards into an immutable
+execution plan. One executor boundary runs CPU work under a selected policy.
+Device backends receive bounded submissions and publish completions; CPU
+workers do not block on device futures.
 
-## Memory Layout
-```
-struct Car {
-    // Structure of Arrays (SoA)
-    float pos_x[N];
-    float pos_y[N];
-    float vel_x[N];
-    float vel_y[N];
-}
-```
+The host-driven API receives simulation time from its caller and never sleeps.
+A distinct self-paced API owns absolute release times. See
+[ADR-0001](adr/0001-one-executor-boundary.md),
+[ADR-0002](adr/0002-host-driven-time.md), and
+[ADR-0003](adr/0003-device-backend-boundary.md).
 
-Physics kernels operate on SoA buffers to maximise cache and SIMD
-performance. Array dimensions align to cache lines for predictable access.
+## Memory layout utilities
 
-## Job System
-
-A lightweight work-stealing job system drives the phase DAG. A fixed
-thread pool pulls tasks from lock-free queues, allowing phases to submit
-independent jobs that execute in parallel while respecting dependency
-edges. Phases wait for their scheduled jobs to finish before advancing,
-keeping frame latency predictable while utilising all CPU cores.
+The repository includes SoA/AoSoA containers and SIMD-oriented kernels. They
+are optional utilities, not a required application data model and not evidence
+that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- Phase DAG: `SimCore::buildTopoLevels`; `include/simcore/SimCore.hpp`
-- Memory layout: `CarSoA`; `include/simcore/car_soa.hpp`
-- Job system: `WorkerPool::workerLoop`, `BoundedMPMCQueue::try_push`; `include/simcore/worker_pool.hpp`, `include/simcore/job_queue.hpp`
-
+- Phase registration and graph: `SimCore::addPhase`,
+  `SimCore::addDependency`, `SimCore::buildTopoLevels`;
+  `include/simcore/SimCore.hpp`
+- Internal range execution: `SimCore::initThreads`,
+  `SimCore::executeFrame`; `include/simcore/SimCore.hpp`
+- Optional global-queue pool: `WorkerPool`; `include/simcore/worker_pool.hpp`
+- Separate research scheduler: `rt::Scheduler`; `rt/include/rt/scheduler.hpp`
+- Data-layout utilities: `include/simcore/car_soa.hpp`,
+  `include/simcore/soa/`

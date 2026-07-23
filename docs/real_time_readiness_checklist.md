@@ -1,18 +1,40 @@
-# Real-Time Readiness Checklist
+# Real-Time Readiness Gates
 
-Use this checklist to assess whether the system is ready for real-time use.
+This checklist is a release/qualification gate, not a feature inventory. RTFW
+0.1 has not completed any end-to-end RT2 qualification.
 
-- [ ] Deterministic execution paths validated by unit tests.
-- [ ] All dynamic allocations are bounded or eliminated.
-- [ ] Plugins can be hot-loaded and unloaded without restarting the runtime.
-- [ ] Watchdog timers and monitoring enabled.
-- [ ] Threat model reviewed and mitigations implemented.
+## Portable runtime gates
 
-## Code anchors
+- [ ] Configuration is finalized into an immutable graph and bounded resource
+  plan.
+- [ ] Invalid and cyclic graphs fail before worker start.
+- [ ] The selected RT lane creates no hidden threads and performs no heap
+  allocation, file I/O, or blocking lock after start.
+- [ ] Every queue-full, arena-overflow, timeout, cancellation, and shutdown path
+  has explicit bounded behavior and tests.
+- [ ] Host-driven steps never sleep; self-paced operation uses absolute release
+  times.
+- [ ] Multiple runtime instances have isolated clocks, numerical policy,
+  allocator state, trace state, and device state.
+- [ ] Trace/metrics records use fixed storage and a versioned schema.
+- [ ] Snapshot input is bounds-checked, versioned, fuzzed, and tied to graph and
+  configuration identity.
+- [ ] The C and C++ embedding APIs can register and execute real host work with
+  typed errors.
 
-- Determinism validation: `TEST(SnapshotRollback, ReplayHashEquality)`; `tests/test_snapshot.cpp`
-- Bounded allocations: `rt::FrameArena`, `rt::FrameArenaPool`; `include/simcore/rt_memory.hpp`
-- Plugin lifecycle: `rt::PluginManager::load`, `rt::PluginManager::unload`; `rt/src/plugin_manager.cpp`
-- Watchdog monitoring: `rt::Watchdog::arm`, `SimCore::executeFrame`; `rt/include/rt/watchdog.hpp`, `include/simcore/SimCore.hpp`
-- Threat mitigations: `enable_sandbox`; `include/simcore/sandbox.hpp`
+## Deployment qualification gates
 
+- [ ] A named hardware, firmware, kernel, driver, toolchain, configuration, and
+  workload tuple is frozen.
+- [ ] CPU isolation, IRQ placement, affinity, scheduling, memory locking, power
+  policy, and device topology pass a fail-closed preflight.
+- [ ] Release, wake-up, compute, device-completion, slack, and miss samples are
+  captured for a predeclared duration.
+- [ ] Pass/fail thresholds are selected before measurement and raw artifacts
+  are retained.
+- [ ] Overload, thermal, device loss/reset, and shutdown behavior pass on the
+  target.
+- [ ] The qualification record is reproducible from a clean checkout.
+
+See [the product contract](product_contract.md) for RT tiers and
+[the roadmap](roadmap.md) for implementation ownership.

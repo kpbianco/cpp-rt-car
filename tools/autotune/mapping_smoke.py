@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -88,10 +89,17 @@ def run_mapping_coverage_check() -> None:
 
 
 def run_round_trip_dry_run(config_path: pathlib.Path) -> None:
-    demo_binary = REPO_ROOT / "build/bin/rtfw_demo"
-    if not demo_binary.is_file():
-        print("Skipping round-trip dry run: build/bin/rtfw_demo not found.")
+    if os.environ.get("RTFW_ENABLE_PLANNED_AUTOTUNE_ROUNDTRIP") != "1":
+        print(
+            "Skipping planned runtime round-trip: set "
+            "RTFW_ENABLE_PLANNED_AUTOTUNE_ROUNDTRIP=1 to exercise the "
+            "not-yet-implemented demo interface."
+        )
         return
+
+    demo_binary = REPO_ROOT / "build/rtfw_demo"
+    if not demo_binary.is_file():
+        raise StepError("build/rtfw_demo not found for planned round-trip check")
 
     tmp_config = pathlib.Path("/tmp/autocfg.json")
     tmp_config.parent.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,7 @@
 #include <simcore/SimCore.hpp>
 
-void violate_phase_thread_invariant() {
-  std::thread worker([] {});
+int main() {
+  auto worker = std::thread([] {});
   worker.join();
+  return 0;
 }
-

@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional,
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-DEFAULT_BINARY = pathlib.Path("build/bin/rtfw_demo")
+DEFAULT_BINARY = pathlib.Path("build/rtfw_demo")
 
 
 def _positive_int(value: Optional[int], fallback: int) -> int:
@@ -78,11 +78,6 @@ def parse_args() -> argparse.Namespace:
         choices=("auto", "on", "off"),
         default="auto",
         help="Control whether SMT-on, SMT-off, or both sweeps are executed.",
-    )
-    parser.add_argument(
-        "--duration",
-        default=None,
-        help="Optional duration to forward to the demo binary (e.g. 2s).",
     )
     parser.add_argument(
         "--demo-arg",
@@ -303,7 +298,6 @@ def run_demo(
     threads: int,
     *,
     pin: bool,
-    duration: Optional[str],
     extra_args: Optional[Sequence[str]],
     env: Mapping[str, str],
 ) -> Mapping[str, Any]:
@@ -311,8 +305,6 @@ def run_demo(
         raise SystemExit(f"Demo binary not found: {binary}")
 
     cmd: List[str] = [str(binary), "--threads", str(threads), "--metrics-json-interval"]
-    if duration:
-        cmd.extend(["--duration", duration])
     if pin:
         cmd.append("--pin")
     if extra_args:
@@ -538,7 +530,6 @@ def main() -> None:
                 binary,
                 threads,
                 pin=args.pin,
-                duration=args.duration,
                 extra_args=args.demo_args,
                 env=env,
             )
@@ -566,7 +557,6 @@ def main() -> None:
         "extra_args": list(args.demo_args or []),
         "threads_override": list(manual_threads or []),
         "smt_mode": args.smt,
-        "duration": args.duration,
     }
     assemble_json(
         json_path,

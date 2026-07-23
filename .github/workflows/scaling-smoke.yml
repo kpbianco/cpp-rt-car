@@ -30,7 +30,6 @@ jobs:
       - name: Run scaling smoke
         run: |
           python tools/scaling/run_scaling.py \
-            --duration 2s \
             --threads 1,2 \
             --smt off \
             --out-dir out/scaling_smoke
