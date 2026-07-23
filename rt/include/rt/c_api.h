@@ -114,10 +114,13 @@ typedef uint64_t rtfw_resource_id;
 #define RTFW_INVALID_PHASE_ID UINT64_MAX
 #define RTFW_INVALID_RESOURCE_ID UINT64_MAX
 
-typedef enum rtfw_resource_access {
-    RTFW_RESOURCE_READ = 0,
-    RTFW_RESOURCE_WRITE = 1
-} rtfw_resource_access;
+/*
+ * Fixed-width rather than an enum so the C boundary can validate malformed
+ * numeric input without first loading an out-of-range enum value.
+ */
+typedef uint32_t rtfw_resource_access;
+#define RTFW_RESOURCE_READ ((rtfw_resource_access)0u)
+#define RTFW_RESOURCE_WRITE ((rtfw_resource_access)1u)
 
 typedef rtfw_callback_result (*rtfw_frame_callback)(
     void* user_data,
