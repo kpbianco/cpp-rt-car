@@ -6,11 +6,12 @@
 #include <rt/c_api.h>
 
 typedef struct sample_state {
-    uint64_t calls;
+    uint64_t produced;
+    uint64_t consumed;
     uint64_t last_frame;
 } sample_state;
 
-static rtfw_callback_result simulate(
+static rtfw_callback_result produce(
     void* user_data,
     const rtfw_callback_context* context) {
     sample_state* state = (sample_state*)user_data;
@@ -21,9 +22,29 @@ static rtfw_callback_result simulate(
         return RTFW_CALLBACK_ERROR;
     }
 
-    ++state->calls;
+    ++state->produced;
     state->last_frame = context->frame_index;
-    memcpy(context->scratch, &state->calls, sizeof(state->calls));
+    memcpy(context->scratch, &state->produced, sizeof(state->produced));
+    return RTFW_CALLBACK_OK;
+}
+
+static rtfw_callback_result consume(
+    void* user_data,
+    const rtfw_callback_context* context) {
+    sample_state* state = (sample_state*)user_data;
+    uint64_t produced = 0;
+    if (!state || !context ||
+        context->struct_size < sizeof(rtfw_callback_context) ||
+        context->delta_ns != 2000000 ||
+        context->scratch_bytes < sizeof(produced)) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    memcpy(&produced, context->scratch, sizeof(produced));
+    if (produced != state->produced ||
+        state->produced != state->consumed + 1) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    ++state->consumed;
     return RTFW_CALLBACK_OK;
 }
 
@@ -52,7 +73,7 @@ int main(void) {
 
     rtfw_config config;
     rtfw_config_init(&config);
-    if (rtfw_config_set(&config, "callback_capacity", "1") != RTFW_STATUS_OK ||
+    if (rtfw_config_set(&config, "callback_capacity", "2") != RTFW_STATUS_OK ||
         rtfw_config_set(&config, "scratch_bytes", "128") != RTFW_STATUS_OK ||
         rtfw_config_set(&config, "trace_capacity", "32") != RTFW_STATUS_OK) {
         fprintf(stderr, "mini_app: failed to build configuration\n");
@@ -67,11 +88,58 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    sample_state state = {0, 0};
+    sample_state state = {0, 0, 0};
+    rtfw_phase_id consumer_phase = RTFW_INVALID_PHASE_ID;
+    rtfw_phase_id producer_phase = RTFW_INVALID_PHASE_ID;
+    rtfw_resource_id simulation_state = RTFW_INVALID_RESOURCE_ID;
     if (!check_status(
             runtime,
-            rtfw_register_callback(runtime, "sample.simulate", simulate, &state),
-            "register callback") ||
+            rtfw_register_phase(
+                runtime,
+                "sample.consume",
+                consume,
+                &state,
+                &consumer_phase),
+            "register consumer") ||
+        !check_status(
+            runtime,
+            rtfw_register_phase(
+                runtime,
+                "sample.produce",
+                produce,
+                &state,
+                &producer_phase),
+            "register producer") ||
+        !check_status(
+            runtime,
+            rtfw_register_resource(
+                runtime,
+                "sample.simulation-state",
+                &simulation_state),
+            "register resource") ||
+        !check_status(
+            runtime,
+            rtfw_add_dependency(
+                runtime,
+                producer_phase,
+                consumer_phase),
+            "add dependency") ||
+        !check_status(
+            runtime,
+            rtfw_declare_resource_access(
+                runtime,
+                producer_phase,
+                simulation_state,
+                RTFW_RESOURCE_WRITE),
+            "declare producer access") ||
+        !check_status(
+            runtime,
+            rtfw_declare_resource_access(
+                runtime,
+                consumer_phase,
+                simulation_state,
+                RTFW_RESOURCE_READ),
+            "declare consumer access") ||
         !check_status(runtime, rtfw_finalize(runtime), "finalize") ||
         !check_status(runtime, rtfw_start(runtime), "start")) {
         rtfw_destroy(runtime);
@@ -101,7 +169,7 @@ int main(void) {
                 runtime,
                 rtfw_step(runtime, &frame, &result),
                 "step") ||
-            result.callbacks_executed != 1 ||
+            result.callbacks_executed != 2 ||
             result.deadline_missed) {
             rtfw_destroy(runtime);
             return EXIT_FAILURE;
@@ -109,13 +177,14 @@ int main(void) {
     }
 
     if (!check_status(runtime, rtfw_stop(runtime), "stop") ||
-        state.calls != 5 ||
+        state.produced != 5 ||
+        state.consumed != 5 ||
         state.last_frame != 4) {
         rtfw_destroy(runtime);
         return EXIT_FAILURE;
     }
 
     rtfw_destroy(runtime);
-    printf("mini_app: executed 5 host-driven callbacks\n");
+    printf("mini_app: executed 5 compiled graph frames\n");
     return EXIT_SUCCESS;
 }

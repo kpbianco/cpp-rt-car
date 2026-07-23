@@ -1,7 +1,10 @@
 #include <rt/runtime.hpp>
 
+#include "compiled_graph.hpp"
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -15,9 +18,23 @@
 namespace {
 
 constexpr std::size_t kMaxCallbacks = 65'536;
+constexpr std::size_t kMaxResources = 65'536;
 constexpr std::size_t kMaxScratchBytes = std::size_t{1} << 30;
 constexpr std::size_t kMaxTraceEvents = std::size_t{1} << 20;
 constexpr std::size_t kNoCallback = std::numeric_limits<std::size_t>::max();
+
+std::atomic<std::uint32_t> g_next_graph_owner{1};
+
+std::uint32_t next_graph_owner() noexcept {
+    for (;;) {
+        const auto candidate =
+            g_next_graph_owner.fetch_add(1, std::memory_order_relaxed);
+        if (candidate != 0 &&
+            candidate != std::numeric_limits<std::uint32_t>::max()) {
+            return candidate;
+        }
+    }
+}
 
 class SteadyRuntimeClock final : public rt::RuntimeClock {
 public:
@@ -73,9 +90,9 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
 namespace rt {
 
 Capabilities query_capabilities() noexcept {
-    // M1 provides host-driven time. Graph compilation and the proven bounded
-    // memory plan are M2 and M4 deliverables, respectively.
-    return {false, true, false};
+    // M2 provides the immutable compiled graph. The proven complete bounded
+    // memory plan remains an M4 deliverable.
+    return {true, true, false};
 }
 
 const char* status_message(Status status) noexcept {
@@ -96,6 +113,12 @@ const char* status_message(Status status) noexcept {
         return "resource allocation failed";
     case Status::internal_error:
         return "internal runtime error";
+    case Status::invalid_handle:
+        return "invalid graph handle";
+    case Status::graph_cycle:
+        return "graph contains a cycle";
+    case Status::resource_conflict:
+        return "unordered conflicting resource access";
     }
     return "unknown runtime status";
 }
@@ -160,8 +183,13 @@ struct Runtime::Impl {
         void* user_data = nullptr;
     };
 
+    struct RegisteredResource {
+        std::string name;
+    };
+
     explicit Impl(RuntimeClock* injected_clock)
-        : clock(injected_clock ? injected_clock : &owned_clock) {
+        : graph_owner(next_graph_owner()),
+          clock(injected_clock ? injected_clock : &owned_clock) {
         error[0] = '\0';
     }
 
@@ -190,6 +218,59 @@ struct Runtime::Impl {
         return Status::callback_failed;
     }
 
+    [[nodiscard]] bool valid_phase(PhaseHandle phase) const noexcept {
+        return phase.valid() &&
+               phase.owner() == graph_owner &&
+               phase.index() < callbacks.size();
+    }
+
+    [[nodiscard]] bool valid_resource(ResourceHandle resource) const noexcept {
+        return resource.valid() &&
+               resource.owner() == graph_owner &&
+               resource.index() < resources.size();
+    }
+
+    Status fail_compile(
+        Status status,
+        const detail::GraphCompileDiagnostic& diagnostic) noexcept {
+        if (status == Status::graph_cycle) {
+            const char* name = valid_phase(diagnostic.first_phase)
+                ? callbacks[diagnostic.first_phase.index()].name.c_str()
+                : "<unknown>";
+            std::snprintf(
+                error.data(),
+                error.size(),
+                "dependency cycle includes phase %u ('%s')",
+                static_cast<unsigned>(diagnostic.first_phase.index()),
+                name);
+            return status;
+        }
+        if (status == Status::resource_conflict) {
+            const char* first = valid_phase(diagnostic.first_phase)
+                ? callbacks[diagnostic.first_phase.index()].name.c_str()
+                : "<unknown>";
+            const char* second = valid_phase(diagnostic.second_phase)
+                ? callbacks[diagnostic.second_phase.index()].name.c_str()
+                : "<unknown>";
+            const char* resource = valid_resource(diagnostic.resource)
+                ? resources[diagnostic.resource.index()].name.c_str()
+                : "<unknown>";
+            std::snprintf(
+                error.data(),
+                error.size(),
+                "resource '%s' has unordered conflicting access by phases "
+                "'%s' and '%s'; add a dependency path",
+                resource,
+                first,
+                second);
+            return status;
+        }
+        if (status == Status::invalid_handle) {
+            return fail(status, "graph contains an invalid phase or resource handle");
+        }
+        return fail(status, nullptr);
+    }
+
     void record(
         RuntimeTraceEventType type,
         Status status,
@@ -210,12 +291,17 @@ struct Runtime::Impl {
         trace_count = std::min(trace_count + 1, trace.size());
     }
 
+    std::uint32_t graph_owner;
     SteadyRuntimeClock owned_clock;
     RuntimeClock* clock;
     RuntimeConfig config{};
     RuntimeState state = RuntimeState::configuring;
     NumericalPolicy numerics{};
     std::vector<RegisteredCallback> callbacks;
+    std::vector<RegisteredResource> resources;
+    std::vector<detail::GraphDependency> dependencies;
+    std::vector<detail::GraphResourceAccess> resource_accesses;
+    std::vector<PhaseHandle> compiled_order;
     std::vector<std::byte> scratch;
     std::vector<RuntimeTraceEvent> trace;
     std::size_t trace_write = 0;
@@ -273,6 +359,14 @@ Status Runtime::configure_key(
 
 Status Runtime::register_callback(
     const CallbackRegistration& registration) noexcept {
+    PhaseHandle ignored;
+    return register_callback(registration, ignored);
+}
+
+Status Runtime::register_callback(
+    const CallbackRegistration& registration,
+    PhaseHandle& out_phase) noexcept {
+    out_phase = {};
     if (!impl_) {
         return Status::internal_error;
     }
@@ -296,11 +390,148 @@ Status Runtime::register_callback(
     }
 
     try {
+        const auto index = static_cast<std::uint32_t>(impl_->callbacks.size());
         impl_->callbacks.push_back(Impl::RegisteredCallback{
             std::string(registration.name),
             registration.callback,
             registration.user_data,
         });
+        out_phase = PhaseHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_resource(
+    std::string_view name,
+    ResourceHandle& out_resource) noexcept {
+    out_resource = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state, "resource registration is frozen");
+    }
+    if (name.empty()) {
+        return impl_->fail(Status::invalid_argument, "resource name is required");
+    }
+    if (impl_->resources.size() >= kMaxResources) {
+        return impl_->fail(Status::capacity_exceeded, "resource safety limit exceeded");
+    }
+    const auto duplicate = std::find_if(
+        impl_->resources.begin(),
+        impl_->resources.end(),
+        [&](const Impl::RegisteredResource& resource) {
+            return resource.name == name;
+        });
+    if (duplicate != impl_->resources.end()) {
+        return impl_->fail(Status::invalid_argument, "resource names must be unique");
+    }
+
+    try {
+        const auto index = static_cast<std::uint32_t>(impl_->resources.size());
+        impl_->resources.push_back(
+            Impl::RegisteredResource{std::string(name)});
+        out_resource = ResourceHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::add_dependency(
+    PhaseHandle prerequisite,
+    PhaseHandle dependent) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state, "graph topology is frozen");
+    }
+    if (!impl_->valid_phase(prerequisite) ||
+        !impl_->valid_phase(dependent)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "dependency contains an invalid or foreign phase handle");
+    }
+    if (prerequisite == dependent) {
+        return impl_->fail(
+            Status::graph_cycle,
+            "a phase cannot depend on itself");
+    }
+    const auto duplicate = std::find_if(
+        impl_->dependencies.begin(),
+        impl_->dependencies.end(),
+        [&](const detail::GraphDependency& dependency) {
+            return dependency.prerequisite == prerequisite &&
+                   dependency.dependent == dependent;
+        });
+    if (duplicate != impl_->dependencies.end()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "dependency is already registered");
+    }
+
+    try {
+        impl_->dependencies.push_back(
+            detail::GraphDependency{prerequisite, dependent});
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::declare_resource_access(
+    PhaseHandle phase,
+    ResourceHandle resource,
+    ResourceAccess access) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state, "graph topology is frozen");
+    }
+    if (!impl_->valid_phase(phase) ||
+        !impl_->valid_resource(resource)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "resource access contains an invalid or foreign handle");
+    }
+    if (access != ResourceAccess::read &&
+        access != ResourceAccess::write) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "resource access mode is invalid");
+    }
+    const auto duplicate = std::find_if(
+        impl_->resource_accesses.begin(),
+        impl_->resource_accesses.end(),
+        [&](const detail::GraphResourceAccess& declaration) {
+            return declaration.phase == phase &&
+                   declaration.resource == resource;
+        });
+    if (duplicate != impl_->resource_accesses.end()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "phase already declares access to this resource");
+    }
+
+    try {
+        impl_->resource_accesses.push_back(
+            detail::GraphResourceAccess{phase, resource, access});
     } catch (const std::bad_alloc&) {
         return impl_->fail(Status::resource_exhausted, nullptr);
     } catch (...) {
@@ -323,6 +554,20 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(Status::invalid_config, nullptr);
     }
 
+    std::vector<PhaseHandle> compiled_order;
+    detail::GraphCompileDiagnostic diagnostic;
+    const auto compile_status = detail::compile_graph(
+        impl_->graph_owner,
+        impl_->callbacks.size(),
+        impl_->resources.size(),
+        impl_->dependencies,
+        impl_->resource_accesses,
+        compiled_order,
+        diagnostic);
+    if (compile_status != Status::ok) {
+        return impl_->fail_compile(compile_status, diagnostic);
+    }
+
     try {
         impl_->scratch.assign(impl_->config.scratch_bytes, std::byte{0});
         impl_->trace.assign(impl_->config.trace_capacity, RuntimeTraceEvent{});
@@ -337,6 +582,7 @@ Status Runtime::finalize() noexcept {
     }
 
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
+    impl_->compiled_order = std::move(compiled_order);
     impl_->trace_write = 0;
     impl_->trace_count = 0;
     impl_->state = RuntimeState::finalized;
@@ -403,7 +649,8 @@ Status Runtime::step(
         impl_->numerics,
     };
 
-    for (std::size_t index = 0; index < impl_->callbacks.size(); ++index) {
+    for (const auto phase : impl_->compiled_order) {
+        const auto index = static_cast<std::size_t>(phase.index());
         auto& callback = impl_->callbacks[index];
         impl_->record(
             RuntimeTraceEventType::callback_begin,
@@ -492,6 +739,31 @@ const RuntimeConfig& Runtime::config() const noexcept {
 
 std::size_t Runtime::callback_count() const noexcept {
     return impl_ ? impl_->callbacks.size() : 0;
+}
+
+std::size_t Runtime::resource_count() const noexcept {
+    return impl_ ? impl_->resources.size() : 0;
+}
+
+std::size_t Runtime::dependency_count() const noexcept {
+    return impl_ ? impl_->dependencies.size() : 0;
+}
+
+std::size_t Runtime::resource_access_count() const noexcept {
+    return impl_ ? impl_->resource_accesses.size() : 0;
+}
+
+bool Runtime::compiled_phase_at(
+    std::size_t execution_index,
+    PhaseHandle& phase) const noexcept {
+    phase = {};
+    if (!impl_ ||
+        impl_->state == RuntimeState::configuring ||
+        execution_index >= impl_->compiled_order.size()) {
+        return false;
+    }
+    phase = impl_->compiled_order[execution_index];
+    return true;
 }
 
 std::uint64_t Runtime::now_ns() noexcept {

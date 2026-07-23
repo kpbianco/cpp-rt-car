@@ -218,7 +218,7 @@ def check_claims() -> None:
             fail(f"README.md: missing required qualification: {text!r}")
 
 
-def check_m1_contract() -> None:
+def check_runtime_contract() -> None:
     cmake = read("CMakeLists.txt")
     samples_cmake = read("samples/CMakeLists.txt")
     runtime_header = read("rt/include/rt/runtime.hpp")
@@ -226,6 +226,10 @@ def check_m1_contract() -> None:
     c_header = read("rt/include/rt/c_api.h")
     roadmap = read("docs/roadmap.md")
     host_doc = read("docs/host_runtime.md")
+    graph_doc = read("docs/compiled_graph.md")
+    graph_source = read("rt/src/compiled_graph.cpp")
+    graph_test = read("tests/test_compiled_graph.cpp")
+    noalloc_test = read("tests/test_trace_noalloc.cpp")
 
     for method in (
         "Status configure(",
@@ -273,6 +277,32 @@ def check_m1_contract() -> None:
         if function not in c_header:
             fail(f"rt/include/rt/c_api.h: missing M1 C ABI function {function!r}")
 
+    for method in (
+        "Status register_resource(",
+        "Status add_dependency(",
+        "Status declare_resource_access(",
+        "bool compiled_phase_at(",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M2 graph method {method!r}")
+
+    for function in (
+        "rtfw_register_phase(",
+        "rtfw_register_resource(",
+        "rtfw_add_dependency(",
+        "rtfw_declare_resource_access(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M2 C ABI function {function!r}")
+
+    for status in (
+        "invalid_handle",
+        "graph_cycle",
+        "resource_conflict",
+    ):
+        if status not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M2 status {status!r}")
+
     for capability in (
         "compiled_graph",
         "host_driven_time",
@@ -289,8 +319,42 @@ def check_m1_contract() -> None:
         if snippet not in cmake and snippet not in samples_cmake:
             fail(f"CMake embedding contract is missing {snippet!r}")
 
-    if "| M1 | Complete |" not in roadmap or "| M2 | Next |" not in roadmap:
-        fail("docs/roadmap.md: M1/M2 milestone status is not advanced")
+    if (
+        "| M1 | Complete |" not in roadmap
+        or "| M2 | Complete |" not in roadmap
+        or "| M3 | Next |" not in roadmap
+    ):
+        fail("docs/roadmap.md: M2/M3 milestone status is not advanced")
+
+    if not re.search(
+        r"return\s*\{\s*true\s*,\s*true\s*,\s*false\s*\}\s*;",
+        runtime_source,
+    ):
+        fail("rt/src/host_runtime.cpp: M2 capability tuple is not true/true/false")
+
+    for token in (
+        "std::priority_queue",
+        "Status::graph_cycle",
+        "Status::resource_conflict",
+        "mark_reachable(",
+    ):
+        if token not in graph_source:
+            fail(f"rt/src/compiled_graph.cpp: missing M2 compiler evidence {token!r}")
+
+    for phrase in (
+        "registration index",
+        "Read | Read",
+        "Write | Write",
+        "dependency path",
+        "bounded_memory_plan",
+    ):
+        if phrase not in graph_doc:
+            fail(f"docs/compiled_graph.md: missing M2 contract phrase {phrase!r}")
+
+    if "RandomizedDagsAgreeWithReferenceExecutor" not in graph_test:
+        fail("tests/test_compiled_graph.cpp: missing randomized DAG evidence")
+    if "CompiledGraphFirstFrameDoesNotAllocate" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing M2 allocation gate")
 
 
 def main() -> int:
@@ -301,17 +365,21 @@ def main() -> int:
             "include/rtfw/version.h",
             "docs/product_contract.md",
             "docs/host_runtime.md",
+            "docs/compiled_graph.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
             "docs/adr/0003-device-backend-boundary.md",
             ".github/workflows/docs-contract.yml",
             "rt/include/rt/runtime.hpp",
+            "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
+            "rt/src/compiled_graph.cpp",
             "rt/src/host_runtime.cpp",
             "samples/embed_c/mini_app.c",
             "samples/embed_cpp/mini_app.cpp",
             "tests/test_host_runtime.cpp",
+            "tests/test_compiled_graph.cpp",
         )
     )
     check_version()
@@ -320,7 +388,7 @@ def main() -> int:
     check_cli_contract()
     check_verified_commands()
     check_claims()
-    check_m1_contract()
+    check_runtime_contract()
 
     if FAILURES:
         print("Documentation contract failed:", file=sys.stderr)

@@ -103,7 +103,7 @@ rt::CallbackResult reentrant_stop_callback(
 
 TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     const auto capabilities = rt::query_capabilities();
-    EXPECT_FALSE(capabilities.compiled_graph);
+    EXPECT_TRUE(capabilities.compiled_graph);
     EXPECT_TRUE(capabilities.host_driven_time);
     EXPECT_FALSE(capabilities.bounded_memory_plan);
 }

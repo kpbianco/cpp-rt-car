@@ -32,6 +32,12 @@ rtfw_status to_c_status(rt::Status status) noexcept {
         return RTFW_STATUS_RESOURCE_EXHAUSTED;
     case rt::Status::internal_error:
         return RTFW_STATUS_INTERNAL_ERROR;
+    case rt::Status::invalid_handle:
+        return RTFW_STATUS_INVALID_HANDLE;
+    case rt::Status::graph_cycle:
+        return RTFW_STATUS_GRAPH_CYCLE;
+    case rt::Status::resource_conflict:
+        return RTFW_STATUS_RESOURCE_CONFLICT;
     }
     return RTFW_STATUS_INTERNAL_ERROR;
 }
@@ -206,6 +212,12 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
         return rt::status_message(rt::Status::resource_exhausted);
     case RTFW_STATUS_INTERNAL_ERROR:
         return rt::status_message(rt::Status::internal_error);
+    case RTFW_STATUS_INVALID_HANDLE:
+        return rt::status_message(rt::Status::invalid_handle);
+    case RTFW_STATUS_GRAPH_CYCLE:
+        return rt::status_message(rt::Status::graph_cycle);
+    case RTFW_STATUS_RESOURCE_CONFLICT:
+        return rt::status_message(rt::Status::resource_conflict);
     }
     return "unknown runtime status";
 }
@@ -285,11 +297,16 @@ RTFW_API rtfw_status rtfw_create(
     }
 }
 
-RTFW_API rtfw_status rtfw_register_callback(
+RTFW_API rtfw_status rtfw_register_phase(
     rtfw_handle* handle,
     const char* name,
     rtfw_frame_callback callback,
-    void* user_data) {
+    void* user_data,
+    rtfw_phase_id* out_phase) {
+    if (!out_phase) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_phase = RTFW_INVALID_PHASE_ID;
     if (!handle) {
         return RTFW_STATUS_INVALID_ARGUMENT;
     }
@@ -310,6 +327,7 @@ RTFW_API rtfw_status rtfw_register_callback(
             "configured callback capacity exceeded");
     }
 
+    handle->clear_boundary_error();
     try {
         auto registration = std::make_unique<CCallback>();
         registration->callback = callback;
@@ -317,16 +335,19 @@ RTFW_API rtfw_status rtfw_register_callback(
         CCallback* stable_registration = registration.get();
         handle->callbacks.push_back(std::move(registration));
 
+        rt::PhaseHandle phase;
         const auto status = handle->runtime.register_callback(
             rt::CallbackRegistration{
                 std::string_view(name),
                 &invoke_c_callback,
                 stable_registration,
-            });
+            },
+            phase);
         if (status != rt::Status::ok) {
             handle->callbacks.pop_back();
             return to_c_status(status);
         }
+        *out_phase = phase.value;
         handle->clear_boundary_error();
         return RTFW_STATUS_OK;
     } catch (const std::bad_alloc&) {
@@ -338,6 +359,91 @@ RTFW_API rtfw_status rtfw_register_callback(
             RTFW_STATUS_INTERNAL_ERROR,
             "unexpected callback registration failure");
     }
+}
+
+RTFW_API rtfw_status rtfw_register_callback(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_frame_callback callback,
+    void* user_data) {
+    rtfw_phase_id ignored = RTFW_INVALID_PHASE_ID;
+    return rtfw_register_phase(
+        handle,
+        name,
+        callback,
+        user_data,
+        &ignored);
+}
+
+RTFW_API rtfw_status rtfw_register_resource(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_resource_id* out_resource) {
+    if (!out_resource) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_resource = RTFW_INVALID_RESOURCE_ID;
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    if (!name) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "resource name is required");
+    }
+
+    handle->clear_boundary_error();
+    rt::ResourceHandle resource;
+    const auto status =
+        handle->runtime.register_resource(std::string_view(name), resource);
+    if (status == rt::Status::ok) {
+        *out_resource = resource.value;
+        handle->clear_boundary_error();
+    }
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_add_dependency(
+    rtfw_handle* handle,
+    rtfw_phase_id prerequisite,
+    rtfw_phase_id dependent) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    return to_c_status(handle->runtime.add_dependency(
+        rt::PhaseHandle{prerequisite},
+        rt::PhaseHandle{dependent}));
+}
+
+RTFW_API rtfw_status rtfw_declare_resource_access(
+    rtfw_handle* handle,
+    rtfw_phase_id phase,
+    rtfw_resource_id resource,
+    rtfw_resource_access access) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    rt::ResourceAccess cpp_access;
+    switch (access) {
+    case RTFW_RESOURCE_READ:
+        cpp_access = rt::ResourceAccess::read;
+        break;
+    case RTFW_RESOURCE_WRITE:
+        cpp_access = rt::ResourceAccess::write;
+        break;
+    default:
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "resource access mode is invalid");
+    }
+
+    handle->clear_boundary_error();
+    return to_c_status(handle->runtime.declare_resource_access(
+        rt::PhaseHandle{phase},
+        rt::ResourceHandle{resource},
+        cpp_access));
 }
 
 RTFW_API rtfw_status rtfw_finalize(rtfw_handle* handle) {

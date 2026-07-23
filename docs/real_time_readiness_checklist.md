@@ -1,13 +1,15 @@
 # Real-Time Readiness Gates
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
-0.2 has not completed any end-to-end RT2 qualification.
+0.3 has not completed any end-to-end RT2 qualification.
 
 ## Portable runtime gates
 
 - [ ] Configuration is finalized into an immutable graph and bounded resource
   plan.
-- [ ] Invalid and cyclic graphs fail before worker start.
+- [x] Invalid/foreign handles, cyclic graphs, and declared resource conflicts
+  fail before start (M2 functional gate; omitted declarations remain host
+  error).
 - [ ] The selected RT lane creates no hidden threads and performs no heap
   allocation, file I/O, or blocking lock after start.
 - [ ] Every queue-full, arena-overflow, timeout, cancellation, and shutdown path
@@ -20,7 +22,8 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
 - [ ] Snapshot input is bounds-checked, versioned, fuzzed, and tied to graph and
   configuration identity.
 - [x] The C and C++ embedding APIs can register and execute real host work with
-  typed errors (M1 functional gate; not an RT qualification).
+  typed lifecycle/graph errors (M1/M2 functional gate; not an RT
+  qualification).
 
 ## Deployment qualification gates
 

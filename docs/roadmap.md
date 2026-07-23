@@ -17,8 +17,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | --- | --- | --- |
 | M0 | Complete | Product contract, truthful documentation, versioning, and license |
 | M1 | Complete | Runtime lifecycle, typed configuration, host-driven API, C ABI draft |
-| M2 | Next | Compiled graph, cycle rejection, and resource hazards |
-| M3 | Planned | Unified CPU executor with honest selectable policies |
+| M2 | Complete | Compiled graph, cycle rejection, and resource hazards |
+| M3 | Next | Unified CPU executor with honest selectable policies |
 | M4 | Planned | Memory plan and zero-allocation RT-lane closure |
 | M5 | Planned | Self-paced absolute cadence, watchdog, and platform preflight |
 | M6 | Planned | RT-safe, versioned observability |
@@ -72,6 +72,16 @@ Exit gates:
 - C and C++ samples register and execute real user callbacks.
 
 ## M2 — Compiled graph
+
+Delivered in 0.3:
+
+- instance-owned phase and logical-resource handles across the C++ and C APIs;
+- explicit dependency and read/write resource declarations;
+- deterministic finalization-time topological compilation;
+- pre-start cycle, invalid/foreign-handle, and unordered resource-conflict
+  diagnostics;
+- immutable compiled topology consumed by the synchronous host executor;
+- randomized DAG/reference-executor and first-frame allocation evidence.
 
 Exit gates:
 
