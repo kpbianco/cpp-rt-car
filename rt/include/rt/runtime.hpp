@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "core/units.hpp"
+#include "rt/graph.hpp"
 #include "rt/version.hpp"
 
 class SimCore;
@@ -50,6 +51,9 @@ enum class Status : std::int32_t {
     callback_failed = -5,
     resource_exhausted = -6,
     internal_error = -7,
+    invalid_handle = -8,
+    graph_cycle = -9,
+    resource_conflict = -10,
 };
 
 [[nodiscard]] const char* status_message(Status status) noexcept;
@@ -104,7 +108,7 @@ struct HostFrameContext {
 struct CallbackContext {
     const HostFrameContext& frame;
     // Valid only for the callback invocation. The same instance-local block is
-    // presented to callbacks in registration order.
+    // presented to callbacks in compiled execution order.
     std::span<std::byte> scratch;
     const NumericalPolicy& numerics;
 };
@@ -170,6 +174,21 @@ public:
         std::string_view value) noexcept;
     [[nodiscard]] Status register_callback(
         const CallbackRegistration& registration) noexcept;
+    // The returned phase handle is required when defining dependencies or
+    // logical resource access. Handles are valid only for this Runtime.
+    [[nodiscard]] Status register_callback(
+        const CallbackRegistration& registration,
+        PhaseHandle& out_phase) noexcept;
+    [[nodiscard]] Status register_resource(
+        std::string_view name,
+        ResourceHandle& out_resource) noexcept;
+    [[nodiscard]] Status add_dependency(
+        PhaseHandle prerequisite,
+        PhaseHandle dependent) noexcept;
+    [[nodiscard]] Status declare_resource_access(
+        PhaseHandle phase,
+        ResourceHandle resource,
+        ResourceAccess access) noexcept;
     [[nodiscard]] Status finalize() noexcept;
     [[nodiscard]] Status start() noexcept;
     [[nodiscard]] Status step(
@@ -180,6 +199,14 @@ public:
     [[nodiscard]] RuntimeState state() const noexcept;
     [[nodiscard]] const RuntimeConfig& config() const noexcept;
     [[nodiscard]] std::size_t callback_count() const noexcept;
+    [[nodiscard]] std::size_t resource_count() const noexcept;
+    [[nodiscard]] std::size_t dependency_count() const noexcept;
+    [[nodiscard]] std::size_t resource_access_count() const noexcept;
+    // Available after successful finalization. The order is deterministic and
+    // remains stable through running and stopped states.
+    [[nodiscard]] bool compiled_phase_at(
+        std::size_t execution_index,
+        PhaseHandle& phase) const noexcept;
     [[nodiscard]] std::uint64_t now_ns() noexcept;
     // The view remains valid until the next control operation or destruction.
     [[nodiscard]] std::string_view last_error() const noexcept;

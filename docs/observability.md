@@ -6,11 +6,12 @@ contract.
 
 ## Binary trace
 
-The M1 host runtime owns a separate fixed-capacity ring for lifecycle, step,
+The M1/M2 host runtime owns a separate fixed-capacity ring for lifecycle, step,
 and callback events. Its cursor and clock domain are instance-local, overflow
 overwrites the oldest event, and `trace_event()` reads retained events in
-chronological order. This is functional lifecycle evidence, not the final M6
-schema.
+chronological order. Callback indices are stable phase registration indices,
+even when compiled execution order differs. This is functional lifecycle
+evidence, not the final M6 schema.
 
 `bintrace::Trace` owns fixed-capacity per-thread event rings. Events can be
 exported offline as Chrome trace JSON, CSV shaped for ETW-oriented analysis, or
@@ -56,7 +57,7 @@ These definitions can change before the M6 schema is frozen.
 ## Code anchors
 
 - Trace rings: `bintrace::Trace`; `include/simcore/bintrace.hpp`
-- M1 lifecycle trace: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1/M2 lifecycle trace: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - Export adapters: `tools/trace_export.hpp`
 - Metrics registry and rolling histogram: `metrics::Registry`,

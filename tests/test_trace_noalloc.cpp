@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <rt/runtime.hpp>
 #include <simcore/bintrace.hpp>
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -81,6 +84,20 @@ struct AllocationGuard {
 
 std::size_t allocation_count() {
     return g_allocation_count.load(std::memory_order_acquire);
+}
+
+struct RuntimeAllocationProbe {
+    std::uint32_t value = 0;
+    std::array<std::uint32_t, 2>* execution = nullptr;
+    std::size_t* count = nullptr;
+};
+
+rt::CallbackResult record_runtime_phase(
+    void* user_data,
+    const rt::CallbackContext&) {
+    auto& probe = *static_cast<RuntimeAllocationProbe*>(user_data);
+    (*probe.execution)[(*probe.count)++] = probe.value;
+    return rt::CallbackResult::ok;
 }
 
 } // namespace
@@ -261,3 +278,63 @@ TEST(TraceNoAlloc, LogHotPathDoesNotAllocate) {
     trace.shutdown();
 }
 
+TEST(TraceNoAlloc, CompiledGraphFirstFrameDoesNotAllocate) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 2;
+    config.scratch_bytes = 64;
+    config.trace_capacity = 16;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+
+    std::array<std::uint32_t, 2> execution{};
+    std::size_t execution_count = 0;
+    RuntimeAllocationProbe consumer_probe{0, &execution, &execution_count};
+    RuntimeAllocationProbe producer_probe{1, &execution, &execution_count};
+    rt::PhaseHandle consumer;
+    rt::PhaseHandle producer;
+    rt::ResourceHandle state;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"consumer", &record_runtime_phase, &consumer_probe},
+            consumer),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"producer", &record_runtime_phase, &producer_probe},
+            producer),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.register_resource("state", state), rt::Status::ok);
+    ASSERT_EQ(runtime.add_dependency(producer, consumer), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.declare_resource_access(
+            producer,
+            state,
+            rt::ResourceAccess::write),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.declare_resource_access(
+            consumer,
+            state,
+            rt::ResourceAccess::read),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    rt::Status step_status = rt::Status::internal_error;
+    {
+        AllocationGuard guard;
+        step_status = runtime.step(
+            rt::HostFrameContext{
+                0,
+                std::chrono::nanoseconds(1),
+                std::nullopt,
+            });
+    }
+
+    EXPECT_EQ(step_status, rt::Status::ok);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_EQ(execution_count, 2u);
+    EXPECT_EQ(execution[0], 1u);
+    EXPECT_EQ(execution[1], 0u);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}

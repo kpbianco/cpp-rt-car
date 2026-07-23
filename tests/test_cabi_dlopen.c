@@ -82,6 +82,17 @@ typedef void (*rtfw_step_result_init_fn)(rtfw_step_result *);
 typedef rtfw_status (*rtfw_create_fn)(const rtfw_config *, rtfw_handle **);
 typedef rtfw_status (*rtfw_register_callback_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *);
+typedef rtfw_status (*rtfw_register_phase_fn)(
+    rtfw_handle *, const char *, rtfw_frame_callback, void *, rtfw_phase_id *);
+typedef rtfw_status (*rtfw_register_resource_fn)(
+    rtfw_handle *, const char *, rtfw_resource_id *);
+typedef rtfw_status (*rtfw_add_dependency_fn)(
+    rtfw_handle *, rtfw_phase_id, rtfw_phase_id);
+typedef rtfw_status (*rtfw_declare_resource_access_fn)(
+    rtfw_handle *,
+    rtfw_phase_id,
+    rtfw_resource_id,
+    rtfw_resource_access);
 typedef rtfw_status (*rtfw_lifecycle_fn)(rtfw_handle *);
 typedef rtfw_status (*rtfw_step_fn)(
     rtfw_handle *, const rtfw_frame_context *, rtfw_step_result *);
@@ -117,17 +128,32 @@ static int check_symbol(void *sym, const char *name) {
 typedef struct callback_state {
     uint64_t calls;
     uint64_t last_frame;
+    uint32_t next_slot;
+    uint32_t ordering_errors;
 } callback_state;
+
+typedef struct callback_probe {
+    callback_state *state;
+    uint32_t phase;
+} callback_probe;
 
 static rtfw_callback_result test_callback(
     void *user_data,
     const rtfw_callback_context *context) {
-    callback_state *state = (callback_state *)user_data;
+    callback_probe *probe = (callback_probe *)user_data;
+    callback_state *state = probe ? probe->state : NULL;
     if (!state || !context ||
         context->struct_size < sizeof(rtfw_callback_context) ||
         context->delta_ns != 1000000 ||
         context->scratch_bytes != 64) {
         return RTFW_CALLBACK_ERROR;
+    }
+    {
+        const uint32_t expected_phase = state->next_slot == 0 ? 1u : 0u;
+        if (probe->phase != expected_phase) {
+            ++state->ordering_errors;
+        }
+        state->next_slot = (state->next_slot + 1u) % 2u;
     }
     ++state->calls;
     state->last_frame = context->frame_index;
@@ -154,6 +180,10 @@ int main(void) {
     rtfw_step_result_init_fn result_init_fn;
     rtfw_create_fn create_fn;
     rtfw_register_callback_fn register_fn;
+    rtfw_register_phase_fn register_phase_fn;
+    rtfw_register_resource_fn register_resource_fn;
+    rtfw_add_dependency_fn add_dependency_fn;
+    rtfw_declare_resource_access_fn declare_access_fn;
     rtfw_lifecycle_fn finalize_fn;
     rtfw_lifecycle_fn start_fn;
     rtfw_step_fn step_fn;
@@ -170,6 +200,10 @@ int main(void) {
     LOAD_FUNCTION(result_init_fn, "rtfw_step_result_init");
     LOAD_FUNCTION(create_fn, "rtfw_create");
     LOAD_FUNCTION(register_fn, "rtfw_register_callback");
+    LOAD_FUNCTION(register_phase_fn, "rtfw_register_phase");
+    LOAD_FUNCTION(register_resource_fn, "rtfw_register_resource");
+    LOAD_FUNCTION(add_dependency_fn, "rtfw_add_dependency");
+    LOAD_FUNCTION(declare_access_fn, "rtfw_declare_resource_access");
     LOAD_FUNCTION(finalize_fn, "rtfw_finalize");
     LOAD_FUNCTION(start_fn, "rtfw_start");
     LOAD_FUNCTION(step_fn, "rtfw_step");
@@ -180,12 +214,15 @@ int main(void) {
 
     {
         const rt_capabilities_c capabilities = capabilities_fn();
-        if (capabilities.compiled_graph != 0 ||
+        if (capabilities.compiled_graph != 1 ||
             capabilities.host_driven_time != 1 ||
             capabilities.bounded_memory_plan != 0 ||
             strcmp(
                 status_message_fn(RTFW_STATUS_INVALID_CONFIG),
-                "invalid runtime configuration") != 0) {
+                "invalid runtime configuration") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_RESOURCE_CONFLICT),
+                "unordered conflicting resource access") != 0) {
             fprintf(stderr, "capability or status contract mismatch\n");
             lib_close(handle);
             return EXIT_FAILURE;
@@ -195,7 +232,7 @@ int main(void) {
     rtfw_config config;
     config_init_fn(&config);
     if (config_set_fn(&config, "scratch_bytes", "64") != RTFW_STATUS_OK ||
-        config_set_fn(&config, "callback_capacity", "1") != RTFW_STATUS_OK ||
+        config_set_fn(&config, "callback_capacity", "2") != RTFW_STATUS_OK ||
         config_set_fn(&config, "unknown", "1") != RTFW_STATUS_INVALID_CONFIG) {
         fprintf(stderr, "strict configuration parsing failed\n");
         lib_close(handle);
@@ -243,15 +280,73 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    callback_state state = {0, 0};
-    if (register_fn(instance, "cabi.callback", test_callback, &state) !=
+    callback_state state = {0, 0, 0, 0};
+    callback_probe consumer_probe = {&state, 0};
+    callback_probe producer_probe = {&state, 1};
+    rtfw_phase_id consumer = RTFW_INVALID_PHASE_ID;
+    rtfw_phase_id producer = RTFW_INVALID_PHASE_ID;
+    rtfw_resource_id graph_state = RTFW_INVALID_RESOURCE_ID;
+    if (register_phase_fn(
+            instance,
+            "cabi.consumer",
+            test_callback,
+            &consumer_probe,
+            &consumer) != RTFW_STATUS_OK ||
+        register_phase_fn(
+            instance,
+            "cabi.producer",
+            test_callback,
+            &producer_probe,
+            &producer) != RTFW_STATUS_OK ||
+        register_resource_fn(instance, "cabi.state", &graph_state) !=
             RTFW_STATUS_OK) {
-        fprintf(stderr, "runtime callback registration failed\n");
+        fprintf(stderr, "runtime graph registration failed\n");
         destroy_fn(instance);
         lib_close(handle);
         return EXIT_FAILURE;
     }
-    if (register_fn(instance, "cabi.over-capacity", test_callback, &state) !=
+    if (consumer == RTFW_INVALID_PHASE_ID ||
+        producer == RTFW_INVALID_PHASE_ID ||
+        graph_state == RTFW_INVALID_RESOURCE_ID ||
+        add_dependency_fn(
+            instance,
+            RTFW_INVALID_PHASE_ID,
+            consumer) != RTFW_STATUS_INVALID_HANDLE ||
+        add_dependency_fn(
+            instance,
+            (rtfw_phase_id)graph_state,
+            consumer) != RTFW_STATUS_INVALID_HANDLE ||
+        add_dependency_fn(instance, producer, consumer) != RTFW_STATUS_OK ||
+        declare_access_fn(
+            instance,
+            producer,
+            graph_state,
+            (rtfw_resource_access)99) != RTFW_STATUS_INVALID_ARGUMENT ||
+        declare_access_fn(
+            instance,
+            producer,
+            (rtfw_resource_id)producer,
+            RTFW_RESOURCE_WRITE) != RTFW_STATUS_INVALID_HANDLE ||
+        declare_access_fn(
+            instance,
+            producer,
+            graph_state,
+            RTFW_RESOURCE_WRITE) != RTFW_STATUS_OK ||
+        declare_access_fn(
+            instance,
+            consumer,
+            graph_state,
+            RTFW_RESOURCE_READ) != RTFW_STATUS_OK) {
+        fprintf(stderr, "runtime graph declaration failed\n");
+        destroy_fn(instance);
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    if (register_fn(
+            instance,
+            "cabi.over-capacity",
+            test_callback,
+            &consumer_probe) !=
             RTFW_STATUS_CAPACITY_EXCEEDED ||
         finalize_fn(instance) != RTFW_STATUS_OK ||
         start_fn(instance) != RTFW_STATUS_OK) {
@@ -260,7 +355,11 @@ int main(void) {
         lib_close(handle);
         return EXIT_FAILURE;
     }
-    if (register_fn(instance, "cabi.too-late", test_callback, &state) !=
+    if (register_fn(
+            instance,
+            "cabi.too-late",
+            test_callback,
+            &consumer_probe) !=
             RTFW_STATUS_INVALID_STATE ||
         strstr(last_error_fn(instance), "frozen") == NULL) {
         fprintf(stderr, "runtime accepted late callback registration\n");
@@ -285,7 +384,7 @@ int main(void) {
             result_init_fn(&result);
         }
         rtfw_status status = step_fn(instance, &frame, &result);
-        if (status != RTFW_STATUS_OK || result.callbacks_executed != 1) {
+        if (status != RTFW_STATUS_OK || result.callbacks_executed != 2) {
             fprintf(
                 stderr,
                 "step %llu failed with status %d\n",
@@ -301,8 +400,10 @@ int main(void) {
     if (stop_fn(instance) != RTFW_STATUS_OK ||
         get_state_fn(instance, &runtime_state) != RTFW_STATUS_OK ||
         runtime_state != RTFW_STATE_STOPPED ||
-        state.calls != 5 ||
-        state.last_frame != 4) {
+        state.calls != 10 ||
+        state.last_frame != 4 ||
+        state.ordering_errors != 0 ||
+        state.next_slot != 0) {
         fprintf(stderr, "runtime shutdown or callback validation failed\n");
         destroy_fn(instance);
         lib_close(handle);
@@ -311,6 +412,48 @@ int main(void) {
 
     destroy_fn(instance);
     destroy_fn(NULL);
+
+    {
+        rtfw_handle *conflict_instance = NULL;
+        rtfw_phase_id conflict_writer = RTFW_INVALID_PHASE_ID;
+        rtfw_phase_id conflict_reader = RTFW_INVALID_PHASE_ID;
+        rtfw_resource_id conflict_resource = RTFW_INVALID_RESOURCE_ID;
+        if (create_fn(&config, &conflict_instance) != RTFW_STATUS_OK ||
+            register_phase_fn(
+                conflict_instance,
+                "conflict.writer",
+                test_callback,
+                &producer_probe,
+                &conflict_writer) != RTFW_STATUS_OK ||
+            register_phase_fn(
+                conflict_instance,
+                "conflict.reader",
+                test_callback,
+                &consumer_probe,
+                &conflict_reader) != RTFW_STATUS_OK ||
+            register_resource_fn(
+                conflict_instance,
+                "conflict.state",
+                &conflict_resource) != RTFW_STATUS_OK ||
+            declare_access_fn(
+                conflict_instance,
+                conflict_writer,
+                conflict_resource,
+                RTFW_RESOURCE_WRITE) != RTFW_STATUS_OK ||
+            declare_access_fn(
+                conflict_instance,
+                conflict_reader,
+                conflict_resource,
+                RTFW_RESOURCE_READ) != RTFW_STATUS_OK ||
+            finalize_fn(conflict_instance) != RTFW_STATUS_RESOURCE_CONFLICT ||
+            strstr(last_error_fn(conflict_instance), "conflict.state") == NULL) {
+            fprintf(stderr, "C ABI resource conflict validation failed\n");
+            destroy_fn(conflict_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        destroy_fn(conflict_instance);
+    }
 
     if (lib_close(handle) != 0) {
         fprintf(stderr, "failed to unload runtime: %s\n", lib_error());

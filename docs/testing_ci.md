@@ -10,6 +10,13 @@ latency qualification and does not prove the complete product contract.
 - Host-runtime tests cover lifecycle transitions, strict configuration,
   no-pacing host steps, callback failure containment, bounded traces, and
   isolation of two runtime instances.
+- Compiled-graph tests cover deterministic order, cycles, invalid and
+  foreign-runtime handles, direct/transitive resource ordering, immutable
+  topology, and randomized DAG agreement with an independent reference
+  executor.
+- Allocation instrumentation observes no heap allocation during the first
+  frame of a representative compiled graph. This is the M2 topology gate, not
+  the complete M4 RT-lane allocation proof.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -18,9 +25,9 @@ latency qualification and does not prove the complete product contract.
   compiler and AVX2/FMA build variants. Each job validates behavior within its
   own binary; CI does not compare hashes between compiler jobs.
 - Linux and Windows jobs exercise selected Debug/RelWithDebInfo builds.
-- Executable shared/static C and C++ callback samples, dynamic C ABI loading,
-  autotune-tooling, scaling-artifact, and documentation-contract jobs provide
-  focused smoke coverage.
+- Executable shared/static C and C++ compiled-graph samples, dynamic C ABI
+  loading, autotune-tooling, scaling-artifact, and documentation-contract jobs
+  provide focused smoke coverage.
 
 ## What CI does not currently establish
 
@@ -47,5 +54,6 @@ predeclared thresholds, and the measurement procedure.
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
 - Optional fuzz harness: `tests/jobqueue_fuzz.cpp`
-- M1 lifecycle tests: `tests/test_host_runtime.cpp`,
+- M1/M2 lifecycle and graph tests: `tests/test_host_runtime.cpp`,
+  `tests/test_compiled_graph.cpp`, `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`

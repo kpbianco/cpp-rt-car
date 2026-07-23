@@ -42,7 +42,10 @@ typedef enum rtfw_status {
     RTFW_STATUS_CAPACITY_EXCEEDED = -4,
     RTFW_STATUS_CALLBACK_FAILED = -5,
     RTFW_STATUS_RESOURCE_EXHAUSTED = -6,
-    RTFW_STATUS_INTERNAL_ERROR = -7
+    RTFW_STATUS_INTERNAL_ERROR = -7,
+    RTFW_STATUS_INVALID_HANDLE = -8,
+    RTFW_STATUS_GRAPH_CYCLE = -9,
+    RTFW_STATUS_RESOURCE_CONFLICT = -10
 } rtfw_status;
 
 typedef enum rtfw_runtime_state {
@@ -104,6 +107,18 @@ typedef enum rtfw_callback_result {
     RTFW_CALLBACK_ERROR = 1
 } rtfw_callback_result;
 
+/* Opaque process-local values: do not persist, decode, or mix their kinds. */
+typedef uint64_t rtfw_phase_id;
+typedef uint64_t rtfw_resource_id;
+
+#define RTFW_INVALID_PHASE_ID UINT64_MAX
+#define RTFW_INVALID_RESOURCE_ID UINT64_MAX
+
+typedef enum rtfw_resource_access {
+    RTFW_RESOURCE_READ = 0,
+    RTFW_RESOURCE_WRITE = 1
+} rtfw_resource_access;
+
 typedef rtfw_callback_result (*rtfw_frame_callback)(
     void* user_data,
     const rtfw_callback_context* context);
@@ -128,7 +143,8 @@ RTFW_API void rtfw_step_result_init(rtfw_step_result* result);
  * The runtime copies configuration and callback names. Callback user_data is
  * borrowed until the runtime is stopped/destroyed. Callback context and
  * scratch pointers are valid only for that synchronous callback invocation.
- * Lifecycle functions are single-host-thread operations in ABI version 1.
+ * Lifecycle and graph functions are single-host-thread operations in ABI
+ * version 1.
  */
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
@@ -138,6 +154,26 @@ RTFW_API rtfw_status rtfw_register_callback(
     const char* name,
     rtfw_frame_callback callback,
     void* user_data);
+/* Preferred M2 registration form: returns an instance-local phase ID. */
+RTFW_API rtfw_status rtfw_register_phase(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_frame_callback callback,
+    void* user_data,
+    rtfw_phase_id* out_phase);
+RTFW_API rtfw_status rtfw_register_resource(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_resource_id* out_resource);
+RTFW_API rtfw_status rtfw_add_dependency(
+    rtfw_handle* handle,
+    rtfw_phase_id prerequisite,
+    rtfw_phase_id dependent);
+RTFW_API rtfw_status rtfw_declare_resource_access(
+    rtfw_handle* handle,
+    rtfw_phase_id phase,
+    rtfw_resource_id resource,
+    rtfw_resource_access access);
 RTFW_API rtfw_status rtfw_finalize(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_start(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_step(
