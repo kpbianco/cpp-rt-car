@@ -1,18 +1,25 @@
-# Limp Mode
+# Degradation and Limp-Mode Experiment
 
-The `SimCore::Settings` structure now provides a `limpMode` flag.
-When enabled, SimCore aggressively trims non-essential features to
-prioritize frame delivery under extreme load. Specifically it:
+`SimCore` contains an experimental four-rung degradation mechanism. Depending
+on budget/governor/watchdog state, it can disable visualizers, reduce substeps,
+and mark broadphase work as coarse. Setting `Settings::limpMode` disables the
+budget monitor and binary trace during settings application and selects the
+highest rung.
 
-- disables the budget monitor and binary trace logging;
-- forces the highest degradation rung, disabling visualizers,
-  enabling coarse broadphase, and limiting substeps to one.
+This is policy scaffolding, not a general overload-safety guarantee:
 
-This switch acts as a global guardrail for deployments that must remain
-responsive even when resources are severely constrained.
+- the runtime cannot know whether a host callback observes the flags;
+- rungs are one-way for the runtime lifetime;
+- callbacks and state transitions are not described by a stable ABI;
+- the watchdog owns another thread and uses mutex/condition-variable state;
+- a watchdog callback mutates runtime degradation state concurrently;
+- there is no qualified proof that the reduced workload meets a deadline.
+
+The target lifecycle will make optional-work shedding an explicit compiled-graph
+policy with thread-safe state transitions, telemetry, and overload tests.
 
 ## Code anchors
 
-- Settings flag: `SimCore::Settings::limpMode`; `include/simcore/SimCore.hpp`
-- Limp-mode behaviour: `SimCore::applySettings`, `SimCore::applyDegradeRung`; `include/simcore/SimCore.hpp`
-
+- Settings and rung behavior: `SimCore::Settings`,
+  `SimCore::applyDegradeRung`; `include/simcore/SimCore.hpp`
+- Watchdog experiment: `rt::Watchdog`; `rt/include/rt/watchdog.hpp`

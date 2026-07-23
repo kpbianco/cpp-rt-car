@@ -1,26 +1,33 @@
-# GPU Frame Graph Stub
+# Device Frame-Graph Mock
 
-This repository includes a lightweight frame graph interface intended for
-experiments with GPU/accelerator scheduling.  The implementation lives in
-[`gpu/frame_graph.hpp`](../gpu/frame_graph.hpp) and provides:
+`gpu/frame_graph.hpp` is a CPU-only experiment for device-style dependency and
+completion APIs. It is not a GPU backend.
 
-* **Resource lifetime tracking** – resources are released after their last use.
-* **Timeline semaphores** – CPU and GPU progress are exposed via atomic
-  counters that can be waited on.
-* **Zero‑copy pinned staging** – resources allocate pinned memory through the
-  existing HAL allocator.
-* **Async overlap budgets** – execution records CPU and GPU durations and
-  computes the amount of overlap between them.
-* **Mixed compute stubs** – helper functions allow submitting placeholder
-  SPIR‑V or CUDA kernels without introducing new plumbing.
+Current behavior:
 
-The frame graph is a stub and intentionally minimal; it is meant to be
-replaced by a real implementation once a concrete GPU backend is available.
+- “GPU” callbacks execute on detached CPU threads from `hal/gpu_stub.hpp`.
+- fences use `std::promise`/`std::shared_future`;
+- waits are handed to a `FiberPool`, which is another CPU execution component;
+- timeline semaphores are atomic counters with busy waits;
+- resources use a 64-byte-aligned host allocation;
+- the HAL `pinned` and `hugepage` flags are currently ignored;
+- SPIR-V words and CUDA labels are accepted by wrappers but no shader/module is
+  loaded and no device work is submitted;
+- resources are freed after their recorded last pass during `execute()`;
+- overlap is an observed wall-clock estimate, not a device scheduling budget.
+
+This mock is useful only for API experiments and unit tests. Detached thread
+creation, future allocation, busy waits, unchecked resource indices, and
+implicit ownership all violate the target device contract.
+
+Milestone M8 replaces this path with the bounded, fault-injectable mock defined
+by [ADR-0003](adr/0003-device-backend-boundary.md). CUDA and XDMA backends come
+only after that contract is tested.
 
 ## Code anchors
 
-- Resource lifetime tracking: `FrameGraph::create_resource`, `FrameGraph::free_dead_resources`; `gpu/frame_graph.hpp`
-- Timeline semaphores: `TimelineSemaphore::wait`, `TimelineSemaphore::signal`; `gpu/frame_graph.hpp`
-- Async overlap budget: `FrameGraph::execute`; `gpu/frame_graph.hpp`
-- Mixed compute stubs: `FrameGraph::add_pass`; `gpu/frame_graph.hpp`
-
+- Frame-graph experiment: `simcore::hal::gpu::FrameGraph`;
+  `gpu/frame_graph.hpp`
+- CPU submission mock: `simcore::hal::gpu::submit`; `hal/gpu_stub.hpp`
+- Allocation flags: `simcore::hal::MemFlags`; `hal/hal.hpp`
+- Target boundary: [ADR-0003](adr/0003-device-backend-boundary.md)

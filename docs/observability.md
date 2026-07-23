@@ -1,61 +1,56 @@
-# Observability
+# Observability Status
 
-The runtime collects execution events with `bintrace`.  These snapshots can be
-exported into several formats:
+The current trace and metrics facilities are useful for development
+experiments. They are not yet a versioned, allocation-free RT telemetry
+contract.
 
-## Chrome trace
-Use `trace_export::write_chrome_trace` to produce a JSON file consumable by the
-Chrome trace viewer.
+## Binary trace
 
-## ETW CSV adapter
-`trace_export::write_etw_trace` emits comma separated values with columns
-`tsc,thread,code,a,b`.  The output can be imported into ETW tooling or any CSV
-processor.
+`bintrace::Trace` owns fixed-capacity per-thread event rings. Events can be
+exported offline as Chrome trace JSON, CSV shaped for ETW-oriented analysis, or
+line-oriented text for eBPF-oriented pipelines. The CSV and text exporters are
+file formats; they do not register a native ETW provider or load an eBPF
+program.
 
-## eBPF text adapter
-`trace_export::write_ebpf_trace` writes each event on its own line using a
-space separated format: `tsc thread code a b`.  This is suitable for simple
-processing by eBPF-based pipelines.
+Queue instrumentation records push/pop depth. Emergency helper attempts and GPU
+mock fence waits have event codes. Ring overflow increments `trace.dropped`.
 
-## Queue instrumentation
+The trace currently uses process-global registration and a low-level timestamp
+domain. Schema/version metadata and stable clock conversion are milestone M6.
 
-The worker pool's bounded MPMC ring emits `queue_push` and `queue_pop` trace
-events whenever a job is enqueued or dequeued. These samples include the queue
-depth (`a`) and capacity (`b`), allowing dashboards to visualise saturation and
-alert when the buffer is routinely full.
+## Metrics JSON
 
-## Worker pool counters
+The demo exposes two output modes:
 
-Emergency launches increment the `worker.emergency_spawns` counter. The value is
-reported via the metrics registry and mirrors the number of detached helper
-threads created by the emergency path, making it straightforward to detect when
-overload handling is triggered.
+| Mode | Phase histogram | Resettable counters |
+| --- | --- | --- |
+| `--metrics-json` | Latest samples retained by each rolling histogram; default capacity 120 | Absolute current values |
+| `--metrics-json-interval` | Same rolling contents at emission, then cleared | Selected values are emitted relative to their baseline, then rebased |
 
-## Metrics JSON snapshots
+Neither mode contains lifetime phase percentiles once more than 120 samples
+have been recorded. The demo emits once at exit, so “interval” currently means
+the final snapshot plus a reset that has no subsequent visible interval.
 
-The runtime can export metrics snapshots as JSON. Two modes are available for
-how rolling histograms and resettable counters are treated between emissions:
+The registry uses a mutex and constructs strings, maps, vectors, and JSON
+streams during update/export. It must not be called an RT-safe hot-path
+facility. Milestone M6 introduces pre-registered identifiers, fixed event
+records, versioned schemas, and a non-RT export lane.
 
-| Mode                      | Histogram semantics                                                | Reset behaviour                                               | Typical use                |
-|---------------------------|---------------------------------------------------------------------|----------------------------------------------------------------|----------------------------|
-| `--metrics-json`          | Percentiles (`p50/p95/p99`) accumulate for the entire run.          | No reset; counters and histograms remain cumulative totals.    | CI baselines or long runs  |
-| `--metrics-json-interval` | Percentiles cover only the samples collected since the last emission. | Rolling histograms and resettable counters reset after export. | Autotuners and live sweeps |
+## Provisional names
 
-## Log drop accounting
+- `worker.steals[*]` and `worker.steals_total` count empty global-queue polls
+  while work remains; they are not successful steals.
+- `worker.queue_max` is a high-water mark.
+- `worker.emergency_spawns` counts helpers actually launched.
+- `log_drops` is `logger.dropped + trace.dropped`.
 
-The `log_drops` counter is the sum of two low-level metrics: `logger.dropped`
-records how many log lines the async logger could not enqueue, while
-`trace.dropped` tracks trace ring buffer losses. Keeping the composite counter
-ensures alerting stays robust even if individual sources fluctuate.
+These definitions can change before the M6 schema is frozen.
 
 ## Code anchors
 
-- Trace capture: `bintrace::Trace::log`, `bintrace::Trace::snapshot`; `include/simcore/bintrace.hpp`
-- Chrome trace export: `trace_export::write_chrome_trace`; `tools/trace_export.hpp`
-- ETW CSV export: `trace_export::write_etw_trace`; `tools/trace_export.hpp`
-- eBPF text export: `trace_export::write_ebpf_trace`; `tools/trace_export.hpp`
-- Queue events: `bintrace::log_queue_push`, `bintrace::log_queue_pop`; `include/simcore/bintrace.hpp`
-- Ring buffer hooks: `BoundedMPMCQueue::try_push`, `BoundedMPMCQueue::try_pop`; `include/simcore/job_queue.hpp`
-- Emergency counter: `WorkerPool::handleEmergency`; `include/simcore/worker_pool.hpp`
-- Log drop aggregation: `SimCore::setMetrics`, `SimCore::publishCounters`; `include/simcore/SimCore.hpp`
-
+- Trace rings: `bintrace::Trace`; `include/simcore/bintrace.hpp`
+- Export adapters: `tools/trace_export.hpp`
+- Metrics registry and rolling histogram: `metrics::Registry`,
+  `metrics::RollingHistogram`; `include/simcore/metrics.hpp`
+- Demo switches: `src/main.cpp`
+- Worker counters: `WorkerPool::stats`; `include/simcore/worker_pool.hpp`

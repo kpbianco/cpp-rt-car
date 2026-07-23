@@ -1,61 +1,71 @@
-# Scheduler
+# Scheduler Status
 
-This module provides a simple work-stealing scheduler used for experiments with
-real‑time task management. The scheduler supports two policies:
+RTFW 0.1 does not have one production scheduler. It has several experimental
+execution components that must be consolidated under
+[ADR-0001](adr/0001-one-executor-boundary.md).
 
-* **EDF (Earliest Deadline First)** – tasks are ordered by their deadline and
-  run accordingly. This is useful for multi‑rate subsystems such as fast feedback
-  loops and sensor processing.
-* **Fixed‑Frame** – tasks are sorted by their period, emulating a fixed frame
-  rate scheduler where shorter period tasks run first.
+## `SimCore` internal workers
 
-Each worker thread owns a local queue backed by a thread‑local memory arena to
-reduce remote NUMA traffic. Tasks have priorities and an aging counter; every
-time a task waits in the queue its age increases, effectively boosting its
-priority so that low priority tasks will eventually run and avoid starvation.
+`SimCore` creates a fixed internal worker team and dispatches chunked range
+work through shared atomic dispatch state. This is the path used by
+`rtfw_demo`. It is coupled to phase execution, pacing, frame arenas, metrics,
+and adaptation.
 
-## Thread-scaling experiments
+## `WorkerPool`
 
-Run `python tools/scaling/run_scaling.py` after building `rtfw_demo` to measure
-how the worker pool scales with the available cores. The helper sweeps powers of
-two worker counts with simultaneous multithreading disabled and enabled,
-capturing the interval `p99` frame time along with a variance estimate. Each run
-prints a compact summary table and writes plotting inputs to
-`results/scaling/<timestamp>.csv` plus a companion JSON blob for raw metrics.
+`WorkerPool` stores `std::function` jobs in one bounded MPMC FIFO queue.
+Submission can spin until queue space or an outstanding-work slot becomes
+available. The current priority and category fields are metadata on the normal
+path; they do not select a priority lane.
 
-These artefacts make it easy to spot when additional threads stop improving the
-frame tail latency, and the JSON payload keeps the phase-level metrics available
-for deeper dives.
+When emergency spawning is enabled, a high-priority submission can execute
+inline for a one-thread pool or create a rate-limited detached helper thread
+under load. That path is incompatible with a bounded fixed-thread RT lane and
+is scheduled for removal. Defining `RTFW_DISABLE_EMERGENCY_SPAWN=1` prevents
+helper creation, but it does not add priority scheduling.
 
-### Emergency path
+The metrics named `steals` count times a worker finds the global queue empty
+while outstanding work exists. There are no per-worker queues in this class,
+so those values are idle/contention polls, not successful steals.
 
-High priority tasks have access to an emergency execution path that bypasses
-the shared queue when the pool is saturated. If the number of outstanding jobs
-is at least the worker count, the scheduler attempts to spawn a detached helper
-thread to run the task immediately. Spawns are guarded by a token bucket with a
-capacity of two and a refill rate of two per second, ensuring that short bursts
-of overload can be absorbed without allowing unbounded thread creation. When
-the pool only contains a single worker thread the fallback executes the task
-inline to avoid additional allocations. Emergency launches are logged to the
-trace ring and counted in `worker.emergency_spawns` so monitoring can alert on
-sustained overload.
+## `rt::Scheduler`
 
-The emergency path can be disabled at build time via the
-`RTFW_DISABLE_EMERGENCY_SPAWN` switch (set it to `1` to disable). When disabled,
-high priority submissions remain on the shared queue even under saturation.
-Instead of `EV_EmergencySpawn`, the trace emits `EV_PriorityEnqueue` events to
-indicate that the job was redirected through the priority lane of the queue.
+`rt::Scheduler` is a separate research component. It distributes pending tasks
+round-robin to per-worker PMR queues, sorts those queues by deadline or period
+before a run, selects local tasks with a priority-plus-age helper, and can steal
+from another worker queue.
 
-Tasks are represented by the nested `Scheduler::Task` struct. The scheduler
-exposes a helper `Scheduler::pop_next_with_aging` function that selects the next
-task based on the `(priority + age)` heuristic. This function is used by unit
-tests to verify the aging behaviour.
+This is not full EDF admission or deadline scheduling: deadlines are only used
+for initial local ordering, worker threads use ordinary OS scheduling, and no
+deadline-miss contract is enforced. The monotonic PMR arenas are not supplied
+with fixed backing storage, so upstream allocation remains possible.
+
+## Target
+
+Milestone M3 replaces the competing paths with one task representation and one
+executor boundary. The first two policies are:
+
+- `static_deterministic`: precomputed worker/chunk assignment;
+- `bounded_throughput`: fixed local queues with bounded steal attempts.
+
+Queue-full behavior, cancellation, nesting, priority semantics, and telemetry
+will be explicit and invariant-tested. Periodic OS scheduling is a later,
+deployment-qualified policy.
+
+## Scaling tool
+
+`tools/scaling/run_scaling.py` can sweep the current demo's worker count and
+write JSON/CSV artifacts. Its reported phase percentiles come from rolling
+histograms, and its “frame” summary is the sum of phase percentiles rather than
+a directly measured end-to-end frame percentile. Treat it as a regression
+smoke tool, not a schedulability analysis.
 
 ## Code anchors
 
-- Task representation: `rt::Scheduler::Task`; `rt/include/rt/scheduler.hpp`
-- Aging heuristic: `rt::Scheduler::pop_next_with_aging`; `rt/include/rt/scheduler.hpp`
-- Worker execution: `rt::Scheduler::run`; `rt/include/rt/scheduler.hpp`, `rt/src/scheduler.cpp`
-- Emergency handling: `WorkerPool::handleEmergency`, `WorkerPool::tryConsumeEmergencyToken`,
-  `WorkerPool::logEmergencySpawn`; `include/simcore/worker_pool.hpp`
-
+- Current demo executor: `SimCore::initThreads`, `SimCore::workerLoop`;
+  `include/simcore/SimCore.hpp`
+- Global FIFO pool and emergency path: `WorkerPool`;
+  `include/simcore/worker_pool.hpp`
+- Research scheduler: `rt::Scheduler`; `rt/include/rt/scheduler.hpp`,
+  `rt/src/scheduler.cpp`
+- Target decision: [ADR-0001](adr/0001-one-executor-boundary.md)

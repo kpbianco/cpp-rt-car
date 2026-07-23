@@ -1,19 +1,25 @@
-# Config Hot Reload
+# Config Hot-Reload Experiment
 
-This module provides a tiny hot-reload mechanism for the `core::Config` structure.
-Configuration is stored on disk in a simple textual format:
+`core::ConfigHotReloader` is a standalone test utility for a two-integer
+`core::Config`:
 
-```
+```text
 <major> <minor>
 ```
 
-`ConfigHotReloader` watches the file's modification time and atomically swaps in
-new configuration objects when it changes.  Basic validation ensures the major
-version matches the previously loaded configuration.  The hot-reload wrapper is
-header-only and has no external dependencies.
+It polls file modification time, parses with `std::ifstream`, allocates a new
+`shared_ptr`, and atomically publishes that pointer when the major version
+matches. It is not connected to `SimCore::Settings`, the demo, plugins, or the
+autotune profile schema.
+
+Filesystem access, parsing, and allocation make it unsuitable for an RT lane.
+The target runtime instead parses and validates typed configuration during
+configure/finalize. A future control-plane update may build an immutable
+configuration off-lane and apply an explicitly supported subset at a safe
+boundary.
 
 ## Code anchors
 
-- Config reload: `ConfigHotReloader::load`, `ConfigHotReloader::hot_reload`; `core/include/core/config_hot_reload.hpp`
-- Snapshot access: `ConfigHotReloader::get`; `core/include/core/config_hot_reload.hpp`
-
+- Toy config type: `core/include/core/config.hpp`
+- Reload helper: `core/include/core/config_hot_reload.hpp`
+- Runtime lifecycle target: [product contract](product_contract.md)

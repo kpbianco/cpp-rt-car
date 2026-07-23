@@ -1,18 +1,40 @@
 # Threat Model
 
-This document outlines potential threats to the runtime and mitigation
-strategies.
+## Trust boundary
 
-- **Plugin misuse**: Untrusted plugins could attempt to exploit the process.
-  Only load plugins from trusted sources and verify ABI versions.
-- **Resource exhaustion**: Plugins may allocate excessive memory or CPU. Use
-  runtime limits and monitoring to detect and contain abuses.
-- **Denial of Service**: Malformed inputs may trigger unexpected states.
-  Validate inputs and employ watchdog timers.
+RTFW 0.1 is an in-process native library prototype. The host application,
+runtime, callbacks, and loaded plugins share one address space and authority.
+Plugins and device backends are trusted code; ABI validation is not a security
+boundary.
 
-## Code anchors
+## Assets
 
-- Plugin mitigations: `rt::PluginManager::load`, `rt::PluginManager::unload`; `rt/src/plugin_manager.cpp`, `rt/include/rt/plugin_api.h`
-- Resource limits: `simcore::TokenBucket::try_acquire`; `include/simcore/backpressure.hpp`
-- Watchdog guardrails: `rt::Watchdog::arm`, `rt::Watchdog::disarm`; `rt/include/rt/watchdog.hpp`
+- host process memory and simulation state;
+- deadlines and service availability;
+- snapshot/config/profile integrity;
+- device buffers and command streams;
+- trace, log, crash, and experiment artifacts;
+- build and dependency provenance.
 
+## Principal threats and current posture
+
+| Threat | Current posture |
+| --- | --- |
+| Malicious/buggy callback or plugin | Full in-process access; version fields catch some incompatibility only |
+| Queue/memory exhaustion | Some bounded primitives exist, but spin, fallback allocation, detached helpers, and unchecked paths remain |
+| Malformed snapshot/config | Parsers have partial validation; comprehensive bounds, fuzzing, and schema identity are incomplete |
+| Device hang/loss | CPU mock only; no bounded backend reset/health contract |
+| Telemetry leakage/corruption | Paths and runtime data can be written to files; schemas and access policy are not frozen |
+| Supply-chain substitution | Submodule/SBOM helpers and CI dependency review exist; signed release provenance is not established |
+| Host-policy mutation | Hardening scripts can make privileged system-wide changes and require operator review |
+
+## Required controls
+
+Before stable release, the project needs bounds-checked parsers, explicit
+resource ceilings, backend timeouts/reset, versioned telemetry, release
+provenance, and a documented trusted-plugin policy. Untrusted extensions require
+an out-of-process boundary; the tiny `enable_sandbox()` experiment is not
+sufficient.
+
+See [security status](security_supply_chain.md) and the
+[product contract](product_contract.md).

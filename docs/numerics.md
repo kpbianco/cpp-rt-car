@@ -1,35 +1,34 @@
-# Numerics & Determinism
+# Numerics Status
 
-This project treats numerical determinism as a first-class goal.
+The repository provides numerical building blocks; it does not make arbitrary
+user kernels deterministic.
 
-## Mixed-Precision Reductions
+## Available utilities
 
-`robust::sum_fp32_to_fp64` explicitly promotes single-precision streams
-to double precision for reductions. For sensitive paths,
-`robust::kahan_sum_fp32` provides compensated summation.
+- `robust::sum_fp32_to_fp64` promotes FP32 inputs for accumulation.
+- `robust::kahan_sum_fp32` provides compensated summation.
+- `robust::ulp_distance` supports error-oriented tests.
+- deterministic reduction helpers use a stable leaf/combine order.
+- `rt::Q16_16` is a small fixed-point utility with a narrower, more explicit
+  behavior surface than floating point.
+- `rt::init_fp_env` requests round-to-nearest and enables FTZ/DAZ on supported
+  x86 threads.
+- `rt::fma` wraps an explicitly gated fused multiply-add.
 
-## Shadow Arithmetic
+## Limits
 
-Tests use double precision "shadow" values and
-`robust::ulp_distance` to track error growth and detect unstable
-kernels.
+The FMA setting is process-global, not per runtime. It only controls calls made
+through `rt::fma`; compilers may contract or transform other floating-point
+expressions according to build flags. FTZ/DAZ is thread-local and must be
+applied to every execution context, including host and device callbacks.
 
-## Denormals & FMA Control
-
-`rt::init_fp_env` sets FE_TONEAREST and enables flush-to-zero and
-denormals-are-zero per thread. `rt::set_use_fma` gates fused
-multiply-add so behaviour is deterministic across targets.
-
-## Fixed-Point Option
-
-For hard real-time subsystems a small fixed-point type `rt::Q16_16`
-implements deterministic arithmetic without relying on floating point
-hardware.
+Different compilers, standard libraries, ISAs, math libraries, and input
+handling can still produce different bits. The current tests support only the
+limited D1 statement in the [product contract](product_contract.md).
 
 ## Code anchors
 
-- Mixed-precision reductions: `robust::sum_fp32_to_fp64`, `robust::kahan_sum_fp32`; `include/simcore/robust_fp.hpp`
-- Shadow arithmetic: `robust::ulp_distance`; `include/simcore/robust_fp.hpp`
-- Denormals & FMA control: `rt::init_fp_env`, `rt::set_use_fma`; `rt/include/rt/numerics.hpp`
-- Fixed-point option: `rt::Q16_16`; `rt/include/rt/fixed_point.hpp`
-
+- Mixed-precision and ULP helpers: `include/simcore/robust_fp.hpp`
+- Reduction order: `include/simcore/deterministic_reduce.hpp`
+- FP environment/FMA wrapper: `rt/include/rt/numerics.hpp`
+- Fixed point: `rt/include/rt/fixed_point.hpp`

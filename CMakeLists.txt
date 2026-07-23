@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(car_sim_core LANGUAGES C CXX)
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/VERSION.txt" RTFW_VERSION LIMIT_COUNT 1)
+string(STRIP "${RTFW_VERSION}" RTFW_VERSION)
+if (NOT RTFW_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "VERSION.txt must contain a semantic version (MAJOR.MINOR.PATCH)")
+endif()
+
+project(rtfw VERSION "${RTFW_VERSION}" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -9,6 +15,7 @@ option(ENABLE_LOG "Enable logging" ON)
 option(ENABLE_PROF "Enable profiler" ON)
 option(ENABLE_TESTS "Build tests" ON)
 option(ENABLE_RAPIDCHECK "Enable RapidCheck property tests" OFF)
+option(SIM_BUILD_FUZZERS "Build the Clang libFuzzer harness" OFF)
 option(SIM_ENABLE_IWYU "Run include-what-you-use during builds" OFF)
 option(SIM_WARN_ODR "Enable -Wodr to detect ODR violations" OFF)
 
@@ -16,7 +23,7 @@ option(SIM_WARN_ODR "Enable -Wodr to detect ODR violations" OFF)
 set(SIM_SANITIZERS "" CACHE STRING "Sanitizers to enable for all targets")
 
 # Hardened build switches
-option(SIM_WERROR "Treat warnings as errors" ON)
+option(SIM_WERROR "Treat warnings as errors in this project's targets" OFF)
 option(SIM_ENABLE_LTO "Enable link time optimization" OFF)
 option(SIM_LTO_THIN "Use ThinLTO when LTO is enabled" OFF)
 set(SIM_PGO "" CACHE STRING "Profile guided optimisation mode: gen or use")
@@ -485,7 +492,7 @@ if (ENABLE_PROF)
     target_compile_definitions(simcore INTERFACE -DPROF_ENABLED)
 endif()
 
-option(SIM_ENABLE_AVX2 "Enable AVX2/FMA for SIMD kernels" ON)
+option(SIM_ENABLE_AVX2 "Enable experimental global AVX2/FMA compilation" OFF)
 
 if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
   add_compile_options(-mavx2 -mfma)
@@ -536,13 +543,18 @@ foreach(lib rtfw_shared rtfw_static)
     target_include_directories(${lib}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
     )
     target_compile_definitions(${lib} PRIVATE RTFW_BUILD=1)
     set_target_properties(${lib} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endforeach()
 
-set_target_properties(rtfw_shared PROPERTIES OUTPUT_NAME rtfw)
+set_target_properties(rtfw_shared PROPERTIES
+    OUTPUT_NAME rtfw
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+)
 set_target_properties(rtfw_static PROPERTIES OUTPUT_NAME rtfw_static)
 
 if (MSVC)
@@ -702,10 +714,22 @@ configure_package_config_file(
     PATH_VARS CMAKE_INSTALL_INCLUDEDIR
 )
 
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/rtfwConfigVersion.cmake
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
 install(
     FILES
         ${CMAKE_CURRENT_BINARY_DIR}/rtfwConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/rtfwConfigVersion.cmake
     DESTINATION ${RTFW_INSTALL_CMAKEDIR}
+)
+
+install(
+    FILES LICENSE VERSION.txt
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw
 )
 
 install(

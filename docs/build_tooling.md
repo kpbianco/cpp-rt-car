@@ -1,51 +1,69 @@
 # Build and Tooling Guide
 
-This project supports a number of build helpers to aid in size and
-performance tuning.
+## Direct build
 
-## CMake presets and toolchains
+The supported baseline is CMake 3.20+ and C++20:
 
-Use the provided `CMakePresets.json` for common configurations:
-
-```
-cmake --preset dev      # Debug build with tests
-cmake --preset release  # Release build with ThinLTO
-cmake --preset pgo-generate  # Instrumentation phase
-cmake --preset pgo-use       # Optimisation phase using collected profile
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON
+cmake --build build --parallel 2
+ctest --test-dir build --output-on-failure
 ```
 
-A simple Clang toolchain is available in `cmake/toolchains/clang.cmake`.
+Tests use the checked-in GoogleTest submodule by default. Clone submodules
+recursively or initialize them before configuring with tests.
 
-## PGO and ThinLTO
+## Presets
 
-PGO can be executed in two phases. The presets above store profiles under
-`profiles/` allowing separate generation and use steps.
+The Ninja presets write under `build/`:
 
-## Size analysis with Bloaty
+```bash
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev --output-on-failure
 
-If [Bloaty](https://github.com/google/bloaty) is installed a `bloaty`
-custom target is generated. Invoke it after building to inspect code bloat:
-
-```
-cmake --build build/release
-cmake --build build/release --target bloaty
-```
-
-## Header hygiene
-
-Enable include-what-you-use and ODR warnings by toggling the options:
-
-```
--DSIM_ENABLE_IWYU=ON -DSIM_WARN_ODR=ON
+cmake --preset release
+cmake --build --preset release
 ```
 
-These checks help keep headers minimal and catch One Definition Rule
-violations early.
+The Release preset requests LTO/ThinLTO. Compiler and generator support is
+checked during configuration.
+
+## Experimental PGO
+
+`pgo-generate` and `pgo-use` expose compiler profile flags, but the repository
+does not orchestrate a representative training workload, merge profiles across
+processes, or validate that a profile matches the binary. Treat these presets
+as scaffolding:
+
+```bash
+cmake --preset pgo-generate
+cmake --build --preset pgo-generate
+# Run a deliberately selected training workload here.
+cmake --preset pgo-use
+cmake --build --preset pgo-use
+```
+
+## Optional analysis
+
+- `SIM_ENABLE_IWYU=ON` requests include-what-you-use when the executable is
+  installed.
+- `SIM_WARN_ODR=ON` adds supported ODR warnings.
+- a `bloaty` target is created only when Bloaty is found.
+- `SIM_ENABLE_AVX2=ON` applies global x86 AVX2/FMA compile flags and is
+  experimental; it is not runtime ISA dispatch.
+- sanitizer combinations are described in [sanitizers](sanitizers.md).
+
+## Installation/versioning
+
+`VERSION.txt` is the release source of truth. CMake installs shared/static
+libraries, public headers, package config/version files, the license, and the
+version file. A clean external `find_package(rtfw CONFIG)` consumer remains an
+M11 release gate.
 
 ## Code anchors
 
-- Presets and PGO flow: `configurePresets` entries (`dev`, `release`, `pgo-generate`, `pgo-use`); `CMakePresets.json`, `CMakeLists.txt` (`SIM_PGO`, `SIM_ENABLE_LTO`)
-- Clang toolchain: `CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER`; `cmake/toolchains/clang.cmake`
-- Bloaty analysis: `add_custom_target(bloaty)`; `CMakeLists.txt`
-- Header hygiene toggles: `option(SIM_ENABLE_IWYU)`, `option(SIM_WARN_ODR)`; `CMakeLists.txt`
-
+- Build configuration and installation: `CMakeLists.txt`
+- Presets: `CMakePresets.json`
+- Clang toolchain: `cmake/toolchains/clang.cmake`
+- Version source: `VERSION.txt`

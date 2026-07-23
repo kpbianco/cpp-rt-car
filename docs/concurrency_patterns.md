@@ -1,30 +1,23 @@
-# Concurrency Patterns
+# Concurrency Pattern Experiments
 
-This project now includes additional patterns for highly concurrent systems:
+The repository includes independent examples of:
 
-## SeqLock
+- `simcore::SeqLock<T>` for copyable read-mostly state;
+- `simcore::LockFreeQueue<T>` with hazard-pointer reclamation;
+- `simcore::TokenBucket` for rate-based admission.
 
-`simcore::SeqLock<T>` provides a lightweight seqlock for read-mostly state
-such as configuration snapshots. Writers publish a new copy while readers
-retry until a consistent sequence is observed.
+They have focused tests, but they are not automatically used by `SimCore` and
+do not by themselves satisfy the runtime memory, progress, or overload
+contract. In particular, “lock-free” is an algorithmic progress property, not
+a bound on completion time or allocation, and token-bucket admission is not a
+queue-capacity plan.
 
-## Hazard-pointer Queue
-
-`simcore::LockFreeQueue<T>` implements a Michael & Scott queue using hazard
-pointers for memory reclamation. It allows multiple producers and consumers
-without locks.
-
-## Back-pressure Token Bucket
-
-`simcore::TokenBucket` implements admission control and pacing via a token
-bucket. Each subsystem can meter work by acquiring tokens and relying on
-rate-based refills to avoid burst avalanches.
-
-Refer to the unit tests for usage examples.
+Before a primitive enters an RT lane it needs explicit supported types,
+allocation/reclamation ownership, memory-order reasoning, capacity behavior,
+shutdown semantics, and contention tests.
 
 ## Code anchors
 
-- SeqLock: `SeqLock::write`, `SeqLock::read`; `include/simcore/seqlock.hpp`
-- Hazard-pointer queue: `LockFreeQueue::push`, `LockFreeQueue::pop`; `include/simcore/lockfree_queue.hpp`
-- Back-pressure token bucket: `TokenBucket::try_acquire`; `include/simcore/backpressure.hpp`
-
+- Seqlock: `include/simcore/seqlock.hpp`
+- Hazard-pointer queue: `include/simcore/lockfree_queue.hpp`
+- Token bucket: `include/simcore/backpressure.hpp`

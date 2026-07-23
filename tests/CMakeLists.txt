@@ -124,7 +124,6 @@ if (SIM_GTEST_AVAILABLE)
 
     add_test(NAME simcore_all COMMAND simcore_tests)
 
-    option(SIM_ENABLE_AVX2 "Enable AVX2/FMA for SIMD kernels" ON)
     if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
       add_compile_options(-mavx2 -mfma)
     endif()
@@ -141,7 +140,9 @@ if (SIM_GTEST_AVAILABLE)
 endif()
 
 add_executable(test_cabi_dlopen test_cabi_dlopen.c)
-target_include_directories(test_cabi_dlopen PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(test_cabi_dlopen PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/include)
 target_compile_definitions(test_cabi_dlopen PRIVATE RTFW_LIB_PATH="$<TARGET_FILE:rtfw>")
 if (UNIX)
     target_link_libraries(test_cabi_dlopen PRIVATE dl)
@@ -155,11 +156,9 @@ add_test(NAME simcore_thread_violation_build
          COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target simcore_thread_violation --config $<CONFIG>)
 set_tests_properties(simcore_thread_violation_build PROPERTIES WILL_FAIL TRUE)
 
-option(SIM_BUILD_FUZZERS "Build libFuzzer harnesses" OFF)
 if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_executable(jobqueue_fuzz jobqueue_fuzz.cpp)
     target_link_libraries(jobqueue_fuzz PRIVATE simcore_platform)
     target_compile_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
-

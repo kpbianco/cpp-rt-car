@@ -1,0 +1,32 @@
+name: Documentation contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  docs-contract:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate static contract
+        run: python3 tools/check_docs_contract.py
+      - name: Run README quick start
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DSIM_WERROR=OFF
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          ./build/rtfw_demo --threads 2 --metrics-json
+      - name: Validate demo CLI
+        run: |
+          test "$(./build/rtfw_demo --version)" = "$(cat VERSION.txt)"
+          if ./build/rtfw_demo --definitely-not-an-option; then
+            echo "unknown option was accepted" >&2
+            exit 1
+          fi

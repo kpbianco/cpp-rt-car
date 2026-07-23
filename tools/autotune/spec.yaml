@@ -1,5 +1,7 @@
+# Planned runtime-integration spec. rtfw_demo 0.1 does not implement its
+# --config, --run, or --rt command-line contract.
 app:
-  path: "./build/bin/rtfw_demo"
+  path: "./build/rtfw_demo"
   warmup_sec: 5
   run_sec: 20
   frame_budget_ms: 5.0

@@ -1,28 +1,37 @@
-# IO and kernel-bypass options
+# Asynchronous I/O Experiments
 
-The logging subsystem offers an asynchronous file sink tuned for stress and
-worst-case durability testing.
+The current logging sinks are service-thread experiments. They are not
+allocation-free RT-lane sinks, and `io_uring` is not kernel bypass.
 
-## Disk logging
+## File sink
 
-`Logger::AsyncRingFileSink` supports:
+`Logger::AsyncRingFileSink` can preallocate a file, use a bounded deque, count
+drops, and request `O_DSYNC` plus `O_DIRECT` on supported Linux builds. Its
+producer path still uses a mutex, copies/allocates strings, and notifies a
+condition variable. `O_DIRECT` also imposes buffer alignment and size rules
+that ordinary log strings may not satisfy; write return values are not
+currently promoted into a complete error contract.
 
-- Preallocating a target log file to avoid growth-related fragmentation.
-- Optional `O_DIRECT|O_DSYNC` open flags via the `directSync` constructor
-  parameter to bypass caches when benchmarking durable paths.
-- A bounded queue that drops excess log records and tracks the drop count
-  via `dropped()` so tests can assert on pressure.
+## Socket sink
 
-For network exporters `Logger::AsyncKernelBypassSink` pairs a bounded queue
-with the `simcore::KernelBypassSocket` helper. The sink pushes log lines to a
-socket using token-bucket backpressure identical to the file sink. On Linux the
-socket helper can opt into io_uring submission by defining
-`SIMCORE_ENABLE_IO_URING` at build time; otherwise it transparently falls back
-to non-blocking `send()` calls so the same interface works across platforms.
+`Logger::AsyncKernelBypassSink` uses a service thread and
+`KernelBypassSocket`. With `SIMCORE_ENABLE_IO_URING` and liburing available, the
+helper submits normal socket sends through io_uring. Otherwise it loops over
+`send()` and depends on the descriptor's blocking mode.
+
+The io_uring path owns pending payloads in `std::list<std::string>` and can
+allocate. It remains a kernel-mediated socket API; no DPDK, AF_XDP, RDMA, or
+other kernel-bypass transport is implemented. The current class name is legacy
+and will be corrected with the M6 service-lane redesign.
+
+## Target
+
+RT-lane code will publish fixed-size records into a preallocated bounded queue.
+A non-RT service owns formatting, file/network I/O, retries, and shutdown.
+Backpressure and drop behavior will be schema-visible and tested.
 
 ## Code anchors
 
-- File sink: `Logger::AsyncRingFileSink::write`, `Logger::AsyncRingFileSink::run`; `include/simcore/logger.hpp`
-- Kernel-bypass sink: `Logger::AsyncKernelBypassSink::write`, `Logger::AsyncKernelBypassSink::run`; `include/simcore/logger.hpp`
-- Kernel bypass helper: `simcore::KernelBypassSocket::submit`, `simcore::KernelBypassSocket::poll`; `include/simcore/kernel_bypass.hpp`
-
+- File/socket sinks: `include/simcore/logger.hpp`
+- io_uring/socket helper: `include/simcore/kernel_bypass.hpp`
+- Observability target: [observability](observability.md)

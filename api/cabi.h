@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <rtfw/version.h>
 
 #if defined _WIN32 || defined __CYGWIN__
 #  ifdef RTFW_BUILD
@@ -17,8 +18,9 @@ extern "C" {
 #endif
 
 /*
- * Stable C ABI for embedding the simulation core.
- * Provides versioning and compile-time feature flag introspection.
+ * Experimental C ABI for embedding the simulation core.
+ * Provides versioning and compile-time feature flag introspection. The ABI is
+ * not frozen before the M11 compatibility milestone.
  */
 
 typedef struct {
@@ -35,7 +37,7 @@ enum cabi_feature {
 typedef uint32_t cabi_feature_flags;
 
 static inline cabi_version_t cabi_version(void) {
-    cabi_version_t v = {1u, 0u};
+    cabi_version_t v = {RTFW_VERSION_MAJOR, RTFW_VERSION_MINOR};
     return v;
 }
 
@@ -70,4 +72,3 @@ RTFW_API void rtfw_destroy(rtfw_handle* handle);
 #ifdef __cplusplus
 }
 #endif
-

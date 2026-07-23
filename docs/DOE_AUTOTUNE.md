@@ -1,107 +1,64 @@
-# DOE / Autotune Workflow
+# DOE and Autotune Status
 
-This guide expands on the quickstart snippet in the [README](../README.md#15-doe--autotune-workflow). It covers the pre-flight checks, describes the generated artifacts, and shows how to extend the default experiment design.
+The repository contains a working design-of-experiments and analysis pipeline,
+plus a synthetic application used to test that pipeline. It is not yet
+integrated with the real `rtfw_demo`.
 
-## 1. Pre-flight checklist
+## What is verified
 
-Before launching autotune runs, stabilise the platform so every replicate produces comparable interval metrics.
+The synthetic workflow generates parameter mappings, runs candidates, evaluates
+constraints/objectives, performs a small search, and writes profiles, JSONL
+results, summaries, and reports.
 
-- **Thermals & frequency**: warm the system for a few minutes and pin clocks/turbo settings according to your reliability policy.
-- **CPU isolation**: reserve cores for realtime work (cpuset, IRQ affinity, SMT policy) matching your production target.
-- **Build artifacts**: ensure `./build/bin/rtfw_demo` exists — the orchestration script assumes a Release-equivalent binary is ready.
-
-## 2. Parameter mapping & validation
-
-The autotuner parameters map directly onto runtime configuration keys. Use the
-table below when you add new knobs to `spec.yaml` or sanity-check generated
-profiles:
-
-| Param | Config path |
-| --- | --- |
-| `threads` | `threads`
-| `chunk_target_us` | `chunking.target_p90_us`
-| `aosoa_block` | `layout.aosoa_block`
-| `steal_threshold` | `scheduler.steal_threshold`
-| `prefetch_distance_bytes` | `prefetch.distance_bytes`
-| `fma_mode` | `numerics.fma`
-| `ftz_daz` | `numerics.ftz_daz`
-| `arena_per_thread_mb` | `memory.arena_per_thread_mb`
-| `huge_pages` | `memory.huge_pages`
-| `emergency_spawn_enabled` | `scheduler.emergency_spawn`
-| `priority_policy` | `scheduler.priority_policy`
-| `governor_target_util` | `governor.target_util`
-| `governor_hysteresis` | `governor.hysteresis`
-
-Schema validation protects these mappings. The JSON Schema in
-`tools/autotune/config.schema.json` enforces the type, required keys, and
-allowed enum values for every generated mapping file so profiles stay
-compatible with the runtime loader.
-
-### Run mapping checks
+Run its CI-sized smoke:
 
 ```bash
-python tools/autotune/make_config.py --self-test
-python tools/autotune/mapping_smoke.py
+tools/autotune/run_smoke.sh
 ```
 
-## 3. Run the full workflow
+Run mapping/schema checks:
 
 ```bash
-python3 tools/autotune/run_experiments.py \
-  --spec tools/autotune/spec.yaml \
-  --screen 32 \
-  --replicates 3 \
-  --local-iters 40 \
-  --topk 5
+python3 tools/autotune/make_config.py --self-test
+python3 tools/autotune/mapping_smoke.py
 ```
 
-### Flags explained
+These commands validate tooling and schemas. They do not validate that
+`rtfw_demo` consumes a generated profile.
 
-- `--spec` — DOE description (application entry point, metrics, factor space, objectives).
-- `--screen` — number of Sobol/randomised candidates to evaluate before local search kicks in.
-- `--replicates` — interval metric samples per evaluation; >1 smooths jittery hosts.
-- `--local-iters` — bounded coordinate/local search iterations seeded from the best screening candidate.
-- `--topk` — number of unique candidates to send through robustness validation.
-- `--warmup-sec` — optional override for the warmup duration defined in the spec (seconds).
-- `--run-sec` — optional override for the metrics sampling window (seconds).
+## Why the default runtime spec is blocked
 
-> **Interval metrics only.** The runner always calls `rtfw_demo` with `--metrics-json-interval`. Cumulative stats (`--metrics-json`) are intentionally ignored because they hide short-lived regressions and make comparisons between runs ambiguous.
+`tools/autotune/spec.yaml` describes the intended runtime integration. The
+orchestrator launches an application with generated `--config` input,
+`--run`-bounded warm-up/measurement windows, and optional `--rt` arguments.
+RTFW 0.1's demo implements none of those three options and does not read
+`RTFW_PROFILE`.
 
-## 4. Generated artifacts
+The current profile schema also contains settings that are not mapped into
+`SimCore::Settings`, including scheduler-steal policy, huge pages, and AoSoA
+layout selection. Consequently:
 
-The workflow writes three directories at the repository root:
+- do not run `spec.yaml` against `rtfw_demo` and interpret the result as a
+  runtime tuning result;
+- tracked files under `results/`, `profiles/`, and `reports/` are illustrative
+  fixtures unless their provenance explicitly names another executable;
+- generated recommendations are not production profiles.
 
-| Directory | Purpose | Key files |
-| --- | --- | --- |
-| `profiles/` | Drop-in machine profiles named `<cpu>-<os>.json`. The runtime auto-loads these alongside stock `default_safe`/`default_fast`. | `profiles/zen3_linux-linux.json` (example) |
-| `results/` | Raw experiment log and orchestration breadcrumbs suitable for CI diffing or ad-hoc plots. | `experiments.jsonl`, `summary.json`, `top_candidates.json`, `validation_summary.json` |
-| `reports/` | Aggregated analytics from `tools/autotune/analyze.py` — Pareto sets, CSV summaries, best run report. | `pareto.json`, `summary.csv`, `best.json` |
+Milestones M1, M3, M4, M5, and M6 must supply configuration, policy,
+measurement-window, and telemetry contracts before runtime autotuning is valid.
 
-All JSON files use UTF-8 + newline for easy `jq`/Python ingestion.
+## Intended workflow after integration
 
-## 5. Tweaking the design space
+After those milestones, a valid experiment will:
 
-The YAML spec drives every stage. To change what the tuner explores:
+1. build a pinned Release artifact;
+2. validate the target host and resolved runtime configuration;
+3. warm up without contaminating the measurement interval;
+4. collect direct end-to-end frame/deadline samples and required counters;
+5. retain raw samples and environment provenance;
+6. reject invalid or dropped-data trials;
+7. validate finalists across seeds, scenarios, and repeated runs;
+8. emit a profile tied to runtime schema and hardware identifiers.
 
-1. Edit [`tools/autotune/spec.yaml`](../tools/autotune/spec.yaml).
-2. Adjust the `params` section (categorical/int/float/bool) with new ranges.
-3. Expand `metrics.hard_constraints` or the objective expression to enforce new SLAs.
-4. Re-run the command above — the script will resume from `results/experiments.jsonl` when possible.
-
-For one-off sweeps or custom analytics, inspect `results/experiments.jsonl` with `jq` or re-run `tools/autotune/analyze.py` against the saved log.
-
-## 6. Consuming the profile
-
-After the run finishes, copy the generated profile into your deployment target or point `RTFW_PROFILE` at the emitted JSON. The runtime loads this alongside existing configs:
-
-```bash
-PROFILE_NAME=$(python3 - <<'PY'
-from tools.autotune import common_host
-tokens = common_host.host_tokens()
-print(f"{tokens['cpu_slug']}-{tokens['os_name']}.json")
-PY
-)
-RTFW_PROFILE=$PROFILE_NAME ./build/bin/rtfw_demo --rt --metrics-json
-```
-
-Because the profile was derived from interval metrics, keep monitoring both cumulative and interval outputs in production to ensure no long-horizon drift.
+The factor-to-config mapping and constraint language are documented in
+[`tools/autotune/README.md`](../tools/autotune/README.md).
