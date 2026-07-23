@@ -16,11 +16,11 @@ pass; file presence or a passing smoke test is not sufficient.
 | ID | Status | Outcome |
 | --- | --- | --- |
 | M0 | Complete | Product contract, truthful documentation, versioning, and license |
-| M1 | Next | Runtime lifecycle, typed configuration, host-driven API, C ABI draft |
-| M2 | Planned | Compiled graph, cycle rejection, and resource hazards |
+| M1 | Complete | Runtime lifecycle, typed configuration, host-driven API, C ABI draft |
+| M2 | Next | Compiled graph, cycle rejection, and resource hazards |
 | M3 | Planned | Unified CPU executor with honest selectable policies |
 | M4 | Planned | Memory plan and zero-allocation RT-lane closure |
-| M5 | Planned | Per-runtime clock, absolute cadence, watchdog, and platform preflight |
+| M5 | Planned | Self-paced absolute cadence, watchdog, and platform preflight |
 | M6 | Planned | RT-safe, versioned observability |
 | M7 | Planned | Determinism tiers, safe snapshots, and replay |
 | M8 | Planned | Device ABI and deterministic fault-injectable mock |
@@ -51,13 +51,23 @@ Exit gates:
 
 ## M1 — Lifecycle, configuration, and host API
 
+Delivered in 0.2:
+
+- `rt::Runtime` with explicit configure/finalize/start/step/stop states;
+- strict typed configuration with callback, scratch, trace, and numerical
+  policy behavior;
+- a synchronous host-driven callback path with runtime-local time, trace,
+  numerical helper, and scratch ownership;
+- a size/version-checked experimental C ABI;
+- executable C and C++ callback samples and dynamic-library coverage.
+
 Exit gates:
 
 - explicit configure/finalize/start/run/stop state machine;
 - unknown configuration and CLI keys fail;
 - every schema key maps to runtime behavior;
 - host-driven steps never sleep;
-- two runtime instances do not share clock, trace, numerical, or allocator
+- two runtime instances do not share clock, trace, numerical, or scratch
   state;
 - C and C++ samples register and execute real user callbacks.
 

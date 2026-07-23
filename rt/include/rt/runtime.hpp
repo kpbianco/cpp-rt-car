@@ -2,8 +2,13 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string_view>
 #include <utility>
 
 #include "core/units.hpp"
@@ -13,20 +18,12 @@ class SimCore;
 
 namespace rt {
 
-// Compile-time feature flags
-// Defaults enable all subsystems; users may disable via template parameters.
-template <bool Jobs = true, bool Time = true, bool Memory = true>
-struct features {
-    static constexpr bool jobs   = Jobs;
-    static constexpr bool time   = Time;
-    static constexpr bool memory = Memory;
-};
-
-// Runtime capability structure
+// Capabilities report only completed target-path guarantees. A false value
+// identifies a later roadmap milestone rather than a disabled build option.
 struct Capabilities {
-    bool jobs;
-    bool time;
-    bool memory;
+    bool compiled_graph;
+    bool host_driven_time;
+    bool bounded_memory_plan;
 };
 
 // Query runtime capabilities
@@ -34,6 +31,168 @@ Capabilities query_capabilities() noexcept;
 
 // Example function using strong types
 core::seconds tick_duration(core::seconds dt) noexcept;
+
+inline constexpr std::uint32_t runtime_config_schema_version = 1;
+
+enum class RuntimeState : std::uint8_t {
+    configuring,
+    finalized,
+    running,
+    stopped,
+};
+
+enum class Status : std::int32_t {
+    ok = 0,
+    invalid_argument = -1,
+    invalid_state = -2,
+    invalid_config = -3,
+    capacity_exceeded = -4,
+    callback_failed = -5,
+    resource_exhausted = -6,
+    internal_error = -7,
+};
+
+[[nodiscard]] const char* status_message(Status status) noexcept;
+
+enum class NumericalMode : std::uint8_t {
+    precise,
+    fused_multiply_add,
+};
+
+struct RuntimeConfig {
+    std::size_t callback_capacity = 64;
+    std::size_t scratch_bytes = 64 * 1024;
+    std::size_t trace_capacity = 1024;
+    NumericalMode numerical_mode = NumericalMode::precise;
+};
+
+// Applies one strict schema key to a typed configuration. The supported keys
+// are callback_capacity, scratch_bytes, trace_capacity, and numerical_mode.
+// Unknown keys and partially parsed values are rejected.
+[[nodiscard]] Status set_runtime_config_value(
+    RuntimeConfig& config,
+    std::string_view key,
+    std::string_view value) noexcept;
+
+class RuntimeClock {
+public:
+    virtual ~RuntimeClock() = default;
+    // Values must be monotonic nanoseconds in one clock domain. A Runtime
+    // constructed with an injected clock borrows it for the Runtime lifetime.
+    [[nodiscard]] virtual std::uint64_t now_ns() noexcept = 0;
+};
+
+class NumericalPolicy {
+public:
+    explicit NumericalPolicy(
+        NumericalMode mode = NumericalMode::precise) noexcept
+        : mode_(mode) {}
+
+    [[nodiscard]] NumericalMode mode() const noexcept { return mode_; }
+    [[nodiscard]] double multiply_add(double a, double b, double c) const noexcept;
+
+private:
+    NumericalMode mode_;
+};
+
+struct HostFrameContext {
+    std::uint64_t frame_index = 0;
+    std::chrono::nanoseconds delta{0};
+    std::optional<std::uint64_t> deadline_ns{};
+};
+
+struct CallbackContext {
+    const HostFrameContext& frame;
+    // Valid only for the callback invocation. The same instance-local block is
+    // presented to callbacks in registration order.
+    std::span<std::byte> scratch;
+    const NumericalPolicy& numerics;
+};
+
+enum class CallbackResult : std::uint8_t {
+    ok,
+    error,
+};
+
+using FrameCallback = CallbackResult (*)(void*, const CallbackContext&);
+
+struct CallbackRegistration {
+    // Runtime copies name. The host retains user_data ownership and must keep
+    // it valid until no future step can invoke this callback.
+    std::string_view name;
+    FrameCallback callback = nullptr;
+    void* user_data = nullptr;
+};
+
+struct StepResult {
+    std::size_t callbacks_executed = 0;
+    std::uint64_t start_ns = 0;
+    std::uint64_t finish_ns = 0;
+    bool deadline_missed = false;
+};
+
+enum class RuntimeTraceEventType : std::uint8_t {
+    finalized,
+    started,
+    step_begin,
+    callback_begin,
+    callback_end,
+    step_end,
+    stopped,
+};
+
+struct RuntimeTraceEvent {
+    RuntimeTraceEventType type = RuntimeTraceEventType::step_begin;
+    Status status = Status::ok;
+    std::uint64_t timestamp_ns = 0;
+    std::uint64_t frame_index = 0;
+    std::size_t callback_index = 0;
+};
+
+// Host-driven lifecycle introduced by M1. Control methods are single-host-
+// thread operations. A step invokes callbacks synchronously and never paces or
+// sleeps; self-paced execution is a separate M5 concern.
+class Runtime {
+public:
+    Runtime();
+    explicit Runtime(RuntimeClock& clock);
+    ~Runtime();
+
+    Runtime(Runtime&&) noexcept;
+    Runtime& operator=(Runtime&&) noexcept;
+
+    Runtime(const Runtime&) = delete;
+    Runtime& operator=(const Runtime&) = delete;
+
+    [[nodiscard]] Status configure(const RuntimeConfig& config) noexcept;
+    [[nodiscard]] Status configure_key(
+        std::string_view key,
+        std::string_view value) noexcept;
+    [[nodiscard]] Status register_callback(
+        const CallbackRegistration& registration) noexcept;
+    [[nodiscard]] Status finalize() noexcept;
+    [[nodiscard]] Status start() noexcept;
+    [[nodiscard]] Status step(
+        const HostFrameContext& frame,
+        StepResult* result = nullptr) noexcept;
+    [[nodiscard]] Status stop() noexcept;
+
+    [[nodiscard]] RuntimeState state() const noexcept;
+    [[nodiscard]] const RuntimeConfig& config() const noexcept;
+    [[nodiscard]] std::size_t callback_count() const noexcept;
+    [[nodiscard]] std::uint64_t now_ns() noexcept;
+    // The view remains valid until the next control operation or destruction.
+    [[nodiscard]] std::string_view last_error() const noexcept;
+
+    [[nodiscard]] std::size_t trace_event_count() const noexcept;
+    [[nodiscard]] bool trace_event(
+        std::size_t chronological_index,
+        RuntimeTraceEvent& event) const noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 struct DemoPipeline {
     struct State {
@@ -90,4 +249,3 @@ inline std::uint64_t DemoPipeline::fence_waits() const {
 }
 
 } // namespace rt
-

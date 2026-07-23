@@ -148,8 +148,8 @@ jobs:
         if: github.event_name == 'pull_request'
         continue-on-error: true
 
-  cabi-release:
-    name: C ABI smoke (${{ matrix.compiler }})
+  embedding-release:
+    name: C/C++ embedding smoke (${{ matrix.compiler }})
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -175,8 +175,11 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_TESTS=OFF \
             -DSIM_WERROR=ON
-      - name: Build embedding sample
-        run: cmake --build build-release --config Release --target sample_embed_c -- -j2
-      - name: Run embedding sample
+      - name: Build embedding samples
+        run: cmake --build build-release --config Release --target sample_embed_c sample_embed_c_static sample_embed_cpp -- -j2
+      - name: Run embedding samples
         working-directory: build-release
-        run: ./samples/sample_embed_c
+        run: |
+          ./samples/sample_embed_c
+          ./samples/sample_embed_c_static
+          ./samples/sample_embed_cpp

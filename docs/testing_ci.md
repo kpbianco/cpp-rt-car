@@ -7,6 +7,9 @@ latency qualification and does not prove the complete product contract.
 
 - GoogleTest unit and integration tests cover phase execution, queues, arenas,
   numerics, snapshots, trace, metrics, mock devices, plugins, and utilities.
+- Host-runtime tests cover lifecycle transitions, strict configuration,
+  no-pacing host steps, callback failure containment, bounded traces, and
+  isolation of two runtime instances.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -15,8 +18,9 @@ latency qualification and does not prove the complete product contract.
   compiler and AVX2/FMA build variants. Each job validates behavior within its
   own binary; CI does not compare hashes between compiler jobs.
 - Linux and Windows jobs exercise selected Debug/RelWithDebInfo builds.
-- C ABI, autotune-tooling, scaling-artifact, and documentation-contract jobs
-  provide focused smoke coverage.
+- Executable shared/static C and C++ callback samples, dynamic C ABI loading,
+  autotune-tooling, scaling-artifact, and documentation-contract jobs provide
+  focused smoke coverage.
 
 ## What CI does not currently establish
 
@@ -43,3 +47,5 @@ predeclared thresholds, and the measurement procedure.
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
 - Optional fuzz harness: `tests/jobqueue_fuzz.cpp`
+- M1 lifecycle tests: `tests/test_host_runtime.cpp`,
+  `tests/test_cabi_dlopen.c`

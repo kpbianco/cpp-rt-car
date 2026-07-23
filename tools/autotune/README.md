@@ -2,7 +2,7 @@
 
 This directory implements a design-of-experiments, scoring, search, validation,
 and reporting pipeline. `spec_smoke.yaml` plus `smoke_app.py` are the supported
-end-to-end test target in RTFW 0.1.
+end-to-end test target in the current repository.
 
 `spec.yaml` is a target integration design, not an operational `rtfw_demo`
 configuration. The demo does not yet implement the `--config`, `--run`, or
@@ -34,8 +34,9 @@ python3 tools/autotune/mapping_smoke.py
 
 The first command targets the synthetic app. The latter commands verify
 mapping coverage and schema behavior. The planned real-demo dry run is disabled
-unless `RTFW_ENABLE_PLANNED_AUTOTUNE_ROUNDTRIP=1`; enabling it in 0.1 is
-expected to fail because the runtime interface is not implemented.
+unless `RTFW_ENABLE_PLANNED_AUTOTUNE_ROUNDTRIP=1`; enabling it against the
+current demo is expected to fail because the runtime interface is not
+implemented.
 
 ## Result records
 

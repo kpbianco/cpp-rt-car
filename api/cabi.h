@@ -1,34 +1,17 @@
 #pragma once
 
-#include <stdint.h>
-#include <rtfw/version.h>
-
-#if defined _WIN32 || defined __CYGWIN__
-#  ifdef RTFW_BUILD
-#    define RTFW_API __declspec(dllexport)
-#  else
-#    define RTFW_API __declspec(dllimport)
-#  endif
-#else
-#  define RTFW_API
-#endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /*
- * Experimental C ABI for embedding the simulation core.
- * Provides versioning and compile-time feature flag introspection. The ABI is
- * not frozen before the M11 compatibility milestone.
+ * Compatibility include for the pre-M1 header path. New integrations should
+ * include <rt/c_api.h>. The C ABI is experimental until M11.
  */
+#include <rt/c_api.h>
 
 typedef struct {
     uint32_t major;
     uint32_t minor;
+    uint32_t patch;
 } cabi_version_t;
 
-/* Feature flags exposed at compile time */
 enum cabi_feature {
     CABI_FEATURE_LOG  = 1u << 0,
     CABI_FEATURE_PROF = 1u << 1,
@@ -37,38 +20,21 @@ enum cabi_feature {
 typedef uint32_t cabi_feature_flags;
 
 static inline cabi_version_t cabi_version(void) {
-    cabi_version_t v = {RTFW_VERSION_MAJOR, RTFW_VERSION_MINOR};
-    return v;
+    cabi_version_t version = {
+        RTFW_VERSION_MAJOR,
+        RTFW_VERSION_MINOR,
+        RTFW_VERSION_PATCH
+    };
+    return version;
 }
 
 static inline cabi_feature_flags cabi_get_features(void) {
-    cabi_feature_flags f = 0u;
+    cabi_feature_flags features = 0u;
 #ifdef LOG_ENABLED
-    f |= CABI_FEATURE_LOG;
+    features |= CABI_FEATURE_LOG;
 #endif
 #ifdef PROF_ENABLED
-    f |= CABI_FEATURE_PROF;
+    features |= CABI_FEATURE_PROF;
 #endif
-    return f;
+    return features;
 }
-
-/*
- * Minimal runtime shim --------------------------------------------------
- */
-
-typedef struct rtfw_handle rtfw_handle;
-
-typedef enum rtfw_status {
-    RTFW_STATUS_OK = 0,
-    RTFW_STATUS_COMPLETE = 1,
-    RTFW_STATUS_INVALID_ARGUMENT = -1,
-    RTFW_STATUS_INTERNAL_ERROR = -2
-} rtfw_status;
-
-RTFW_API rtfw_handle* rtfw_create(double frame_budget_ms);
-RTFW_API rtfw_status rtfw_step(rtfw_handle* handle);
-RTFW_API void rtfw_destroy(rtfw_handle* handle);
-
-#ifdef __cplusplus
-}
-#endif

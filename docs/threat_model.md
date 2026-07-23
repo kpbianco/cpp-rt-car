@@ -2,7 +2,7 @@
 
 ## Trust boundary
 
-RTFW 0.1 is an in-process native library prototype. The host application,
+RTFW 0.2 is an in-process native library prototype. The host application,
 runtime, callbacks, and loaded plugins share one address space and authority.
 Plugins and device backends are trusted code; ABI validation is not a security
 boundary.
@@ -22,7 +22,7 @@ boundary.
 | --- | --- |
 | Malicious/buggy callback or plugin | Full in-process access; version fields catch some incompatibility only |
 | Queue/memory exhaustion | Some bounded primitives exist, but spin, fallback allocation, detached helpers, and unchecked paths remain |
-| Malformed snapshot/config | Parsers have partial validation; comprehensive bounds, fuzzing, and schema identity are incomplete |
+| Malformed snapshot/config | M1 runtime keys and C structure headers fail closed; snapshot, profile, and other experimental parsers still need comprehensive bounds, fuzzing, and schema identity |
 | Device hang/loss | CPU mock only; no bounded backend reset/health contract |
 | Telemetry leakage/corruption | Paths and runtime data can be written to files; schemas and access policy are not frozen |
 | Supply-chain substitution | Submodule/SBOM helpers and CI dependency review exist; signed release provenance is not established |

@@ -2,7 +2,7 @@
 
 Status: accepted target contract for the pre-1.0 development line
 
-Current release: 0.1.0 experimental
+Current release: 0.2.0 experimental
 
 ## Product definition
 
@@ -12,7 +12,8 @@ before execution, and runs it on a preallocated CPU executor. The target
 runtime supports host-driven and self-paced frames and integrates asynchronous
 device backends through bounded submission and completion interfaces.
 
-The current 0.1 implementation is a research prototype. It provides useful
+The current 0.2 implementation is a research prototype. Its new host runtime
+satisfies the M1 lifecycle and callback contract at RT0, alongside useful
 primitives and experiments, but it does not yet satisfy the complete contract
 in this document.
 
@@ -50,8 +51,10 @@ The 1.0 lifecycle is:
 5. **Stop** — reject new submissions, drain or cancel according to policy,
    stop service lanes, and release resources.
 
-The current `SimCore` constructor/run/destructor flow does not yet enforce this
-lifecycle. Lifecycle implementation is milestone M1.
+`rt::Runtime` now enforces the M1 configure/finalize/start/step/stop state
+machine and freezes callback registration at finalization. The legacy
+`SimCore` constructor/run/destructor path remains experimental and does not
+inherit that lifecycle.
 
 ### Time ownership
 
@@ -61,6 +64,10 @@ Host-driven time is the default embedding contract:
   deadline from the host.
 - A host-driven step does not sleep or advance a hidden wall clock.
 - A separate self-paced mode owns an absolute periodic release schedule.
+
+The 0.2 `rt::Runtime` implements the host-driven half: the host supplies frame
+index, delta, and optional deadline, and callbacks execute synchronously without
+runtime pacing. Self-paced absolute releases remain milestone M5.
 
 See [ADR-0002](adr/0002-host-driven-time.md).
 
@@ -101,7 +108,7 @@ must define capabilities, buffer registration, bounded submission, completion,
 timeout, cancellation where supported, health, reset, and shutdown.
 
 The current GPU implementation is a CPU mock that launches detached threads.
-There is no CUDA, Vulkan, or XDMA backend in 0.1. See
+There is no CUDA, Vulkan, or XDMA backend in 0.2. See
 [ADR-0003](adr/0003-device-backend-boundary.md).
 
 ## Real-time tiers
@@ -126,7 +133,7 @@ An RT2 qualification record must include:
 - raw release, wake-up, compute, completion, slack, and miss samples;
 - thresholds chosen before the run and the final pass/fail result.
 
-No RT2 qualification exists in 0.1.
+No RT2 qualification exists in 0.2.
 
 ## Determinism tiers
 
@@ -138,23 +145,27 @@ No RT2 qualification exists in 0.1.
 | D3 — Portable deterministic | Only approved fixed-point or explicitly specified math kernels; arbitrary floating-point code is excluded |
 
 Current tests exercise parts of D1 within one build. They do not establish D2
-across GCC and Clang or D3 across machines. The FMA control is process-global
-and only affects explicit `rt::fma` calls.
+across GCC and Clang or D3 across machines. The legacy `SimCore` FMA control is
+process-global and only affects explicit `rt::fma` calls; the M1 runtime's
+instance-local helper does not constrain arbitrary callback expressions.
 
 ## Current support matrix
 
-| Surface | 0.1 status | Notes |
+| Surface | 0.2 status | Notes |
 | --- | --- | --- |
+| `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen registration |
+| Host-driven callbacks | Implemented RT0 surface | Synchronous registration-order execution; no sleeping or worker creation |
 | GCC/Clang C++20 build | Experimental | Linux CI covers selected compiler/build combinations |
 | MSVC build | Experimental | Windows CI is a portability check, not an RT qualification |
 | `SimCore` phase/range API | Experimental | Graph cycles and nested phase/range concurrency require redesign |
 | Bounded MPMC queue | Implemented primitive | `WorkerPool` uses one global FIFO queue |
 | `WorkerPool` priority/work stealing | Experimental/misnamed | Priority is not honored by normal dequeue; "steal" telemetry is not a successful-steal count |
 | Frame arenas | Experimental | Release overflow can fall back to heap allocation |
-| Binary trace ring | Experimental | Fixed storage exists; ownership/time-domain integration is not final |
+| M1 runtime trace ring | Implemented RT0 surface | Fixed instance-local lifecycle/callback ring with runtime-local timestamps |
+| Legacy binary trace ring | Experimental | Fixed storage exists; schema/time-domain integration is not final |
 | Metrics JSON | Experimental | Phase histograms are rolling windows, default capacity 120 |
 | Snapshot helpers | Experimental | Input validation and stable interchange compatibility are incomplete |
-| C ABI | Experimental smoke surface | Create/step/destroy only; no user work registration |
+| C ABI | Experimental M1 surface | Size/version-checked configuration and frame types plus callback lifecycle; ABI freezes at M11 |
 | JSON profiles/runtime autotune | Planned integration | Generators exist; `rtfw_demo` does not load their output |
 | GPU | CPU mock only | Detached-thread stub; no hardware backend |
 | XDMA | Planned | No implementation |

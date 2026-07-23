@@ -1,6 +1,6 @@
 # Security and Supply-Chain Status
 
-RTFW 0.1 has security-oriented experiments and CI helpers, not a hardened
+RTFW 0.2 has security-oriented experiments and CI helpers, not a hardened
 plugin sandbox or complete supply-chain policy.
 
 ## Process restriction experiment
