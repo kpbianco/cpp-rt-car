@@ -508,6 +508,7 @@ target_include_directories(simcore_core INTERFACE
 
 # Runtime module providing C API surface
 set(RT_SOURCES
+    rt/src/host_runtime.cpp
     rt/src/runtime.cpp
     rt/src/plugin_manager.cpp
     rt/src/scheduler.cpp
@@ -544,11 +545,14 @@ foreach(lib rtfw_shared rtfw_static)
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
             $<INSTALL_INTERFACE:include>
     )
-    target_compile_definitions(${lib} PRIVATE RTFW_BUILD=1)
     set_target_properties(${lib} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endforeach()
+
+target_compile_definitions(rtfw_shared PRIVATE RTFW_BUILD=1)
+target_compile_definitions(rtfw_static PUBLIC RTFW_STATIC_DEFINE=1)
 
 set_target_properties(rtfw_shared PROPERTIES
     OUTPUT_NAME rtfw
@@ -589,6 +593,9 @@ target_link_libraries(trace_dump PRIVATE simcore_platform)
 target_include_directories(trace_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Tiny sample programs
+if (ENABLE_TESTS)
+    enable_testing()
+endif()
 add_subdirectory(samples)
 
 # Micro benchmarks
@@ -596,7 +603,6 @@ add_subdirectory(bench)
 
 # Tests
 if (ENABLE_TESTS)
-    enable_testing()
     add_subdirectory(tests)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeterminismTargets.cmake)
 endif()

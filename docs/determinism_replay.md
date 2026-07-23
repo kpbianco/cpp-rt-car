@@ -1,7 +1,7 @@
 # Determinism and Replay Status
 
 The determinism tiers and evidence rules are normative in the
-[product contract](product_contract.md). RTFW 0.1 exercises pieces of D1
+[product contract](product_contract.md). RTFW 0.2 exercises pieces of D1
 (same-build reproducibility), but does not qualify D2 or D3.
 
 ## Current mechanisms
@@ -22,7 +22,8 @@ The determinism tiers and evidence rules are normative in the
 
 - callbacks can use arbitrary mutable state, unordered iteration, clocks,
   random sources, and floating-point operations outside runtime control;
-- the FMA switch and trace pointer are process-global;
+- the legacy `SimCore` FMA switch and trace pointer are process-global; the M1
+  host runtime's numerical helper and trace are instance-local;
 - floating-point behavior is not proven identical across compilers, ISAs, or
   machines;
 - the current snapshot is native-layout data without a stable endian/width

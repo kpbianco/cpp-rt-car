@@ -1,4 +1,4 @@
-# Planned runtime-integration spec. rtfw_demo 0.1 does not implement its
+# Planned runtime-integration spec. The current rtfw_demo does not implement its
 # --config, --run, or --rt command-line contract.
 app:
   path: "./build/rtfw_demo"

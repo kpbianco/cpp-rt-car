@@ -3,9 +3,9 @@
 Generated from `results` using spec `tools/autotune/spec.yaml`.
 
 > **Illustrative fixture only.** The tracked data is not a valid measurement
-> of `rtfw_demo`: version 0.1 does not implement the config, run-window, or RT
-> command-line interface used by the spec. Do not deploy this profile or cite
-> these values as runtime results.
+> of `rtfw_demo`: the current demo does not implement the config, run-window,
+> or RT command-line interface used by the spec. Do not deploy this profile or
+> cite these values as runtime results.
 
 ## Hardware and environment
 
@@ -68,6 +68,6 @@ Generated from `results` using spec `tools/autotune/spec.yaml`.
 ## How to use
 
 ```bash
-# Planned interface; not implemented by rtfw_demo 0.1
+# Planned interface; not implemented by the current rtfw_demo
 ./build/rtfw_demo --config profiles/<cpu>-<os>.json --rt --metrics-json
 ```

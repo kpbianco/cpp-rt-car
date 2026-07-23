@@ -14,13 +14,18 @@ user kernels deterministic.
 - `rt::init_fp_env` requests round-to-nearest and enables FTZ/DAZ on supported
   x86 threads.
 - `rt::fma` wraps an explicitly gated fused multiply-add.
+- M1 callback contexts expose an instance-local `NumericalPolicy` whose
+  `multiply_add` operation is selected before finalization.
 
 ## Limits
 
-The FMA setting is process-global, not per runtime. It only controls calls made
-through `rt::fma`; compilers may contract or transform other floating-point
-expressions according to build flags. FTZ/DAZ is thread-local and must be
-applied to every execution context, including host and device callbacks.
+The legacy `rt::fma` setting used by `SimCore` is process-global. It only
+controls calls made through `rt::fma`; compilers may contract or transform
+other floating-point expressions according to build flags. The M1
+`rt::Runtime` does not modify that flag: its precise/FMA choice applies only to
+the numerical helper passed to its callbacks and is isolated per instance.
+FTZ/DAZ is thread-local and must be applied to every future execution context,
+including host and device callbacks.
 
 Different compilers, standard libraries, ISAs, math libraries, and input
 handling can still produce different bits. The current tests support only the
@@ -31,4 +36,6 @@ limited D1 statement in the [product contract](product_contract.md).
 - Mixed-precision and ULP helpers: `include/simcore/robust_fp.hpp`
 - Reduction order: `include/simcore/deterministic_reduce.hpp`
 - FP environment/FMA wrapper: `rt/include/rt/numerics.hpp`
+- Instance-local callback numerical helper: `rt/include/rt/runtime.hpp`,
+  `rt/src/host_runtime.cpp`
 - Fixed point: `rt/include/rt/fixed_point.hpp`

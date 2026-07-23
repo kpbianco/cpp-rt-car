@@ -1,6 +1,6 @@
 # Scheduler Status
 
-RTFW 0.1 does not have one production scheduler. It has several experimental
+RTFW 0.2 does not have one production scheduler. It has several experimental
 execution components that must be consolidated under
 [ADR-0001](adr/0001-one-executor-boundary.md).
 

@@ -494,8 +494,8 @@ def main() -> None:
     lines.append("")
     lines.append(
         "> **Integration status:** if this report uses `tools/autotune/spec.yaml`, "
-        "it is illustrative only. `rtfw_demo` 0.1 does not implement that spec's "
-        "config, run-window, or RT command-line contract."
+        "it is illustrative only. The current `rtfw_demo` does not implement "
+        "that spec's config, run-window, or RT command-line contract."
     )
 
     lines.append("")
@@ -542,7 +542,7 @@ def main() -> None:
     lines.append("## Use this profile")
     lines.append("")
     lines.append("```bash")
-    lines.append("# Planned interface; not implemented by rtfw_demo 0.1")
+    lines.append("# Planned interface; not implemented by the current rtfw_demo")
     lines.append("./build/rtfw_demo --config profiles/<cpu>-<os>.json --rt --metrics-json")
     lines.append("```")
     if best_key_metrics:

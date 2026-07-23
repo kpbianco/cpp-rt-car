@@ -20,9 +20,10 @@ must not invent one.
 
 ## ABI policy
 
-The plugin and C surfaces are experimental in 0.1. Their major/minor fields
-support compatibility checks but do not yet constitute a stable ABI promise.
-Milestone M11 freezes exported symbols, ownership, structure sizing,
+The plugin and C surfaces are experimental in 0.2. The M1 C configuration,
+frame, callback, and result structures carry explicit sizes, and configuration
+carries `RTFW_C_ABI_VERSION`; those checks do not yet constitute a stable ABI
+promise. Milestone M11 freezes exported symbols, ownership, structure sizing,
 capabilities, errors, and compatibility policy.
 
 ## Thread-creation guard

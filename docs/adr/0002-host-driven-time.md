@@ -31,9 +31,16 @@ wake-up, start, finish, slack, and miss data.
 - Engines can integrate without a competing frame loop.
 - C and C++ APIs share the same explicit time model.
 - Tests can use a fake clock without waiting on wall time.
-- The current private-step C ABI path will be replaced.
+- The private-step C ABI path is replaced by the M1 lifecycle surface.
 - A borrowed host executor can be paired with host-driven time, but its latency
   is controlled by the host and cannot inherit an RTFW qualification.
+
+## Implementation status
+
+M1 implements host-driven `rt::Runtime::step()` and its C equivalent. Each
+runtime has a local clock domain, and tests verify that a large simulation
+delta does not pace the calling thread. Self-paced absolute release control is
+still M5.
 
 ## Rejected alternatives
 

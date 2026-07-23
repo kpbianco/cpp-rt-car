@@ -8,7 +8,7 @@ simulation execution. The repository explores phase graphs, parallel range
 work, fixed-capacity queues, frame arenas, numerical controls, tracing, and
 asynchronous device patterns.
 
-> **Status: 0.1.0 experimental.** This release is not production-ready and has
+> **Status: 0.2.0 experimental.** This release is not production-ready and has
 > no hard-real-time, worst-case-latency, cross-platform bitwise-determinism, GPU,
 > or XDMA qualification. See the [product contract](docs/product_contract.md)
 > and [roadmap](docs/roadmap.md) before integrating it.
@@ -17,6 +17,8 @@ asynchronous device patterns.
 
 | Area | Status | What exists today |
 | --- | --- | --- |
+| Host runtime lifecycle | Implemented RT0 surface | `rt::Runtime` enforces configure/finalize/start/step/stop and freezes registration at finalization |
+| Host-driven callbacks | Implemented RT0 surface | C and C++ callbacks run synchronously in registration order; the runtime does not sleep or create worker threads |
 | Phase/range execution | Experimental | `SimCore` registers phases, dependencies, serial work, ranges, and reductions |
 | CPU workers | Experimental | `SimCore` has internal range workers; optional `WorkerPool` uses one bounded global FIFO queue |
 | Phase graph | Experimental | Topological levels exist, but cycle rejection and safe nested phase/range concurrency are planned |
@@ -25,8 +27,9 @@ asynchronous device patterns.
 | Trace | Experimental | Fixed-capacity per-thread binary event rings and offline exporters |
 | Metrics | Experimental | JSON counters and rolling phase histograms; default histogram capacity is 120 samples |
 | Snapshots | Experimental | Demo and low-level serialization helpers; stable validated replay format is planned |
-| C ABI | Linkage smoke surface | `rtfw_create`, `rtfw_step`, and `rtfw_destroy`; user callback/graph registration is planned |
-| Configuration/autotune | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
+| C ABI | Experimental lifecycle surface | Size/version-checked configuration and frame structures expose create/register/finalize/start/step/stop with typed status codes |
+| Runtime configuration | Implemented M1 schema | Four strict typed keys control callback, scratch, trace, and numerical-policy behavior; unknown keys fail |
+| Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
 | GPU | CPU mock only | The mock launches detached CPU threads; no CUDA/Vulkan backend exists |
 | XDMA | Planned | No backend exists |
 
@@ -78,7 +81,28 @@ Several worker telemetry names are also provisional; see
 [observability](docs/observability.md).
 
 The demo does not implement `--config`, `--rt`, `--run`, `--duration`, or
-`RTFW_PROFILE`. Those interfaces are tracked in milestones M1 and M5.
+`RTFW_PROFILE`. The M1 typed configuration belongs to the embedding runtime;
+demo/profile integration and self-paced execution remain planned.
+
+## Embedding lifecycle
+
+Release 0.2 adds the first target-path embedding surface in
+`<rt/runtime.hpp>` and `<rt/c_api.h>`:
+
+1. configure a typed runtime;
+2. register callbacks while the runtime is configuring;
+3. finalize to allocate instance-local scratch and trace storage and freeze
+   registration;
+4. start;
+5. submit host-owned frame index, simulation delta, and optional deadline to
+   `step()`;
+6. stop.
+
+Callbacks currently execute synchronously on the calling thread in registration
+order. This is deliberate: graph compilation is M2 and the unified bounded CPU
+executor is M3. See the [host runtime contract](docs/host_runtime.md) and the
+working [C](samples/embed_c/mini_app.c) and
+[C++](samples/embed_cpp/mini_app.cpp) examples.
 
 ## Architecture direction
 
@@ -100,7 +124,9 @@ Accepted architecture decisions:
 - [ADR-0002: host-driven time by default](docs/adr/0002-host-driven-time.md)
 - [ADR-0003: bounded device backend ABI](docs/adr/0003-device-backend-boundary.md)
 
-The existing implementation does not yet satisfy all three decisions. The
+The M1 host runtime now implements lifecycle and host-driven time, but the
+existing `SimCore` demo and experimental scheduler components do not yet
+satisfy all three decisions. The
 [architecture guide](docs/architecture.md) distinguishes current and target
 paths.
 
@@ -126,9 +152,9 @@ Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | Experimental runtime, scheduler, fiber, snapshot, plugin, and C capability components |
+| `rt/include/rt/`, `rt/src/` | M1 host runtime plus experimental scheduler, fiber, snapshot, and plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
-| `api/` | Experimental embedding C header |
+| `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |
 | `tests/` | GoogleTest, integration, and optional fuzz coverage |
 | `tools/` | Trace, characterization, scaling, SBOM, and autotune tooling |
@@ -162,7 +188,7 @@ CI currently provides:
 - Linux GCC/Clang Debug and RelWithDebInfo build/test matrices;
 - selected FMA/AVX2 build variants;
 - Windows portability builds;
-- C ABI linkage smoke;
+- shared/static C and C++ lifecycle/callback samples plus dynamic C ABI loading;
 - autotune mapping and synthetic autotune smoke;
 - scaling artifact smoke;
 - documentation/version/claim checks.

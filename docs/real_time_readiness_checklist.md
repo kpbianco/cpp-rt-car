@@ -1,7 +1,7 @@
 # Real-Time Readiness Gates
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
-0.1 has not completed any end-to-end RT2 qualification.
+0.2 has not completed any end-to-end RT2 qualification.
 
 ## Portable runtime gates
 
@@ -19,8 +19,8 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
 - [ ] Trace/metrics records use fixed storage and a versioned schema.
 - [ ] Snapshot input is bounds-checked, versioned, fuzzed, and tied to graph and
   configuration identity.
-- [ ] The C and C++ embedding APIs can register and execute real host work with
-  typed errors.
+- [x] The C and C++ embedding APIs can register and execute real host work with
+  typed errors (M1 functional gate; not an RT qualification).
 
 ## Deployment qualification gates
 

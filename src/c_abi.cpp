@@ -1,99 +1,445 @@
-#include "api/cabi.h"
+#include <rt/c_api.h>
+#include <rt/runtime.hpp>
 
-#include <simcore/SimCore.hpp>
-#include <simcore/logger.hpp>
-
-#include <cmath>
-#include <exception>
+#include <array>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
-
-struct rtfw_handle {
-    Logger logger;
-    std::unique_ptr<SimCore> sim;
-};
+#include <optional>
+#include <string_view>
+#include <vector>
 
 namespace {
 
-template <typename Tag, typename Tag::type M>
-struct StepFriend {
-    friend typename Tag::type get(Tag) {
-        return M;
+rtfw_status to_c_status(rt::Status status) noexcept {
+    switch (status) {
+    case rt::Status::ok:
+        return RTFW_STATUS_OK;
+    case rt::Status::invalid_argument:
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    case rt::Status::invalid_state:
+        return RTFW_STATUS_INVALID_STATE;
+    case rt::Status::invalid_config:
+        return RTFW_STATUS_INVALID_CONFIG;
+    case rt::Status::capacity_exceeded:
+        return RTFW_STATUS_CAPACITY_EXCEEDED;
+    case rt::Status::callback_failed:
+        return RTFW_STATUS_CALLBACK_FAILED;
+    case rt::Status::resource_exhausted:
+        return RTFW_STATUS_RESOURCE_EXHAUSTED;
+    case rt::Status::internal_error:
+        return RTFW_STATUS_INTERNAL_ERROR;
     }
-};
-
-struct StepAccessor {
-    using type = bool (SimCore::*)();
-    friend type get(StepAccessor);
-};
-
-template struct StepFriend<StepAccessor, &SimCore::step>;
-
-constexpr double kDefaultHz = 500.0;
-
-SimCore::Settings make_settings(double frame_budget_ms) {
-    SimCore::Settings settings;
-    settings.threads = 1;
-    settings.maxFrames = -1;
-    settings.driftLogInterval = 0;
-    settings.budgetMonitor = false;
-    settings.rateGovernorEnable = false;
-    settings.predictiveEnable = false;
-    settings.autoTuneChunks = false;
-    settings.budgetWindow = 0;
-
-    if (std::isfinite(frame_budget_ms) && frame_budget_ms > 0.0) {
-        settings.hz = 1000.0 / frame_budget_ms;
-    } else {
-        settings.hz = kDefaultHz;
-    }
-
-    return settings;
+    return RTFW_STATUS_INTERNAL_ERROR;
 }
 
-bool advance_frame(SimCore &sim) {
-    auto fn = get(StepAccessor{});
-    return (sim.*fn)();
+bool bytes_are_zero(const uint8_t* bytes, std::size_t size) noexcept {
+    for (std::size_t index = 0; index < size; ++index) {
+        if (bytes[index] != 0u) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool config_header_valid(const rtfw_config& config) noexcept {
+    return config.struct_size >= sizeof(rtfw_config) &&
+           config.abi_version == RTFW_C_ABI_VERSION &&
+           config.reserved == 0u;
+}
+
+bool frame_header_valid(const rtfw_frame_context& frame) noexcept {
+    return frame.struct_size >= sizeof(rtfw_frame_context) &&
+           frame.reserved0 == 0u &&
+           bytes_are_zero(frame.reserved1, sizeof(frame.reserved1));
+}
+
+bool result_header_valid(const rtfw_step_result& result) noexcept {
+    return result.struct_size >= sizeof(rtfw_step_result) &&
+           result.reserved0 == 0u &&
+           bytes_are_zero(result.reserved1, sizeof(result.reserved1));
+}
+
+bool to_cpp_config(
+    const rtfw_config& source,
+    rt::RuntimeConfig& target) noexcept {
+    if (!config_header_valid(source) ||
+        source.callback_capacity > std::numeric_limits<std::size_t>::max() ||
+        source.scratch_bytes > std::numeric_limits<std::size_t>::max() ||
+        source.trace_capacity > std::numeric_limits<std::size_t>::max()) {
+        return false;
+    }
+
+    target.callback_capacity =
+        static_cast<std::size_t>(source.callback_capacity);
+    target.scratch_bytes = static_cast<std::size_t>(source.scratch_bytes);
+    target.trace_capacity = static_cast<std::size_t>(source.trace_capacity);
+    switch (source.numerical_mode) {
+    case RTFW_NUMERICAL_PRECISE:
+        target.numerical_mode = rt::NumericalMode::precise;
+        break;
+    case RTFW_NUMERICAL_FUSED_MULTIPLY_ADD:
+        target.numerical_mode = rt::NumericalMode::fused_multiply_add;
+        break;
+    default:
+        return false;
+    }
+    return true;
+}
+
+void from_cpp_config(
+    const rt::RuntimeConfig& source,
+    rtfw_config& target) noexcept {
+    target.callback_capacity = source.callback_capacity;
+    target.scratch_bytes = source.scratch_bytes;
+    target.trace_capacity = source.trace_capacity;
+    target.numerical_mode =
+        source.numerical_mode == rt::NumericalMode::fused_multiply_add
+        ? RTFW_NUMERICAL_FUSED_MULTIPLY_ADD
+        : RTFW_NUMERICAL_PRECISE;
+}
+
+rtfw_runtime_state to_c_state(rt::RuntimeState state) noexcept {
+    switch (state) {
+    case rt::RuntimeState::configuring:
+        return RTFW_STATE_CONFIGURING;
+    case rt::RuntimeState::finalized:
+        return RTFW_STATE_FINALIZED;
+    case rt::RuntimeState::running:
+        return RTFW_STATE_RUNNING;
+    case rt::RuntimeState::stopped:
+        return RTFW_STATE_STOPPED;
+    }
+    return RTFW_STATE_STOPPED;
+}
+
+struct CCallback {
+    rtfw_frame_callback callback = nullptr;
+    void* user_data = nullptr;
+};
+
+rt::CallbackResult invoke_c_callback(
+    void* opaque,
+    const rt::CallbackContext& context) {
+    auto* registration = static_cast<CCallback*>(opaque);
+    rtfw_callback_context c_context{};
+    c_context.struct_size = sizeof(c_context);
+    c_context.numerical_mode =
+        context.numerics.mode() == rt::NumericalMode::fused_multiply_add
+        ? RTFW_NUMERICAL_FUSED_MULTIPLY_ADD
+        : RTFW_NUMERICAL_PRECISE;
+    c_context.frame_index = context.frame.frame_index;
+    c_context.delta_ns = context.frame.delta.count();
+    c_context.has_deadline = context.frame.deadline_ns ? 1u : 0u;
+    c_context.deadline_ns = context.frame.deadline_ns.value_or(0);
+    c_context.scratch = context.scratch.data();
+    c_context.scratch_bytes = context.scratch.size();
+
+    return registration->callback(registration->user_data, &c_context) ==
+            RTFW_CALLBACK_OK
+        ? rt::CallbackResult::ok
+        : rt::CallbackResult::error;
 }
 
 } // namespace
 
+struct rtfw_handle {
+    rt::Runtime runtime;
+    std::vector<std::unique_ptr<CCallback>> callbacks;
+    std::array<char, 256> boundary_error{};
+
+    void clear_boundary_error() noexcept {
+        boundary_error[0] = '\0';
+    }
+
+    rtfw_status fail(rtfw_status status, const char* message) noexcept {
+        std::snprintf(
+            boundary_error.data(),
+            boundary_error.size(),
+            "%s",
+            message ? message : "C ABI boundary error");
+        return status;
+    }
+};
+
 extern "C" {
 
-RTFW_API rtfw_handle *rtfw_create(double frame_budget_ms) {
-    auto handle = std::unique_ptr<rtfw_handle>(new (std::nothrow) rtfw_handle());
-    if (!handle) {
-        return nullptr;
-    }
-    try {
-        auto settings = make_settings(frame_budget_ms);
-        auto sim = std::make_unique<SimCore>(settings);
-        handle->logger.setLevel(Logger::Level::Error);
-        sim->setLogger(&handle->logger);
-        handle->sim = std::move(sim);
-    } catch (const std::exception &) {
-        return nullptr;
-    } catch (...) {
-        return nullptr;
-    }
-    return handle.release();
+RTFW_API uint32_t rt_version_major(void) {
+    return RT_VERSION_MAJOR;
 }
 
-RTFW_API rtfw_status rtfw_step(rtfw_handle *handle) {
-    if (!handle || !handle->sim) {
+RTFW_API uint32_t rt_version_minor(void) {
+    return RT_VERSION_MINOR;
+}
+
+RTFW_API uint32_t rt_version_patch(void) {
+    return RT_VERSION_PATCH;
+}
+
+RTFW_API rt_capabilities_c rt_query_capabilities(void) {
+    const auto capabilities = rt::query_capabilities();
+    return {
+        static_cast<uint8_t>(capabilities.compiled_graph),
+        static_cast<uint8_t>(capabilities.host_driven_time),
+        static_cast<uint8_t>(capabilities.bounded_memory_plan),
+    };
+}
+
+RTFW_API const char* rtfw_status_message(rtfw_status status) {
+    switch (status) {
+    case RTFW_STATUS_OK:
+        return rt::status_message(rt::Status::ok);
+    case RTFW_STATUS_INVALID_ARGUMENT:
+        return rt::status_message(rt::Status::invalid_argument);
+    case RTFW_STATUS_INVALID_STATE:
+        return rt::status_message(rt::Status::invalid_state);
+    case RTFW_STATUS_INVALID_CONFIG:
+        return rt::status_message(rt::Status::invalid_config);
+    case RTFW_STATUS_CAPACITY_EXCEEDED:
+        return rt::status_message(rt::Status::capacity_exceeded);
+    case RTFW_STATUS_CALLBACK_FAILED:
+        return rt::status_message(rt::Status::callback_failed);
+    case RTFW_STATUS_RESOURCE_EXHAUSTED:
+        return rt::status_message(rt::Status::resource_exhausted);
+    case RTFW_STATUS_INTERNAL_ERROR:
+        return rt::status_message(rt::Status::internal_error);
+    }
+    return "unknown runtime status";
+}
+
+RTFW_API void rtfw_config_init(rtfw_config* config) {
+    if (!config) {
+        return;
+    }
+    std::memset(config, 0, sizeof(*config));
+    config->struct_size = sizeof(*config);
+    config->abi_version = RTFW_C_ABI_VERSION;
+    from_cpp_config(rt::RuntimeConfig{}, *config);
+}
+
+RTFW_API rtfw_status rtfw_config_set(
+    rtfw_config* config,
+    const char* key,
+    const char* value) {
+    if (!config || !key || !value || !config_header_valid(*config)) {
         return RTFW_STATUS_INVALID_ARGUMENT;
     }
+
+    rt::RuntimeConfig typed{};
+    if (!to_cpp_config(*config, typed)) {
+        return RTFW_STATUS_INVALID_CONFIG;
+    }
+    const auto status =
+        rt::set_runtime_config_value(typed, std::string_view(key), std::string_view(value));
+    if (status == rt::Status::ok) {
+        from_cpp_config(typed, *config);
+    }
+    return to_c_status(status);
+}
+
+RTFW_API void rtfw_frame_context_init(rtfw_frame_context* context) {
+    if (!context) {
+        return;
+    }
+    std::memset(context, 0, sizeof(*context));
+    context->struct_size = sizeof(*context);
+}
+
+RTFW_API void rtfw_step_result_init(rtfw_step_result* result) {
+    if (!result) {
+        return;
+    }
+    std::memset(result, 0, sizeof(*result));
+    result->struct_size = sizeof(*result);
+}
+
+RTFW_API rtfw_status rtfw_create(
+    const rtfw_config* config,
+    rtfw_handle** out_handle) {
+    if (!out_handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_handle = nullptr;
+
+    rt::RuntimeConfig typed{};
+    if (config && !to_cpp_config(*config, typed)) {
+        return RTFW_STATUS_INVALID_CONFIG;
+    }
+
     try {
-        const bool more = advance_frame(*handle->sim);
-        return more ? RTFW_STATUS_OK : RTFW_STATUS_COMPLETE;
-    } catch (const std::exception &) {
-        return RTFW_STATUS_INTERNAL_ERROR;
+        auto handle = std::make_unique<rtfw_handle>();
+        const auto status = handle->runtime.configure(typed);
+        if (status != rt::Status::ok) {
+            return to_c_status(status);
+        }
+        handle->callbacks.reserve(typed.callback_capacity);
+        *out_handle = handle.release();
+        return RTFW_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return RTFW_STATUS_RESOURCE_EXHAUSTED;
     } catch (...) {
         return RTFW_STATUS_INTERNAL_ERROR;
     }
 }
 
-RTFW_API void rtfw_destroy(rtfw_handle *handle) {
+RTFW_API rtfw_status rtfw_register_callback(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_frame_callback callback,
+    void* user_data) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    if (!name || !callback) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "callback name and function are required");
+    }
+    if (handle->runtime.state() != rt::RuntimeState::configuring) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_STATE,
+            "callback registration is frozen");
+    }
+    if (handle->callbacks.size() >=
+        handle->runtime.config().callback_capacity) {
+        return handle->fail(
+            RTFW_STATUS_CAPACITY_EXCEEDED,
+            "configured callback capacity exceeded");
+    }
+
+    try {
+        auto registration = std::make_unique<CCallback>();
+        registration->callback = callback;
+        registration->user_data = user_data;
+        CCallback* stable_registration = registration.get();
+        handle->callbacks.push_back(std::move(registration));
+
+        const auto status = handle->runtime.register_callback(
+            rt::CallbackRegistration{
+                std::string_view(name),
+                &invoke_c_callback,
+                stable_registration,
+            });
+        if (status != rt::Status::ok) {
+            handle->callbacks.pop_back();
+            return to_c_status(status);
+        }
+        handle->clear_boundary_error();
+        return RTFW_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return handle->fail(
+            RTFW_STATUS_RESOURCE_EXHAUSTED,
+            "callback registration allocation failed");
+    } catch (...) {
+        return handle->fail(
+            RTFW_STATUS_INTERNAL_ERROR,
+            "unexpected callback registration failure");
+    }
+}
+
+RTFW_API rtfw_status rtfw_finalize(rtfw_handle* handle) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    return to_c_status(handle->runtime.finalize());
+}
+
+RTFW_API rtfw_status rtfw_start(rtfw_handle* handle) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    return to_c_status(handle->runtime.start());
+}
+
+RTFW_API rtfw_status rtfw_step(
+    rtfw_handle* handle,
+    const rtfw_frame_context* frame,
+    rtfw_step_result* result) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    if (!frame || !frame_header_valid(*frame)) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "frame context is missing, undersized, or has nonzero reserved fields");
+    }
+    if (result && !result_header_valid(*result)) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "step result is undersized or has nonzero reserved fields");
+    }
+    if (frame->delta_ns < 0 || frame->has_deadline > 1u) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "invalid frame delta or deadline flag");
+    }
+
+    rt::HostFrameContext cpp_frame{};
+    cpp_frame.frame_index = frame->frame_index;
+    cpp_frame.delta = std::chrono::nanoseconds(frame->delta_ns);
+    if (frame->has_deadline) {
+        cpp_frame.deadline_ns = frame->deadline_ns;
+    }
+
+    rt::StepResult cpp_result{};
+    handle->clear_boundary_error();
+    const auto status = handle->runtime.step(cpp_frame, &cpp_result);
+    if (result) {
+        const auto struct_size = result->struct_size;
+        std::memset(result, 0, sizeof(*result));
+        result->struct_size = struct_size;
+        result->callbacks_executed = cpp_result.callbacks_executed;
+        result->start_ns = cpp_result.start_ns;
+        result->finish_ns = cpp_result.finish_ns;
+        result->deadline_missed = cpp_result.deadline_missed ? 1u : 0u;
+    }
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_stop(rtfw_handle* handle) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    return to_c_status(handle->runtime.stop());
+}
+
+RTFW_API rtfw_status rtfw_get_state(
+    const rtfw_handle* handle,
+    rtfw_runtime_state* out_state) {
+    if (!handle || !out_state) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_state = to_c_state(handle->runtime.state());
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_now_ns(
+    rtfw_handle* handle,
+    uint64_t* out_now_ns) {
+    if (!handle || !out_now_ns) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_now_ns = handle->runtime.now_ns();
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API const char* rtfw_last_error(const rtfw_handle* handle) {
+    if (!handle) {
+        return "invalid runtime handle";
+    }
+    if (handle->boundary_error[0] != '\0') {
+        return handle->boundary_error.data();
+    }
+    return handle->runtime.last_error().data();
+}
+
+RTFW_API void rtfw_destroy(rtfw_handle* handle) {
     delete handle;
 }
 

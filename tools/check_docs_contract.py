@@ -201,6 +201,10 @@ def check_claims() -> None:
         if claim.lower() in surfaces.lower():
             fail(f"documentation contains retired claim/path: {claim!r}")
 
+    stale_version = re.compile(r"\b(?:RTFW|version|demo)\s+0\.1\b", re.IGNORECASE)
+    if stale_version.search(surfaces):
+        fail("documentation contains a stale 0.1 release reference")
+
     readme = read("README.md")
     required_qualifiers = (
         "not production-ready",
@@ -214,6 +218,81 @@ def check_claims() -> None:
             fail(f"README.md: missing required qualification: {text!r}")
 
 
+def check_m1_contract() -> None:
+    cmake = read("CMakeLists.txt")
+    samples_cmake = read("samples/CMakeLists.txt")
+    runtime_header = read("rt/include/rt/runtime.hpp")
+    runtime_source = read("rt/src/host_runtime.cpp")
+    c_header = read("rt/include/rt/c_api.h")
+    roadmap = read("docs/roadmap.md")
+    host_doc = read("docs/host_runtime.md")
+
+    for method in (
+        "Status configure(",
+        "Status register_callback(",
+        "Status finalize()",
+        "Status start()",
+        "Status step(",
+        "Status stop()",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M1 lifecycle method {method!r}")
+
+    forbidden_host_pacing = ("sleep_for", "sleep_until", "std::thread")
+    for token in forbidden_host_pacing:
+        if token in runtime_source:
+            fail(f"rt/src/host_runtime.cpp: host-driven runtime contains {token!r}")
+
+    schema_keys = {
+        "callback_capacity",
+        "scratch_bytes",
+        "trace_capacity",
+        "numerical_mode",
+    }
+    implemented_keys = set(
+        re.findall(r'key\s*==\s*"([a-z0-9_]+)"', runtime_source)
+    )
+    if implemented_keys != schema_keys:
+        fail(
+            "rt/src/host_runtime.cpp: runtime schema keys differ from contract: "
+            f"implemented={sorted(implemented_keys)}, expected={sorted(schema_keys)}"
+        )
+    for key in schema_keys:
+        if f"`{key}`" not in host_doc:
+            fail(f"docs/host_runtime.md: missing schema key {key!r}")
+
+    for function in (
+        "rtfw_status_message(",
+        "rtfw_create(",
+        "rtfw_register_callback(",
+        "rtfw_finalize(",
+        "rtfw_start(",
+        "rtfw_step(",
+        "rtfw_stop(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M1 C ABI function {function!r}")
+
+    for capability in (
+        "compiled_graph",
+        "host_driven_time",
+        "bounded_memory_plan",
+    ):
+        if capability not in runtime_header or capability not in c_header:
+            fail(f"M1 capability contract is missing {capability!r}")
+
+    for snippet in (
+        "target_compile_definitions(rtfw_shared PRIVATE RTFW_BUILD=1)",
+        "target_compile_definitions(rtfw_static PUBLIC RTFW_STATIC_DEFINE=1)",
+        "sample_embed_c_static",
+    ):
+        if snippet not in cmake and snippet not in samples_cmake:
+            fail(f"CMake embedding contract is missing {snippet!r}")
+
+    if "| M1 | Complete |" not in roadmap or "| M2 | Next |" not in roadmap:
+        fail("docs/roadmap.md: M1/M2 milestone status is not advanced")
+
+
 def main() -> int:
     require_files(
         (
@@ -221,11 +300,18 @@ def main() -> int:
             "VERSION.txt",
             "include/rtfw/version.h",
             "docs/product_contract.md",
+            "docs/host_runtime.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
             "docs/adr/0003-device-backend-boundary.md",
             ".github/workflows/docs-contract.yml",
+            "rt/include/rt/runtime.hpp",
+            "rt/include/rt/c_api.h",
+            "rt/src/host_runtime.cpp",
+            "samples/embed_c/mini_app.c",
+            "samples/embed_cpp/mini_app.cpp",
+            "tests/test_host_runtime.cpp",
         )
     )
     check_version()
@@ -234,6 +320,7 @@ def main() -> int:
     check_cli_contract()
     check_verified_commands()
     check_claims()
+    check_m1_contract()
 
     if FAILURES:
         print("Documentation contract failed:", file=sys.stderr)
