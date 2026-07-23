@@ -229,6 +229,9 @@ def check_runtime_contract() -> None:
     graph_doc = read("docs/compiled_graph.md")
     graph_source = read("rt/src/compiled_graph.cpp")
     graph_test = read("tests/test_compiled_graph.cpp")
+    executor_doc = read("docs/executor.md")
+    executor_source = read("rt/src/executor.cpp")
+    executor_test = read("tests/test_executor.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
 
     for method in (
@@ -252,6 +255,9 @@ def check_runtime_contract() -> None:
         "scratch_bytes",
         "trace_capacity",
         "numerical_mode",
+        "executor_policy",
+        "worker_count",
+        "executor_queue_capacity",
     }
     implemented_keys = set(
         re.findall(r'key\s*==\s*"([a-z0-9_]+)"', runtime_source)
@@ -295,6 +301,23 @@ def check_runtime_contract() -> None:
         if function not in c_header:
             fail(f"rt/include/rt/c_api.h: missing M2 C ABI function {function!r}")
 
+    for method in (
+        "Status parallel_for(",
+        "Status parallel_reduce(",
+        "bool static_phase_assignment_at(",
+        "ExecutorStats executor_stats()",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M3 executor method {method!r}")
+
+    for function in (
+        "rtfw_parallel_for(",
+        "rtfw_parallel_reduce(",
+        "rtfw_task_worker_index(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M3 C ABI function {function!r}")
+
     for status in (
         "invalid_handle",
         "graph_cycle",
@@ -306,6 +329,7 @@ def check_runtime_contract() -> None:
     for capability in (
         "compiled_graph",
         "host_driven_time",
+        "unified_cpu_executor",
         "bounded_memory_plan",
     ):
         if capability not in runtime_header or capability not in c_header:
@@ -322,15 +346,19 @@ def check_runtime_contract() -> None:
     if (
         "| M1 | Complete |" not in roadmap
         or "| M2 | Complete |" not in roadmap
-        or "| M3 | Next |" not in roadmap
+        or "| M3 | Complete |" not in roadmap
+        or "| M4 | Next |" not in roadmap
     ):
-        fail("docs/roadmap.md: M2/M3 milestone status is not advanced")
+        fail("docs/roadmap.md: M3/M4 milestone status is not advanced")
 
     if not re.search(
-        r"return\s*\{\s*true\s*,\s*true\s*,\s*false\s*\}\s*;",
+        r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*false\s*\}\s*;",
         runtime_source,
     ):
-        fail("rt/src/host_runtime.cpp: M2 capability tuple is not true/true/false")
+        fail(
+            "rt/src/host_runtime.cpp: M3 capability tuple is not "
+            "true/true/true/false"
+        )
 
     for token in (
         "std::priority_queue",
@@ -356,6 +384,39 @@ def check_runtime_contract() -> None:
     if "CompiledGraphFirstFrameDoesNotAllocate" not in noalloc_test:
         fail("tests/test_trace_noalloc.cpp: missing M2 allocation gate")
 
+    for token in (
+        "ExecutorPolicy::static_deterministic",
+        "ExecutorPolicy::bounded_throughput",
+        "successful_steals_",
+        "Status::queue_full",
+        "kQueueCasAttemptLimit",
+    ):
+        if token not in executor_source:
+            fail(f"rt/src/executor.cpp: missing M3 executor evidence {token!r}")
+    for forbidden in (".detach(", "handleEmergency", "std::async"):
+        if forbidden in executor_source:
+            fail(
+                "rt/src/executor.cpp: unified executor contains forbidden "
+                f"emergency/detached path {forbidden!r}"
+            )
+    for phrase in (
+        "static_deterministic",
+        "bounded_throughput",
+        "queue_full",
+        "successful steals",
+        "accepted prefix",
+    ):
+        if phrase not in executor_doc:
+            fail(f"docs/executor.md: missing M3 contract phrase {phrase!r}")
+    for test_name in (
+        "StaticAssignmentMetadataAndExecutionAreStable",
+        "QueueFullSubmissionReturnsWithinBound",
+        "IndependentNestedWorkPassesStaticStress",
+        "ThroughputUsesLocalQueuesAndSuccessfulSteals",
+    ):
+        if test_name not in executor_test:
+            fail(f"tests/test_executor.cpp: missing M3 gate {test_name!r}")
+
 
 def main() -> int:
     require_files(
@@ -366,6 +427,7 @@ def main() -> int:
             "docs/product_contract.md",
             "docs/host_runtime.md",
             "docs/compiled_graph.md",
+            "docs/executor.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -375,11 +437,13 @@ def main() -> int:
             "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
             "rt/src/compiled_graph.cpp",
+            "rt/src/executor.cpp",
             "rt/src/host_runtime.cpp",
             "samples/embed_c/mini_app.c",
             "samples/embed_cpp/mini_app.cpp",
             "tests/test_host_runtime.cpp",
             "tests/test_compiled_graph.cpp",
+            "tests/test_executor.cpp",
         )
     )
     check_version()

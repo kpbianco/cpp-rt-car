@@ -2,7 +2,7 @@
 
 ## Trust boundary
 
-RTFW 0.3 is an in-process native library prototype. The host application,
+RTFW 0.4 is an in-process native library prototype. The host application,
 runtime, callbacks, and loaded plugins share one address space and authority.
 Plugins and device backends are trusted code; ABI validation is not a security
 boundary.

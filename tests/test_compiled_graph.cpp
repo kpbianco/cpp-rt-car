@@ -511,7 +511,24 @@ TEST(CompiledGraph, RandomizedDagsAgreeWithReferenceExecutor) {
                     std::nullopt,
                 }),
             rt::Status::ok);
-        EXPECT_EQ(executed, expected);
+        ASSERT_EQ(executed.size(), phase_count);
+        std::vector<std::size_t> execution_position(
+            phase_count,
+            phase_count);
+        for (std::size_t position = 0;
+             position < executed.size();
+             ++position) {
+            ASSERT_LT(executed[position], phase_count);
+            EXPECT_EQ(
+                execution_position[executed[position]],
+                phase_count);
+            execution_position[executed[position]] = position;
+        }
+        for (const auto& [prerequisite, dependent] : dependencies) {
+            EXPECT_LT(
+                execution_position[prerequisite],
+                execution_position[dependent]);
+        }
         EXPECT_EQ(runtime.stop(), rt::Status::ok);
     }
 }

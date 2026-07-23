@@ -1,12 +1,13 @@
 # Compiled Graph Contract
 
-Release 0.3 adds the M2 compiled graph to the target-path `rt::Runtime`.
+Release 0.3 added the M2 compiled graph to the target-path `rt::Runtime`.
 The graph is an RT0 functional surface: it validates dependency and logical
-resource ordering before start, then supplies an immutable deterministic phase
-order to the current synchronous executor.
+resource ordering before start, supplies an immutable deterministic phase order
+for introspection, and provides dependency tables to the M3 executor.
 
-It does not add parallel execution, a complete bounded memory plan, or a
-latency qualification. Those remain M3, M4, and deployment-specific work.
+Release 0.4 adds parallel execution without changing the M2 validation rules.
+A complete bounded memory plan and latency qualification remain M4 and
+deployment-specific work.
 
 ## Graph vocabulary
 
@@ -65,9 +66,8 @@ and stopped states.
 
 ## Resource ordering
 
-Resource declarations prevent an incidental serial order in 0.3 from becoming
-an unsafe parallel graph in M3. For every pair of phases that names the same
-resource:
+Resource declarations prevent an incidental traversal from becoming an unsafe
+parallel graph. For every pair of phases that names the same resource:
 
 | First access | Second access | Required ordering |
 | --- | --- | --- |
@@ -86,9 +86,11 @@ declarations when touching application memory.
 
 ## Execution and allocation boundary
 
-`step()` traverses the committed order and invokes callbacks synchronously on
-the host thread. Trace callback indices remain phase registration indices, even
-when compiled execution order differs.
+`step()` submits dependency-ready phases to the M3 worker team and waits
+synchronously from the host. Trace callback indices remain phase registration
+indices. `compiled_phase_at()` still returns the registration-index
+tie-broken canonical topological order, but independent callbacks may overlap
+and their completion order is not that canonical total order.
 
 Graph compilation, adjacency construction, cycle detection, and resource-path
 analysis may allocate and may have data-dependent cost during `finalize()`.
@@ -97,8 +99,9 @@ instrumentation test covers the first frame of a representative compiled graph
 and observes no heap allocation.
 
 That test closes only the M2 topology gate. Arbitrary callbacks can allocate,
-and the complete executor, scratch, overload, and RT-lane allocation proof
-remains M4. `bounded_memory_plan` therefore remains false.
+and the complete scratch, overload, and RT-lane allocation proof remains M4.
+`bounded_memory_plan` therefore remains false. Executor semantics are specified
+in the [M3 executor contract](executor.md).
 
 ## C and C++ entry points
 

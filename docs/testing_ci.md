@@ -17,6 +17,11 @@ latency qualification and does not prove the complete product contract.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph. This is the M2 topology gate, not
   the complete M4 RT-lane allocation proof.
+- Unified-executor tests stress independent phases with nested ranges and
+  fixed-tree reductions under both policies, verify stable static assignment
+  metadata, force deterministic queue saturation, and require real local
+  execution and successful cross-worker steals.
+- A focused GCC ThreadSanitizer job runs the unified-executor suite.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -54,6 +59,7 @@ predeclared thresholds, and the measurement procedure.
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
 - Optional fuzz harness: `tests/jobqueue_fuzz.cpp`
-- M1/M2 lifecycle and graph tests: `tests/test_host_runtime.cpp`,
-  `tests/test_compiled_graph.cpp`, `tests/test_trace_noalloc.cpp`,
+- M1–M3 lifecycle, graph, and executor tests: `tests/test_host_runtime.cpp`,
+  `tests/test_compiled_graph.cpp`, `tests/test_executor.cpp`,
+  `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`

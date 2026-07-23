@@ -1,7 +1,7 @@
 # Determinism and Replay Status
 
 The determinism tiers and evidence rules are normative in the
-[product contract](product_contract.md). RTFW 0.3 exercises pieces of D1
+[product contract](product_contract.md). RTFW 0.4 exercises pieces of D1
 (same-build reproducibility), but does not qualify D2 or D3.
 
 ## Current mechanisms

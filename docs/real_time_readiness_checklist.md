@@ -1,7 +1,7 @@
 # Real-Time Readiness Gates
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
-0.3 has not completed any end-to-end RT2 qualification.
+0.4 has not completed any end-to-end RT2 qualification.
 
 ## Portable runtime gates
 
@@ -14,6 +14,9 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   allocation, file I/O, or blocking lock after start.
 - [ ] Every queue-full, arena-overflow, timeout, cancellation, and shutdown path
   has explicit bounded behavior and tests.
+- [x] The M3 CPU executor's queue saturation is bounded and creates no
+  emergency or detached helper (functional gate; complete frame overload policy
+  remains M4).
 - [ ] Host-driven steps never sleep; self-paced operation uses absolute release
   times.
 - [ ] Multiple runtime instances have isolated clocks, numerical policy,
@@ -22,7 +25,7 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
 - [ ] Snapshot input is bounds-checked, versioned, fuzzed, and tied to graph and
   configuration identity.
 - [x] The C and C++ embedding APIs can register and execute real host work with
-  typed lifecycle/graph errors (M1/M2 functional gate; not an RT
+  typed lifecycle/graph/executor errors (M1–M3 functional gate; not an RT
   qualification).
 
 ## Deployment qualification gates
