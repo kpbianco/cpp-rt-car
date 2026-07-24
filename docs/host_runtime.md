@@ -2,7 +2,8 @@
 
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
 extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
-plan, and M5 time/platform controls. It provides explicit host-driven and
+plan, M5 time/platform controls, and M6 versioned observability. It provides
+explicit host-driven and
 finite self-paced operation without adopting the legacy `SimCore` scheduler
 or pacing loop.
 
@@ -31,13 +32,13 @@ Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
 
-Control operations are single-host-thread operations in 0.6. `step()` and
+Control operations are single-host-thread operations in 0.7. `step()` and
 `run_periodic()` are non-reentrant. A periodic observer cannot recursively
 step, and `stop()` called from inside a callback or periodic loop is rejected.
 
 ## Typed configuration
 
-`rt::RuntimeConfig` has fifteen schema keys:
+`rt::RuntimeConfig` has sixteen schema keys:
 
 | Key | Type/default | Runtime behavior |
 | --- | --- | --- |
@@ -56,6 +57,7 @@ step, and `stop()` called from inside a callback or periodic loop is rejected.
 | `watchdog_timeout_ns` | nonnegative integer, `0` | Nanoseconds from measured step start to watchdog expiry; zero disables the watchdog and the maximum is 24 hours |
 | `watchdog_max_degradation_level` | nonnegative integer, `0` | Caps frame-thread degradation increments; accepted range is 0–255 |
 | `platform_preflight_mode` | `disabled` | Selects `disabled` or fail-closed, read-only `strict` prerequisite checks |
+| `workload_id` | identifier, `unspecified` | Labels observability output with 1–63 characters from `A-Za-z0-9._:/@-`; it does not affect the configuration fingerprint |
 
 The typed structure can be supplied with `configure()`. Dynamic callers can use
 `configure_key()` or the C `rtfw_config_set()` equivalent. Unknown keys,
@@ -165,12 +167,15 @@ The experimental C ABI mirrors the lifecycle:
 - `rtfw_run_periodic`;
 - `rtfw_get_platform_preflight_report`;
 - `rtfw_get_degradation_level`;
+- `rtfw_get_observability_metadata`;
+- `rtfw_get_metrics`;
+- `rtfw_read_trace`;
 - `rtfw_stop`;
 - `rtfw_destroy`.
 
 Public configuration, frame, callback, result, and memory-plan structures carry
-sizes, and configuration carries `RTFW_C_ABI_VERSION` (version 4 in release
-0.6). Periodic and preflight structures follow the same initialized-output
+sizes, and configuration carries `RTFW_C_ABI_VERSION` (version 5 in release
+0.7). Periodic, preflight, and observability structures follow the same initialized-output
 rule. Call the supplied structure initializers and leave reserved fields zero.
 `rtfw_status_message()` provides status text even when no runtime handle was
 created; `rtfw_last_error()` adds handle-specific context. The ABI remains
@@ -199,7 +204,9 @@ and exclusions are specified in the
 in the [executor contract](executor.md). M5 adds absolute cadence, one-shot
 watchdog/degradation, and fail-closed prerequisite reporting. It does not
 preempt callbacks or qualify a deployment; see the
-[time/platform contract](time_platform.md).
+[time/platform contract](time_platform.md). M6 adds bounded schema-v1
+trace/counter emission and non-RT cursor/export APIs; see the
+[observability contract](observability.md).
 
 ## Code and evidence
 
@@ -214,6 +221,7 @@ preempt callbacks or qualify a deployment; see the
 - Memory-plan tests: `tests/test_memory_plan.cpp`
 - Time/watchdog tests: `tests/test_periodic_runtime.cpp`
 - Platform-preflight tests: `tests/test_platform_preflight.cpp`
+- Observability tests: `tests/test_observability.cpp`
 - Dynamic C ABI test: `tests/test_cabi_dlopen.c`
 - C sample: `samples/embed_c/mini_app.c`
 - C++ sample: `samples/embed_cpp/mini_app.cpp`

@@ -1,6 +1,6 @@
 # Finalized Memory and Overload Contract
 
-Release 0.6 retains the M4 memory closure for the target-path CPU runtime,
+Release 0.7 retains the M4 memory closure for the target-path CPU runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.
@@ -51,7 +51,10 @@ released before the running state.
 
 `scratch_bytes`, `trace_capacity`, `worker_count`, and
 `executor_queue_capacity` also contribute directly to the plan. Queue slots
-equal `worker_count * executor_queue_capacity`.
+equal `worker_count * executor_queue_capacity`. M6 trace storage is
+`trace_capacity * trace_slot_bytes`; an internal slot is larger than the
+64-byte exported record because it contains atomic commit and producer-claim
+state.
 
 ## Scratch ownership
 
@@ -97,8 +100,9 @@ ignores a failed nested submission. Already-running or accepted child work is
 allowed to quiesce before `step()` returns.
 
 `ExecutorStats::queue_full_rejections` and
-`ExecutorStats::scratch_exhaustions` expose functional counters. They are not
-the versioned production telemetry surface planned for M6.
+`ExecutorStats::scratch_exhaustions` remain direct functional counters. M6 also
+publishes them through the versioned metric schema without adding an RT-lane
+allocation or output sink.
 
 ## Running-state boundary
 
@@ -106,9 +110,10 @@ the versioned production telemetry surface planned for M6.
 M5 watchdog service lane. After it returns, the target CPU frame path uses
 preallocated graph, queue, scratch, and trace storage. It contains no file I/O,
 condition-variable wait, blocking mutex, hidden thread creation, heap fallback,
-or intentional heap allocation. Watchdog arm/disarm uses atomics and a
-notification; its condition-variable wait is confined to the non-RT service
-lane.
+or intentional heap allocation. M6 trace producers make one atomic slot-claim
+attempt and drop on contention rather than waiting. Watchdog arm/disarm uses
+atomics and a notification; its condition-variable wait is confined to the
+non-RT service lane.
 Workers use bounded queue operations and yield when idle or waiting for nested
 work.
 

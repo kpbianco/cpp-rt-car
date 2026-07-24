@@ -110,6 +110,7 @@ TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     EXPECT_TRUE(capabilities.self_paced_time);
     EXPECT_TRUE(capabilities.frame_watchdog);
     EXPECT_TRUE(capabilities.strict_platform_preflight);
+    EXPECT_TRUE(capabilities.versioned_observability);
 }
 
 TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
@@ -168,7 +169,7 @@ TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
 }
 
 TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
-    EXPECT_EQ(rt::runtime_config_schema_version, 4u);
+    EXPECT_EQ(rt::runtime_config_schema_version, 5u);
 
     rt::RuntimeConfig standalone;
     const auto unchanged = standalone;
@@ -199,6 +200,12 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
             standalone,
             "platform_preflight_mode",
             "best_effort"),
+        rt::Status::invalid_config);
+    EXPECT_EQ(
+        rt::set_runtime_config_value(
+            standalone,
+            "workload_id",
+            "spaces are rejected"),
         rt::Status::invalid_config);
 
     rt::Runtime runtime;
@@ -244,6 +251,11 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
         runtime.configure_key(
             "platform_preflight_mode",
             "disabled"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key(
+            "workload_id",
+            "host-runtime.test"),
         rt::Status::ok);
     EXPECT_EQ(
         runtime.configure_key("worker_threads", "8"),

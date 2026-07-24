@@ -1,6 +1,6 @@
 #pragma once
 
 #define RTFW_VERSION_MAJOR 0
-#define RTFW_VERSION_MINOR 6
+#define RTFW_VERSION_MINOR 7
 #define RTFW_VERSION_PATCH 0
-#define RTFW_VERSION_STRING "0.6.0"
+#define RTFW_VERSION_STRING "0.7.0"

@@ -10,6 +10,18 @@ project(rtfw VERSION "${RTFW_VERSION}" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
+set(
+  RTFW_BUILD_ID
+  "rtfw-${PROJECT_VERSION}"
+  CACHE STRING
+  "Stable observability build identifier (A-Za-z0-9._:/@-, max 63 bytes)")
+string(LENGTH "${RTFW_BUILD_ID}" RTFW_BUILD_ID_LENGTH)
+if (RTFW_BUILD_ID_LENGTH GREATER 63 OR
+    NOT RTFW_BUILD_ID MATCHES "^[A-Za-z0-9._:/@-]+$")
+  message(FATAL_ERROR
+    "RTFW_BUILD_ID must be 1-63 characters from A-Za-z0-9._:/@-")
+endif()
+
 # Options (toggle logging / profiler / tests)
 option(ENABLE_LOG "Enable logging" ON)
 option(ENABLE_PROF "Enable profiler" ON)
@@ -512,9 +524,11 @@ set(RT_SOURCES
     rt/src/executor.cpp
     rt/src/host_runtime.cpp
     rt/src/native_platform_preflight.cpp
+    rt/src/observability_export.cpp
     rt/src/runtime.cpp
     rt/src/plugin_manager.cpp
     rt/src/scheduler.cpp
+    rt/src/telemetry.cpp
     rt/src/fiber_pool.cpp
     rt/src/watchdog_monitor.cpp
 )
@@ -526,6 +540,9 @@ else()
 endif()
 
 add_library(simcore_rt STATIC ${RT_SOURCES})
+target_compile_definitions(
+    simcore_rt
+    PRIVATE RTFW_BUILD_ID_STRING="${RTFW_BUILD_ID}")
 target_include_directories(simcore_rt PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>

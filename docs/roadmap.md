@@ -21,8 +21,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M3 | Complete | Unified CPU executor with honest selectable policies |
 | M4 | Complete | Memory plan and zero-allocation RT-lane closure |
 | M5 | Complete | Self-paced absolute cadence, watchdog, and platform preflight |
-| M6 | Next | RT-safe, versioned observability |
-| M7 | Planned | Determinism tiers, safe snapshots, and replay |
+| M6 | Complete | RT-safe, versioned observability |
+| M7 | Next | Determinism tiers, safe snapshots, and replay |
 | M8 | Planned | Device ABI and deterministic fault-injectable mock |
 | M9 | Planned | Real CUDA backend |
 | M10 | Planned | Real XDMA backend for one named host/FPGA stack |
@@ -166,12 +166,29 @@ The precise surface and qualification boundary are in
 
 ## M6 — Observability
 
+Delivered in 0.7:
+
+- a fixed-width schema-v1 runtime trace with monotonic sequence numbers,
+  nonblocking slot claims, and explicit overwrite/drop accounting;
+- caller-owned, runtime-bound trace cursors with exact retained-window loss
+  reporting and bounded caller-provided output;
+- 22 stable counter/gauge definitions with cumulative and independent
+  cursor-based interval windows;
+- build, runtime-version, configuration, workload, and runtime-instance
+  provenance on every snapshot/read;
+- experimental C ABI v5 access and a non-RT JSON export helper;
+- isolation, window-partition, loss, contention, C ABI, no-allocation, and
+  ThreadSanitizer evidence.
+
 Exit gates:
 
 - production trace/counter emission preserves the M4 RT-lane gate;
 - metric window semantics are invariant-tested;
 - two runtime instances have isolated traces;
 - output schemas include version/build/config/workload identifiers.
+
+The exact schema, cursor behavior, and legacy boundary are in
+[the observability contract](observability.md).
 
 ## M7 — Determinism and replay
 

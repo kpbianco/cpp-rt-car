@@ -1,6 +1,6 @@
 {
   "name": "cpp-rt-car",
-  "version-string": "0.6.0",
+  "version-string": "0.7.0",
   "builtin-baseline": "3f7e1436a0b11806abbddce274164a491091223e",
   "dependencies": []
 }

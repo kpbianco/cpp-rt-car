@@ -22,13 +22,15 @@ helper submits normal socket sends through io_uring. Otherwise it loops over
 The io_uring path owns pending payloads in `std::list<std::string>` and can
 allocate. It remains a kernel-mediated socket API; no DPDK, AF_XDP, RDMA, or
 other kernel-bypass transport is implemented. The current class name is legacy
-and will be corrected with the M6 service-lane redesign.
+and remains misleading.
 
 ## Target
 
-RT-lane code will publish fixed-size records into a preallocated bounded queue.
-A non-RT service owns formatting, file/network I/O, retries, and shutdown.
-Backpressure and drop behavior will be schema-visible and tested.
+M6 target-runtime lanes publish fixed-size records into preallocated atomic
+slots with schema-visible overwrite/drop behavior. The library intentionally
+does not create a telemetry transport thread. A future adapter may own
+formatting, file/network I/O, retries, and shutdown on a non-RT service lane;
+the legacy logger sinks above do not inherit the M6 contract.
 
 ## Code anchors
 

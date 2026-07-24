@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <string_view>
 
 #include <rt/runtime.hpp>
 
@@ -99,6 +100,12 @@ int main() {
     config.task_scratch_slots = 128;
     config.memory_budget_bytes = 1024 * 1024;
     config.overload_policy = rt::OverloadPolicy::fail_frame;
+    if (rt::set_runtime_config_value(
+            config,
+            "workload_id",
+            "sample.embed_cpp") != rt::Status::ok) {
+        return 1;
+    }
 
     SampleState state;
     rt::PhaseHandle consumer;
@@ -180,8 +187,41 @@ int main() {
         return 1;
     }
 
+    rt::RuntimeMetricSnapshot metrics;
+    rt::RuntimeTraceCursor trace_cursor;
+    rt::RuntimeTraceReadResult trace_result;
+    std::array<rt::RuntimeTraceEvent, 32> trace_events{};
+    if (!check(
+            runtime,
+            runtime.metrics_snapshot(
+                rt::RuntimeMetricWindow::cumulative,
+                nullptr,
+                metrics),
+            "read metrics") ||
+        metrics.samples[static_cast<std::size_t>(
+            rt::RuntimeMetricId::frames_completed)].value != 5 ||
+        metrics.samples[static_cast<std::size_t>(
+            rt::RuntimeMetricId::callbacks_completed)].value != 10 ||
+        !check(
+            runtime,
+            runtime.read_trace(
+                trace_cursor,
+                trace_events,
+                trace_result),
+            "read trace") ||
+        trace_result.events_read == 0 ||
+        std::string_view(
+            metrics.metadata.workload_id.data()) !=
+            "sample.embed_cpp") {
+        return 1;
+    }
+
     std::cout << "mini_app_cpp: executed 5 absolute-cadence graph frames with "
               << memory_plan.planned_bytes
-              << " planned runtime bytes\n";
+              << " planned runtime bytes; observability schema "
+              << metrics.metadata.schema_version
+              << " retained "
+              << trace_result.events_read
+              << " events\n";
     return 0;
 }

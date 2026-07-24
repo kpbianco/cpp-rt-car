@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <new>
@@ -51,6 +52,140 @@ static_assert(
     static_cast<std::uint32_t>(
         rt::PlatformCheckStatus::unsupported) ==
     RTFW_PLATFORM_CHECK_UNSUPPORTED);
+static_assert(
+    rt::observability_schema_version ==
+    RTFW_OBSERVABILITY_SCHEMA_VERSION);
+static_assert(
+    rt::observability_identifier_capacity ==
+    RTFW_OBSERVABILITY_IDENTIFIER_CAPACITY);
+
+constexpr std::array<std::uint16_t, 11> kCppTraceIds{{
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::finalized),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::started),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::periodic_release),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::periodic_wake),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::step_begin),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::callback_begin),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::callback_end),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::watchdog_fired),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::degradation_applied),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::step_end),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::stopped),
+}};
+constexpr std::array<std::uint16_t, 11> kCTraceIds{{
+    RTFW_TRACE_FINALIZED,
+    RTFW_TRACE_STARTED,
+    RTFW_TRACE_PERIODIC_RELEASE,
+    RTFW_TRACE_PERIODIC_WAKE,
+    RTFW_TRACE_STEP_BEGIN,
+    RTFW_TRACE_CALLBACK_BEGIN,
+    RTFW_TRACE_CALLBACK_END,
+    RTFW_TRACE_WATCHDOG_FIRED,
+    RTFW_TRACE_DEGRADATION_APPLIED,
+    RTFW_TRACE_STEP_END,
+    RTFW_TRACE_STOPPED,
+}};
+static_assert(kCppTraceIds == kCTraceIds);
+static_assert(
+    static_cast<std::uint16_t>(rt::RuntimeTraceProducer::host) ==
+        RTFW_TRACE_PRODUCER_HOST &&
+    static_cast<std::uint16_t>(rt::RuntimeTraceProducer::worker) ==
+        RTFW_TRACE_PRODUCER_WORKER);
+
+constexpr std::array<std::uint16_t, RTFW_RUNTIME_METRIC_COUNT>
+    kCppMetricIds{{
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::frames_started),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::frames_completed),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::frames_failed),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::callbacks_started),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::callbacks_completed),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::callback_failures),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::deadline_misses),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::watchdog_events),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::degradation_events),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::periodic_releases),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::periodic_wakes),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::trace_events_emitted),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::trace_events_overwritten),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::trace_events_dropped),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::executor_submitted_tasks),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::executor_local_executions),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::executor_steal_attempts),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::executor_successful_steals),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::executor_queue_rejections),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::executor_scratch_exhaustions),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::executor_worker_starts),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::degradation_level),
+    }};
+constexpr std::array<std::uint16_t, RTFW_RUNTIME_METRIC_COUNT>
+    kCMetricIds{{
+        RTFW_METRIC_FRAMES_STARTED,
+        RTFW_METRIC_FRAMES_COMPLETED,
+        RTFW_METRIC_FRAMES_FAILED,
+        RTFW_METRIC_CALLBACKS_STARTED,
+        RTFW_METRIC_CALLBACKS_COMPLETED,
+        RTFW_METRIC_CALLBACK_FAILURES,
+        RTFW_METRIC_DEADLINE_MISSES,
+        RTFW_METRIC_WATCHDOG_EVENTS,
+        RTFW_METRIC_DEGRADATION_EVENTS,
+        RTFW_METRIC_PERIODIC_RELEASES,
+        RTFW_METRIC_PERIODIC_WAKES,
+        RTFW_METRIC_TRACE_EVENTS_EMITTED,
+        RTFW_METRIC_TRACE_EVENTS_OVERWRITTEN,
+        RTFW_METRIC_TRACE_EVENTS_DROPPED,
+        RTFW_METRIC_EXECUTOR_SUBMITTED_TASKS,
+        RTFW_METRIC_EXECUTOR_LOCAL_EXECUTIONS,
+        RTFW_METRIC_EXECUTOR_STEAL_ATTEMPTS,
+        RTFW_METRIC_EXECUTOR_SUCCESSFUL_STEALS,
+        RTFW_METRIC_EXECUTOR_QUEUE_REJECTIONS,
+        RTFW_METRIC_EXECUTOR_SCRATCH_EXHAUSTIONS,
+        RTFW_METRIC_EXECUTOR_WORKER_STARTS,
+        RTFW_METRIC_DEGRADATION_LEVEL,
+    }};
+static_assert(kCppMetricIds == kCMetricIds);
+static_assert(
+    rt::runtime_metric_count ==
+    RTFW_RUNTIME_METRIC_COUNT);
+static_assert(sizeof(rt::RuntimeTraceEvent) == sizeof(rtfw_trace_event));
+static_assert(
+    sizeof(rt::ObservabilityMetadata) ==
+    sizeof(rtfw_observability_metadata));
+static_assert(
+    sizeof(rt::RuntimeMetricSample) ==
+    sizeof(rtfw_metric_sample));
 
 rtfw_status to_c_status(rt::Status status) noexcept {
     switch (status) {
@@ -162,6 +297,52 @@ bool preflight_report_header_valid(
                sizeof(report.reserved));
 }
 
+bool observability_metadata_header_valid(
+    const rtfw_observability_metadata& metadata) noexcept {
+    return metadata.struct_size >=
+        sizeof(rtfw_observability_metadata);
+}
+
+bool metric_cursor_header_valid(
+    const rtfw_metric_cursor& cursor) noexcept {
+    return cursor.struct_size >= sizeof(rtfw_metric_cursor) &&
+           cursor.schema_version ==
+               RTFW_OBSERVABILITY_SCHEMA_VERSION &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(cursor.reserved),
+               sizeof(cursor.reserved));
+}
+
+bool metric_snapshot_header_valid(
+    const rtfw_metric_snapshot& snapshot) noexcept {
+    return snapshot.struct_size >= sizeof(rtfw_metric_snapshot) &&
+           observability_metadata_header_valid(snapshot.metadata) &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(snapshot.reserved),
+               sizeof(snapshot.reserved));
+}
+
+bool trace_cursor_header_valid(
+    const rtfw_trace_cursor& cursor) noexcept {
+    return cursor.struct_size >= sizeof(rtfw_trace_cursor) &&
+           cursor.schema_version ==
+               RTFW_OBSERVABILITY_SCHEMA_VERSION &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(cursor.reserved),
+               sizeof(cursor.reserved));
+}
+
+bool trace_read_result_header_valid(
+    const rtfw_trace_read_result& result) noexcept {
+    return result.struct_size >=
+               sizeof(rtfw_trace_read_result) &&
+           result.reserved0 == 0u &&
+           observability_metadata_header_valid(result.metadata) &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(result.reserved),
+               sizeof(result.reserved));
+}
+
 bool to_cpp_config(
     const rtfw_config& source,
     rt::RuntimeConfig& target) noexcept {
@@ -248,6 +429,10 @@ bool to_cpp_config(
     default:
         return false;
     }
+    std::copy(
+        std::begin(source.workload_id),
+        std::end(source.workload_id),
+        target.workload_id.begin());
     return true;
 }
 
@@ -285,6 +470,10 @@ void from_cpp_config(
             rt::PlatformPreflightMode::strict
         ? RTFW_PLATFORM_PREFLIGHT_STRICT
         : RTFW_PLATFORM_PREFLIGHT_DISABLED;
+    std::copy(
+        source.workload_id.begin(),
+        source.workload_id.end(),
+        std::begin(target.workload_id));
 }
 
 rtfw_runtime_state to_c_state(rt::RuntimeState state) noexcept {
@@ -323,6 +512,7 @@ void from_cpp_memory_plan(
     target.task_scratch_total_bytes =
         source.task_scratch_total_bytes;
     target.trace_capacity = source.trace_capacity;
+    target.trace_slot_bytes = source.trace_slot_bytes;
     target.trace_storage_bytes = source.trace_storage_bytes;
     target.queue_slots = source.queue_slots;
     target.scratch_alignment = source.scratch_alignment;
@@ -385,6 +575,137 @@ void from_cpp_preflight(
             "%s",
             source_check.message.data());
     }
+}
+
+void from_cpp_observability_metadata(
+    const rt::ObservabilityMetadata& source,
+    rtfw_observability_metadata& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.runtime_version_major =
+        source.runtime_version_major;
+    target.runtime_version_minor =
+        source.runtime_version_minor;
+    target.runtime_version_patch =
+        source.runtime_version_patch;
+    target.trace_event_size = source.trace_event_size;
+    target.metric_sample_size = source.metric_sample_size;
+    target.metric_count = source.metric_count;
+    target.config_id = source.config_id;
+    target.runtime_id = source.runtime_id;
+    target.trace_capacity = source.trace_capacity;
+    std::copy(
+        source.build_id.begin(),
+        source.build_id.end(),
+        std::begin(target.build_id));
+    std::copy(
+        source.workload_id.begin(),
+        source.workload_id.end(),
+        std::begin(target.workload_id));
+}
+
+void from_cpp_metric_sample(
+    const rt::RuntimeMetricSample& source,
+    rtfw_metric_sample& target) noexcept {
+    target.id = static_cast<std::uint16_t>(source.id);
+    target.kind = static_cast<std::uint8_t>(source.kind);
+    target.value = source.value;
+}
+
+void from_cpp_metric_snapshot(
+    const rt::RuntimeMetricSnapshot& source,
+    rtfw_metric_snapshot& target) noexcept {
+    target.window =
+        source.window == rt::RuntimeMetricWindow::interval
+        ? RTFW_METRIC_INTERVAL
+        : RTFW_METRIC_CUMULATIVE;
+    from_cpp_observability_metadata(
+        source.metadata,
+        target.metadata);
+    target.snapshot_sequence = source.snapshot_sequence;
+    target.window_start_ns = source.window_start_ns;
+    target.window_end_ns = source.window_end_ns;
+    target.sample_count = source.sample_count;
+    const auto count = std::min<std::size_t>(
+        source.sample_count,
+        RTFW_RUNTIME_METRIC_COUNT);
+    for (std::size_t index = 0; index < count; ++index) {
+        from_cpp_metric_sample(
+            source.samples[index],
+            target.samples[index]);
+    }
+}
+
+void to_cpp_metric_cursor(
+    const rtfw_metric_cursor& source,
+    rt::RuntimeMetricCursor& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.reserved0 = 0;
+    target.runtime_id = source.runtime_id;
+    target.window_end_ns = source.window_end_ns;
+    std::copy(
+        std::begin(source.counters),
+        std::end(source.counters),
+        target.counters.begin());
+}
+
+void from_cpp_metric_cursor(
+    const rt::RuntimeMetricCursor& source,
+    rtfw_metric_cursor& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.runtime_id = source.runtime_id;
+    target.window_end_ns = source.window_end_ns;
+    std::copy(
+        source.counters.begin(),
+        source.counters.end(),
+        std::begin(target.counters));
+}
+
+void from_cpp_trace_event(
+    const rt::RuntimeTraceEvent& source,
+    rtfw_trace_event& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.record_size = source.record_size;
+    target.type = static_cast<std::uint16_t>(source.type);
+    target.status = to_c_status(source.status);
+    target.producer =
+        static_cast<std::uint16_t>(source.producer);
+    target.sequence = source.sequence;
+    target.timestamp_ns = source.timestamp_ns;
+    target.frame_index = source.frame_index;
+    target.callback_index = source.callback_index;
+    target.worker_index = source.worker_index;
+    target.value = source.value;
+}
+
+void to_cpp_trace_cursor(
+    const rtfw_trace_cursor& source,
+    rt::RuntimeTraceCursor& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.reserved0 = 0;
+    target.runtime_id = source.runtime_id;
+    target.next_sequence = source.next_sequence;
+}
+
+void from_cpp_trace_cursor(
+    const rt::RuntimeTraceCursor& source,
+    rtfw_trace_cursor& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.runtime_id = source.runtime_id;
+    target.next_sequence = source.next_sequence;
+}
+
+void from_cpp_trace_result(
+    const rt::RuntimeTraceReadResult& source,
+    rtfw_trace_read_result& target) noexcept {
+    from_cpp_observability_metadata(
+        source.metadata,
+        target.metadata);
+    target.first_sequence = source.first_sequence;
+    target.next_sequence = source.next_sequence;
+    target.events_read = source.events_read;
+    target.lost_events = source.lost_events;
+    target.remaining_sequence_count =
+        source.remaining_sequence_count;
 }
 
 struct CCallback {
@@ -542,7 +863,8 @@ RTFW_API rt_capabilities_c rt_query_capabilities(void) {
         static_cast<uint8_t>(capabilities.self_paced_time),
         static_cast<uint8_t>(capabilities.frame_watchdog),
         static_cast<uint8_t>(capabilities.strict_platform_preflight),
-        0u,
+        static_cast<uint8_t>(
+            capabilities.versioned_observability),
     };
 }
 
@@ -581,6 +903,22 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
         return rt::status_message(rt::Status::clock_failure);
     }
     return "unknown runtime status";
+}
+
+RTFW_API const char* rtfw_metric_name(rtfw_metric_id id) {
+    rt::RuntimeMetricDefinition definition;
+    if (!rt::runtime_metric_definition(
+            static_cast<std::size_t>(id),
+            definition)) {
+        return "unknown";
+    }
+    return definition.name.data();
+}
+
+RTFW_API const char* rtfw_trace_event_name(
+    rtfw_trace_event_type type) {
+    return rt::runtime_trace_event_name(
+        static_cast<rt::RuntimeTraceEventType>(type));
 }
 
 RTFW_API void rtfw_config_init(rtfw_config* config) {
@@ -672,6 +1010,59 @@ RTFW_API void rtfw_platform_preflight_report_init(
     }
     std::memset(report, 0, sizeof(*report));
     report->struct_size = sizeof(*report);
+}
+
+RTFW_API void rtfw_observability_metadata_init(
+    rtfw_observability_metadata* metadata) {
+    if (!metadata) {
+        return;
+    }
+    std::memset(metadata, 0, sizeof(*metadata));
+    metadata->struct_size = sizeof(*metadata);
+    metadata->schema_version =
+        RTFW_OBSERVABILITY_SCHEMA_VERSION;
+}
+
+RTFW_API void rtfw_metric_cursor_init(
+    rtfw_metric_cursor* cursor) {
+    if (!cursor) {
+        return;
+    }
+    std::memset(cursor, 0, sizeof(*cursor));
+    cursor->struct_size = sizeof(*cursor);
+    cursor->schema_version =
+        RTFW_OBSERVABILITY_SCHEMA_VERSION;
+}
+
+RTFW_API void rtfw_metric_snapshot_init(
+    rtfw_metric_snapshot* snapshot) {
+    if (!snapshot) {
+        return;
+    }
+    std::memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->struct_size = sizeof(*snapshot);
+    rtfw_observability_metadata_init(&snapshot->metadata);
+}
+
+RTFW_API void rtfw_trace_cursor_init(
+    rtfw_trace_cursor* cursor) {
+    if (!cursor) {
+        return;
+    }
+    std::memset(cursor, 0, sizeof(*cursor));
+    cursor->struct_size = sizeof(*cursor);
+    cursor->schema_version =
+        RTFW_OBSERVABILITY_SCHEMA_VERSION;
+}
+
+RTFW_API void rtfw_trace_read_result_init(
+    rtfw_trace_read_result* result) {
+    if (!result) {
+        return;
+    }
+    std::memset(result, 0, sizeof(*result));
+    result->struct_size = sizeof(*result);
+    rtfw_observability_metadata_init(&result->metadata);
 }
 
 RTFW_API rtfw_status rtfw_create(
@@ -1128,6 +1519,152 @@ RTFW_API rtfw_status rtfw_get_degradation_level(
     }
     *out_level = handle->runtime.degradation_level();
     return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_get_observability_metadata(
+    rtfw_handle* handle,
+    rtfw_observability_metadata* out_metadata) {
+    if (!handle || !out_metadata ||
+        !observability_metadata_header_valid(*out_metadata)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    rt::ObservabilityMetadata cpp_metadata;
+    handle->clear_boundary_error();
+    const auto status =
+        handle->runtime.observability_metadata(cpp_metadata);
+    if (status != rt::Status::ok) {
+        return to_c_status(status);
+    }
+
+    const auto struct_size = out_metadata->struct_size;
+    std::memset(out_metadata, 0, sizeof(*out_metadata));
+    out_metadata->struct_size = struct_size;
+    from_cpp_observability_metadata(
+        cpp_metadata,
+        *out_metadata);
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_get_metrics(
+    rtfw_handle* handle,
+    rtfw_metric_window window,
+    rtfw_metric_cursor* cursor,
+    rtfw_metric_snapshot* out_snapshot) {
+    if (!handle || !out_snapshot ||
+        !metric_snapshot_header_valid(*out_snapshot) ||
+        (cursor && !metric_cursor_header_valid(*cursor))) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    rt::RuntimeMetricWindow cpp_window;
+    switch (window) {
+    case RTFW_METRIC_CUMULATIVE:
+        cpp_window = rt::RuntimeMetricWindow::cumulative;
+        break;
+    case RTFW_METRIC_INTERVAL:
+        if (!cursor) {
+            return handle->fail(
+                RTFW_STATUS_INVALID_ARGUMENT,
+                "interval metrics require an initialized cursor");
+        }
+        cpp_window = rt::RuntimeMetricWindow::interval;
+        break;
+    default:
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "metric window is invalid");
+    }
+
+    rt::RuntimeMetricCursor cpp_cursor;
+    if (cursor) {
+        to_cpp_metric_cursor(*cursor, cpp_cursor);
+    }
+    rt::RuntimeMetricSnapshot cpp_snapshot;
+    handle->clear_boundary_error();
+    const auto status = handle->runtime.metrics_snapshot(
+        cpp_window,
+        cpp_window == rt::RuntimeMetricWindow::interval
+            ? &cpp_cursor
+            : nullptr,
+        cpp_snapshot);
+    if (status != rt::Status::ok) {
+        return to_c_status(status);
+    }
+
+    if (cpp_window == rt::RuntimeMetricWindow::interval) {
+        from_cpp_metric_cursor(cpp_cursor, *cursor);
+    }
+    const auto struct_size = out_snapshot->struct_size;
+    const auto metadata_size =
+        out_snapshot->metadata.struct_size;
+    std::memset(out_snapshot, 0, sizeof(*out_snapshot));
+    out_snapshot->struct_size = struct_size;
+    out_snapshot->metadata.struct_size = metadata_size;
+    from_cpp_metric_snapshot(cpp_snapshot, *out_snapshot);
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_read_trace(
+    rtfw_handle* handle,
+    rtfw_trace_cursor* cursor,
+    rtfw_trace_event* events,
+    uint64_t event_capacity,
+    rtfw_trace_read_result* out_result) {
+    if (!handle || !cursor || !out_result ||
+        !trace_cursor_header_valid(*cursor) ||
+        !trace_read_result_header_valid(*out_result) ||
+        event_capacity > std::numeric_limits<std::size_t>::max() ||
+        (event_capacity != 0 && !events)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const auto staging_capacity =
+            std::min<std::size_t>(
+                static_cast<std::size_t>(event_capacity),
+                handle->runtime.config().trace_capacity);
+        std::vector<rt::RuntimeTraceEvent> cpp_events(
+            staging_capacity);
+        rt::RuntimeTraceCursor cpp_cursor;
+        to_cpp_trace_cursor(*cursor, cpp_cursor);
+        rt::RuntimeTraceReadResult cpp_result;
+        handle->clear_boundary_error();
+        const auto status = handle->runtime.read_trace(
+            cpp_cursor,
+            cpp_events,
+            cpp_result);
+        if (status != rt::Status::ok) {
+            return to_c_status(status);
+        }
+
+        from_cpp_trace_cursor(cpp_cursor, *cursor);
+        for (std::size_t index = 0;
+             index < cpp_result.events_read;
+             ++index) {
+            std::memset(&events[index], 0, sizeof(events[index]));
+            from_cpp_trace_event(
+                cpp_events[index],
+                events[index]);
+        }
+
+        const auto struct_size = out_result->struct_size;
+        const auto metadata_size =
+            out_result->metadata.struct_size;
+        std::memset(out_result, 0, sizeof(*out_result));
+        out_result->struct_size = struct_size;
+        out_result->metadata.struct_size = metadata_size;
+        from_cpp_trace_result(cpp_result, *out_result);
+        return RTFW_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return handle->fail(
+            RTFW_STATUS_RESOURCE_EXHAUSTED,
+            "trace export staging allocation failed");
+    } catch (...) {
+        return handle->fail(
+            RTFW_STATUS_INTERNAL_ERROR,
+            "unexpected trace export failure");
+    }
 }
 
 RTFW_API rtfw_status rtfw_now_ns(

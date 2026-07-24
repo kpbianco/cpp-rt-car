@@ -2,7 +2,7 @@
 
 Status: accepted target contract for the pre-1.0 development line
 
-Current release: 0.6.0 experimental
+Current release: 0.7.0 experimental
 
 ## Product definition
 
@@ -12,11 +12,11 @@ before execution, and runs it on a preallocated CPU executor. The target
 runtime supports host-driven and self-paced frames and integrates asynchronous
 device backends through bounded submission and completion interfaces.
 
-The current 0.6 implementation is a research prototype. Its target-path host
+The current 0.7 implementation is a research prototype. Its target-path host
 runtime satisfies the M1 lifecycle/callback, M2 compiled-graph, M3 unified
-CPU-executor, M4 bounded-memory, and M5 time/platform contracts at RT0,
-alongside useful primitives and experiments, but it does not yet satisfy the
-complete contract in this document.
+CPU-executor, M4 bounded-memory, M5 time/platform, and M6 observability
+contracts at RT0, alongside useful primitives and experiments, but it does not
+yet satisfy the complete contract in this document.
 
 ## Claim policy
 
@@ -69,7 +69,7 @@ Host-driven time is the default embedding contract:
 - A host-driven step does not sleep or advance a hidden wall clock.
 - A separate self-paced mode owns an absolute periodic release schedule.
 
-The 0.6 `rt::Runtime` implements both explicit modes. The host supplies frame
+The 0.7 `rt::Runtime` implements both explicit modes. The host supplies frame
 index, delta, and optional deadline to synchronous `step()` without runtime
 pacing. `run_periodic()` executes a finite caller-thread loop using absolute
 epoch-based releases; late frames never shift that epoch. Per-frame results
@@ -91,7 +91,7 @@ policies may differ:
 | `host_adapter` | Execution through a host job-system contract with explicit scratch and completion contexts |
 | `periodic_rt` | Static execution plus qualified absolute release/deadline control |
 
-Release 0.6 implements `static_deterministic` and `bounded_throughput` in the
+Release 0.7 implements `static_deterministic` and `bounded_throughput` in the
 runtime-owned executor. Graph phases, nested ranges, and reductions share that
 team. The current `SimCore` workers, optional `WorkerPool`, `rt::Scheduler`,
 and `FiberPool` are separate compatibility experiments, not target policies.
@@ -116,6 +116,20 @@ ring under an explicit budget. Bounded queue and scratch reservation use
 test observes no heap allocation after start. The plan's exact accounting
 scope and exclusions are in [the memory contract](memory_plan.md).
 
+### Observability
+
+The target runtime uses pre-registered numeric event/metric definitions,
+fixed-capacity RT-lane emission, explicit loss accounting, runtime-isolated
+cursors, and version/build/config/workload provenance. Serialization and
+external transport remain non-RT host responsibilities.
+
+Release 0.7 implements observability schema version 1 for `rt::Runtime`.
+Metric cursors independently partition monotonic counters into intervals
+without resetting global state; gauges are sampled rather than differenced.
+Trace cursors report exact sequence loss after overwrite or contention. The
+legacy `SimCore` registry and binary trace are outside this schema. See
+[the observability contract](observability.md).
+
 ### Device execution
 
 Devices are optional backends outside the core scheduler. A backend contract
@@ -123,7 +137,7 @@ must define capabilities, buffer registration, bounded submission, completion,
 timeout, cancellation where supported, health, reset, and shutdown.
 
 The current GPU implementation is a CPU mock that launches detached threads.
-There is no CUDA, Vulkan, or XDMA backend in 0.6. See
+There is no CUDA, Vulkan, or XDMA backend in 0.7. See
 [ADR-0003](adr/0003-device-backend-boundary.md).
 
 ## Real-time tiers
@@ -148,10 +162,10 @@ An RT2 qualification record must include:
 - raw release, wake-up, compute, completion, slack, and miss samples;
 - thresholds chosen before the run and the final pass/fail result.
 
-Release 0.6 has a strict, read-only Linux prerequisite preflight. It fails
+Release 0.7 has a strict, read-only Linux prerequisite preflight. It fails
 closed on missing PREEMPT_RT, lock coverage, isolated affinity, realtime
 scheduling, or absolute clock support, but it does not validate the full
-deployment record or measured deadlines. No RT2 qualification exists in 0.6.
+deployment record or measured deadlines. No RT2 qualification exists in 0.7.
 
 ## Determinism tiers
 
@@ -169,7 +183,7 @@ instance-local helper does not constrain arbitrary callback expressions.
 
 ## Current support matrix
 
-| Surface | 0.6 status | Notes |
+| Surface | 0.7 status | Notes |
 | --- | --- | --- |
 | `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen topology |
 | Compiled graph | Implemented RT0 surface | Deterministic topological order; invalid/foreign handles, cycles, and unordered conflicting resource access fail before start |
@@ -179,17 +193,18 @@ instance-local helper does not constrain arbitrary callback expressions.
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |
+| Versioned observability | Implemented RT0 surface | Schema-v1 fixed trace records and 22 metrics; bounded nonblocking emission, cursor loss/window semantics, provenance, C ABI v5, and non-RT JSON export |
 | GCC/Clang C++20 build | Experimental | Linux CI covers selected compiler/build combinations |
 | MSVC build | Experimental | Windows CI is a portability check, not an RT qualification |
 | `SimCore` phase/range API | Experimental | Graph cycles and nested phase/range concurrency require redesign |
 | Bounded MPMC queue | Implemented primitive | `WorkerPool` uses one global FIFO queue |
 | `WorkerPool` priority/work stealing | Experimental/misnamed | Priority is not honored by normal dequeue; "steal" telemetry is not a successful-steal count |
 | Frame arenas | Experimental | Release overflow can fall back to heap allocation |
-| M1–M5 runtime trace ring | Implemented RT0 surface | Fixed instance-local lifecycle/callback/time/watchdog ring with runtime-local timestamps |
-| Legacy binary trace ring | Experimental | Fixed storage exists; schema/time-domain integration is not final |
+| M1–M6 runtime trace ring | Implemented RT0 surface | Fixed instance-local schema-v1 records with monotonic sequences, runtime-local timestamps, and explicit overwrite/drop accounting |
+| Legacy binary trace ring | Experimental | `SimCore` retains process-global registration and separate event definitions outside the M6 schema |
 | Metrics JSON | Experimental | Phase histograms are rolling windows, default capacity 120 |
 | Snapshot helpers | Experimental | Input validation and stable interchange compatibility are incomplete |
-| C ABI | Experimental M5 surface | ABI v4 adds periodic execution, watchdog/degradation state, and platform-preflight reports; ABI freezes at M11 |
+| C ABI | Experimental M6 surface | ABI v5 adds provenance, metric windows, and bounded trace reads; ABI freezes at M11 |
 | JSON profiles/runtime autotune | Planned integration | Generators exist; `rtfw_demo` does not load their output |
 | GPU | CPU mock only | Detached-thread stub; no hardware backend |
 | XDMA | Planned | No implementation |

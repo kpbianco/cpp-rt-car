@@ -1,7 +1,7 @@
 # Real-Time Readiness Gates
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
-0.6 has not completed any end-to-end RT2 qualification.
+0.7 has not completed any end-to-end RT2 qualification.
 
 ## Portable runtime gates
 
@@ -28,13 +28,16 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   threads start, and fails closed with per-check explanations (M5 functional
   gate; not deployment qualification).
 - [ ] Multiple runtime instances have isolated clocks, numerical policy,
-  allocator state, trace state, and device state.
-- [ ] Trace/metrics records use fixed storage and a versioned schema.
+  allocator state, trace state, and device state (target CPU/telemetry state is
+  isolated; the device boundary is not implemented).
+- [x] Target trace/metrics emission uses fixed planned storage, schema-v1
+  identifiers, explicit loss/window semantics, and per-runtime cursors (M6
+  functional gate; export remains non-RT).
 - [ ] Snapshot input is bounds-checked, versioned, fuzzed, and tied to graph and
   configuration identity.
 - [x] The C and C++ embedding APIs can register and execute real host work with
-  typed lifecycle/graph/executor/memory/time/platform errors (M1–M5 functional
-  gate; not an RT qualification).
+  typed lifecycle/graph/executor/memory/time/platform/observability errors
+  (M1–M6 functional gate; not an RT qualification).
 
 ## Deployment qualification gates
 
@@ -52,4 +55,6 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its
-limits are specified in the [time/platform contract](time_platform.md).
+limits are specified in the [time/platform contract](time_platform.md); M6
+schema and exporter boundaries are in the
+[observability contract](observability.md).
