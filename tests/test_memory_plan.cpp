@@ -196,6 +196,11 @@ TEST(MemoryPlan, FinalizedPlanMatchesConfigurationAndAlignment) {
             second),
         rt::Status::ok);
     ASSERT_EQ(runtime.add_dependency(first, second), rt::Status::ok);
+    std::array<std::byte, 17> replay_state{};
+    ASSERT_EQ(
+        runtime.register_state(
+            {"memory-plan.state", 1, replay_state}),
+        rt::Status::ok);
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
     ASSERT_TRUE(runtime.memory_plan(plan));
 
@@ -214,6 +219,19 @@ TEST(MemoryPlan, FinalizedPlanMatchesConfigurationAndAlignment) {
     EXPECT_EQ(
         plan.trace_storage_bytes,
         config.trace_capacity * plan.trace_slot_bytes);
+    EXPECT_EQ(plan.state_count, 1u);
+    EXPECT_EQ(
+        plan.registered_state_bytes,
+        replay_state.size());
+    EXPECT_EQ(
+        plan.snapshot_max_bytes,
+        config.snapshot_max_bytes);
+    EXPECT_EQ(
+        plan.replay_input_capacity,
+        config.replay_input_capacity);
+    EXPECT_EQ(
+        plan.input_log_max_bytes,
+        config.input_log_max_bytes);
     EXPECT_EQ(plan.queue_slots, 8u);
     EXPECT_EQ(plan.scratch_alignment, 64u);
     EXPECT_EQ(

@@ -2,25 +2,26 @@
 
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
 extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
-plan, M5 time/platform controls, and M6 versioned observability. It provides
-explicit host-driven and
-finite self-paced operation without adopting the legacy `SimCore` scheduler
-or pacing loop.
+plan, M5 time/platform controls, M6 versioned observability, and M7
+determinism/replay surface. It provides explicit host-driven and finite
+self-paced operation without adopting the legacy `SimCore` scheduler or
+pacing loop.
 
 The surface is RT0 functional behavior, not qualified latency.
 `query_capabilities()` and `rt_query_capabilities()` report host-driven time,
 compiled-graph validation, the unified CPU executor, the target-path bounded
 memory plan, self-paced time, the frame watchdog, and strict platform preflight
-as available.
+as available. They also report versioned observability and deterministic replay
+as available; the latter means the implemented D0/D1 surface, not D2 or D3.
 
 ## Lifecycle
 
 | Current state | Allowed operation | Resulting state |
 | --- | --- | --- |
-| `configuring` | typed configuration, graph registration and declarations | `configuring` |
+| `configuring` | typed configuration, graph/state registration and declarations | `configuring` |
 | `configuring` | `finalize()` | `finalized` |
 | `finalized` | `start()`, preflight, and create configured worker/service lanes | `running` |
-| `running` | `step(frame)` | `running` |
+| `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
 | `running` | `run_periodic(config)` | `running` |
 | `finalized` or `running` | `stop()` | `stopped` |
 | `stopped` | repeated `stop()` | `stopped` |
@@ -32,13 +33,14 @@ Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
 
-Control operations are single-host-thread operations in 0.7. `step()` and
-`run_periodic()` are non-reentrant. A periodic observer cannot recursively
-step, and `stop()` called from inside a callback or periodic loop is rejected.
+Control operations are single-host-thread operations in 0.8. `step()`,
+`run_periodic()`, checkpoint/restore, input-log export, and replay are
+non-reentrant with execution. A periodic observer cannot recursively step, and
+`stop()` called from inside a callback, periodic loop, or replay is rejected.
 
 ## Typed configuration
 
-`rt::RuntimeConfig` has sixteen schema keys:
+`rt::RuntimeConfig` has twenty-one schema keys:
 
 | Key | Type/default | Runtime behavior |
 | --- | --- | --- |
@@ -57,7 +59,12 @@ step, and `stop()` called from inside a callback or periodic loop is rejected.
 | `watchdog_timeout_ns` | nonnegative integer, `0` | Nanoseconds from measured step start to watchdog expiry; zero disables the watchdog and the maximum is 24 hours |
 | `watchdog_max_degradation_level` | nonnegative integer, `0` | Caps frame-thread degradation increments; accepted range is 0–255 |
 | `platform_preflight_mode` | `disabled` | Selects `disabled` or fail-closed, read-only `strict` prerequisite checks |
-| `workload_id` | identifier, `unspecified` | Labels observability output with 1–63 characters from `A-Za-z0-9._:/@-`; it does not affect the configuration fingerprint |
+| `workload_id` | identifier, `unspecified` | Labels observability and replay artifacts with 1–63 characters from `A-Za-z0-9._:/@-`; it affects configuration and replay identity |
+| `determinism_tier` | `d0_unspecified` | Selects D0 unspecified behavior or D1 schedule-independent replay; D2 and D3 are rejected in 0.8 |
+| `state_capacity` | nonnegative integer, `64` | Maximum canonical state regions accepted before finalization; zero disables registration |
+| `snapshot_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded checkpoint bytes |
+| `replay_input_capacity` | nonnegative integer, `4096` | Maximum records accepted in one encoded or replayed input log |
+| `input_log_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded input-log bytes |
 
 The typed structure can be supplied with `configure()`. Dynamic callers can use
 `configure_key()` or the C `rtfw_config_set()` equivalent. Unknown keys,
@@ -92,6 +99,24 @@ returns `callback_failed`. Dependent and not-yet-invoked work is skipped;
 already-running independent callbacks may finish. The runtime remains running
 so the host can inspect the error and decide whether to retry or stop. A C
 callback must not throw across the language boundary.
+
+## Canonical state and replay
+
+State registration is allowed only while configuring. Each registration
+supplies a unique stable name, a nonzero schema version, and one non-empty,
+non-overlapping caller-owned byte region. Its address and size are frozen by
+finalization and must remain valid until runtime destruction. Those bytes must
+already be a canonical representation; native object layout, padding,
+pointers, and platform-endian fields are not portable state formats.
+
+Checkpoint and input-log APIs are non-RT control operations. Callers provide
+the output storage, and short buffers report the exact required size without a
+partial artifact. Restore fully validates format, bounds, checksums, runtime
+identity, registered schema, and every destination size before changing any
+registered byte. Replay validates both artifacts before restore, applies each
+input callback immediately before its frame, and invokes the ordinary
+synchronous `step()` path. See the
+[determinism/replay contract](determinism_replay.md).
 
 ## Self-paced frames
 
@@ -135,12 +160,16 @@ Each runtime owns:
 - its clock object or explicitly borrowed C++ clock;
 - its watchdog state and degradation level;
 - its fixed-capacity platform-preflight report.
+- its copied canonical-state registry metadata and replay identities.
 
 Callback user data remains host-owned and must outlive every step that can use
 it. A phase's scratch contents may persist across frames, but no phase sees
 another phase's block. Cross-phase state belongs in host-owned memory covered
 by resource declarations. Callers must not treat scratch as durable
 application state.
+Registered canonical state storage also remains host-owned and must remain
+stable for the runtime lifetime. Checkpoint and input-log buffers are
+caller-owned and need exist only for the duration of the relevant call.
 
 The new surface does not modify the legacy process-global `HighResClock`,
 `bintrace` registration, or `rt::set_use_fma` flag used by `SimCore`. This is
@@ -170,13 +199,19 @@ The experimental C ABI mirrors the lifecycle:
 - `rtfw_get_observability_metadata`;
 - `rtfw_get_metrics`;
 - `rtfw_read_trace`;
+- `rtfw_register_state`;
+- `rtfw_checkpoint_size` / `rtfw_checkpoint_write` /
+  `rtfw_checkpoint_inspect` / `rtfw_checkpoint_restore`;
+- `rtfw_input_log_write` / `rtfw_input_log_inspect`;
+- `rtfw_replay` / `rtfw_registered_state_hash`;
 - `rtfw_stop`;
 - `rtfw_destroy`.
 
 Public configuration, frame, callback, result, and memory-plan structures carry
-sizes, and configuration carries `RTFW_C_ABI_VERSION` (version 5 in release
-0.7). Periodic, preflight, and observability structures follow the same initialized-output
-rule. Call the supplied structure initializers and leave reserved fields zero.
+sizes, and configuration carries `RTFW_C_ABI_VERSION` (experimental version 6
+in release 0.8). Periodic, preflight, observability, checkpoint, input-log, and
+replay structures follow the same initialized-output rule. Call the supplied
+structure initializers and leave reserved fields zero.
 `rtfw_status_message()` provides status text even when no runtime handle was
 created; `rtfw_last_error()` adds handle-specific context. The ABI remains
 unfrozen before M11; incompatible pre-1.0 changes require a repository version
@@ -206,7 +241,9 @@ watchdog/degradation, and fail-closed prerequisite reporting. It does not
 preempt callbacks or qualify a deployment; see the
 [time/platform contract](time_platform.md). M6 adds bounded schema-v1
 trace/counter emission and non-RT cursor/export APIs; see the
-[observability contract](observability.md).
+[observability contract](observability.md). M7 adds bounded canonical-state
+checkpoint and replay control operations; see the
+[determinism/replay contract](determinism_replay.md).
 
 ## Code and evidence
 
@@ -222,6 +259,8 @@ trace/counter emission and non-RT cursor/export APIs; see the
 - Time/watchdog tests: `tests/test_periodic_runtime.cpp`
 - Platform-preflight tests: `tests/test_platform_preflight.cpp`
 - Observability tests: `tests/test_observability.cpp`
+- Determinism/replay tests: `tests/test_determinism_replay.cpp`
+- Artifact parser fuzz target: `tests/snapshot_fuzz.cpp`
 - Dynamic C ABI test: `tests/test_cabi_dlopen.c`
 - C sample: `samples/embed_c/mini_app.c`
 - C++ sample: `samples/embed_cpp/mini_app.cpp`

@@ -221,6 +221,7 @@ def check_claims() -> None:
 def check_runtime_contract() -> None:
     cmake = read("CMakeLists.txt")
     samples_cmake = read("samples/CMakeLists.txt")
+    tests_cmake = read("tests/CMakeLists.txt")
     runtime_header = read("rt/include/rt/runtime.hpp")
     runtime_source = read("rt/src/host_runtime.cpp")
     c_header = read("rt/include/rt/c_api.h")
@@ -233,18 +234,26 @@ def check_runtime_contract() -> None:
     memory_doc = read("docs/memory_plan.md")
     time_doc = read("docs/time_platform.md")
     observability_doc = read("docs/observability.md")
+    determinism_doc = read("docs/determinism_replay.md")
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
     preflight_source = read("rt/src/native_platform_preflight.cpp")
     telemetry_source = read("rt/src/telemetry.cpp")
+    snapshot_codec_header = read("rt/src/snapshot_codec.hpp")
+    snapshot_codec_source = read("rt/src/snapshot_codec.cpp")
     host_test = read("tests/test_host_runtime.cpp")
     executor_test = read("tests/test_executor.cpp")
     memory_test = read("tests/test_memory_plan.cpp")
     periodic_test = read("tests/test_periodic_runtime.cpp")
     preflight_test = read("tests/test_platform_preflight.cpp")
     observability_test = read("tests/test_observability.cpp")
+    determinism_test = read("tests/test_determinism_replay.cpp")
+    snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
+    ci_workflow = read(".github/workflows/ci.yml")
+    c_sample = read("samples/embed_c/mini_app.c")
+    cpp_sample = read("samples/embed_cpp/mini_app.cpp")
 
     for method in (
         "Status configure(",
@@ -281,6 +290,11 @@ def check_runtime_contract() -> None:
         "watchdog_max_degradation_level",
         "platform_preflight_mode",
         "workload_id",
+        "determinism_tier",
+        "state_capacity",
+        "snapshot_max_bytes",
+        "replay_input_capacity",
+        "input_log_max_bytes",
     }
     implemented_keys = set(
         re.findall(r'key\s*==\s*"([a-z0-9_]+)"', runtime_source)
@@ -394,6 +408,34 @@ def check_runtime_contract() -> None:
         if function not in c_header:
             fail(f"rt/include/rt/c_api.h: missing M6 C ABI function {function!r}")
 
+    for method in (
+        "Status register_state(",
+        "Status checkpoint_size(",
+        "Status write_checkpoint(",
+        "Status restore_checkpoint(",
+        "Status write_input_log(",
+        "Status replay(",
+        "Status registered_state_hash(",
+        "inspect_checkpoint_artifact(",
+        "inspect_input_log_artifact(",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M7 method {method!r}")
+
+    for function in (
+        "rtfw_register_state(",
+        "rtfw_checkpoint_size(",
+        "rtfw_checkpoint_write(",
+        "rtfw_checkpoint_inspect(",
+        "rtfw_checkpoint_restore(",
+        "rtfw_input_log_write(",
+        "rtfw_input_log_inspect(",
+        "rtfw_replay(",
+        "rtfw_registered_state_hash(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M7 C ABI function {function!r}")
+
     for status in (
         "invalid_handle",
         "graph_cycle",
@@ -406,6 +448,10 @@ def check_runtime_contract() -> None:
         if status not in runtime_header:
             fail(f"rt/include/rt/runtime.hpp: missing M5 status {status!r}")
 
+    for status in ("invalid_artifact", "incompatible_artifact"):
+        if status not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M7 status {status!r}")
+
     for capability in (
         "compiled_graph",
         "host_driven_time",
@@ -415,6 +461,7 @@ def check_runtime_contract() -> None:
         "frame_watchdog",
         "strict_platform_preflight",
         "versioned_observability",
+        "deterministic_replay",
     ):
         if capability not in runtime_header or capability not in c_header:
             fail(f"M1 capability contract is missing {capability!r}")
@@ -434,17 +481,19 @@ def check_runtime_contract() -> None:
         or "| M4 | Complete |" not in roadmap
         or "| M5 | Complete |" not in roadmap
         or "| M6 | Complete |" not in roadmap
-        or "| M7 | Next |" not in roadmap
+        or "| M7 | Complete |" not in roadmap
+        or "| M8 | Next |" not in roadmap
     ):
-        fail("docs/roadmap.md: M6/M7 milestone status is not advanced")
+        fail("docs/roadmap.md: M7/M8 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
-        r"\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*\}\s*;",
+        r"\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
+        r"\s*true\s*\}\s*;",
         runtime_source,
     ):
         fail(
-            "rt/src/host_runtime.cpp: M6 capability tuple is not eight true values"
+            "rt/src/host_runtime.cpp: M7 capability tuple is not nine true values"
         )
 
     for token in (
@@ -604,11 +653,11 @@ def check_runtime_contract() -> None:
             fail(f"tests/test_platform_preflight.cpp: missing M5 gate {test_name!r}")
     if "watchdog_timeout_ns" not in noalloc_test:
         fail("tests/test_trace_noalloc.cpp: missing armed-watchdog allocation gate")
-    if "#define RTFW_C_ABI_VERSION 5u" not in c_header:
-        fail("rt/include/rt/c_api.h: M6 requires experimental ABI version 5")
-    if "rtfw_run_periodic(" not in read("samples/embed_c/mini_app.c"):
+    if "#define RTFW_C_ABI_VERSION 6u" not in c_header:
+        fail("rt/include/rt/c_api.h: M7 requires experimental ABI version 6")
+    if "rtfw_run_periodic(" not in c_sample:
         fail("samples/embed_c/mini_app.c: missing M5 periodic sample")
-    if "runtime.run_periodic(" not in read("samples/embed_cpp/mini_app.cpp"):
+    if "runtime.run_periodic(" not in cpp_sample:
         fail("samples/embed_cpp/mini_app.cpp: missing M5 periodic sample")
 
     for token in (
@@ -654,12 +703,118 @@ def check_runtime_contract() -> None:
     ):
         if test_name not in observability_test:
             fail(f"tests/test_observability.cpp: missing M6 gate {test_name!r}")
-    if "Observability.*" not in read(".github/workflows/ci.yml"):
+    if "Observability.*" not in ci_workflow:
         fail(".github/workflows/ci.yml: M6 is missing from the TSAN filter")
-    if "rtfw_get_metrics(" not in read("samples/embed_c/mini_app.c"):
+    if "rtfw_get_metrics(" not in c_sample:
         fail("samples/embed_c/mini_app.c: missing M6 metric sample")
-    if "runtime.metrics_snapshot(" not in read("samples/embed_cpp/mini_app.cpp"):
+    if "runtime.metrics_snapshot(" not in cpp_sample:
         fail("samples/embed_cpp/mini_app.cpp: missing M6 metric sample")
+
+    for token in (
+        "checkpoint_header_size = 256",
+        "checkpoint_record_header_size = 88",
+        "input_log_header_size = 192",
+        "input_log_record_header_size = 48",
+        "encode_checkpoint_artifact(",
+        "parse_checkpoint_artifact(",
+        "encode_input_log_artifact(",
+        "parse_input_log_artifact(",
+    ):
+        if token not in snapshot_codec_header:
+            fail(f"rt/src/snapshot_codec.hpp: missing M7 codec evidence {token!r}")
+    for token in (
+        "checked_artifact_add(",
+        "artifact_checksum(",
+        "store_u64_le(",
+        "load_u64_le(",
+    ):
+        if token not in snapshot_codec_source:
+            fail(f"rt/src/snapshot_codec.cpp: missing M7 codec evidence {token!r}")
+    for forbidden in (
+        "std::vector<",
+        "std::basic_string<",
+        "std::map<",
+        "std::unordered_map<",
+    ):
+        if forbidden in snapshot_codec_header or forbidden in snapshot_codec_source:
+            fail(
+                "M7 artifact codec contains a forbidden allocating container "
+                f"{forbidden!r}"
+            )
+    for token in (
+        "DeterminismTier::schedule_independent",
+        "Runtime::register_state(",
+        "Runtime::restore_checkpoint(",
+        "Runtime::write_input_log(",
+        "Runtime::replay(",
+        "registered state storage regions must not overlap",
+        "input-log output cannot overlap registered state",
+    ):
+        if token not in runtime_source:
+            fail(f"rt/src/host_runtime.cpp: missing M7 evidence {token!r}")
+    for phrase in (
+        "caller-owned",
+        "transactionally restore",
+        "little-endian",
+        "D2",
+        "D3",
+        "non-RT host",
+        "overlapping storage regions",
+    ):
+        if phrase not in determinism_doc:
+            fail(
+                "docs/determinism_replay.md: missing M7 contract phrase "
+                f"{phrase!r}"
+            )
+    for test_name in (
+        "D1RegisteredStateMatchesAcrossWorkerCounts",
+        "D1CheckpointTransfersAcrossWorkerCounts",
+        "D0RequiresExactResolvedConfiguration",
+        "CheckpointAndInputLogReproduceState",
+        "CorruptCheckpointNeverMutatesState",
+        "ForeignStateSchemaAndGraphAreRejected",
+        "InvalidInputLogIsRejectedBeforeRestore",
+        "ParserMutationCorpusStaysBounded",
+        "D1RejectsTimingAndThroughputPolicies",
+        "StateAndArtifactStorageMustNotOverlap",
+        "InputLogRequiresStrictFrameOrder",
+    ):
+        if test_name not in determinism_test:
+            fail(f"tests/test_determinism_replay.cpp: missing M7 gate {test_name!r}")
+    if "CheckpointAndInputCodecDoNotAllocate" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing M7 allocation gate")
+    for token in (
+        "inspect_checkpoint_artifact(",
+        "inspect_input_log_artifact(",
+    ):
+        if token not in snapshot_fuzz:
+            fail(f"tests/snapshot_fuzz.cpp: missing M7 fuzz evidence {token!r}")
+    for token in (
+        "rtfw_determinism_artifact",
+        "snapshot_fuzz",
+        "DeterminismReplay.*",
+        'cmp "$baseline" "$artifact"',
+    ):
+        if token not in ci_workflow:
+            fail(f".github/workflows/ci.yml: missing M7 evidence {token!r}")
+    for token in (
+        "rt/src/snapshot_codec.cpp",
+        "test_determinism_replay.cpp",
+        "determinism_artifact.cpp",
+        "snapshot_fuzz.cpp",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"CMake M7 integration is missing {token!r}")
+    for token, surface in (
+        ("rtfw_register_state(", c_sample),
+        ("rtfw_checkpoint_write(", c_sample),
+        ("rtfw_checkpoint_inspect(", c_sample),
+        ("runtime.register_state(", cpp_sample),
+        ("runtime.write_checkpoint(", cpp_sample),
+        ("inspect_checkpoint_artifact(", cpp_sample),
+    ):
+        if token not in surface:
+            fail(f"embedding samples are missing M7 usage {token!r}")
 
 
 def main() -> int:
@@ -675,6 +830,7 @@ def main() -> int:
             "docs/memory_plan.md",
             "docs/time_platform.md",
             "docs/observability.md",
+            "docs/determinism_replay.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -693,6 +849,8 @@ def main() -> int:
             "rt/src/native_platform_preflight.cpp",
             "rt/src/telemetry.hpp",
             "rt/src/telemetry.cpp",
+            "rt/src/snapshot_codec.hpp",
+            "rt/src/snapshot_codec.cpp",
             "rt/include/rt/observability_export.hpp",
             "rt/src/observability_export.cpp",
             "samples/embed_c/mini_app.c",
@@ -704,6 +862,9 @@ def main() -> int:
             "tests/test_periodic_runtime.cpp",
             "tests/test_platform_preflight.cpp",
             "tests/test_observability.cpp",
+            "tests/test_determinism_replay.cpp",
+            "tests/determinism_artifact.cpp",
+            "tests/snapshot_fuzz.cpp",
         )
     )
     check_version()

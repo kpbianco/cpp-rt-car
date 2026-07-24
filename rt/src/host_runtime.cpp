@@ -4,6 +4,7 @@
 #include "compiled_graph.hpp"
 #include "executor.hpp"
 #include "native_platform_preflight.hpp"
+#include "snapshot_codec.hpp"
 #include "telemetry.hpp"
 #include "watchdog_monitor.hpp"
 
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include <rt/arch.hpp>
+#include <rt/snapshot.hpp>
 
 namespace {
 
@@ -41,6 +43,12 @@ constexpr std::size_t kMaxMemoryBudgetBytes =
 constexpr std::uint64_t kMaxWatchdogTimeoutNs =
     std::uint64_t{24} * 60 * 60 * 1'000'000'000;
 constexpr std::uint32_t kMaxDegradationLevel = 255;
+constexpr std::size_t kMaxRegisteredStates =
+    rt::detail::artifact_absolute_max_records;
+constexpr std::size_t kMaxArtifactBytes =
+    rt::detail::artifact_absolute_max_bytes;
+constexpr std::size_t kMaxReplayInputs =
+    rt::detail::artifact_absolute_max_records;
 constexpr std::size_t kNoCallback = std::numeric_limits<std::size_t>::max();
 constexpr std::size_t kNoWorker = std::numeric_limits<std::size_t>::max();
 constexpr std::uint64_t kFnvOffset = 14'695'981'039'346'656'037ull;
@@ -91,6 +99,29 @@ bool checked_time_multiply(
     }
     result = left * right;
     return true;
+}
+
+bool byte_spans_overlap(
+    std::span<const std::byte> left,
+    std::span<const std::byte> right) noexcept {
+    if (left.empty() || right.empty()) {
+        return false;
+    }
+    const auto left_begin =
+        reinterpret_cast<std::uintptr_t>(left.data());
+    const auto right_begin =
+        reinterpret_cast<std::uintptr_t>(right.data());
+    if (left.size() >
+            std::numeric_limits<std::uintptr_t>::max() -
+                left_begin ||
+        right.size() >
+            std::numeric_limits<std::uintptr_t>::max() -
+                right_begin) {
+        return true;
+    }
+    const auto left_end = left_begin + left.size();
+    const auto right_end = right_begin + right.size();
+    return left_begin < right_end && right_begin < left_end;
 }
 
 std::int64_t deadline_slack(
@@ -236,6 +267,32 @@ void hash_u64(std::uint64_t& hash, std::uint64_t value) noexcept {
     }
 }
 
+void hash_bytes(
+    std::uint64_t& hash,
+    std::span<const std::byte> bytes) noexcept {
+    hash_u64(hash, bytes.size());
+    for (const auto value : bytes) {
+        hash_byte(hash, static_cast<std::uint8_t>(value));
+    }
+}
+
+void hash_string(
+    std::uint64_t& hash,
+    std::string_view value) noexcept {
+    hash_bytes(hash, std::as_bytes(std::span(value)));
+}
+
+std::string_view identifier_view(
+    const std::array<
+        char,
+        rt::observability_identifier_capacity>& identifier) noexcept {
+    const auto end =
+        std::find(identifier.begin(), identifier.end(), '\0');
+    return std::string_view(
+        identifier.data(),
+        static_cast<std::size_t>(end - identifier.begin()));
+}
+
 std::uint64_t config_identifier(
     const rt::RuntimeConfig& config) noexcept {
     std::uint64_t hash = kFnvOffset;
@@ -266,6 +323,15 @@ std::uint64_t config_identifier(
         hash,
         static_cast<std::uint64_t>(
             config.platform_preflight_mode));
+    hash_u64(
+        hash,
+        static_cast<std::uint64_t>(
+            config.determinism_tier));
+    hash_u64(hash, config.state_capacity);
+    hash_u64(hash, config.snapshot_max_bytes);
+    hash_u64(hash, config.replay_input_capacity);
+    hash_u64(hash, config.input_log_max_bytes);
+    hash_string(hash, identifier_view(config.workload_id));
     return hash;
 }
 
@@ -298,6 +364,14 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
         config.watchdog_timeout_ns > kMaxWatchdogTimeoutNs ||
         config.watchdog_max_degradation_level >
             kMaxDegradationLevel ||
+        config.state_capacity > kMaxRegisteredStates ||
+        config.snapshot_max_bytes <
+            rt::detail::checkpoint_header_size ||
+        config.snapshot_max_bytes > kMaxArtifactBytes ||
+        config.replay_input_capacity > kMaxReplayInputs ||
+        config.input_log_max_bytes <
+            rt::detail::input_log_header_size ||
+        config.input_log_max_bytes > kMaxArtifactBytes ||
         !valid_identifier(config.workload_id)) {
         return rt::Status::invalid_config;
     }
@@ -329,6 +403,22 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
     default:
         return rt::Status::invalid_config;
     }
+    switch (config.determinism_tier) {
+    case rt::DeterminismTier::unspecified:
+        break;
+    case rt::DeterminismTier::schedule_independent:
+        if (config.executor_policy !=
+                rt::ExecutorPolicy::static_deterministic ||
+            config.watchdog_timeout_ns != 0) {
+            return rt::Status::invalid_config;
+        }
+        break;
+    case rt::DeterminismTier::reproducible_build:
+    case rt::DeterminismTier::portable_deterministic:
+        return rt::Status::invalid_config;
+    default:
+        return rt::Status::invalid_config;
+    }
     return rt::Status::ok;
 }
 
@@ -337,9 +427,9 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
 namespace rt {
 
 Capabilities query_capabilities() noexcept {
-    // M6 adds schema-versioned, instance-local trace and metric export with
-    // fixed RT-lane emission storage.
-    return {true, true, true, true, true, true, true, true};
+    // M7 adds bounded canonical state checkpoints and input-log replay with an
+    // explicit D1 application contract.
+    return {true, true, true, true, true, true, true, true, true};
 }
 
 const char* status_message(Status status) noexcept {
@@ -374,6 +464,10 @@ const char* status_message(Status status) noexcept {
         return "strict platform preflight failed";
     case Status::clock_failure:
         return "runtime clock operation failed";
+    case Status::invalid_artifact:
+        return "checkpoint or input-log artifact is invalid";
+    case Status::incompatible_artifact:
+        return "checkpoint or input-log artifact is incompatible";
     }
     return "unknown runtime status";
 }
@@ -481,6 +575,38 @@ Status set_runtime_config_value(
         } else {
             return Status::invalid_config;
         }
+    } else if (key == "determinism_tier") {
+        if (value == "unspecified" || value == "d0") {
+            candidate.determinism_tier =
+                DeterminismTier::unspecified;
+        } else if (
+            value == "schedule_independent" ||
+            value == "d1") {
+            candidate.determinism_tier =
+                DeterminismTier::schedule_independent;
+        } else {
+            return Status::invalid_config;
+        }
+    } else if (key == "state_capacity") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.state_capacity = parsed;
+    } else if (key == "snapshot_max_bytes") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.snapshot_max_bytes = parsed;
+    } else if (key == "replay_input_capacity") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.replay_input_capacity = parsed;
+    } else if (key == "input_log_max_bytes") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.input_log_max_bytes = parsed;
     } else if (key == "workload_id") {
         if (!set_identifier(candidate.workload_id, value)) {
             return Status::invalid_config;
@@ -539,6 +665,12 @@ struct Runtime::Impl {
         std::string name;
     };
 
+    struct RegisteredState {
+        std::array<char, replay_identifier_capacity> name{};
+        std::uint32_t schema_version = 0;
+        std::span<std::byte> storage{};
+    };
+
     explicit Impl(
         RuntimeClock* injected_clock,
         PlatformPreflightProbe* injected_preflight)
@@ -589,6 +721,133 @@ struct Runtime::Impl {
         return resource.valid() &&
                resource.owner() == graph_owner &&
                resource.index() < resources.size();
+    }
+
+    [[nodiscard]] std::uint64_t compute_graph_id() const noexcept {
+        std::uint64_t hash = kFnvOffset;
+        hash_u64(hash, 1);
+        hash_u64(hash, callbacks.size());
+        for (const auto& callback : callbacks) {
+            hash_string(hash, callback.name);
+        }
+        hash_u64(hash, resources.size());
+        for (const auto& resource : resources) {
+            hash_string(hash, resource.name);
+        }
+        hash_u64(hash, dependencies.size());
+        for (const auto& dependency : dependencies) {
+            hash_u64(hash, dependency.prerequisite.index());
+            hash_u64(hash, dependency.dependent.index());
+        }
+        hash_u64(hash, resource_accesses.size());
+        for (const auto& access : resource_accesses) {
+            hash_u64(hash, access.phase.index());
+            hash_u64(hash, access.resource.index());
+            hash_u64(
+                hash,
+                static_cast<std::uint64_t>(access.access));
+        }
+        return hash;
+    }
+
+    [[nodiscard]] std::uint64_t
+    compute_state_schema_id() const noexcept {
+        std::uint64_t hash = kFnvOffset;
+        hash_u64(hash, checkpoint_schema_version);
+        hash_u64(hash, states.size());
+        for (const auto& registered_state : states) {
+            hash_string(hash, identifier_view(registered_state.name));
+            hash_u64(hash, registered_state.schema_version);
+            hash_u64(hash, registered_state.storage.size());
+        }
+        return hash;
+    }
+
+    [[nodiscard]] std::uint64_t compute_replay_id(
+        std::uint64_t resolved_graph_id,
+        std::uint64_t resolved_state_schema_id) const noexcept {
+        std::uint64_t hash = kFnvOffset;
+        hash_u64(hash, checkpoint_schema_version);
+        hash_u64(
+            hash,
+            static_cast<std::uint64_t>(
+                config.determinism_tier));
+        if (config.determinism_tier ==
+            DeterminismTier::unspecified) {
+            hash_u64(hash, config_identifier(config));
+        } else {
+            // Operational capacities and worker_count are deliberately
+            // excluded from D1 compatibility. Semantic callback-visible
+            // choices remain part of the identity.
+            hash_u64(
+                hash,
+                static_cast<std::uint64_t>(
+                    config.numerical_mode));
+            hash_u64(hash, config.scratch_bytes);
+            hash_u64(hash, config.scratch_alignment);
+            hash_u64(hash, config.task_scratch_bytes);
+            hash_u64(
+                hash,
+                static_cast<std::uint64_t>(
+                    config.overload_policy));
+        }
+        hash_u64(hash, resolved_graph_id);
+        hash_u64(hash, resolved_state_schema_id);
+        hash_string(hash, identifier_view(config.workload_id));
+        return hash;
+    }
+
+    static bool provide_state(
+        void* context,
+        std::size_t index,
+        detail::StateWriteView& output) noexcept {
+        auto& self = *static_cast<Impl*>(context);
+        if (index >= self.states.size()) {
+            output = {};
+            return false;
+        }
+        const auto& state = self.states[index];
+        output.name = identifier_view(state.name);
+        output.schema_version = state.schema_version;
+        output.payload = std::as_bytes(state.storage);
+        return true;
+    }
+
+    [[nodiscard]] std::uint64_t state_hash() const noexcept {
+        std::uint64_t hash = kFnvOffset;
+        const auto append =
+            [&hash](std::span<const std::byte> bytes) {
+                for (const auto value : bytes) {
+                    hash ^= static_cast<std::uint8_t>(value);
+                    hash *= kFnvPrime;
+                }
+            };
+        for (const auto& registered_state : states) {
+            std::array<
+                std::byte,
+                detail::checkpoint_record_header_size> header{};
+            const auto name = identifier_view(registered_state.name);
+            std::memcpy(
+                header.data(),
+                name.data(),
+                name.size());
+            store_u32_le(
+                header,
+                64,
+                registered_state.schema_version);
+            store_u64_le(
+                header,
+                72,
+                registered_state.storage.size());
+            store_u64_le(
+                header,
+                80,
+                detail::artifact_checksum(
+                    std::as_bytes(registered_state.storage)));
+            append(header);
+            append(std::as_bytes(registered_state.storage));
+        }
+        return hash;
     }
 
     Status fail_compile(
@@ -879,6 +1138,7 @@ struct Runtime::Impl {
     NumericalPolicy numerics{};
     std::vector<RegisteredCallback> callbacks;
     std::vector<RegisteredResource> resources;
+    std::vector<RegisteredState> states;
     std::vector<detail::GraphDependency> dependencies;
     std::vector<detail::GraphResourceAccess> resource_accesses;
     std::vector<PhaseHandle> compiled_order;
@@ -886,6 +1146,9 @@ struct Runtime::Impl {
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::TelemetryCounters telemetry_counters;
     ObservabilityMetadata observability{};
+    std::uint64_t graph_id = 0;
+    std::uint64_t state_schema_id = 0;
+    std::uint64_t replay_id = 0;
     std::uint64_t telemetry_epoch_ns = 0;
     std::uint64_t metric_snapshot_sequence = 0;
     std::unique_ptr<detail::Executor> executor;
@@ -896,6 +1159,8 @@ struct Runtime::Impl {
     std::atomic<bool> in_step{false};
     std::atomic<bool> in_periodic_run{false};
     std::atomic<bool> periodic_dispatch{false};
+    std::atomic<bool> in_replay{false};
+    std::atomic<bool> replay_dispatch{false};
     std::atomic<std::uint32_t> degradation_level{0};
     bool watchdog_started = false;
     const HostFrameContext* active_frame = nullptr;
@@ -927,7 +1192,8 @@ Status Runtime::configure(const RuntimeConfig& config) noexcept {
         return impl_->fail(Status::invalid_state, "configure requires configuring state");
     }
     if (validate_config(config) != Status::ok ||
-        config.callback_capacity < impl_->callbacks.size()) {
+        config.callback_capacity < impl_->callbacks.size() ||
+        config.state_capacity < impl_->states.size()) {
         return impl_->fail(Status::invalid_config, nullptr);
     }
     impl_->config = config;
@@ -948,7 +1214,8 @@ Status Runtime::configure_key(
     RuntimeConfig candidate = impl_->config;
     const auto status = set_runtime_config_value(candidate, key, value);
     if (status != Status::ok ||
-        candidate.callback_capacity < impl_->callbacks.size()) {
+        candidate.callback_capacity < impl_->callbacks.size() ||
+        candidate.state_capacity < impl_->states.size()) {
         return impl_->fail(Status::invalid_config, "unknown or invalid configuration key/value");
     }
     impl_->config = candidate;
@@ -1043,6 +1310,105 @@ Status Runtime::register_resource(
         return impl_->fail(Status::internal_error, nullptr);
     }
 
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_state(
+    const StateRegistration& registration) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "state registration is frozen");
+    }
+    if (registration.schema_version == 0 ||
+        registration.storage.empty()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "state schema version and non-empty storage are required");
+    }
+    if (impl_->states.size() >= impl_->config.state_capacity) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "configured state capacity exceeded");
+    }
+
+    std::array<char, replay_identifier_capacity> name{};
+    if (!set_identifier(name, registration.name)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "state name must be a stable replay identifier");
+    }
+    const auto duplicate = std::find_if(
+        impl_->states.begin(),
+        impl_->states.end(),
+        [&](const Impl::RegisteredState& state) {
+            return state.name == name;
+        });
+    if (duplicate != impl_->states.end()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "state names must be unique");
+    }
+    for (const auto& state : impl_->states) {
+        if (byte_spans_overlap(
+                std::as_bytes(registration.storage),
+                std::as_bytes(state.storage))) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "registered state storage regions must not overlap");
+        }
+    }
+
+    std::size_t payload_bytes = registration.storage.size();
+    std::size_t record_bytes = 0;
+    std::size_t required_bytes = 0;
+    if (!detail::checked_artifact_multiply(
+            impl_->states.size() + 1,
+            detail::checkpoint_record_header_size,
+            record_bytes)) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "registered state size overflows the snapshot format");
+    }
+    for (const auto& state : impl_->states) {
+        if (!detail::checked_artifact_add(
+                payload_bytes,
+                state.storage.size(),
+                payload_bytes)) {
+            return impl_->fail(
+                Status::capacity_exceeded,
+                "registered state size overflows the snapshot format");
+        }
+    }
+    if (!detail::checked_artifact_add(
+            detail::checkpoint_header_size,
+            record_bytes,
+            required_bytes) ||
+        !detail::checked_artifact_add(
+            required_bytes,
+            payload_bytes,
+            required_bytes) ||
+        required_bytes > impl_->config.snapshot_max_bytes) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "registered state exceeds snapshot_max_bytes");
+    }
+
+    try {
+        impl_->states.push_back(Impl::RegisteredState{
+            name,
+            registration.schema_version,
+            registration.storage,
+        });
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
     impl_->clear_error();
     return Status::ok;
 }
@@ -1149,7 +1515,8 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(Status::invalid_state, "finalize requires configuring state");
     }
     if (validate_config(impl_->config) != Status::ok ||
-        impl_->callbacks.size() > impl_->config.callback_capacity) {
+        impl_->callbacks.size() > impl_->config.callback_capacity ||
+        impl_->states.size() > impl_->config.state_capacity) {
         return impl_->fail(Status::invalid_config, nullptr);
     }
 
@@ -1185,6 +1552,38 @@ Status Runtime::finalize() noexcept {
             "task_scratch_slots is too small for the compiled graph");
     }
 
+    std::size_t registered_state_bytes = 0;
+    for (const auto& state : impl_->states) {
+        if (!detail::checked_artifact_add(
+                registered_state_bytes,
+                state.storage.size(),
+                registered_state_bytes)) {
+            return impl_->fail(
+                Status::invalid_config,
+                "registered state size overflows the snapshot format");
+        }
+    }
+    std::size_t checkpoint_record_bytes = 0;
+    std::size_t checkpoint_required_bytes = 0;
+    if (!detail::checked_artifact_multiply(
+            impl_->states.size(),
+            detail::checkpoint_record_header_size,
+            checkpoint_record_bytes) ||
+        !detail::checked_artifact_add(
+            detail::checkpoint_header_size,
+            checkpoint_record_bytes,
+            checkpoint_required_bytes) ||
+        !detail::checked_artifact_add(
+            checkpoint_required_bytes,
+            registered_state_bytes,
+            checkpoint_required_bytes) ||
+        checkpoint_required_bytes >
+            impl_->config.snapshot_max_bytes) {
+        return impl_->fail(
+            Status::invalid_config,
+            "registered state exceeds snapshot_max_bytes");
+    }
+
     MemoryPlan memory_plan;
     memory_plan.memory_budget_bytes =
         impl_->config.memory_budget_bytes;
@@ -1199,6 +1598,15 @@ Status Runtime::finalize() noexcept {
         impl_->config.trace_capacity;
     memory_plan.trace_slot_bytes =
         detail::TelemetryRing::slot_size();
+    memory_plan.state_count = impl_->states.size();
+    memory_plan.registered_state_bytes =
+        registered_state_bytes;
+    memory_plan.snapshot_max_bytes =
+        impl_->config.snapshot_max_bytes;
+    memory_plan.replay_input_capacity =
+        impl_->config.replay_input_capacity;
+    memory_plan.input_log_max_bytes =
+        impl_->config.input_log_max_bytes;
     memory_plan.scratch_alignment =
         impl_->config.scratch_alignment;
     memory_plan.overload_policy =
@@ -1274,6 +1682,9 @@ Status Runtime::finalize() noexcept {
         plan_valid = plan_valid &&
             add_runtime_bytes(resource.name.capacity() + 1);
     }
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->states.capacity(),
+        sizeof(Impl::RegisteredState));
     plan_valid = plan_valid && add_runtime_array(
         impl_->dependencies.capacity(),
         sizeof(detail::GraphDependency));
@@ -1351,6 +1762,12 @@ Status Runtime::finalize() noexcept {
     impl_->finalized_memory_plan = memory_plan;
     impl_->telemetry_counters.reset();
     impl_->metric_snapshot_sequence = 0;
+    impl_->graph_id = impl_->compute_graph_id();
+    impl_->state_schema_id =
+        impl_->compute_state_schema_id();
+    impl_->replay_id = impl_->compute_replay_id(
+        impl_->graph_id,
+        impl_->state_schema_id);
     impl_->observability = {};
     impl_->observability.config_id =
         config_identifier(impl_->config);
@@ -1486,6 +1903,12 @@ Status Runtime::step(
         return impl_->fail(
             Status::invalid_state,
             "step cannot be entered from a periodic observer");
+    }
+    if (impl_->in_replay.load(std::memory_order_acquire) &&
+        !impl_->replay_dispatch.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "step cannot be entered from a replay input callback");
     }
     bool expected = false;
     if (!impl_->in_step.compare_exchange_strong(
@@ -1630,6 +2053,11 @@ Status Runtime::run_periodic(
         return impl_->fail(
             Status::invalid_state,
             "periodic execution cannot be entered from a frame callback");
+    }
+    if (impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "periodic execution cannot run during replay");
     }
     if (config.frame_count == 0 ||
         config.period.count() <= 0 ||
@@ -1832,7 +2260,8 @@ Status Runtime::stop() noexcept {
         return Status::internal_error;
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
-        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
         return impl_->fail(
             Status::invalid_state,
             "stop cannot run from a callback or periodic loop");
@@ -1979,7 +2408,8 @@ Status Runtime::observability_metadata(
             "observability metadata requires a finalized runtime");
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
-        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
         return impl_->fail(
             Status::invalid_state,
             "observability export cannot run during a frame or periodic loop");
@@ -2004,7 +2434,8 @@ Status Runtime::metrics_snapshot(
             "metric export requires a finalized runtime");
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
-        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
         return impl_->fail(
             Status::invalid_state,
             "metric export cannot run during a frame or periodic loop");
@@ -2116,7 +2547,8 @@ Status Runtime::read_trace(
             "trace export requires a finalized runtime");
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
-        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
         return impl_->fail(
             Status::invalid_state,
             "trace export cannot run during a frame or periodic loop");
@@ -2169,6 +2601,501 @@ Status Runtime::read_trace(
     cursor.next_sequence = sequence;
     result.next_sequence = sequence;
     result.remaining_sequence_count = end - sequence;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::checkpoint_size(
+    std::size_t& required_bytes) noexcept {
+    required_bytes = 0;
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "checkpoint sizing requires a finalized runtime");
+    }
+    std::size_t record_bytes = 0;
+    std::size_t payload_bytes = 0;
+    if (!detail::checked_artifact_multiply(
+            impl_->states.size(),
+            detail::checkpoint_record_header_size,
+            record_bytes)) {
+        return impl_->fail(
+            Status::internal_error,
+            "finalized checkpoint size overflowed");
+    }
+    for (const auto& state : impl_->states) {
+        if (!detail::checked_artifact_add(
+                payload_bytes,
+                state.storage.size(),
+                payload_bytes)) {
+            return impl_->fail(
+                Status::internal_error,
+                "finalized checkpoint size overflowed");
+        }
+    }
+    if (!detail::checked_artifact_add(
+            detail::checkpoint_header_size,
+            record_bytes,
+            required_bytes) ||
+        !detail::checked_artifact_add(
+            required_bytes,
+            payload_bytes,
+            required_bytes) ||
+        required_bytes > impl_->config.snapshot_max_bytes) {
+        required_bytes = 0;
+        return impl_->fail(
+            Status::internal_error,
+            "finalized checkpoint exceeds its frozen bound");
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::write_checkpoint(
+    std::uint64_t checkpoint_frame_index,
+    std::span<std::byte> output,
+    ArtifactWriteResult& result) noexcept {
+    result = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "checkpoint export requires a finalized runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "checkpoint export cannot run during execution");
+    }
+    const auto output_bytes =
+        std::span<const std::byte>(output.data(), output.size());
+    for (const auto& state : impl_->states) {
+        if (byte_spans_overlap(
+                output_bytes,
+                std::as_bytes(state.storage))) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "checkpoint output cannot overlap registered state");
+        }
+    }
+
+    CheckpointMetadata metadata;
+    metadata.determinism_tier =
+        impl_->config.determinism_tier;
+    metadata.config_id = impl_->observability.config_id;
+    metadata.replay_id = impl_->replay_id;
+    metadata.graph_id = impl_->graph_id;
+    metadata.state_schema_id = impl_->state_schema_id;
+    metadata.checkpoint_frame_index =
+        checkpoint_frame_index;
+    metadata.build_id = impl_->observability.build_id;
+    metadata.workload_id =
+        impl_->observability.workload_id;
+    const auto status = detail::encode_checkpoint_artifact(
+        metadata,
+        impl_->states.size(),
+        &Impl::provide_state,
+        impl_.get(),
+        impl_->config.snapshot_max_bytes,
+        output,
+        result);
+    if (status != Status::ok) {
+        return impl_->fail(
+            status,
+            status == Status::capacity_exceeded
+                ? "checkpoint output buffer is too small"
+                : "checkpoint encoding failed");
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::restore_checkpoint(
+    std::span<const std::byte> checkpoint,
+    CheckpointMetadata* metadata) noexcept {
+    if (metadata) {
+        *metadata = {};
+    }
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "checkpoint restore requires a finalized runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "checkpoint restore cannot run during execution");
+    }
+    for (const auto& state : impl_->states) {
+        if (byte_spans_overlap(
+                checkpoint,
+                std::as_bytes(state.storage))) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "checkpoint input cannot overlap registered state");
+        }
+    }
+
+    CheckpointMetadata parsed;
+    const auto parse_status =
+        detail::parse_checkpoint_artifact(
+            checkpoint,
+            impl_->config.snapshot_max_bytes,
+            impl_->config.state_capacity,
+            parsed);
+    if (parse_status != Status::ok) {
+        return impl_->fail(
+            parse_status,
+            "checkpoint validation failed before state restore");
+    }
+    if (parsed.runtime_version_major != version_major ||
+        parsed.determinism_tier !=
+            impl_->config.determinism_tier ||
+        parsed.replay_id != impl_->replay_id ||
+        parsed.graph_id != impl_->graph_id ||
+        parsed.state_schema_id != impl_->state_schema_id ||
+        parsed.state_count != impl_->states.size() ||
+        parsed.workload_id != impl_->observability.workload_id ||
+        (impl_->config.determinism_tier ==
+             DeterminismTier::unspecified &&
+         parsed.config_id != impl_->observability.config_id)) {
+        return impl_->fail(
+            Status::incompatible_artifact,
+            "checkpoint identity does not match the finalized runtime");
+    }
+
+    // First pass verifies the exact registered schema and every destination
+    // size. No application byte is changed until this pass succeeds.
+    detail::CheckpointRecordCursor cursor;
+    for (std::size_t index = 0;
+         index < impl_->states.size();
+         ++index) {
+        detail::CheckpointRecordView record;
+        const auto& state = impl_->states[index];
+        if (!detail::next_checkpoint_record(
+                checkpoint,
+                parsed,
+                cursor,
+                record) ||
+            record.name != identifier_view(state.name) ||
+            record.schema_version != state.schema_version ||
+            record.payload.size() != state.storage.size()) {
+            return impl_->fail(
+                Status::incompatible_artifact,
+                "checkpoint state schema does not match registration");
+        }
+    }
+
+    // The second pass cannot fail: the complete source and every destination
+    // were validated above, so restore is transactional for registered bytes.
+    cursor = {};
+    for (std::size_t index = 0;
+         index < impl_->states.size();
+         ++index) {
+        detail::CheckpointRecordView record;
+        (void)detail::next_checkpoint_record(
+            checkpoint,
+            parsed,
+            cursor,
+            record);
+        std::memcpy(
+            impl_->states[index].storage.data(),
+            record.payload.data(),
+            record.payload.size());
+    }
+    if (metadata) {
+        *metadata = parsed;
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::write_input_log(
+    std::span<const ReplayInputRecord> records,
+    std::span<std::byte> output,
+    ArtifactWriteResult& result) noexcept {
+    result = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "input-log export requires a finalized runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "input-log export cannot run during execution");
+    }
+    const auto output_bytes =
+        std::span<const std::byte>(output.data(), output.size());
+    if (byte_spans_overlap(
+            output_bytes,
+            std::as_bytes(records))) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "input-log output cannot overlap input records");
+    }
+    for (const auto& state : impl_->states) {
+        if (byte_spans_overlap(
+                output_bytes,
+                std::as_bytes(state.storage))) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "input-log output cannot overlap registered state");
+        }
+    }
+    for (const auto& record : records) {
+        if (byte_spans_overlap(output_bytes, record.payload)) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "input-log output cannot overlap an input payload");
+        }
+    }
+
+    InputLogMetadata metadata;
+    metadata.determinism_tier =
+        impl_->config.determinism_tier;
+    metadata.replay_id = impl_->replay_id;
+    metadata.state_schema_id = impl_->state_schema_id;
+    metadata.workload_id =
+        impl_->observability.workload_id;
+    const auto status = detail::encode_input_log_artifact(
+        metadata,
+        records,
+        impl_->config.replay_input_capacity,
+        impl_->config.input_log_max_bytes,
+        output,
+        result);
+    if (status != Status::ok) {
+        return impl_->fail(
+            status,
+            status == Status::capacity_exceeded
+                ? "input-log output buffer is too small or exceeds its bound"
+                : "input-log encoding failed");
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::replay(
+    std::span<const std::byte> checkpoint,
+    std::span<const std::byte> input_log,
+    ReplayInputCallback input_callback,
+    void* input_user_data,
+    ReplayResult* result) noexcept {
+    ReplayResult local_result;
+    ReplayResult& output = result ? *result : local_result;
+    output = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::running) {
+        return impl_->fail(
+            Status::invalid_state,
+            "replay requires a running runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "replay requires non-reentrant host control");
+    }
+    for (const auto& state : impl_->states) {
+        if (byte_spans_overlap(
+                input_log,
+                std::as_bytes(state.storage))) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "input log cannot overlap registered state");
+        }
+    }
+
+    CheckpointMetadata checkpoint_metadata;
+    InputLogMetadata input_metadata;
+    const auto checkpoint_status =
+        detail::parse_checkpoint_artifact(
+            checkpoint,
+            impl_->config.snapshot_max_bytes,
+            impl_->config.state_capacity,
+            checkpoint_metadata);
+    if (checkpoint_status != Status::ok) {
+        return impl_->fail(
+            checkpoint_status,
+            "checkpoint validation failed before replay");
+    }
+    const auto input_status =
+        detail::parse_input_log_artifact(
+            input_log,
+            impl_->config.input_log_max_bytes,
+            impl_->config.replay_input_capacity,
+            input_metadata);
+    if (input_status != Status::ok) {
+        return impl_->fail(
+            input_status,
+            "input-log validation failed before replay");
+    }
+    if (checkpoint_metadata.runtime_version_major !=
+            version_major ||
+        checkpoint_metadata.determinism_tier !=
+            impl_->config.determinism_tier ||
+        checkpoint_metadata.replay_id != impl_->replay_id ||
+        checkpoint_metadata.graph_id != impl_->graph_id ||
+        checkpoint_metadata.state_schema_id !=
+            impl_->state_schema_id ||
+        checkpoint_metadata.workload_id !=
+            impl_->observability.workload_id ||
+        input_metadata.runtime_version_major != version_major ||
+        input_metadata.determinism_tier !=
+            impl_->config.determinism_tier ||
+        input_metadata.replay_id != impl_->replay_id ||
+        input_metadata.state_schema_id !=
+            impl_->state_schema_id ||
+        input_metadata.workload_id !=
+            impl_->observability.workload_id ||
+        (input_metadata.record_count != 0 &&
+         input_metadata.first_frame_index <=
+             checkpoint_metadata.checkpoint_frame_index) ||
+        (impl_->config.determinism_tier ==
+             DeterminismTier::unspecified &&
+         checkpoint_metadata.config_id !=
+             impl_->observability.config_id)) {
+        return impl_->fail(
+            Status::incompatible_artifact,
+            "checkpoint/input-log identity does not match the runtime");
+    }
+    if (input_metadata.record_count != 0 && !input_callback) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "replay input callback is required for a non-empty log");
+    }
+
+    const auto restore_status =
+        restore_checkpoint(checkpoint, nullptr);
+    if (restore_status != Status::ok) {
+        return restore_status;
+    }
+
+    bool expected = false;
+    if (!impl_->in_replay.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "replay is already active");
+    }
+    struct ReplayGuard {
+        std::atomic<bool>& flag;
+        explicit ReplayGuard(std::atomic<bool>& value)
+            : flag(value) {}
+        ~ReplayGuard() {
+            flag.store(false, std::memory_order_release);
+        }
+    } replay_guard(impl_->in_replay);
+
+    output.checkpoint_frame_index =
+        checkpoint_metadata.checkpoint_frame_index;
+    output.first_frame_index =
+        input_metadata.first_frame_index;
+    output.last_frame_index =
+        input_metadata.last_frame_index;
+    detail::InputLogRecordCursor cursor;
+    for (std::size_t index = 0;
+         index < input_metadata.record_count;
+         ++index) {
+        detail::InputLogRecordView record;
+        if (!detail::next_input_log_record(
+                input_log,
+                input_metadata,
+                cursor,
+                record)) {
+            return impl_->fail(
+                Status::internal_error,
+                "validated input log could not be traversed");
+        }
+
+        CallbackResult callback_result =
+            CallbackResult::error;
+        try {
+            callback_result = input_callback(
+                input_user_data,
+                ReplayInputView{
+                    record.frame,
+                    record.input_type,
+                    record.payload,
+                });
+        } catch (...) {
+            callback_result = CallbackResult::error;
+        }
+        if (callback_result != CallbackResult::ok) {
+            return impl_->fail(
+                Status::callback_failed,
+                "replay input callback failed");
+        }
+        ++output.records_processed;
+
+        Status step_status = Status::internal_error;
+        {
+            struct ReplayDispatchGuard {
+                std::atomic<bool>& flag;
+                explicit ReplayDispatchGuard(
+                    std::atomic<bool>& value)
+                    : flag(value) {
+                    flag.store(true, std::memory_order_release);
+                }
+                ~ReplayDispatchGuard() {
+                    flag.store(false, std::memory_order_release);
+                }
+            } dispatch_guard(impl_->replay_dispatch);
+            step_status = step(record.frame);
+        }
+        if (step_status != Status::ok) {
+            return step_status;
+        }
+        ++output.frames_replayed;
+    }
+    output.final_state_hash = impl_->state_hash();
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::registered_state_hash(
+    std::uint64_t& hash) noexcept {
+    hash = 0;
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "registered-state hashing requires a finalized runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "registered-state hashing cannot run during execution");
+    }
+    hash = impl_->state_hash();
     impl_->clear_error();
     return Status::ok;
 }

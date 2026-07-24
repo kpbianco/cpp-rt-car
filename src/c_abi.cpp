@@ -58,6 +58,28 @@ static_assert(
 static_assert(
     rt::observability_identifier_capacity ==
     RTFW_OBSERVABILITY_IDENTIFIER_CAPACITY);
+static_assert(
+    rt::checkpoint_schema_version ==
+    RTFW_CHECKPOINT_SCHEMA_VERSION);
+static_assert(
+    rt::input_log_schema_version ==
+    RTFW_INPUT_LOG_SCHEMA_VERSION);
+static_assert(
+    rt::replay_identifier_capacity ==
+    RTFW_REPLAY_IDENTIFIER_CAPACITY);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::DeterminismTier::unspecified) ==
+        RTFW_DETERMINISM_D0_UNSPECIFIED &&
+    static_cast<std::uint32_t>(
+        rt::DeterminismTier::schedule_independent) ==
+        RTFW_DETERMINISM_D1_SCHEDULE_INDEPENDENT &&
+    static_cast<std::uint32_t>(
+        rt::DeterminismTier::reproducible_build) ==
+        RTFW_DETERMINISM_D2_REPRODUCIBLE_BUILD &&
+    static_cast<std::uint32_t>(
+        rt::DeterminismTier::portable_deterministic) ==
+        RTFW_DETERMINISM_D3_PORTABLE);
 
 constexpr std::array<std::uint16_t, 11> kCppTraceIds{{
     static_cast<std::uint16_t>(
@@ -219,6 +241,10 @@ rtfw_status to_c_status(rt::Status status) noexcept {
         return RTFW_STATUS_PLATFORM_PREFLIGHT_FAILED;
     case rt::Status::clock_failure:
         return RTFW_STATUS_CLOCK_FAILURE;
+    case rt::Status::invalid_artifact:
+        return RTFW_STATUS_INVALID_ARTIFACT;
+    case rt::Status::incompatible_artifact:
+        return RTFW_STATUS_INCOMPATIBLE_ARTIFACT;
     }
     return RTFW_STATUS_INTERNAL_ERROR;
 }
@@ -232,10 +258,28 @@ bool bytes_are_zero(const uint8_t* bytes, std::size_t size) noexcept {
     return true;
 }
 
+bool bounded_c_identifier(
+    const char* value,
+    std::size_t capacity,
+    std::string_view& output) noexcept {
+    output = {};
+    if (!value || capacity == 0) {
+        return false;
+    }
+    std::size_t length = 0;
+    while (length < capacity && value[length] != '\0') {
+        ++length;
+    }
+    if (length == 0 || length == capacity) {
+        return false;
+    }
+    output = std::string_view(value, length);
+    return true;
+}
+
 bool config_header_valid(const rtfw_config& config) noexcept {
     return config.struct_size >= sizeof(rtfw_config) &&
            config.abi_version == RTFW_C_ABI_VERSION &&
-           config.reserved0 == 0u &&
            bytes_are_zero(
                reinterpret_cast<const uint8_t*>(config.reserved),
                sizeof(config.reserved));
@@ -343,6 +387,64 @@ bool trace_read_result_header_valid(
                sizeof(result.reserved));
 }
 
+bool artifact_write_result_header_valid(
+    const rtfw_artifact_write_result& result) noexcept {
+    return result.struct_size >= sizeof(result) &&
+           result.reserved0 == 0u &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(result.reserved),
+               sizeof(result.reserved));
+}
+
+bool checkpoint_metadata_header_valid(
+    const rtfw_checkpoint_metadata& metadata) noexcept {
+    return metadata.struct_size >= sizeof(metadata) &&
+           metadata.schema_version ==
+               RTFW_CHECKPOINT_SCHEMA_VERSION &&
+           metadata.reserved0 == 0u &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(metadata.reserved),
+               sizeof(metadata.reserved));
+}
+
+bool input_log_metadata_header_valid(
+    const rtfw_input_log_metadata& metadata) noexcept {
+    return metadata.struct_size >= sizeof(metadata) &&
+           metadata.schema_version ==
+               RTFW_INPUT_LOG_SCHEMA_VERSION &&
+           metadata.reserved0 == 0u &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(metadata.reserved),
+               sizeof(metadata.reserved));
+}
+
+bool replay_input_record_valid(
+    const rtfw_replay_input_record& record) noexcept {
+    return record.struct_size >= sizeof(record) &&
+           record.delta_ns >= 0 &&
+           record.has_deadline <= 1u &&
+           bytes_are_zero(
+               record.reserved0,
+               sizeof(record.reserved0)) &&
+           (record.has_deadline != 0u ||
+            record.deadline_ns == 0u) &&
+           (record.payload_size == 0 || record.payload) &&
+           record.payload_size <=
+               std::numeric_limits<std::size_t>::max() &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(record.reserved),
+               sizeof(record.reserved));
+}
+
+bool replay_result_header_valid(
+    const rtfw_replay_result& result) noexcept {
+    return result.struct_size >= sizeof(result) &&
+           result.reserved0 == 0u &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(result.reserved),
+               sizeof(result.reserved));
+}
+
 bool to_cpp_config(
     const rtfw_config& source,
     rt::RuntimeConfig& target) noexcept {
@@ -360,6 +462,14 @@ bool to_cpp_config(
         source.task_scratch_slots >
             std::numeric_limits<std::size_t>::max() ||
         source.memory_budget_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        source.state_capacity >
+            std::numeric_limits<std::size_t>::max() ||
+        source.snapshot_max_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        source.replay_input_capacity >
+            std::numeric_limits<std::size_t>::max() ||
+        source.input_log_max_bytes >
             std::numeric_limits<std::size_t>::max()) {
         return false;
     }
@@ -429,6 +539,36 @@ bool to_cpp_config(
     default:
         return false;
     }
+    switch (source.determinism_tier) {
+    case RTFW_DETERMINISM_D0_UNSPECIFIED:
+        target.determinism_tier =
+            rt::DeterminismTier::unspecified;
+        break;
+    case RTFW_DETERMINISM_D1_SCHEDULE_INDEPENDENT:
+        target.determinism_tier =
+            rt::DeterminismTier::schedule_independent;
+        break;
+    case RTFW_DETERMINISM_D2_REPRODUCIBLE_BUILD:
+        target.determinism_tier =
+            rt::DeterminismTier::reproducible_build;
+        break;
+    case RTFW_DETERMINISM_D3_PORTABLE:
+        target.determinism_tier =
+            rt::DeterminismTier::portable_deterministic;
+        break;
+    default:
+        return false;
+    }
+    target.state_capacity =
+        static_cast<std::size_t>(source.state_capacity);
+    target.snapshot_max_bytes =
+        static_cast<std::size_t>(source.snapshot_max_bytes);
+    target.replay_input_capacity =
+        static_cast<std::size_t>(
+            source.replay_input_capacity);
+    target.input_log_max_bytes =
+        static_cast<std::size_t>(
+            source.input_log_max_bytes);
     std::copy(
         std::begin(source.workload_id),
         std::end(source.workload_id),
@@ -470,6 +610,16 @@ void from_cpp_config(
             rt::PlatformPreflightMode::strict
         ? RTFW_PLATFORM_PREFLIGHT_STRICT
         : RTFW_PLATFORM_PREFLIGHT_DISABLED;
+    target.determinism_tier =
+        static_cast<std::uint32_t>(
+            source.determinism_tier);
+    target.state_capacity = source.state_capacity;
+    target.snapshot_max_bytes =
+        source.snapshot_max_bytes;
+    target.replay_input_capacity =
+        source.replay_input_capacity;
+    target.input_log_max_bytes =
+        source.input_log_max_bytes;
     std::copy(
         source.workload_id.begin(),
         source.workload_id.end(),
@@ -514,6 +664,15 @@ void from_cpp_memory_plan(
     target.trace_capacity = source.trace_capacity;
     target.trace_slot_bytes = source.trace_slot_bytes;
     target.trace_storage_bytes = source.trace_storage_bytes;
+    target.state_count = source.state_count;
+    target.registered_state_bytes =
+        source.registered_state_bytes;
+    target.snapshot_max_bytes =
+        source.snapshot_max_bytes;
+    target.replay_input_capacity =
+        source.replay_input_capacity;
+    target.input_log_max_bytes =
+        source.input_log_max_bytes;
     target.queue_slots = source.queue_slots;
     target.scratch_alignment = source.scratch_alignment;
 }
@@ -708,6 +867,90 @@ void from_cpp_trace_result(
         source.remaining_sequence_count;
 }
 
+void from_cpp_artifact_write_result(
+    const rt::ArtifactWriteResult& source,
+    rtfw_artifact_write_result& target) noexcept {
+    target.required_bytes = source.required_bytes;
+    target.bytes_written = source.bytes_written;
+    target.checksum = source.checksum;
+}
+
+void from_cpp_checkpoint_metadata(
+    const rt::CheckpointMetadata& source,
+    rtfw_checkpoint_metadata& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.runtime_version_major =
+        source.runtime_version_major;
+    target.runtime_version_minor =
+        source.runtime_version_minor;
+    target.runtime_version_patch =
+        source.runtime_version_patch;
+    target.determinism_tier =
+        static_cast<std::uint32_t>(
+            source.determinism_tier);
+    target.state_count = source.state_count;
+    target.config_id = source.config_id;
+    target.replay_id = source.replay_id;
+    target.graph_id = source.graph_id;
+    target.state_schema_id = source.state_schema_id;
+    target.checkpoint_frame_index =
+        source.checkpoint_frame_index;
+    target.state_payload_bytes =
+        source.state_payload_bytes;
+    target.total_bytes = source.total_bytes;
+    target.state_hash = source.state_hash;
+    target.artifact_checksum =
+        source.artifact_checksum;
+    std::copy(
+        source.build_id.begin(),
+        source.build_id.end(),
+        std::begin(target.build_id));
+    std::copy(
+        source.workload_id.begin(),
+        source.workload_id.end(),
+        std::begin(target.workload_id));
+}
+
+void from_cpp_input_log_metadata(
+    const rt::InputLogMetadata& source,
+    rtfw_input_log_metadata& target) noexcept {
+    target.schema_version = source.schema_version;
+    target.runtime_version_major =
+        source.runtime_version_major;
+    target.runtime_version_minor =
+        source.runtime_version_minor;
+    target.runtime_version_patch =
+        source.runtime_version_patch;
+    target.determinism_tier =
+        static_cast<std::uint32_t>(
+            source.determinism_tier);
+    target.record_count = source.record_count;
+    target.replay_id = source.replay_id;
+    target.state_schema_id = source.state_schema_id;
+    target.payload_bytes = source.payload_bytes;
+    target.total_bytes = source.total_bytes;
+    target.artifact_checksum =
+        source.artifact_checksum;
+    target.first_frame_index = source.first_frame_index;
+    target.last_frame_index = source.last_frame_index;
+    std::copy(
+        source.workload_id.begin(),
+        source.workload_id.end(),
+        std::begin(target.workload_id));
+}
+
+void from_cpp_replay_result(
+    const rt::ReplayResult& source,
+    rtfw_replay_result& target) noexcept {
+    target.checkpoint_frame_index =
+        source.checkpoint_frame_index;
+    target.first_frame_index = source.first_frame_index;
+    target.last_frame_index = source.last_frame_index;
+    target.records_processed = source.records_processed;
+    target.frames_replayed = source.frames_replayed;
+    target.final_state_hash = source.final_state_hash;
+}
+
 struct CCallback {
     rtfw_frame_callback callback = nullptr;
     void* user_data = nullptr;
@@ -818,6 +1061,34 @@ rt::CallbackResult invoke_c_periodic_observer(
         : rt::CallbackResult::error;
 }
 
+struct CReplayInvocation {
+    rtfw_replay_input_callback callback = nullptr;
+    void* user_data = nullptr;
+};
+
+rt::CallbackResult invoke_c_replay_input(
+    void* opaque,
+    const rt::ReplayInputView& input) {
+    auto& invocation =
+        *static_cast<CReplayInvocation*>(opaque);
+    rtfw_replay_input_view c_input{};
+    c_input.struct_size = sizeof(c_input);
+    c_input.input_type = input.input_type;
+    c_input.frame_index = input.frame.frame_index;
+    c_input.delta_ns = input.frame.delta.count();
+    c_input.has_deadline =
+        input.frame.deadline_ns ? 1u : 0u;
+    c_input.deadline_ns =
+        input.frame.deadline_ns.value_or(0);
+    c_input.payload = input.payload.data();
+    c_input.payload_size = input.payload.size();
+    return invocation.callback(
+               invocation.user_data,
+               &c_input) == RTFW_CALLBACK_OK
+        ? rt::CallbackResult::ok
+        : rt::CallbackResult::error;
+}
+
 } // namespace
 
 struct rtfw_handle {
@@ -865,6 +1136,8 @@ RTFW_API rt_capabilities_c rt_query_capabilities(void) {
         static_cast<uint8_t>(capabilities.strict_platform_preflight),
         static_cast<uint8_t>(
             capabilities.versioned_observability),
+        static_cast<uint8_t>(
+            capabilities.deterministic_replay),
     };
 }
 
@@ -901,6 +1174,12 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
             rt::Status::platform_preflight_failed);
     case RTFW_STATUS_CLOCK_FAILURE:
         return rt::status_message(rt::Status::clock_failure);
+    case RTFW_STATUS_INVALID_ARTIFACT:
+        return rt::status_message(
+            rt::Status::invalid_artifact);
+    case RTFW_STATUS_INCOMPATIBLE_ARTIFACT:
+        return rt::status_message(
+            rt::Status::incompatible_artifact);
     }
     return "unknown runtime status";
 }
@@ -1065,6 +1344,55 @@ RTFW_API void rtfw_trace_read_result_init(
     rtfw_observability_metadata_init(&result->metadata);
 }
 
+RTFW_API void rtfw_artifact_write_result_init(
+    rtfw_artifact_write_result* result) {
+    if (!result) {
+        return;
+    }
+    std::memset(result, 0, sizeof(*result));
+    result->struct_size = sizeof(*result);
+}
+
+RTFW_API void rtfw_checkpoint_metadata_init(
+    rtfw_checkpoint_metadata* metadata) {
+    if (!metadata) {
+        return;
+    }
+    std::memset(metadata, 0, sizeof(*metadata));
+    metadata->struct_size = sizeof(*metadata);
+    metadata->schema_version =
+        RTFW_CHECKPOINT_SCHEMA_VERSION;
+}
+
+RTFW_API void rtfw_input_log_metadata_init(
+    rtfw_input_log_metadata* metadata) {
+    if (!metadata) {
+        return;
+    }
+    std::memset(metadata, 0, sizeof(*metadata));
+    metadata->struct_size = sizeof(*metadata);
+    metadata->schema_version =
+        RTFW_INPUT_LOG_SCHEMA_VERSION;
+}
+
+RTFW_API void rtfw_replay_input_record_init(
+    rtfw_replay_input_record* record) {
+    if (!record) {
+        return;
+    }
+    std::memset(record, 0, sizeof(*record));
+    record->struct_size = sizeof(*record);
+}
+
+RTFW_API void rtfw_replay_result_init(
+    rtfw_replay_result* result) {
+    if (!result) {
+        return;
+    }
+    std::memset(result, 0, sizeof(*result));
+    result->struct_size = sizeof(*result);
+}
+
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
     rtfw_handle** out_handle) {
@@ -1198,6 +1526,38 @@ RTFW_API rtfw_status rtfw_register_resource(
         handle->clear_boundary_error();
     }
     return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_register_state(
+    rtfw_handle* handle,
+    const char* name,
+    uint32_t schema_version,
+    void* storage,
+    uint64_t storage_bytes) {
+    if (!handle || !name || !storage ||
+        storage_bytes == 0 ||
+        storage_bytes >
+            std::numeric_limits<std::size_t>::max()) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    std::string_view state_name;
+    if (!bounded_c_identifier(
+            name,
+            RTFW_REPLAY_IDENTIFIER_CAPACITY,
+            state_name)) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "state name must be a bounded replay identifier");
+    }
+    handle->clear_boundary_error();
+    return to_c_status(handle->runtime.register_state(
+        rt::StateRegistration{
+            state_name,
+            schema_version,
+            std::span<std::byte>(
+                static_cast<std::byte*>(storage),
+                static_cast<std::size_t>(storage_bytes)),
+        }));
 }
 
 RTFW_API rtfw_status rtfw_add_dependency(
@@ -1665,6 +2025,281 @@ RTFW_API rtfw_status rtfw_read_trace(
             RTFW_STATUS_INTERNAL_ERROR,
             "unexpected trace export failure");
     }
+}
+
+RTFW_API rtfw_status rtfw_checkpoint_size(
+    rtfw_handle* handle,
+    uint64_t* out_required_bytes) {
+    if (!handle || !out_required_bytes) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_required_bytes = 0;
+    std::size_t required = 0;
+    handle->clear_boundary_error();
+    const auto status =
+        handle->runtime.checkpoint_size(required);
+    if (status == rt::Status::ok) {
+        *out_required_bytes = required;
+    }
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_checkpoint_write(
+    rtfw_handle* handle,
+    uint64_t checkpoint_frame_index,
+    void* output,
+    uint64_t output_bytes,
+    rtfw_artifact_write_result* out_result) {
+    if (!handle || !out_result ||
+        !artifact_write_result_header_valid(*out_result) ||
+        output_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        (output_bytes != 0 && !output)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    rt::ArtifactWriteResult cpp_result;
+    handle->clear_boundary_error();
+    const auto status = handle->runtime.write_checkpoint(
+        checkpoint_frame_index,
+        std::span<std::byte>(
+            static_cast<std::byte*>(output),
+            static_cast<std::size_t>(output_bytes)),
+        cpp_result);
+    const auto struct_size = out_result->struct_size;
+    std::memset(out_result, 0, sizeof(*out_result));
+    out_result->struct_size = struct_size;
+    from_cpp_artifact_write_result(
+        cpp_result,
+        *out_result);
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_checkpoint_inspect(
+    const void* checkpoint,
+    uint64_t checkpoint_bytes,
+    rtfw_checkpoint_metadata* out_metadata) {
+    if (!out_metadata ||
+        !checkpoint_metadata_header_valid(*out_metadata) ||
+        checkpoint_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        (checkpoint_bytes != 0 && !checkpoint)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    rt::CheckpointMetadata cpp_metadata;
+    const auto status = rt::inspect_checkpoint_artifact(
+        std::span<const std::byte>(
+            static_cast<const std::byte*>(checkpoint),
+            static_cast<std::size_t>(checkpoint_bytes)),
+        cpp_metadata);
+    if (status != rt::Status::ok) {
+        return to_c_status(status);
+    }
+    const auto struct_size = out_metadata->struct_size;
+    std::memset(out_metadata, 0, sizeof(*out_metadata));
+    out_metadata->struct_size = struct_size;
+    from_cpp_checkpoint_metadata(
+        cpp_metadata,
+        *out_metadata);
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_checkpoint_restore(
+    rtfw_handle* handle,
+    const void* checkpoint,
+    uint64_t checkpoint_bytes,
+    rtfw_checkpoint_metadata* out_metadata) {
+    if (!handle ||
+        checkpoint_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        (checkpoint_bytes != 0 && !checkpoint) ||
+        (out_metadata &&
+         !checkpoint_metadata_header_valid(*out_metadata))) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    rt::CheckpointMetadata cpp_metadata;
+    handle->clear_boundary_error();
+    const auto status = handle->runtime.restore_checkpoint(
+        std::span<const std::byte>(
+            static_cast<const std::byte*>(checkpoint),
+            static_cast<std::size_t>(checkpoint_bytes)),
+        out_metadata ? &cpp_metadata : nullptr);
+    if (status != rt::Status::ok) {
+        return to_c_status(status);
+    }
+    if (out_metadata) {
+        const auto struct_size = out_metadata->struct_size;
+        std::memset(out_metadata, 0, sizeof(*out_metadata));
+        out_metadata->struct_size = struct_size;
+        from_cpp_checkpoint_metadata(
+            cpp_metadata,
+            *out_metadata);
+    }
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_input_log_write(
+    rtfw_handle* handle,
+    const rtfw_replay_input_record* records,
+    uint64_t record_count,
+    void* output,
+    uint64_t output_bytes,
+    rtfw_artifact_write_result* out_result) {
+    if (!handle || !out_result ||
+        !artifact_write_result_header_valid(*out_result) ||
+        record_count >
+            std::numeric_limits<std::size_t>::max() ||
+        output_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        (record_count != 0 && !records) ||
+        (output_bytes != 0 && !output) ||
+        record_count >
+            handle->runtime.config().replay_input_capacity) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        std::vector<rt::ReplayInputRecord> cpp_records;
+        cpp_records.reserve(
+            static_cast<std::size_t>(record_count));
+        for (std::size_t index = 0;
+             index < record_count;
+             ++index) {
+            const auto& record = records[index];
+            if (!replay_input_record_valid(record)) {
+                return handle->fail(
+                    RTFW_STATUS_INVALID_ARGUMENT,
+                    "replay input record is malformed");
+            }
+            rt::HostFrameContext frame;
+            frame.frame_index = record.frame_index;
+            frame.delta =
+                std::chrono::nanoseconds(record.delta_ns);
+            if (record.has_deadline != 0u) {
+                frame.deadline_ns = record.deadline_ns;
+            }
+            cpp_records.push_back(rt::ReplayInputRecord{
+                frame,
+                record.input_type,
+                std::span<const std::byte>(
+                    static_cast<const std::byte*>(
+                        record.payload),
+                    static_cast<std::size_t>(
+                        record.payload_size)),
+            });
+        }
+
+        rt::ArtifactWriteResult cpp_result;
+        handle->clear_boundary_error();
+        const auto status = handle->runtime.write_input_log(
+            cpp_records,
+            std::span<std::byte>(
+                static_cast<std::byte*>(output),
+                static_cast<std::size_t>(output_bytes)),
+            cpp_result);
+        const auto struct_size = out_result->struct_size;
+        std::memset(out_result, 0, sizeof(*out_result));
+        out_result->struct_size = struct_size;
+        from_cpp_artifact_write_result(
+            cpp_result,
+            *out_result);
+        return to_c_status(status);
+    } catch (const std::bad_alloc&) {
+        return handle->fail(
+            RTFW_STATUS_RESOURCE_EXHAUSTED,
+            "replay input staging allocation failed");
+    } catch (...) {
+        return handle->fail(
+            RTFW_STATUS_INTERNAL_ERROR,
+            "unexpected input-log encoding failure");
+    }
+}
+
+RTFW_API rtfw_status rtfw_input_log_inspect(
+    const void* input_log,
+    uint64_t input_log_bytes,
+    rtfw_input_log_metadata* out_metadata) {
+    if (!out_metadata ||
+        !input_log_metadata_header_valid(*out_metadata) ||
+        input_log_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        (input_log_bytes != 0 && !input_log)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    rt::InputLogMetadata cpp_metadata;
+    const auto status = rt::inspect_input_log_artifact(
+        std::span<const std::byte>(
+            static_cast<const std::byte*>(input_log),
+            static_cast<std::size_t>(input_log_bytes)),
+        cpp_metadata);
+    if (status != rt::Status::ok) {
+        return to_c_status(status);
+    }
+    const auto struct_size = out_metadata->struct_size;
+    std::memset(out_metadata, 0, sizeof(*out_metadata));
+    out_metadata->struct_size = struct_size;
+    from_cpp_input_log_metadata(
+        cpp_metadata,
+        *out_metadata);
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_replay(
+    rtfw_handle* handle,
+    const void* checkpoint,
+    uint64_t checkpoint_bytes,
+    const void* input_log,
+    uint64_t input_log_bytes,
+    rtfw_replay_input_callback input_callback,
+    void* input_user_data,
+    rtfw_replay_result* out_result) {
+    if (!handle ||
+        checkpoint_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        input_log_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        (checkpoint_bytes != 0 && !checkpoint) ||
+        (input_log_bytes != 0 && !input_log) ||
+        (out_result &&
+         !replay_result_header_valid(*out_result))) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    CReplayInvocation invocation{
+        input_callback,
+        input_user_data,
+    };
+    rt::ReplayResult cpp_result;
+    handle->clear_boundary_error();
+    const auto status = handle->runtime.replay(
+        std::span<const std::byte>(
+            static_cast<const std::byte*>(checkpoint),
+            static_cast<std::size_t>(checkpoint_bytes)),
+        std::span<const std::byte>(
+            static_cast<const std::byte*>(input_log),
+            static_cast<std::size_t>(input_log_bytes)),
+        input_callback ? &invoke_c_replay_input : nullptr,
+        &invocation,
+        out_result ? &cpp_result : nullptr);
+    if (out_result) {
+        const auto struct_size = out_result->struct_size;
+        std::memset(out_result, 0, sizeof(*out_result));
+        out_result->struct_size = struct_size;
+        from_cpp_replay_result(cpp_result, *out_result);
+    }
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_registered_state_hash(
+    rtfw_handle* handle,
+    uint64_t* out_hash) {
+    if (!handle || !out_hash) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_hash = 0;
+    handle->clear_boundary_error();
+    return to_c_status(
+        handle->runtime.registered_state_hash(*out_hash));
 }
 
 RTFW_API rtfw_status rtfw_now_ns(

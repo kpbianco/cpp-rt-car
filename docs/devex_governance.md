@@ -20,12 +20,14 @@ must not invent one.
 
 ## ABI policy
 
-The plugin and C surfaces are experimental in 0.7. The M1–M6 C configuration,
+The plugin and C surfaces are experimental in 0.8. The M1–M7 C configuration,
 frame, callback, result, graph, task-scratch, memory-plan, periodic, watchdog,
-degradation, preflight, metric-window, trace-cursor, and provenance surfaces
-carry their current validation metadata,
+degradation, preflight, metric-window, trace-cursor, provenance, canonical
+state, checkpoint, input-log, and replay surfaces carry their current
+validation metadata,
 and configuration carries
-`RTFW_C_ABI_VERSION`; those checks do not yet constitute a stable ABI promise.
+`RTFW_C_ABI_VERSION` 6; those checks do not yet constitute a stable ABI
+promise.
 Milestone M11 freezes exported symbols, ownership, structure sizing,
 capabilities, errors, and compatibility policy.
 

@@ -3,6 +3,7 @@
 #include <simcore/logger.hpp>
 #include <rt/snapshot.hpp>
 #include <cstdint>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -72,4 +73,24 @@ TEST(SnapshotRollback, ReplayHashEquality) {
     auto hash2 = rt::hash64(final2.data);
 
     EXPECT_EQ(hash1, hash2);
+}
+
+TEST(SnapshotLegacyReader, TruncatedScalarFailsClosed) {
+    const std::vector<std::uint8_t> bytes{0x01, 0x02, 0x03};
+    rt::SnapshotReader reader(bytes);
+    std::uint64_t value = std::numeric_limits<std::uint64_t>::max();
+    reader.read(value);
+    EXPECT_FALSE(reader.good());
+    EXPECT_EQ(value, 0u);
+    EXPECT_EQ(reader.remaining(), 0u);
+}
+
+TEST(SnapshotLegacyReader, EncodedVectorLengthCannotForceAllocation) {
+    rt::SnapshotWriter writer;
+    writer.write(std::numeric_limits<std::uint64_t>::max());
+    rt::SnapshotReader reader(writer.data);
+    std::vector<std::uint64_t> values{1, 2, 3};
+    reader.readVector(values);
+    EXPECT_FALSE(reader.good());
+    EXPECT_TRUE(values.empty());
 }

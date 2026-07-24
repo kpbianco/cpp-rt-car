@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(RTFW_C_ABI_VERSION == 5u, "unexpected C ABI version");
+_Static_assert(RTFW_C_ABI_VERSION == 6u, "unexpected C ABI version");
 _Static_assert(sizeof(rtfw_status) == sizeof(int32_t), "status width changed");
 _Static_assert(
     sizeof(rtfw_overload_policy) == sizeof(uint32_t),
@@ -12,6 +12,9 @@ _Static_assert(
 _Static_assert(
     sizeof(rtfw_platform_preflight_mode) == sizeof(uint32_t),
     "platform preflight mode width changed");
+_Static_assert(
+    sizeof(rtfw_determinism_tier) == sizeof(uint32_t),
+    "determinism tier width changed");
 
 #if defined(_WIN32)
 #    define WIN32_LEAN_AND_MEAN
@@ -101,6 +104,15 @@ typedef void (*rtfw_metric_cursor_init_fn)(rtfw_metric_cursor *);
 typedef void (*rtfw_metric_snapshot_init_fn)(rtfw_metric_snapshot *);
 typedef void (*rtfw_trace_cursor_init_fn)(rtfw_trace_cursor *);
 typedef void (*rtfw_trace_read_result_init_fn)(rtfw_trace_read_result *);
+typedef void (*rtfw_artifact_write_result_init_fn)(
+    rtfw_artifact_write_result *);
+typedef void (*rtfw_checkpoint_metadata_init_fn)(
+    rtfw_checkpoint_metadata *);
+typedef void (*rtfw_input_log_metadata_init_fn)(
+    rtfw_input_log_metadata *);
+typedef void (*rtfw_replay_input_record_init_fn)(
+    rtfw_replay_input_record *);
+typedef void (*rtfw_replay_result_init_fn)(rtfw_replay_result *);
 typedef rtfw_status (*rtfw_create_fn)(const rtfw_config *, rtfw_handle **);
 typedef rtfw_status (*rtfw_register_callback_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *);
@@ -108,6 +120,8 @@ typedef rtfw_status (*rtfw_register_phase_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *, rtfw_phase_id *);
 typedef rtfw_status (*rtfw_register_resource_fn)(
     rtfw_handle *, const char *, rtfw_resource_id *);
+typedef rtfw_status (*rtfw_register_state_fn)(
+    rtfw_handle *, const char *, uint32_t, void *, uint64_t);
 typedef rtfw_status (*rtfw_add_dependency_fn)(
     rtfw_handle *, rtfw_phase_id, rtfw_phase_id);
 typedef rtfw_status (*rtfw_declare_resource_access_fn)(
@@ -165,6 +179,41 @@ typedef rtfw_status (*rtfw_read_trace_fn)(
     rtfw_trace_event *,
     uint64_t,
     rtfw_trace_read_result *);
+typedef rtfw_status (*rtfw_checkpoint_size_fn)(
+    rtfw_handle *, uint64_t *);
+typedef rtfw_status (*rtfw_checkpoint_write_fn)(
+    rtfw_handle *,
+    uint64_t,
+    void *,
+    uint64_t,
+    rtfw_artifact_write_result *);
+typedef rtfw_status (*rtfw_checkpoint_inspect_fn)(
+    const void *, uint64_t, rtfw_checkpoint_metadata *);
+typedef rtfw_status (*rtfw_checkpoint_restore_fn)(
+    rtfw_handle *,
+    const void *,
+    uint64_t,
+    rtfw_checkpoint_metadata *);
+typedef rtfw_status (*rtfw_input_log_write_fn)(
+    rtfw_handle *,
+    const rtfw_replay_input_record *,
+    uint64_t,
+    void *,
+    uint64_t,
+    rtfw_artifact_write_result *);
+typedef rtfw_status (*rtfw_input_log_inspect_fn)(
+    const void *, uint64_t, rtfw_input_log_metadata *);
+typedef rtfw_status (*rtfw_replay_fn)(
+    rtfw_handle *,
+    const void *,
+    uint64_t,
+    const void *,
+    uint64_t,
+    rtfw_replay_input_callback,
+    void *,
+    rtfw_replay_result *);
+typedef rtfw_status (*rtfw_registered_state_hash_fn)(
+    rtfw_handle *, uint64_t *);
 typedef const char *(*rtfw_last_error_fn)(const rtfw_handle *);
 typedef void (*rtfw_destroy_fn)(rtfw_handle *);
 
@@ -360,6 +409,21 @@ static rtfw_callback_result periodic_observer(
     return RTFW_CALLBACK_OK;
 }
 
+static rtfw_callback_result replay_input(
+    void *user_data,
+    const rtfw_replay_input_view *input) {
+    unsigned char *state = (unsigned char *)user_data;
+    if (!state || !input ||
+        input->struct_size < sizeof(*input) ||
+        input->input_type != 7u ||
+        input->payload_size != 8u ||
+        !input->payload) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    memcpy(state, input->payload, 8u);
+    return RTFW_CALLBACK_OK;
+}
+
 int main(void) {
 #ifndef RTFW_LIB_PATH
 #error "RTFW_LIB_PATH must be defined with the runtime library path"
@@ -389,10 +453,16 @@ int main(void) {
     rtfw_metric_snapshot_init_fn metric_snapshot_init_fn;
     rtfw_trace_cursor_init_fn trace_cursor_init_fn;
     rtfw_trace_read_result_init_fn trace_read_result_init_fn;
+    rtfw_artifact_write_result_init_fn artifact_result_init_fn;
+    rtfw_checkpoint_metadata_init_fn checkpoint_metadata_init_fn;
+    rtfw_input_log_metadata_init_fn input_log_metadata_init_fn;
+    rtfw_replay_input_record_init_fn replay_record_init_fn;
+    rtfw_replay_result_init_fn replay_result_init_fn;
     rtfw_create_fn create_fn;
     rtfw_register_callback_fn register_fn;
     rtfw_register_phase_fn register_phase_fn;
     rtfw_register_resource_fn register_resource_fn;
+    rtfw_register_state_fn register_state_fn;
     rtfw_add_dependency_fn add_dependency_fn;
     rtfw_declare_resource_access_fn declare_access_fn;
     rtfw_parallel_for_fn parallel_for_fn;
@@ -411,6 +481,14 @@ int main(void) {
     rtfw_get_observability_metadata_fn get_observability_metadata_fn;
     rtfw_get_metrics_fn get_metrics_fn;
     rtfw_read_trace_fn read_trace_fn;
+    rtfw_checkpoint_size_fn checkpoint_size_fn;
+    rtfw_checkpoint_write_fn checkpoint_write_fn;
+    rtfw_checkpoint_inspect_fn checkpoint_inspect_fn;
+    rtfw_checkpoint_restore_fn checkpoint_restore_fn;
+    rtfw_input_log_write_fn input_log_write_fn;
+    rtfw_input_log_inspect_fn input_log_inspect_fn;
+    rtfw_replay_fn replay_fn;
+    rtfw_registered_state_hash_fn registered_state_hash_fn;
     rtfw_last_error_fn last_error_fn;
     rtfw_destroy_fn destroy_fn;
 
@@ -437,10 +515,26 @@ int main(void) {
     LOAD_FUNCTION(
         trace_read_result_init_fn,
         "rtfw_trace_read_result_init");
+    LOAD_FUNCTION(
+        artifact_result_init_fn,
+        "rtfw_artifact_write_result_init");
+    LOAD_FUNCTION(
+        checkpoint_metadata_init_fn,
+        "rtfw_checkpoint_metadata_init");
+    LOAD_FUNCTION(
+        input_log_metadata_init_fn,
+        "rtfw_input_log_metadata_init");
+    LOAD_FUNCTION(
+        replay_record_init_fn,
+        "rtfw_replay_input_record_init");
+    LOAD_FUNCTION(
+        replay_result_init_fn,
+        "rtfw_replay_result_init");
     LOAD_FUNCTION(create_fn, "rtfw_create");
     LOAD_FUNCTION(register_fn, "rtfw_register_callback");
     LOAD_FUNCTION(register_phase_fn, "rtfw_register_phase");
     LOAD_FUNCTION(register_resource_fn, "rtfw_register_resource");
+    LOAD_FUNCTION(register_state_fn, "rtfw_register_state");
     LOAD_FUNCTION(add_dependency_fn, "rtfw_add_dependency");
     LOAD_FUNCTION(declare_access_fn, "rtfw_declare_resource_access");
     LOAD_FUNCTION(parallel_for_fn, "rtfw_parallel_for");
@@ -465,6 +559,16 @@ int main(void) {
         "rtfw_get_observability_metadata");
     LOAD_FUNCTION(get_metrics_fn, "rtfw_get_metrics");
     LOAD_FUNCTION(read_trace_fn, "rtfw_read_trace");
+    LOAD_FUNCTION(checkpoint_size_fn, "rtfw_checkpoint_size");
+    LOAD_FUNCTION(checkpoint_write_fn, "rtfw_checkpoint_write");
+    LOAD_FUNCTION(checkpoint_inspect_fn, "rtfw_checkpoint_inspect");
+    LOAD_FUNCTION(checkpoint_restore_fn, "rtfw_checkpoint_restore");
+    LOAD_FUNCTION(input_log_write_fn, "rtfw_input_log_write");
+    LOAD_FUNCTION(input_log_inspect_fn, "rtfw_input_log_inspect");
+    LOAD_FUNCTION(replay_fn, "rtfw_replay");
+    LOAD_FUNCTION(
+        registered_state_hash_fn,
+        "rtfw_registered_state_hash");
     LOAD_FUNCTION(last_error_fn, "rtfw_last_error");
     LOAD_FUNCTION(destroy_fn, "rtfw_destroy");
     loaded_parallel_for = parallel_for_fn;
@@ -482,6 +586,7 @@ int main(void) {
             capabilities.frame_watchdog != 1 ||
             capabilities.strict_platform_preflight != 1 ||
             capabilities.versioned_observability != 1 ||
+            capabilities.deterministic_replay != 1 ||
             strcmp(
                 metric_name_fn(RTFW_METRIC_FRAMES_COMPLETED),
                 "runtime.frames_completed") != 0 ||
@@ -507,6 +612,12 @@ int main(void) {
             strcmp(
                 status_message_fn(RTFW_STATUS_CLOCK_FAILURE),
                 "runtime clock operation failed") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_INVALID_ARTIFACT),
+                "checkpoint or input-log artifact is invalid") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_INCOMPATIBLE_ARTIFACT),
+                "checkpoint or input-log artifact is incompatible") != 0 ||
             strcmp(
                 status_message_fn((rtfw_status)INT32_MAX),
                 "unknown runtime status") != 0) {
@@ -563,6 +674,26 @@ int main(void) {
             "disabled") != RTFW_STATUS_OK ||
         config_set_fn(
             &config,
+            "determinism_tier",
+            "unspecified") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "state_capacity",
+            "4") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "snapshot_max_bytes",
+            "4096") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "replay_input_capacity",
+            "16") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "input_log_max_bytes",
+            "4096") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
             "workload_id",
             "cabi.dynamic") != RTFW_STATUS_OK ||
         config_set_fn(
@@ -578,14 +709,6 @@ int main(void) {
         lib_close(handle);
         return EXIT_FAILURE;
     }
-    config.reserved0 = 1;
-    if (config_set_fn(&config, "scratch_bytes", "64") !=
-            RTFW_STATUS_INVALID_ARGUMENT) {
-        fprintf(stderr, "configuration accepted reserved0\n");
-        lib_close(handle);
-        return EXIT_FAILURE;
-    }
-    config.reserved0 = 0;
     config.reserved[0] = 1;
     if (config_set_fn(&config, "scratch_bytes", "64") !=
             RTFW_STATUS_INVALID_ARGUMENT) {
@@ -632,6 +755,15 @@ int main(void) {
         return EXIT_FAILURE;
     }
     config.platform_preflight_mode = RTFW_PLATFORM_PREFLIGHT_DISABLED;
+    config.determinism_tier = UINT32_MAX;
+    if (create_fn(&config, &instance) != RTFW_STATUS_INVALID_CONFIG ||
+        instance != NULL) {
+        fprintf(stderr, "runtime accepted a malformed determinism tier\n");
+        destroy_fn(instance);
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    config.determinism_tier = RTFW_DETERMINISM_D0_UNSPECIFIED;
     if (create_fn(&config, &instance) != RTFW_STATUS_OK || !instance) {
         fprintf(stderr, "rtfw_create failed\n");
         lib_close(handle);
@@ -1117,6 +1249,167 @@ int main(void) {
 
     destroy_fn(instance);
     destroy_fn(NULL);
+
+    {
+        rtfw_handle *replay_instance = NULL;
+        rtfw_config replay_config = config;
+        unsigned char state_bytes[8] = {
+            1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u};
+        const unsigned char checkpoint_state[8] = {
+            1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u};
+        const unsigned char payload[8] = {
+            11u, 12u, 13u, 14u, 15u, 16u, 17u, 18u};
+        unsigned char checkpoint[4096];
+        unsigned char input_log[4096];
+        uint64_t checkpoint_bytes = 0;
+        uint64_t state_hash = 0;
+        rtfw_artifact_write_result checkpoint_result;
+        rtfw_artifact_write_result input_result;
+        rtfw_checkpoint_metadata checkpoint_metadata;
+        rtfw_input_log_metadata input_metadata;
+        rtfw_replay_input_record record;
+        rtfw_replay_result replay_result;
+        char unterminated_name[RTFW_REPLAY_IDENTIFIER_CAPACITY];
+
+        replay_config.determinism_tier =
+            RTFW_DETERMINISM_D1_SCHEDULE_INDEPENDENT;
+        memset(
+            unterminated_name,
+            'a',
+            sizeof(unterminated_name));
+        if (create_fn(&replay_config, &replay_instance) !=
+                RTFW_STATUS_OK ||
+            register_state_fn(
+                replay_instance,
+                unterminated_name,
+                1u,
+                state_bytes,
+                sizeof(state_bytes)) !=
+                RTFW_STATUS_INVALID_ARGUMENT ||
+            register_state_fn(
+                replay_instance,
+                "cabi.state",
+                1u,
+                state_bytes,
+                sizeof(state_bytes)) != RTFW_STATUS_OK ||
+            finalize_fn(replay_instance) != RTFW_STATUS_OK ||
+            start_fn(replay_instance) != RTFW_STATUS_OK ||
+            checkpoint_size_fn(
+                replay_instance,
+                &checkpoint_bytes) != RTFW_STATUS_OK ||
+            checkpoint_bytes > sizeof(checkpoint)) {
+            fprintf(stderr, "C ABI replay setup failed\n");
+            destroy_fn(replay_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+
+        artifact_result_init_fn(&checkpoint_result);
+        if (checkpoint_write_fn(
+                replay_instance,
+                0u,
+                NULL,
+                0u,
+                &checkpoint_result) !=
+                RTFW_STATUS_CAPACITY_EXCEEDED ||
+            checkpoint_result.required_bytes != checkpoint_bytes) {
+            fprintf(stderr, "checkpoint sizing result failed\n");
+            destroy_fn(replay_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        artifact_result_init_fn(&checkpoint_result);
+        checkpoint_metadata_init_fn(&checkpoint_metadata);
+        if (checkpoint_write_fn(
+                replay_instance,
+                0u,
+                checkpoint,
+                sizeof(checkpoint),
+                &checkpoint_result) != RTFW_STATUS_OK ||
+            checkpoint_result.bytes_written != checkpoint_bytes ||
+            checkpoint_inspect_fn(
+                checkpoint,
+                checkpoint_result.bytes_written,
+                &checkpoint_metadata) != RTFW_STATUS_OK ||
+            checkpoint_metadata.state_count != 1u ||
+            checkpoint_metadata.determinism_tier !=
+                RTFW_DETERMINISM_D1_SCHEDULE_INDEPENDENT) {
+            fprintf(stderr, "checkpoint C ABI contract failed\n");
+            destroy_fn(replay_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+
+        memset(state_bytes, 0x5a, sizeof(state_bytes));
+        checkpoint_metadata_init_fn(&checkpoint_metadata);
+        if (checkpoint_restore_fn(
+                replay_instance,
+                checkpoint,
+                checkpoint_result.bytes_written,
+                &checkpoint_metadata) != RTFW_STATUS_OK ||
+            memcmp(
+                state_bytes,
+                checkpoint_state,
+                sizeof(state_bytes)) != 0) {
+            fprintf(stderr, "checkpoint restore C ABI contract failed\n");
+            destroy_fn(replay_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+
+        replay_record_init_fn(&record);
+        record.input_type = 7u;
+        record.frame_index = 1u;
+        record.delta_ns = 1;
+        record.payload = payload;
+        record.payload_size = sizeof(payload);
+        artifact_result_init_fn(&input_result);
+        input_log_metadata_init_fn(&input_metadata);
+        if (input_log_write_fn(
+                replay_instance,
+                &record,
+                1u,
+                input_log,
+                sizeof(input_log),
+                &input_result) != RTFW_STATUS_OK ||
+            input_log_inspect_fn(
+                input_log,
+                input_result.bytes_written,
+                &input_metadata) != RTFW_STATUS_OK ||
+            input_metadata.record_count != 1u ||
+            input_metadata.first_frame_index != 1u) {
+            fprintf(stderr, "input-log C ABI contract failed\n");
+            destroy_fn(replay_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+
+        memset(state_bytes, 0x33, sizeof(state_bytes));
+        replay_result_init_fn(&replay_result);
+        if (replay_fn(
+                replay_instance,
+                checkpoint,
+                checkpoint_result.bytes_written,
+                input_log,
+                input_result.bytes_written,
+                replay_input,
+                state_bytes,
+                &replay_result) != RTFW_STATUS_OK ||
+            replay_result.records_processed != 1u ||
+            replay_result.frames_replayed != 1u ||
+            memcmp(state_bytes, payload, sizeof(state_bytes)) != 0 ||
+            registered_state_hash_fn(
+                replay_instance,
+                &state_hash) != RTFW_STATUS_OK ||
+            state_hash != replay_result.final_state_hash ||
+            stop_fn(replay_instance) != RTFW_STATUS_OK) {
+            fprintf(stderr, "replay C ABI contract failed\n");
+            destroy_fn(replay_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        destroy_fn(replay_instance);
+    }
 
     {
         rtfw_handle *conflict_instance = NULL;

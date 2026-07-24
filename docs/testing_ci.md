@@ -29,19 +29,27 @@ latency qualification and does not prove the complete product contract.
   of cumulative counters, gauge sampling, exact trace-cursor loss, runtime
   isolation, JSON schema fields, and drop-without-wait behavior under slot
   contention.
+- Determinism/replay tests compare D1 canonical state across one, two, and four
+  workers; transfer checkpoints across worker counts; reproduce final state
+  from checkpoint plus input log; require transactional rejection of corrupt
+  and foreign artifacts; and exercise 5,000 deterministic parser mutations.
+- Allocation instrumentation also covers checkpoint sizing/writing,
+  inspection, restore, and input-log writing against caller-owned buffers.
 - Unified-executor tests stress independent phases with nested ranges and
   fixed-tree reductions under both policies, verify stable static assignment
   metadata, force deterministic queue saturation, and require real local
   execution and successful cross-worker steals.
 - A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
-  M5 time/platform, and M6 observability suites.
+  M5 time/platform, M6 observability, and M7 determinism/replay suites.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
   paths.
-- the determinism matrix runs a filtered integration test across selected
-  compiler and AVX2/FMA build variants. Each job validates behavior within its
-  own binary; CI does not compare hashes between compiler jobs.
+- the determinism matrix runs a filtered integration test and emits the same
+  integer-only D1 checkpoint artifact under GCC/Clang and FMA on/off. A
+  separate exchange job byte-compares all four artifacts.
+- a Clang/libFuzzer smoke job runs the allocation-free checkpoint and input-log
+  inspectors for 20,000 generated inputs.
 - Linux and Windows jobs exercise selected Debug/RelWithDebInfo builds.
 - Executable shared/static C and C++ compiled-graph samples, dynamic C ABI
   loading, autotune-tooling, scaling-artifact, and documentation-contract jobs
@@ -52,8 +60,13 @@ latency qualification and does not prove the complete product contract.
 - No job measures a statistically controlled worst-case or confidence-bound
   latency gate on dedicated hardware.
 - Sanitizer jobs do not cover every sanitizer, platform, or code path.
-- The libFuzzer target is optional and is not a continuous fuzzing service.
-- Passing snapshot tests do not establish a safe, stable interchange format.
+- The libFuzzer smoke target is not a continuous fuzzing service and cannot
+  establish parser safety for every input.
+- M7 artifact checksums detect accidental corruption; they are not
+  authentication and do not protect against maliciously rewritten artifacts.
+- Cross-compiler artifact equality currently covers one canonical integer
+  workload on Linux, not arbitrary callback code, floating-point behavior,
+  architectures, standard libraries, or D2/D3 determinism.
 - Passing mock-GPU tests do not exercise a hardware device.
 - Best-effort host-hardening steps on shared runners are not RT evidence.
 
@@ -71,8 +84,11 @@ predeclared thresholds, and the measurement procedure.
 - Differential test: `tests/test_differential_output.cpp`
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
-- Optional fuzz harness: `tests/jobqueue_fuzz.cpp`
-- M1–M6 lifecycle, graph, executor, memory, time, platform, and observability
+- Optional fuzz harnesses: `tests/jobqueue_fuzz.cpp`,
+  `tests/snapshot_fuzz.cpp`
+- Cross-build artifact producer: `tests/determinism_artifact.cpp`
+- M1–M7 lifecycle, graph, executor, memory, time, platform, observability, and
+  replay
   tests:
   `tests/test_host_runtime.cpp`,
   `tests/test_compiled_graph.cpp`, `tests/test_executor.cpp`,
@@ -80,5 +96,6 @@ predeclared thresholds, and the measurement procedure.
   `tests/test_periodic_runtime.cpp`,
   `tests/test_platform_preflight.cpp`,
   `tests/test_observability.cpp`,
+  `tests/test_determinism_replay.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`

@@ -1,7 +1,10 @@
 #pragma once
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <span>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -9,6 +12,10 @@
 
 namespace rt {
 
+// Legacy native-layout helpers retained for SimCore compatibility. Readers
+// are bounds checked and never resize from an encoded count until the complete
+// payload is known to fit the supplied input. New integrations should use the
+// versioned Runtime checkpoint/replay API instead.
 struct SnapshotWriter {
     std::vector<std::uint8_t> data;
 
@@ -46,49 +53,150 @@ struct SnapshotWriter {
 struct SnapshotReader {
     const std::vector<std::uint8_t> &data;
     std::size_t offset{0};
+    bool valid{true};
 
     explicit SnapshotReader(const std::vector<std::uint8_t> &d) : data(d) {}
 
     template <class T> void read(T &out) {
         static_assert(std::is_trivially_copyable_v<T>, "read requires POD");
+        if (!valid || sizeof(T) > data.size() - std::min(offset, data.size())) {
+            out = T{};
+            offset = data.size();
+            valid = false;
+            return;
+        }
         std::memcpy(&out, data.data() + offset, sizeof(T));
         offset += sizeof(T);
     }
 
     template <class T> void readVector(std::vector<T> &vec) {
+        static_assert(std::is_trivially_copyable_v<T>, "readVector requires POD");
         std::uint64_t n = 0;
         read(n);
-        vec.resize(static_cast<std::size_t>(n));
-        if (n) {
-            static_assert(std::is_trivially_copyable_v<T>, "readVector requires POD");
-            std::memcpy(vec.data(), data.data() + offset, n * sizeof(T));
-            offset += n * sizeof(T);
+        if (!valid ||
+            n > std::numeric_limits<std::size_t>::max() ||
+            static_cast<std::size_t>(n) >
+                (data.size() - offset) / sizeof(T)) {
+            vec.clear();
+            offset = data.size();
+            valid = false;
+            return;
+        }
+        const auto count = static_cast<std::size_t>(n);
+        vec.resize(count);
+        if (count != 0) {
+            const auto bytes = count * sizeof(T);
+            std::memcpy(vec.data(), data.data() + offset, bytes);
+            offset += bytes;
         }
     }
 
     template <class K, class V> void readMap(std::unordered_map<K, V> &m) {
+        static_assert(std::is_trivially_copyable_v<K>, "readMap requires POD keys");
+        static_assert(std::is_trivially_copyable_v<V>, "readMap requires POD values");
         std::uint64_t n = 0;
         read(n);
         m.clear();
+        constexpr std::size_t pair_bytes = sizeof(K) + sizeof(V);
+        if (!valid ||
+            n > std::numeric_limits<std::size_t>::max() ||
+            static_cast<std::size_t>(n) >
+                (data.size() - offset) / pair_bytes) {
+            offset = data.size();
+            valid = false;
+            return;
+        }
         m.reserve(static_cast<std::size_t>(n));
         for (std::uint64_t i = 0; i < n; ++i) {
-            K k;
-            V v;
+            K k{};
+            V v{};
             read(k);
             read(v);
+            if (!valid) {
+                m.clear();
+                return;
+            }
             m.emplace(std::move(k), std::move(v));
         }
     }
+
+    [[nodiscard]] bool good() const noexcept { return valid; }
+    [[nodiscard]] std::size_t remaining() const noexcept {
+        return offset <= data.size() ? data.size() - offset : 0;
+    }
 };
 
-inline std::uint64_t hash64(const std::vector<std::uint8_t> &buf) {
+inline std::uint64_t hash64(std::span<const std::byte> buf) noexcept {
     std::uint64_t h = 1469598103934665603ull;
-    for (std::uint8_t b : buf) {
-        h ^= b;
+    for (std::byte b : buf) {
+        h ^= static_cast<std::uint8_t>(b);
         h *= 1099511628211ull;
     }
     return h;
 }
 
-} // namespace rt
+inline std::uint64_t hash64(const std::vector<std::uint8_t> &buf) noexcept {
+    return hash64(std::as_bytes(std::span(buf)));
+}
 
+inline bool store_u32_le(
+    std::span<std::byte> output,
+    std::size_t offset,
+    std::uint32_t value) noexcept {
+    if (offset > output.size() || output.size() - offset < sizeof(value)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < sizeof(value); ++index) {
+        output[offset + index] = static_cast<std::byte>(
+            (value >> (index * 8u)) & 0xffu);
+    }
+    return true;
+}
+
+inline bool store_u64_le(
+    std::span<std::byte> output,
+    std::size_t offset,
+    std::uint64_t value) noexcept {
+    if (offset > output.size() || output.size() - offset < sizeof(value)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < sizeof(value); ++index) {
+        output[offset + index] = static_cast<std::byte>(
+            (value >> (index * 8u)) & 0xffu);
+    }
+    return true;
+}
+
+inline bool load_u32_le(
+    std::span<const std::byte> input,
+    std::size_t offset,
+    std::uint32_t& value) noexcept {
+    value = 0;
+    if (offset > input.size() || input.size() - offset < sizeof(value)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < sizeof(value); ++index) {
+        value |= static_cast<std::uint32_t>(
+                     static_cast<std::uint8_t>(input[offset + index]))
+                 << (index * 8u);
+    }
+    return true;
+}
+
+inline bool load_u64_le(
+    std::span<const std::byte> input,
+    std::size_t offset,
+    std::uint64_t& value) noexcept {
+    value = 0;
+    if (offset > input.size() || input.size() - offset < sizeof(value)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < sizeof(value); ++index) {
+        value |= static_cast<std::uint64_t>(
+                     static_cast<std::uint8_t>(input[offset + index]))
+                 << (index * 8u);
+    }
+    return true;
+}
+
+} // namespace rt

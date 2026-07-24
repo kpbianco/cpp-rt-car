@@ -24,7 +24,7 @@ extern "C" {
 #define RT_VERSION_MAJOR RTFW_VERSION_MAJOR
 #define RT_VERSION_MINOR RTFW_VERSION_MINOR
 #define RT_VERSION_PATCH RTFW_VERSION_PATCH
-#define RTFW_C_ABI_VERSION 5u
+#define RTFW_C_ABI_VERSION 6u
 
 typedef struct {
     uint8_t compiled_graph;
@@ -35,6 +35,7 @@ typedef struct {
     uint8_t frame_watchdog;
     uint8_t strict_platform_preflight;
     uint8_t versioned_observability;
+    uint8_t deterministic_replay;
 } rt_capabilities_c;
 
 typedef struct rtfw_handle rtfw_handle;
@@ -57,6 +58,8 @@ typedef int32_t rtfw_status;
 #define RTFW_STATUS_SCRATCH_EXHAUSTED ((rtfw_status)-12)
 #define RTFW_STATUS_PLATFORM_PREFLIGHT_FAILED ((rtfw_status)-13)
 #define RTFW_STATUS_CLOCK_FAILURE ((rtfw_status)-14)
+#define RTFW_STATUS_INVALID_ARTIFACT ((rtfw_status)-15)
+#define RTFW_STATUS_INCOMPATIBLE_ARTIFACT ((rtfw_status)-16)
 
 typedef uint32_t rtfw_runtime_state;
 #define RTFW_STATE_CONFIGURING ((rtfw_runtime_state)0u)
@@ -84,6 +87,14 @@ typedef uint32_t rtfw_platform_preflight_mode;
 #define RTFW_PLATFORM_PREFLIGHT_DISABLED ((rtfw_platform_preflight_mode)0u)
 #define RTFW_PLATFORM_PREFLIGHT_STRICT ((rtfw_platform_preflight_mode)1u)
 
+typedef uint32_t rtfw_determinism_tier;
+#define RTFW_DETERMINISM_D0_UNSPECIFIED ((rtfw_determinism_tier)0u)
+#define RTFW_DETERMINISM_D1_SCHEDULE_INDEPENDENT \
+    ((rtfw_determinism_tier)1u)
+#define RTFW_DETERMINISM_D2_REPRODUCIBLE_BUILD \
+    ((rtfw_determinism_tier)2u)
+#define RTFW_DETERMINISM_D3_PORTABLE ((rtfw_determinism_tier)3u)
+
 typedef uint32_t rtfw_platform_check_id;
 #define RTFW_PLATFORM_CHECK_ABSOLUTE_MONOTONIC_CLOCK \
     ((rtfw_platform_check_id)0u)
@@ -104,6 +115,9 @@ typedef uint32_t rtfw_platform_check_status;
 #define RTFW_PLATFORM_CHECK_MESSAGE_CAPACITY 96u
 #define RTFW_OBSERVABILITY_SCHEMA_VERSION 1u
 #define RTFW_OBSERVABILITY_IDENTIFIER_CAPACITY 64u
+#define RTFW_CHECKPOINT_SCHEMA_VERSION 1u
+#define RTFW_INPUT_LOG_SCHEMA_VERSION 1u
+#define RTFW_REPLAY_IDENTIFIER_CAPACITY 64u
 #define RTFW_RUNTIME_METRIC_COUNT 22u
 #define RTFW_INVALID_TRACE_INDEX UINT32_MAX
 
@@ -125,7 +139,11 @@ typedef struct rtfw_config {
     uint32_t platform_preflight_mode;
     uint64_t watchdog_timeout_ns;
     uint32_t watchdog_max_degradation_level;
-    uint32_t reserved0;
+    uint32_t determinism_tier;
+    uint64_t state_capacity;
+    uint64_t snapshot_max_bytes;
+    uint64_t replay_input_capacity;
+    uint64_t input_log_max_bytes;
     char workload_id[RTFW_OBSERVABILITY_IDENTIFIER_CAPACITY];
     uint64_t reserved[2];
 } rtfw_config;
@@ -227,6 +245,11 @@ typedef struct rtfw_memory_plan {
     uint64_t trace_capacity;
     uint64_t trace_slot_bytes;
     uint64_t trace_storage_bytes;
+    uint64_t state_count;
+    uint64_t registered_state_bytes;
+    uint64_t snapshot_max_bytes;
+    uint64_t replay_input_capacity;
+    uint64_t input_log_max_bytes;
     uint64_t queue_slots;
     uint64_t scratch_alignment;
     uint64_t reserved[4];
@@ -380,6 +403,95 @@ typedef struct rtfw_trace_read_result {
     uint64_t reserved[2];
 } rtfw_trace_read_result;
 
+typedef struct rtfw_artifact_write_result {
+    uint32_t struct_size;
+    uint32_t reserved0;
+    uint64_t required_bytes;
+    uint64_t bytes_written;
+    uint64_t checksum;
+    uint64_t reserved[2];
+} rtfw_artifact_write_result;
+
+typedef struct rtfw_checkpoint_metadata {
+    uint32_t struct_size;
+    uint32_t schema_version;
+    uint32_t runtime_version_major;
+    uint32_t runtime_version_minor;
+    uint32_t runtime_version_patch;
+    uint32_t determinism_tier;
+    uint32_t state_count;
+    uint32_t reserved0;
+    uint64_t config_id;
+    uint64_t replay_id;
+    uint64_t graph_id;
+    uint64_t state_schema_id;
+    uint64_t checkpoint_frame_index;
+    uint64_t state_payload_bytes;
+    uint64_t total_bytes;
+    uint64_t state_hash;
+    uint64_t artifact_checksum;
+    char build_id[RTFW_REPLAY_IDENTIFIER_CAPACITY];
+    char workload_id[RTFW_REPLAY_IDENTIFIER_CAPACITY];
+    uint64_t reserved[2];
+} rtfw_checkpoint_metadata;
+
+typedef struct rtfw_input_log_metadata {
+    uint32_t struct_size;
+    uint32_t schema_version;
+    uint32_t runtime_version_major;
+    uint32_t runtime_version_minor;
+    uint32_t runtime_version_patch;
+    uint32_t determinism_tier;
+    uint32_t record_count;
+    uint32_t reserved0;
+    uint64_t replay_id;
+    uint64_t state_schema_id;
+    uint64_t payload_bytes;
+    uint64_t total_bytes;
+    uint64_t artifact_checksum;
+    uint64_t first_frame_index;
+    uint64_t last_frame_index;
+    char workload_id[RTFW_REPLAY_IDENTIFIER_CAPACITY];
+    uint64_t reserved[2];
+} rtfw_input_log_metadata;
+
+typedef struct rtfw_replay_input_record {
+    uint32_t struct_size;
+    uint32_t input_type;
+    uint64_t frame_index;
+    int64_t delta_ns;
+    uint8_t has_deadline;
+    uint8_t reserved0[7];
+    uint64_t deadline_ns;
+    const void* payload;
+    uint64_t payload_size;
+    uint64_t reserved[2];
+} rtfw_replay_input_record;
+
+typedef struct rtfw_replay_input_view {
+    uint32_t struct_size;
+    uint32_t input_type;
+    uint64_t frame_index;
+    int64_t delta_ns;
+    uint8_t has_deadline;
+    uint8_t reserved0[7];
+    uint64_t deadline_ns;
+    const void* payload;
+    uint64_t payload_size;
+} rtfw_replay_input_view;
+
+typedef struct rtfw_replay_result {
+    uint32_t struct_size;
+    uint32_t reserved0;
+    uint64_t checkpoint_frame_index;
+    uint64_t first_frame_index;
+    uint64_t last_frame_index;
+    uint64_t records_processed;
+    uint64_t frames_replayed;
+    uint64_t final_state_hash;
+    uint64_t reserved[2];
+} rtfw_replay_result;
+
 typedef uint32_t rtfw_callback_result;
 #define RTFW_CALLBACK_OK ((rtfw_callback_result)0u)
 #define RTFW_CALLBACK_ERROR ((rtfw_callback_result)1u)
@@ -420,6 +532,10 @@ typedef rtfw_callback_result (*rtfw_periodic_frame_callback)(
     void* user_data,
     const rtfw_periodic_frame_result* frame);
 
+typedef rtfw_callback_result (*rtfw_replay_input_callback)(
+    void* user_data,
+    const rtfw_replay_input_view* input);
+
 /* Capability bytes are 0 or 1 and report completed target-path guarantees. */
 RTFW_API uint32_t rt_version_major(void);
 RTFW_API uint32_t rt_version_minor(void);
@@ -454,13 +570,23 @@ RTFW_API void rtfw_trace_cursor_init(
     rtfw_trace_cursor* cursor);
 RTFW_API void rtfw_trace_read_result_init(
     rtfw_trace_read_result* result);
+RTFW_API void rtfw_artifact_write_result_init(
+    rtfw_artifact_write_result* result);
+RTFW_API void rtfw_checkpoint_metadata_init(
+    rtfw_checkpoint_metadata* metadata);
+RTFW_API void rtfw_input_log_metadata_init(
+    rtfw_input_log_metadata* metadata);
+RTFW_API void rtfw_replay_input_record_init(
+    rtfw_replay_input_record* record);
+RTFW_API void rtfw_replay_result_init(
+    rtfw_replay_result* result);
 
 /*
  * The runtime copies configuration and callback names. Callback user_data is
  * borrowed until the runtime is stopped/destroyed. Callback context and
  * scratch pointers are valid only for that synchronous callback invocation.
  * Lifecycle and graph functions are single-host-thread operations in ABI
- * version 5.
+ * version 6.
  */
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
@@ -481,6 +607,12 @@ RTFW_API rtfw_status rtfw_register_resource(
     rtfw_handle* handle,
     const char* name,
     rtfw_resource_id* out_resource);
+RTFW_API rtfw_status rtfw_register_state(
+    rtfw_handle* handle,
+    const char* name,
+    uint32_t schema_version,
+    void* storage,
+    uint64_t storage_bytes);
 RTFW_API rtfw_status rtfw_add_dependency(
     rtfw_handle* handle,
     rtfw_phase_id prerequisite,
@@ -575,6 +707,47 @@ RTFW_API rtfw_status rtfw_read_trace(
     rtfw_trace_event* events,
     uint64_t event_capacity,
     rtfw_trace_read_result* out_result);
+RTFW_API rtfw_status rtfw_checkpoint_size(
+    rtfw_handle* handle,
+    uint64_t* out_required_bytes);
+RTFW_API rtfw_status rtfw_checkpoint_write(
+    rtfw_handle* handle,
+    uint64_t checkpoint_frame_index,
+    void* output,
+    uint64_t output_bytes,
+    rtfw_artifact_write_result* out_result);
+RTFW_API rtfw_status rtfw_checkpoint_inspect(
+    const void* checkpoint,
+    uint64_t checkpoint_bytes,
+    rtfw_checkpoint_metadata* out_metadata);
+RTFW_API rtfw_status rtfw_checkpoint_restore(
+    rtfw_handle* handle,
+    const void* checkpoint,
+    uint64_t checkpoint_bytes,
+    rtfw_checkpoint_metadata* out_metadata);
+RTFW_API rtfw_status rtfw_input_log_write(
+    rtfw_handle* handle,
+    const rtfw_replay_input_record* records,
+    uint64_t record_count,
+    void* output,
+    uint64_t output_bytes,
+    rtfw_artifact_write_result* out_result);
+RTFW_API rtfw_status rtfw_input_log_inspect(
+    const void* input_log,
+    uint64_t input_log_bytes,
+    rtfw_input_log_metadata* out_metadata);
+RTFW_API rtfw_status rtfw_replay(
+    rtfw_handle* handle,
+    const void* checkpoint,
+    uint64_t checkpoint_bytes,
+    const void* input_log,
+    uint64_t input_log_bytes,
+    rtfw_replay_input_callback input_callback,
+    void* input_user_data,
+    rtfw_replay_result* out_result);
+RTFW_API rtfw_status rtfw_registered_state_hash(
+    rtfw_handle* handle,
+    uint64_t* out_hash);
 RTFW_API rtfw_status rtfw_now_ns(
     rtfw_handle* handle,
     uint64_t* out_now_ns);

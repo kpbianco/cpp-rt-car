@@ -19,7 +19,7 @@ Release 0.6 adds a separate M5 target-path signal:
 `CallbackContext::degradation_level`. A one-shot watchdog event is consumed and
 the capped level is incremented only by the frame thread after the graph
 returns. The watchdog service lane never calls the host or mutates that state.
-Callbacks must explicitly choose cheaper work; 0.7 does not automatically
+Callbacks must explicitly choose cheaper work; 0.8 does not automatically
 disable phases and has no recovery policy. See the
 [time/platform contract](time_platform.md).
 

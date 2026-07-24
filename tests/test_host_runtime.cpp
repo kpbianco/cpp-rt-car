@@ -111,6 +111,7 @@ TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     EXPECT_TRUE(capabilities.frame_watchdog);
     EXPECT_TRUE(capabilities.strict_platform_preflight);
     EXPECT_TRUE(capabilities.versioned_observability);
+    EXPECT_TRUE(capabilities.deterministic_replay);
 }
 
 TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
@@ -169,7 +170,7 @@ TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
 }
 
 TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
-    EXPECT_EQ(rt::runtime_config_schema_version, 5u);
+    EXPECT_EQ(rt::runtime_config_schema_version, 6u);
 
     rt::RuntimeConfig standalone;
     const auto unchanged = standalone;
@@ -253,6 +254,21 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
             "disabled"),
         rt::Status::ok);
     ASSERT_EQ(
+        runtime.configure_key("determinism_tier", "d0"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("state_capacity", "2"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("snapshot_max_bytes", "1024"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("replay_input_capacity", "4"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("input_log_max_bytes", "1024"),
+        rt::Status::ok);
+    ASSERT_EQ(
         runtime.configure_key(
             "workload_id",
             "host-runtime.test"),
@@ -288,6 +304,13 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
     EXPECT_EQ(
         runtime.config().platform_preflight_mode,
         rt::PlatformPreflightMode::disabled);
+    EXPECT_EQ(
+        runtime.config().determinism_tier,
+        rt::DeterminismTier::unspecified);
+    EXPECT_EQ(runtime.config().state_capacity, 2u);
+    EXPECT_EQ(runtime.config().snapshot_max_bytes, 1024u);
+    EXPECT_EQ(runtime.config().replay_input_capacity, 4u);
+    EXPECT_EQ(runtime.config().input_log_max_bytes, 1024u);
     EXPECT_EQ(runtime.trace_event_count(), 3u);
     EXPECT_NE(first.multiply_add, 0.0);
 

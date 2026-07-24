@@ -42,6 +42,7 @@ namespace
 
 static constexpr std::array<char, 8> kSnapshotMagic{'R', 'T', 'F', 'W', 'S', 'N', 'A', 'P'};
 static constexpr std::uint32_t kSnapshotVersion = 1u;
+static constexpr std::uint64_t kMaxDemoSnapshotBytes = 64u * 1024u * 1024u;
 
 template <typename T>
 void writeScalar(std::ofstream &out, T value)
@@ -82,6 +83,9 @@ std::vector<T> readVector(std::ifstream &in)
     readScalar(in, size);
     if (size == 0)
         return {};
+    if (size > std::numeric_limits<std::size_t>::max() ||
+        size > kMaxDemoSnapshotBytes / sizeof(T))
+        throw std::runtime_error("Snapshot vector exceeds the demo size policy");
     std::vector<T> values(static_cast<std::size_t>(size));
     in.read(reinterpret_cast<char*>(values.data()), static_cast<std::streamsize>(sizeof(T) * values.size()));
     if (!in)
@@ -207,6 +211,8 @@ std::vector<std::uint8_t> canonicalizeSimState(const std::vector<std::uint8_t> &
     reader.read(precoveredMs);
     writer.write<double>(0.0);
 
+    if (!reader.good() || reader.remaining() != 0)
+        throw std::runtime_error("Legacy SimCore snapshot payload is malformed");
     return writer.data;
 }
 
@@ -215,6 +221,12 @@ DemoSnapshot loadSnapshotFile(const std::string &path)
     std::ifstream in(path, std::ios::binary);
     if (!in)
         throw std::runtime_error("Failed to open snapshot input file: " + path);
+    in.seekg(0, std::ios::end);
+    const auto fileSize = in.tellg();
+    if (fileSize < 0 ||
+        static_cast<std::uint64_t>(fileSize) > kMaxDemoSnapshotBytes)
+        throw std::runtime_error("Snapshot input exceeds the demo size policy: " + path);
+    in.seekg(0, std::ios::beg);
 
     std::array<char, kSnapshotMagic.size()> magic{};
     in.read(magic.data(), static_cast<std::streamsize>(magic.size()));

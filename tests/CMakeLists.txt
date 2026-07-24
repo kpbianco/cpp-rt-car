@@ -81,6 +81,7 @@ if (SIM_GTEST_AVAILABLE)
         test_executor.cpp
         test_memory_plan.cpp
         test_observability.cpp
+        test_determinism_replay.cpp
         test_rt_pipeline.cpp
         test_platform_gate.cpp
         integration/test_determinism.cpp
@@ -147,6 +148,9 @@ if (SIM_GTEST_AVAILABLE)
     endif()
 endif()
 
+add_executable(rtfw_determinism_artifact determinism_artifact.cpp)
+target_link_libraries(rtfw_determinism_artifact PRIVATE simcore_rt)
+
 add_executable(test_cabi_dlopen test_cabi_dlopen.c)
 target_include_directories(test_cabi_dlopen PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -173,4 +177,13 @@ if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_link_libraries(jobqueue_fuzz PRIVATE simcore_platform)
     target_compile_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+
+    # Compile the codec into the fuzz binary so ASan/UBSan instrument the
+    # parser itself rather than only the libFuzzer entry point.
+    add_executable(snapshot_fuzz
+        snapshot_fuzz.cpp
+        ${CMAKE_SOURCE_DIR}/rt/src/snapshot_codec.cpp)
+    target_link_libraries(snapshot_fuzz PRIVATE simcore simcore_core)
+    target_compile_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()

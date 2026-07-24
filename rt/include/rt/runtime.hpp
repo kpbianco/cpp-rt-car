@@ -31,6 +31,7 @@ struct Capabilities {
     bool frame_watchdog;
     bool strict_platform_preflight;
     bool versioned_observability;
+    bool deterministic_replay;
 };
 
 // Query runtime capabilities
@@ -39,10 +40,14 @@ Capabilities query_capabilities() noexcept;
 // Example function using strong types
 core::seconds tick_duration(core::seconds dt) noexcept;
 
-inline constexpr std::uint32_t runtime_config_schema_version = 5;
+inline constexpr std::uint32_t runtime_config_schema_version = 6;
 inline constexpr std::uint32_t observability_schema_version = 1;
 inline constexpr std::size_t observability_identifier_capacity = 64;
 inline constexpr std::uint32_t observability_metadata_size = 184;
+inline constexpr std::uint32_t checkpoint_schema_version = 1;
+inline constexpr std::uint32_t input_log_schema_version = 1;
+inline constexpr std::size_t replay_identifier_capacity =
+    observability_identifier_capacity;
 
 enum class RuntimeState : std::uint8_t {
     configuring,
@@ -67,6 +72,8 @@ enum class Status : std::int32_t {
     scratch_exhausted = -12,
     platform_preflight_failed = -13,
     clock_failure = -14,
+    invalid_artifact = -15,
+    incompatible_artifact = -16,
 };
 
 [[nodiscard]] const char* status_message(Status status) noexcept;
@@ -89,6 +96,13 @@ enum class OverloadPolicy : std::uint8_t {
 enum class PlatformPreflightMode : std::uint8_t {
     disabled,
     strict,
+};
+
+enum class DeterminismTier : std::uint8_t {
+    unspecified = 0,
+    schedule_independent = 1,
+    reproducible_build = 2,
+    portable_deterministic = 3,
 };
 
 enum class PlatformCheckId : std::uint8_t {
@@ -222,6 +236,14 @@ struct RuntimeConfig {
     std::uint32_t watchdog_max_degradation_level = 0;
     PlatformPreflightMode platform_preflight_mode =
         PlatformPreflightMode::disabled;
+    // D1 is an explicit application contract: only registered canonical state
+    // is compared, and callbacks must obey the restrictions documented in
+    // docs/determinism_replay.md. D2 and D3 are reserved and rejected.
+    DeterminismTier determinism_tier = DeterminismTier::unspecified;
+    std::size_t state_capacity = 64;
+    std::size_t snapshot_max_bytes = 1024 * 1024;
+    std::size_t replay_input_capacity = 4096;
+    std::size_t input_log_max_bytes = 1024 * 1024;
     // Stable caller-supplied provenance copied into every observability
     // snapshot. IDs use [A-Za-z0-9._:/@-] and must be NUL terminated.
     std::array<char, observability_identifier_capacity> workload_id{
@@ -233,8 +255,9 @@ struct RuntimeConfig {
 // executor_policy, worker_count, executor_queue_capacity, scratch_alignment,
 // task_scratch_bytes, task_scratch_slots, memory_budget_bytes,
 // overload_policy, watchdog_timeout_ns, watchdog_max_degradation_level,
-// platform_preflight_mode, and workload_id. Unknown keys and partially parsed
-// values are rejected.
+// platform_preflight_mode, determinism_tier, state_capacity,
+// snapshot_max_bytes, replay_input_capacity, input_log_max_bytes, and
+// workload_id. Unknown keys and partially parsed values are rejected.
 [[nodiscard]] Status set_runtime_config_value(
     RuntimeConfig& config,
     std::string_view key,
@@ -289,6 +312,101 @@ struct HostFrameContext {
     std::optional<std::uint64_t> deadline_ns{};
 };
 
+enum class CallbackResult : std::uint8_t {
+    ok,
+    error,
+};
+
+struct StateRegistration {
+    // State names are stable schema identifiers and use the same restricted
+    // character set as workload_id. Storage is borrowed through Runtime
+    // destruction. Its bytes must be an application-defined canonical
+    // representation (for example, fixed-width little-endian fields), not a
+    // compiler-native object layout with padding.
+    std::string_view name;
+    std::uint32_t schema_version = 1;
+    std::span<std::byte> storage{};
+};
+
+struct ArtifactWriteResult {
+    std::size_t required_bytes = 0;
+    std::size_t bytes_written = 0;
+    std::uint64_t checksum = 0;
+};
+
+struct CheckpointMetadata {
+    std::uint32_t schema_version = checkpoint_schema_version;
+    std::uint32_t runtime_version_major = version_major;
+    std::uint32_t runtime_version_minor = version_minor;
+    std::uint32_t runtime_version_patch = version_patch;
+    DeterminismTier determinism_tier = DeterminismTier::unspecified;
+    std::uint64_t config_id = 0;
+    std::uint64_t replay_id = 0;
+    std::uint64_t graph_id = 0;
+    std::uint64_t state_schema_id = 0;
+    std::uint64_t checkpoint_frame_index = 0;
+    std::uint64_t state_payload_bytes = 0;
+    std::uint64_t total_bytes = 0;
+    std::uint64_t state_hash = 0;
+    std::uint64_t artifact_checksum = 0;
+    std::uint32_t state_count = 0;
+    std::array<char, replay_identifier_capacity> build_id{};
+    std::array<char, replay_identifier_capacity> workload_id{};
+};
+
+struct ReplayInputRecord {
+    HostFrameContext frame{};
+    std::uint32_t input_type = 0;
+    std::span<const std::byte> payload{};
+};
+
+struct InputLogMetadata {
+    std::uint32_t schema_version = input_log_schema_version;
+    std::uint32_t runtime_version_major = version_major;
+    std::uint32_t runtime_version_minor = version_minor;
+    std::uint32_t runtime_version_patch = version_patch;
+    DeterminismTier determinism_tier = DeterminismTier::unspecified;
+    std::uint64_t replay_id = 0;
+    std::uint64_t state_schema_id = 0;
+    std::uint64_t payload_bytes = 0;
+    std::uint64_t total_bytes = 0;
+    std::uint64_t artifact_checksum = 0;
+    std::uint64_t first_frame_index = 0;
+    std::uint64_t last_frame_index = 0;
+    std::uint32_t record_count = 0;
+    std::array<char, replay_identifier_capacity> workload_id{};
+};
+
+struct ReplayInputView {
+    HostFrameContext frame{};
+    std::uint32_t input_type = 0;
+    std::span<const std::byte> payload{};
+};
+
+using ReplayInputCallback = CallbackResult (*)(
+    void* user_data,
+    const ReplayInputView& input);
+
+struct ReplayResult {
+    std::uint64_t checkpoint_frame_index = 0;
+    std::uint64_t first_frame_index = 0;
+    std::uint64_t last_frame_index = 0;
+    std::size_t records_processed = 0;
+    std::size_t frames_replayed = 0;
+    std::uint64_t final_state_hash = 0;
+};
+
+// These inspectors are allocation-free and validate the complete artifact,
+// including fixed-width little-endian headers, bounds, reserved fields, and
+// per-record plus whole-artifact checksums. They do not apply runtime identity
+// policy; Runtime::restore_checkpoint and Runtime::replay do.
+[[nodiscard]] Status inspect_checkpoint_artifact(
+    std::span<const std::byte> artifact,
+    CheckpointMetadata& metadata) noexcept;
+[[nodiscard]] Status inspect_input_log_artifact(
+    std::span<const std::byte> artifact,
+    InputLogMetadata& metadata) noexcept;
+
 struct CallbackContext {
     const HostFrameContext& frame;
     // Valid only for this phase callback. Each phase owns a distinct block so
@@ -300,11 +418,6 @@ struct CallbackContext {
     // its frame returns, so callbacks observe the level committed by earlier
     // frames.
     std::uint32_t degradation_level = 0;
-};
-
-enum class CallbackResult : std::uint8_t {
-    ok,
-    error,
 };
 
 using FrameCallback = CallbackResult (*)(void*, const CallbackContext&);
@@ -397,6 +510,13 @@ struct MemoryPlan {
     std::size_t trace_capacity = 0;
     std::size_t trace_slot_bytes = 0;
     std::size_t trace_storage_bytes = 0;
+    std::size_t state_count = 0;
+    // Borrowed application storage is reported but is not included in
+    // planned_bytes. Registry metadata is included in runtime_control_bytes.
+    std::size_t registered_state_bytes = 0;
+    std::size_t snapshot_max_bytes = 0;
+    std::size_t replay_input_capacity = 0;
+    std::size_t input_log_max_bytes = 0;
     std::size_t queue_slots = 0;
     std::size_t scratch_alignment = 0;
     OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
@@ -592,6 +712,8 @@ public:
     [[nodiscard]] Status register_resource(
         std::string_view name,
         ResourceHandle& out_resource) noexcept;
+    [[nodiscard]] Status register_state(
+        const StateRegistration& registration) noexcept;
     [[nodiscard]] Status add_dependency(
         PhaseHandle prerequisite,
         PhaseHandle dependent) noexcept;
@@ -662,6 +784,31 @@ public:
         RuntimeTraceCursor& cursor,
         std::span<RuntimeTraceEvent> output,
         RuntimeTraceReadResult& result) noexcept;
+
+    // Checkpoint and replay calls are non-RT host operations. Buffers are
+    // caller-owned, and their maximum accepted sizes are frozen by
+    // RuntimeConfig. A failed restore never mutates registered state.
+    [[nodiscard]] Status checkpoint_size(
+        std::size_t& required_bytes) noexcept;
+    [[nodiscard]] Status write_checkpoint(
+        std::uint64_t checkpoint_frame_index,
+        std::span<std::byte> output,
+        ArtifactWriteResult& result) noexcept;
+    [[nodiscard]] Status restore_checkpoint(
+        std::span<const std::byte> checkpoint,
+        CheckpointMetadata* metadata = nullptr) noexcept;
+    [[nodiscard]] Status write_input_log(
+        std::span<const ReplayInputRecord> records,
+        std::span<std::byte> output,
+        ArtifactWriteResult& result) noexcept;
+    [[nodiscard]] Status replay(
+        std::span<const std::byte> checkpoint,
+        std::span<const std::byte> input_log,
+        ReplayInputCallback input_callback,
+        void* input_user_data = nullptr,
+        ReplayResult* result = nullptr) noexcept;
+    [[nodiscard]] Status registered_state_hash(
+        std::uint64_t& hash) noexcept;
 
     // Compatibility accessors over the latest retained trace window.
     [[nodiscard]] std::size_t trace_event_count() const noexcept;

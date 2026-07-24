@@ -1,6 +1,6 @@
 # Versioned Observability Contract
 
-Release 0.7 completes the M6 RT0 observability surface for `rt::Runtime`.
+Release 0.8 retains the M6 RT0 observability surface for `rt::Runtime`.
 Emission is bounded and allocation-free on runtime lanes; inspection and
 serialization are explicit non-RT host operations. This is a telemetry
 contract, not a latency qualification or a native OpenTelemetry, ETW, or eBPF
@@ -30,11 +30,11 @@ with `-DRTFW_BUILD_ID=<token>`. Build and workload identifiers are restricted
 to 1–63 characters from `A-Za-z0-9._:/@-`; the runtime rejects malformed or
 unterminated workload IDs.
 
-`config_id` is a 64-bit FNV-1a fingerprint of configuration schema version 5
-and every behavioral `RuntimeConfig` field. It deliberately excludes
-`workload_id`, because workload provenance and runtime behavior are separate
-dimensions. The identifier is useful for correlation and equality checks; it
-is not a cryptographic digest.
+`config_id` is a 64-bit FNV-1a fingerprint of configuration schema version 6,
+every behavioral `RuntimeConfig` field, and `workload_id`. The identifier is
+useful for correlation and exact configuration equality checks; it is not a
+cryptographic digest. M7's separate `replay_id` applies its documented D0/D1
+compatibility policy instead of reusing `config_id`.
 
 ## Trace emission
 
@@ -149,7 +149,7 @@ C++:
 - `write_observability_json()` in
   `<rt/observability_export.hpp>`.
 
-C ABI v5:
+Current C ABI v6:
 
 - `rtfw_get_observability_metadata()`;
 - `rtfw_get_metrics()`;
@@ -172,7 +172,7 @@ host sink.
 - fixed trace schema, loss accounting, metric windows, provenance, runtime
   isolation, JSON, and contended nonblocking emission:
   `tests/test_observability.cpp`;
-- C ABI v5 symbol, structure, cursor, metric, and trace coverage:
+- C ABI v6 symbol, structure, cursor, metric, and trace coverage:
   `tests/test_cabi_dlopen.c`;
 - complete post-start CPU frames with tracing and counters under allocation
   instrumentation: `tests/test_trace_noalloc.cpp`;

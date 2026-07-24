@@ -8,7 +8,7 @@ simulation execution. The repository explores phase graphs, parallel range
 work, fixed-capacity queues, frame arenas, numerical controls, tracing, and
 asynchronous device patterns.
 
-> **Status: 0.7.0 experimental.** This release is not production-ready and has
+> **Status: 0.8.0 experimental.** This release is not production-ready and has
 > no hard-real-time, worst-case-latency, cross-platform bitwise-determinism, GPU,
 > or XDMA qualification. See the [product contract](docs/product_contract.md)
 > and [roadmap](docs/roadmap.md) before integrating it.
@@ -27,15 +27,16 @@ asynchronous device patterns.
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
 | Target-path observability | Implemented RT0 surface | Schema-v1 fixed records, bounded nonblocking emission, runtime-bound trace/metric cursors, explicit loss, provenance metadata, and non-RT JSON export |
+| Target-path checkpoint/replay | Implemented D0/D1 surface | Canonical state registration, stable little-endian checkpoints/input logs, transactional restore, worker-count-independent D1 identity, and synchronous input replay |
 | Legacy phase/range execution | Experimental | `SimCore` retains its separate phase, range, reduction, and pacing path for compatibility |
 | Legacy `SimCore` graph | Experimental | Topological levels exist, but this path does not inherit the target runtime's cycle/resource validation |
 | Legacy memory utilities | Experimental | Per-thread frame arenas and NUMA helpers remain outside the target plan; the Release arena overflow path can fall back to heap allocation |
 | Numerics | Experimental | FTZ/DAZ setup, explicit FMA gating, fixed reductions, fixed point, and counter PRNG utilities |
 | Legacy trace | Experimental | `SimCore` retains process-global per-thread binary rings and offline adapters outside the M6 contract |
 | Legacy metrics | Experimental | Demo JSON uses mutex-backed counters and rolling phase histograms with a default 120-sample capacity |
-| Snapshots | Experimental | Demo and low-level serialization helpers; stable validated replay format is planned |
-| C ABI | Experimental ABI v5 surface | Size/version-checked lifecycle, graph, nested-work, memory, time/platform, and observability calls use fixed-width discriminators and typed status codes |
-| Runtime configuration | Implemented M1–M6 schema | Sixteen strict typed keys include bounded execution, time/platform controls, and a workload provenance ID; unknown keys fail |
+| Legacy snapshots | Experimental compatibility surface | Demo/native-layout helpers are bounds checked but remain outside target checkpoint schema v1 |
+| C ABI | Experimental ABI v6 surface | Size/version-checked lifecycle, graph, nested-work, memory, time/platform, observability, checkpoint, and replay calls use fixed-width discriminators and typed status codes |
+| Runtime configuration | Implemented M1–M7 schema | Twenty-one strict typed keys include bounded execution, time/platform, provenance, determinism, and artifact limits; unknown keys fail |
 | Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
 | GPU | CPU mock only | The mock launches detached CPU threads; no CUDA/Vulkan backend exists |
 | XDMA | Planned | No backend exists |
@@ -92,12 +93,14 @@ embedding runtime; demo/profile integration remains planned.
 
 ## Embedding lifecycle
 
-Release 0.7 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
-memory closure, M5 time/platform controls, and M6 observability in
+Release 0.8 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
+memory closure, M5 time/platform controls, M6 observability, and M7
+checkpoint/replay in
 `<rt/runtime.hpp>` and `<rt/c_api.h>`:
 
 1. configure a typed runtime;
-2. register callback phases and logical resources while configuring;
+2. register callback phases, logical resources, and canonical replay state
+   while configuring;
 3. declare phase dependencies and read/write resource access;
 4. finalize to validate and compile the graph, reject an over-budget memory
    plan, allocate aligned phase/task scratch, trace, and fixed queue storage,
@@ -108,7 +111,9 @@ memory closure, M5 time/platform controls, and M6 observability in
    `step()`, or run a finite absolute-cadence loop with `run_periodic()`;
 7. inspect per-frame timing, watchdog/degradation, and preflight results;
 8. export versioned counters and trace records from a non-RT host lane;
-9. stop.
+9. write/restore bounded checkpoints or replay a validated input log from a
+   non-RT host lane;
+10. stop.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -119,7 +124,8 @@ uses local queues and bounded steals. Both use the same team for nested
 [executor contract](docs/executor.md), the
 [memory-plan contract](docs/memory_plan.md), the
 [time/platform contract](docs/time_platform.md), the
-[observability contract](docs/observability.md), and the working
+[observability contract](docs/observability.md), the
+[determinism/replay contract](docs/determinism_replay.md), and the working
 [C](samples/embed_c/mini_app.c) and
 [C++](samples/embed_cpp/mini_app.cpp) examples.
 
@@ -143,10 +149,10 @@ Accepted architecture decisions:
 - [ADR-0002: host-driven time by default](docs/adr/0002-host-driven-time.md)
 - [ADR-0003: bounded device backend ABI](docs/adr/0003-device-backend-boundary.md)
 
-The M1–M6 host runtime now implements lifecycle, both explicit time modes,
+The M1–M7 host runtime now implements lifecycle, both explicit time modes,
 compiled graph validation, the first two CPU policies, the bounded target-path
-memory plan, watchdog/degradation, platform preflight, and versioned
-observability. The existing
+memory plan, watchdog/degradation, platform preflight, versioned
+observability, and bounded registered-state replay. The existing
 `SimCore` demo and legacy scheduler components remain outside that target
 path. The [architecture guide](docs/architecture.md) distinguishes current
 and target paths.
@@ -162,18 +168,20 @@ RTFW separates portable functionality from deployment qualification:
 
 No RT2 record exists yet.
 
-Determinism is also tiered from D0 (unspecified) through D3 (portable approved
-fixed-point/specified math). Current tests exercise parts of D1 within one
-build; they do not prove arbitrary GCC/Clang or cross-machine bit identity.
-Definitions and evidence requirements are in the
-[product contract](docs/product_contract.md).
+Determinism is tiered from D0 (unspecified) through D3 (portable approved
+fixed-point/specified math). Release 0.8 supports D0 and an explicit D1
+contract for registered canonical state. Its worker-count and compiler-artifact
+fixtures do not prove D2, arbitrary floating-point identity, or cross-machine
+D3 behavior. Definitions and evidence requirements are in the
+[product contract](docs/product_contract.md) and
+[determinism/replay contract](docs/determinism_replay.md).
 
 ## Repository map
 
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M6 host runtime, graph compiler, unified executor, memory/time/platform/observability controls, plus experimental legacy scheduler/fiber, snapshot, and plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M7 host runtime, graph compiler, unified executor, memory/time/platform/observability/replay controls, plus experimental legacy scheduler/fiber and plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |
@@ -197,8 +205,8 @@ The following top-level CMake options are implemented:
 | `SIM_ENABLE_LTO` | `OFF` | Enable interprocedural optimization |
 | `SIM_LTO_THIN` | `OFF` | Request ThinLTO where supported |
 | `SIM_PGO` | empty | Experimental `gen`/`use` PGO mode |
-| `SIM_BUILD_FUZZERS` | `OFF` | Build the Clang libFuzzer harness |
-| `RTFW_BUILD_ID` | `rtfw-<version>` | Stable 1–63 character build identifier included in M6 observability output |
+| `SIM_BUILD_FUZZERS` | `OFF` | Build the Clang job-queue and snapshot-parser libFuzzer harnesses |
+| `RTFW_BUILD_ID` | `rtfw-<version>` | Stable 1–63 character build identifier included in observability and checkpoint provenance |
 
 Platform and optional dependency behavior is described in the
 [build guide](docs/build_tooling.md).
@@ -219,8 +227,11 @@ CI currently provides:
 - fake-clock absolute-release/deadline/no-drift tests, one-shot watchdog and
   frame-thread degradation tests, and fail-closed preflight tests;
 - schema/provenance, interval-partition, trace-loss, instance-isolation,
-  contended-emission, C ABI v5, JSON-export, and ThreadSanitizer observability
+  contended-emission, C ABI v6, JSON-export, and ThreadSanitizer observability
   gates;
+- D1 equality across 1/2/4 workers, cross-worker checkpoint transfer,
+  transactional corruption rejection, checkpoint/input replay, bounded
+  mutation and libFuzzer parser gates, plus exchanged GCC/Clang/FMA artifacts;
 - shared/static C and C++ compiled-graph samples plus dynamic C ABI loading;
 - autotune mapping and synthetic autotune smoke;
 - scaling artifact smoke;
