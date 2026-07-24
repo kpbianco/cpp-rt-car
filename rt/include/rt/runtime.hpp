@@ -26,6 +26,9 @@ struct Capabilities {
     bool host_driven_time;
     bool unified_cpu_executor;
     bool bounded_memory_plan;
+    bool self_paced_time;
+    bool frame_watchdog;
+    bool strict_platform_preflight;
 };
 
 // Query runtime capabilities
@@ -34,7 +37,7 @@ Capabilities query_capabilities() noexcept;
 // Example function using strong types
 core::seconds tick_duration(core::seconds dt) noexcept;
 
-inline constexpr std::uint32_t runtime_config_schema_version = 3;
+inline constexpr std::uint32_t runtime_config_schema_version = 4;
 
 enum class RuntimeState : std::uint8_t {
     configuring,
@@ -57,6 +60,8 @@ enum class Status : std::int32_t {
     resource_conflict = -10,
     queue_full = -11,
     scratch_exhausted = -12,
+    platform_preflight_failed = -13,
+    clock_failure = -14,
 };
 
 [[nodiscard]] const char* status_message(Status status) noexcept;
@@ -74,6 +79,43 @@ enum class ExecutorPolicy : std::uint8_t {
 enum class OverloadPolicy : std::uint8_t {
     reject_submission,
     fail_frame,
+};
+
+enum class PlatformPreflightMode : std::uint8_t {
+    disabled,
+    strict,
+};
+
+enum class PlatformCheckId : std::uint8_t {
+    absolute_monotonic_clock,
+    realtime_kernel,
+    memory_lock_limit,
+    locked_memory,
+    isolated_cpu_affinity,
+    realtime_scheduler,
+};
+
+enum class PlatformCheckStatus : std::uint8_t {
+    passed,
+    failed,
+    unsupported,
+};
+
+inline constexpr std::size_t platform_check_capacity = 6;
+inline constexpr std::size_t platform_check_message_capacity = 96;
+
+struct PlatformCheckResult {
+    PlatformCheckId id = PlatformCheckId::absolute_monotonic_clock;
+    PlatformCheckStatus status = PlatformCheckStatus::unsupported;
+    std::int32_t system_error = 0;
+    std::array<char, platform_check_message_capacity> message{};
+};
+
+struct PlatformPreflightReport {
+    PlatformPreflightMode mode = PlatformPreflightMode::disabled;
+    bool passed = false;
+    std::size_t check_count = 0;
+    std::array<PlatformCheckResult, platform_check_capacity> checks{};
 };
 
 enum class TaskResult : std::uint8_t {
@@ -171,13 +213,19 @@ struct RuntimeConfig {
     std::size_t task_scratch_slots = 1024;
     std::size_t memory_budget_bytes = 256 * 1024 * 1024;
     OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
+    std::uint64_t watchdog_timeout_ns = 0;
+    std::uint32_t watchdog_max_degradation_level = 0;
+    PlatformPreflightMode platform_preflight_mode =
+        PlatformPreflightMode::disabled;
 };
 
 // Applies one strict schema key to a typed configuration. The supported keys
 // are callback_capacity, scratch_bytes, trace_capacity, numerical_mode,
 // executor_policy, worker_count, executor_queue_capacity, scratch_alignment,
-// task_scratch_bytes, task_scratch_slots, memory_budget_bytes, and
-// overload_policy. Unknown keys and partially parsed values are rejected.
+// task_scratch_bytes, task_scratch_slots, memory_budget_bytes,
+// overload_policy, watchdog_timeout_ns, watchdog_max_degradation_level, and
+// platform_preflight_mode. Unknown keys and partially parsed values are
+// rejected.
 [[nodiscard]] Status set_runtime_config_value(
     RuntimeConfig& config,
     std::string_view key,
@@ -189,6 +237,28 @@ public:
     // Values must be monotonic nanoseconds in one clock domain. A Runtime
     // constructed with an injected clock borrows it for the Runtime lifetime.
     [[nodiscard]] virtual std::uint64_t now_ns() noexcept = 0;
+    // Waits until an absolute timestamp in the same clock domain. Custom
+    // clocks that do not implement absolute waiting keep host-driven stepping
+    // but periodic execution returns clock_failure.
+    [[nodiscard]] virtual Status sleep_until_ns(
+        std::uint64_t absolute_ns) noexcept {
+        (void)absolute_ns;
+        return Status::clock_failure;
+    }
+    [[nodiscard]] virtual bool supports_absolute_sleep() const noexcept {
+        return false;
+    }
+};
+
+class PlatformPreflightProbe {
+public:
+    virtual ~PlatformPreflightProbe() = default;
+    // Implementations must overwrite report without allocating or throwing.
+    // A Runtime constructed with a probe borrows it for the Runtime lifetime.
+    virtual void inspect(
+        std::size_t planned_runtime_bytes,
+        const RuntimeClock& clock,
+        PlatformPreflightReport& report) noexcept = 0;
 };
 
 class NumericalPolicy {
@@ -217,6 +287,10 @@ struct CallbackContext {
     std::span<std::byte> scratch;
     const NumericalPolicy& numerics;
     const TaskContext& tasks;
+    // Runtime-owned degradation state. A watchdog event is applied only after
+    // its frame returns, so callbacks observe the level committed by earlier
+    // frames.
+    std::uint32_t degradation_level = 0;
 };
 
 enum class CallbackResult : std::uint8_t {
@@ -239,6 +313,43 @@ struct StepResult {
     std::uint64_t start_ns = 0;
     std::uint64_t finish_ns = 0;
     bool deadline_missed = false;
+    bool watchdog_fired = false;
+    std::uint32_t degradation_level = 0;
+};
+
+struct PeriodicRunConfig {
+    std::uint64_t first_frame_index = 0;
+    std::size_t frame_count = 1;
+    std::chrono::nanoseconds period{16'666'667};
+    std::optional<std::uint64_t> first_release_ns{};
+    std::chrono::nanoseconds relative_deadline{16'666'667};
+};
+
+struct PeriodicFrameResult {
+    Status status = Status::ok;
+    std::uint64_t frame_index = 0;
+    std::uint64_t release_ns = 0;
+    std::uint64_t wake_ns = 0;
+    std::uint64_t start_ns = 0;
+    std::uint64_t finish_ns = 0;
+    std::int64_t slack_ns = 0;
+    bool deadline_missed = false;
+    bool watchdog_fired = false;
+    std::uint32_t degradation_level = 0;
+};
+
+using PeriodicFrameObserver = CallbackResult (*)(
+    void* user_data,
+    const PeriodicFrameResult& frame);
+
+struct PeriodicRunResult {
+    std::size_t frames_executed = 0;
+    std::size_t deadline_misses = 0;
+    std::size_t watchdog_events = 0;
+    std::uint32_t final_degradation_level = 0;
+    std::uint64_t first_release_ns = 0;
+    std::uint64_t next_release_ns = 0;
+    PeriodicFrameResult last_frame{};
 };
 
 struct ExecutorStats {
@@ -284,9 +395,13 @@ struct MemoryPlan {
 enum class RuntimeTraceEventType : std::uint8_t {
     finalized,
     started,
+    periodic_release,
+    periodic_wake,
     step_begin,
     callback_begin,
     callback_end,
+    watchdog_fired,
+    degradation_applied,
     step_end,
     stopped,
 };
@@ -301,11 +416,12 @@ struct RuntimeTraceEvent {
 
 // Host-driven lifecycle introduced by M1. Control methods are single-host-
 // thread operations. A step invokes callbacks synchronously and never paces or
-// sleeps; self-paced execution is a separate M5 concern.
+// sleeps; self-paced execution uses the separate M5 run_periodic API.
 class Runtime {
 public:
     Runtime();
     explicit Runtime(RuntimeClock& clock);
+    Runtime(RuntimeClock& clock, PlatformPreflightProbe& preflight);
     ~Runtime();
 
     Runtime(Runtime&&) noexcept;
@@ -340,6 +456,13 @@ public:
     [[nodiscard]] Status step(
         const HostFrameContext& frame,
         StepResult* result = nullptr) noexcept;
+    // Runs a finite runtime-owned loop on the calling frame thread. Releases
+    // are first_release + i * period; late frames never shift that epoch.
+    [[nodiscard]] Status run_periodic(
+        const PeriodicRunConfig& config,
+        PeriodicFrameObserver observer = nullptr,
+        void* observer_data = nullptr,
+        PeriodicRunResult* result = nullptr) noexcept;
     [[nodiscard]] Status stop() noexcept;
 
     [[nodiscard]] RuntimeState state() const noexcept;
@@ -361,6 +484,11 @@ public:
     // runtime payload/control storage and exclude allocator metadata and OS
     // thread stacks.
     [[nodiscard]] bool memory_plan(MemoryPlan& plan) const noexcept;
+    // Available after start is attempted. Strict failures leave the runtime
+    // finalized so the host can inspect every failed prerequisite.
+    [[nodiscard]] bool platform_preflight_report(
+        PlatformPreflightReport& report) const noexcept;
+    [[nodiscard]] std::uint32_t degradation_level() const noexcept;
     [[nodiscard]] std::uint64_t now_ns() noexcept;
     // The view remains valid until the next control operation or destruction.
     [[nodiscard]] std::string_view last_error() const noexcept;

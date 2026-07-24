@@ -1,6 +1,6 @@
 # Scheduler Status
 
-RTFW 0.5 has one target-path CPU executor owned by `rt::Runtime`. It implements
+RTFW 0.6 has one target-path CPU executor owned by `rt::Runtime`. It implements
 the first two policies accepted by
 [ADR-0001](adr/0001-one-executor-boundary.md). Several older execution
 components remain for source compatibility but are not used by that runtime.
@@ -64,7 +64,8 @@ M3 completes the runtime-owned `static_deterministic` and
 `bounded_throughput` policies, and M4 closes their target-path memory, scratch,
 and frame-level overload plan. The legacy classes are quarantined rather than
 silently presented as equivalent implementations. A host job-system adapter
-and periodic OS scheduling remain later, separately qualified policies.
+remains later. M5's caller-thread absolute cadence and prerequisite preflight
+do not constitute a separately qualified periodic OS scheduling policy.
 
 ## Scaling tool
 

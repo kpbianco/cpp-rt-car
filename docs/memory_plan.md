@@ -1,6 +1,6 @@
 # Finalized Memory and Overload Contract
 
-Release 0.5 completes the M4 memory closure for the target-path CPU runtime,
+Release 0.6 retains the M4 memory closure for the target-path CPU runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.
@@ -102,10 +102,13 @@ the versioned production telemetry surface planned for M6.
 
 ## Running-state boundary
 
-`start()` creates the configured fixed worker team. After it returns, the
-target CPU frame path uses preallocated graph, queue, scratch, and trace
-storage. It contains no file I/O, condition-variable wait, blocking mutex,
-hidden thread creation, heap fallback, or intentional heap allocation.
+`start()` creates the configured fixed worker team and, only when enabled, one
+M5 watchdog service lane. After it returns, the target CPU frame path uses
+preallocated graph, queue, scratch, and trace storage. It contains no file I/O,
+condition-variable wait, blocking mutex, hidden thread creation, heap fallback,
+or intentional heap allocation. Watchdog arm/disarm uses atomics and a
+notification; its condition-variable wait is confined to the non-RT service
+lane.
 Workers use bounded queue operations and yield when idle or waiting for nested
 work.
 
@@ -118,7 +121,8 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
 - plan, alignment, nested ownership, budget, and overload tests:
   `tests/test_memory_plan.cpp`;
 - 64 complete frames under each executor policy with concurrent phases, range
-  work, fixed-tree reductions, tracing, and allocation instrumentation:
+  work, fixed-tree reductions, tracing, an armed watchdog, and allocation
+  instrumentation:
   `tests/test_trace_noalloc.cpp`;
 - C ABI plan, scratch, malformed discriminator, and reserved-field checks:
   `tests/test_cabi_dlopen.c`;

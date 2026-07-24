@@ -1,6 +1,7 @@
 #include <rt/c_api.h>
 #include <rt/runtime.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -13,6 +14,43 @@
 #include <vector>
 
 namespace {
+
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckId::absolute_monotonic_clock) ==
+    RTFW_PLATFORM_CHECK_ABSOLUTE_MONOTONIC_CLOCK);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckId::realtime_kernel) ==
+    RTFW_PLATFORM_CHECK_REALTIME_KERNEL);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckId::memory_lock_limit) ==
+    RTFW_PLATFORM_CHECK_MEMORY_LOCK_LIMIT);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckId::locked_memory) ==
+    RTFW_PLATFORM_CHECK_LOCKED_MEMORY);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckId::isolated_cpu_affinity) ==
+    RTFW_PLATFORM_CHECK_ISOLATED_CPU_AFFINITY);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckId::realtime_scheduler) ==
+    RTFW_PLATFORM_CHECK_REALTIME_SCHEDULER);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckStatus::passed) ==
+    RTFW_PLATFORM_CHECK_PASSED);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckStatus::failed) ==
+    RTFW_PLATFORM_CHECK_FAILED);
+static_assert(
+    static_cast<std::uint32_t>(
+        rt::PlatformCheckStatus::unsupported) ==
+    RTFW_PLATFORM_CHECK_UNSUPPORTED);
 
 rtfw_status to_c_status(rt::Status status) noexcept {
     switch (status) {
@@ -42,6 +80,10 @@ rtfw_status to_c_status(rt::Status status) noexcept {
         return RTFW_STATUS_QUEUE_FULL;
     case rt::Status::scratch_exhausted:
         return RTFW_STATUS_SCRATCH_EXHAUSTED;
+    case rt::Status::platform_preflight_failed:
+        return RTFW_STATUS_PLATFORM_PREFLIGHT_FAILED;
+    case rt::Status::clock_failure:
+        return RTFW_STATUS_CLOCK_FAILURE;
     }
     return RTFW_STATUS_INTERNAL_ERROR;
 }
@@ -82,6 +124,42 @@ bool memory_plan_header_valid(
            bytes_are_zero(
                reinterpret_cast<const uint8_t*>(plan.reserved),
                sizeof(plan.reserved));
+}
+
+bool periodic_config_header_valid(
+    const rtfw_periodic_config& config) noexcept {
+    return config.struct_size >= sizeof(rtfw_periodic_config) &&
+           config.reserved0 == 0u &&
+           config.has_first_release <= 1u &&
+           bytes_are_zero(config.reserved1, sizeof(config.reserved1)) &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(config.reserved),
+               sizeof(config.reserved));
+}
+
+bool periodic_result_header_valid(
+    const rtfw_periodic_run_result& result) noexcept {
+    return result.struct_size >= sizeof(rtfw_periodic_run_result) &&
+           result.reserved0 == 0u &&
+           result.reserved1 == 0u &&
+           result.last_frame.struct_size >=
+               sizeof(rtfw_periodic_frame_result) &&
+           bytes_are_zero(
+               result.last_frame.reserved0,
+               sizeof(result.last_frame.reserved0)) &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(result.reserved),
+               sizeof(result.reserved));
+}
+
+bool preflight_report_header_valid(
+    const rtfw_platform_preflight_report& report) noexcept {
+    return report.struct_size >=
+               sizeof(rtfw_platform_preflight_report) &&
+           bytes_are_zero(report.reserved0, sizeof(report.reserved0)) &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(report.reserved),
+               sizeof(report.reserved));
 }
 
 bool to_cpp_config(
@@ -155,6 +233,21 @@ bool to_cpp_config(
     default:
         return false;
     }
+    target.watchdog_timeout_ns = source.watchdog_timeout_ns;
+    target.watchdog_max_degradation_level =
+        source.watchdog_max_degradation_level;
+    switch (source.platform_preflight_mode) {
+    case RTFW_PLATFORM_PREFLIGHT_DISABLED:
+        target.platform_preflight_mode =
+            rt::PlatformPreflightMode::disabled;
+        break;
+    case RTFW_PLATFORM_PREFLIGHT_STRICT:
+        target.platform_preflight_mode =
+            rt::PlatformPreflightMode::strict;
+        break;
+    default:
+        return false;
+    }
     return true;
 }
 
@@ -184,6 +277,14 @@ void from_cpp_config(
         source.overload_policy == rt::OverloadPolicy::fail_frame
         ? RTFW_OVERLOAD_FAIL_FRAME
         : RTFW_OVERLOAD_REJECT_SUBMISSION;
+    target.watchdog_timeout_ns = source.watchdog_timeout_ns;
+    target.watchdog_max_degradation_level =
+        source.watchdog_max_degradation_level;
+    target.platform_preflight_mode =
+        source.platform_preflight_mode ==
+            rt::PlatformPreflightMode::strict
+        ? RTFW_PLATFORM_PREFLIGHT_STRICT
+        : RTFW_PLATFORM_PREFLIGHT_DISABLED;
 }
 
 rtfw_runtime_state to_c_state(rt::RuntimeState state) noexcept {
@@ -225,6 +326,65 @@ void from_cpp_memory_plan(
     target.trace_storage_bytes = source.trace_storage_bytes;
     target.queue_slots = source.queue_slots;
     target.scratch_alignment = source.scratch_alignment;
+}
+
+void from_cpp_periodic_frame(
+    const rt::PeriodicFrameResult& source,
+    rtfw_periodic_frame_result& target) noexcept {
+    std::memset(&target, 0, sizeof(target));
+    target.struct_size = sizeof(target);
+    target.status = to_c_status(source.status);
+    target.frame_index = source.frame_index;
+    target.release_ns = source.release_ns;
+    target.wake_ns = source.wake_ns;
+    target.start_ns = source.start_ns;
+    target.finish_ns = source.finish_ns;
+    target.slack_ns = source.slack_ns;
+    target.deadline_missed = source.deadline_missed ? 1u : 0u;
+    target.watchdog_fired = source.watchdog_fired ? 1u : 0u;
+    target.degradation_level = source.degradation_level;
+}
+
+void from_cpp_periodic_result(
+    const rt::PeriodicRunResult& source,
+    rtfw_periodic_run_result& target) noexcept {
+    target.frames_executed = source.frames_executed;
+    target.deadline_misses = source.deadline_misses;
+    target.watchdog_events = source.watchdog_events;
+    target.final_degradation_level =
+        source.final_degradation_level;
+    target.first_release_ns = source.first_release_ns;
+    target.next_release_ns = source.next_release_ns;
+    from_cpp_periodic_frame(source.last_frame, target.last_frame);
+}
+
+void from_cpp_preflight(
+    const rt::PlatformPreflightReport& source,
+    rtfw_platform_preflight_report& target) noexcept {
+    target.mode =
+        source.mode == rt::PlatformPreflightMode::strict
+        ? RTFW_PLATFORM_PREFLIGHT_STRICT
+        : RTFW_PLATFORM_PREFLIGHT_DISABLED;
+    target.passed = source.passed ? 1u : 0u;
+    target.check_count = std::min<std::size_t>(
+        source.check_count,
+        RTFW_PLATFORM_CHECK_CAPACITY);
+    for (std::size_t index = 0;
+         index < target.check_count;
+         ++index) {
+        const auto& source_check = source.checks[index];
+        auto& target_check = target.checks[index];
+        target_check.id =
+            static_cast<std::uint32_t>(source_check.id);
+        target_check.status =
+            static_cast<std::uint32_t>(source_check.status);
+        target_check.system_error = source_check.system_error;
+        std::snprintf(
+            target_check.message,
+            sizeof(target_check.message),
+            "%s",
+            source_check.message.data());
+    }
 }
 
 struct CCallback {
@@ -303,6 +463,7 @@ rt::CallbackResult invoke_c_callback(
         context.numerics.mode() == rt::NumericalMode::fused_multiply_add
         ? RTFW_NUMERICAL_FUSED_MULTIPLY_ADD
         : RTFW_NUMERICAL_PRECISE;
+    c_context.degradation_level = context.degradation_level;
     c_context.frame_index = context.frame.frame_index;
     c_context.delta_ns = context.frame.delta.count();
     c_context.has_deadline = context.frame.deadline_ns ? 1u : 0u;
@@ -313,6 +474,25 @@ rt::CallbackResult invoke_c_callback(
 
     return registration->callback(registration->user_data, &c_context) ==
             RTFW_CALLBACK_OK
+        ? rt::CallbackResult::ok
+        : rt::CallbackResult::error;
+}
+
+struct CPeriodicInvocation {
+    rtfw_periodic_frame_callback callback = nullptr;
+    void* user_data = nullptr;
+};
+
+rt::CallbackResult invoke_c_periodic_observer(
+    void* opaque,
+    const rt::PeriodicFrameResult& frame) {
+    auto& invocation =
+        *static_cast<CPeriodicInvocation*>(opaque);
+    rtfw_periodic_frame_result c_frame;
+    from_cpp_periodic_frame(frame, c_frame);
+    return invocation.callback(
+               invocation.user_data,
+               &c_frame) == RTFW_CALLBACK_OK
         ? rt::CallbackResult::ok
         : rt::CallbackResult::error;
 }
@@ -359,6 +539,10 @@ RTFW_API rt_capabilities_c rt_query_capabilities(void) {
         static_cast<uint8_t>(capabilities.host_driven_time),
         static_cast<uint8_t>(capabilities.unified_cpu_executor),
         static_cast<uint8_t>(capabilities.bounded_memory_plan),
+        static_cast<uint8_t>(capabilities.self_paced_time),
+        static_cast<uint8_t>(capabilities.frame_watchdog),
+        static_cast<uint8_t>(capabilities.strict_platform_preflight),
+        0u,
     };
 }
 
@@ -390,6 +574,11 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
         return rt::status_message(rt::Status::queue_full);
     case RTFW_STATUS_SCRATCH_EXHAUSTED:
         return rt::status_message(rt::Status::scratch_exhausted);
+    case RTFW_STATUS_PLATFORM_PREFLIGHT_FAILED:
+        return rt::status_message(
+            rt::Status::platform_preflight_failed);
+    case RTFW_STATUS_CLOCK_FAILURE:
+        return rt::status_message(rt::Status::clock_failure);
     }
     return "unknown runtime status";
 }
@@ -440,12 +629,49 @@ RTFW_API void rtfw_step_result_init(rtfw_step_result* result) {
     result->struct_size = sizeof(*result);
 }
 
+RTFW_API void rtfw_periodic_config_init(
+    rtfw_periodic_config* config) {
+    if (!config) {
+        return;
+    }
+    std::memset(config, 0, sizeof(*config));
+    config->struct_size = sizeof(*config);
+    const rt::PeriodicRunConfig defaults{};
+    config->first_frame_index = defaults.first_frame_index;
+    config->frame_count = defaults.frame_count;
+    config->period_ns =
+        static_cast<uint64_t>(defaults.period.count());
+    config->relative_deadline_ns =
+        static_cast<uint64_t>(
+            defaults.relative_deadline.count());
+}
+
+RTFW_API void rtfw_periodic_run_result_init(
+    rtfw_periodic_run_result* result) {
+    if (!result) {
+        return;
+    }
+    std::memset(result, 0, sizeof(*result));
+    result->struct_size = sizeof(*result);
+    result->last_frame.struct_size =
+        sizeof(result->last_frame);
+}
+
 RTFW_API void rtfw_memory_plan_init(rtfw_memory_plan* plan) {
     if (!plan) {
         return;
     }
     std::memset(plan, 0, sizeof(*plan));
     plan->struct_size = sizeof(*plan);
+}
+
+RTFW_API void rtfw_platform_preflight_report_init(
+    rtfw_platform_preflight_report* report) {
+    if (!report) {
+        return;
+    }
+    std::memset(report, 0, sizeof(*report));
+    report->struct_size = sizeof(*report);
 }
 
 RTFW_API rtfw_status rtfw_create(
@@ -762,6 +988,76 @@ RTFW_API rtfw_status rtfw_step(
         result->start_ns = cpp_result.start_ns;
         result->finish_ns = cpp_result.finish_ns;
         result->deadline_missed = cpp_result.deadline_missed ? 1u : 0u;
+        result->watchdog_fired = cpp_result.watchdog_fired ? 1u : 0u;
+        result->degradation_level = cpp_result.degradation_level;
+    }
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_run_periodic(
+    rtfw_handle* handle,
+    const rtfw_periodic_config* config,
+    rtfw_periodic_frame_callback observer,
+    void* observer_data,
+    rtfw_periodic_run_result* result) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    if (!config || !periodic_config_header_valid(*config)) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "periodic config is missing, undersized, or has nonzero reserved fields");
+    }
+    if (result && !periodic_result_header_valid(*result)) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "periodic result is undersized or has nonzero reserved fields");
+    }
+    if (config->frame_count >
+            std::numeric_limits<std::size_t>::max() ||
+        config->period_ns >
+            static_cast<uint64_t>(
+                std::chrono::nanoseconds::max().count()) ||
+        config->relative_deadline_ns >
+            static_cast<uint64_t>(
+                std::chrono::nanoseconds::max().count())) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_ARGUMENT,
+            "periodic count or duration exceeds the native runtime range");
+    }
+
+    rt::PeriodicRunConfig cpp_config;
+    cpp_config.first_frame_index = config->first_frame_index;
+    cpp_config.frame_count =
+        static_cast<std::size_t>(config->frame_count);
+    cpp_config.period =
+        std::chrono::nanoseconds(
+            static_cast<std::chrono::nanoseconds::rep>(
+                config->period_ns));
+    if (config->has_first_release != 0u) {
+        cpp_config.first_release_ns =
+            config->first_release_ns;
+    }
+    cpp_config.relative_deadline =
+        std::chrono::nanoseconds(
+            static_cast<std::chrono::nanoseconds::rep>(
+                config->relative_deadline_ns));
+
+    CPeriodicInvocation invocation{observer, observer_data};
+    rt::PeriodicRunResult cpp_result;
+    handle->clear_boundary_error();
+    const auto status = handle->runtime.run_periodic(
+        cpp_config,
+        observer ? &invoke_c_periodic_observer : nullptr,
+        observer ? &invocation : nullptr,
+        &cpp_result);
+    if (result) {
+        const auto struct_size = result->struct_size;
+        std::memset(result, 0, sizeof(*result));
+        result->struct_size = struct_size;
+        result->last_frame.struct_size =
+            sizeof(result->last_frame);
+        from_cpp_periodic_result(cpp_result, *result);
     }
     return to_c_status(status);
 }
@@ -802,6 +1098,35 @@ RTFW_API rtfw_status rtfw_get_memory_plan(
     std::memset(out_plan, 0, sizeof(*out_plan));
     out_plan->struct_size = struct_size;
     from_cpp_memory_plan(cpp_plan, *out_plan);
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_get_platform_preflight_report(
+    const rtfw_handle* handle,
+    rtfw_platform_preflight_report* out_report) {
+    if (!handle || !out_report ||
+        !preflight_report_header_valid(*out_report)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    rt::PlatformPreflightReport cpp_report;
+    if (!handle->runtime.platform_preflight_report(cpp_report)) {
+        return RTFW_STATUS_INVALID_STATE;
+    }
+    const auto struct_size = out_report->struct_size;
+    std::memset(out_report, 0, sizeof(*out_report));
+    out_report->struct_size = struct_size;
+    from_cpp_preflight(cpp_report, *out_report);
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_get_degradation_level(
+    const rtfw_handle* handle,
+    uint32_t* out_level) {
+    if (!handle || !out_level) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_level = handle->runtime.degradation_level();
     return RTFW_STATUS_OK;
 }
 

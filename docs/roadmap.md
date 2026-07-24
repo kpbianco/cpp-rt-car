@@ -20,8 +20,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M2 | Complete | Compiled graph, cycle rejection, and resource hazards |
 | M3 | Complete | Unified CPU executor with honest selectable policies |
 | M4 | Complete | Memory plan and zero-allocation RT-lane closure |
-| M5 | Next | Self-paced absolute cadence, watchdog, and platform preflight |
-| M6 | Planned | RT-safe, versioned observability |
+| M5 | Complete | Self-paced absolute cadence, watchdog, and platform preflight |
+| M6 | Next | RT-safe, versioned observability |
 | M7 | Planned | Determinism tiers, safe snapshots, and replay |
 | M8 | Planned | Device ABI and deterministic fault-injectable mock |
 | M9 | Planned | Real CUDA backend |
@@ -139,6 +139,20 @@ Exit gates:
 
 ## M5 — Time and platform
 
+Delivered in 0.6:
+
+- a finite self-paced C++/C loop using epoch-based absolute releases and
+  explicit relative deadlines;
+- per-frame release, wake, start, finish, slack, miss, watchdog, and
+  degradation results;
+- a one-shot watchdog service lane that never invokes host code, plus
+  frame-thread application of capped runtime degradation state;
+- disabled-by-default, read-only strict Linux preflight covering the runtime
+  clock, PREEMPT_RT, memory lock limit/current locked memory, isolated
+  affinity, and realtime scheduling;
+- fixed-capacity inspectable failure reports, deterministic fake-clock/probe
+  tests, C ABI v4 coverage, and an armed-watchdog allocation gate.
+
 Exit gates:
 
 - fake-clock tests prove exact release/deadline behavior;
@@ -146,6 +160,9 @@ Exit gates:
 - one watchdog arm produces at most one event;
 - degradation is applied on the frame thread;
 - strict platform preflight explains and rejects unmet prerequisites.
+
+The precise surface and qualification boundary are in
+[the time/platform contract](time_platform.md).
 
 ## M6 — Observability
 

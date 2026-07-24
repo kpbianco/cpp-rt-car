@@ -492,6 +492,10 @@ void run_complete_cpu_frames_noalloc(rt::ExecutorPolicy policy) {
     config.task_scratch_bytes = 64;
     config.task_scratch_slots = 64;
     config.memory_budget_bytes = 1024 * 1024;
+    // Exercise watchdog arm/disarm inside the measured frame path while
+    // keeping the service-lane deadline comfortably beyond the test.
+    config.watchdog_timeout_ns = 60'000'000'000ull;
+    config.watchdog_max_degradation_level = 2;
     ASSERT_EQ(runtime.configure(config), rt::Status::ok);
 
     FullFramePhaseState first;
@@ -528,6 +532,7 @@ void run_complete_cpu_frames_noalloc(rt::ExecutorPolicy policy) {
 
     constexpr std::uint64_t kFrames = 64;
     rt::Status step_status = rt::Status::ok;
+    rt::StepResult step_result;
     {
         AllocationGuard guard;
         for (std::uint64_t frame = 0; frame < kFrames; ++frame) {
@@ -536,7 +541,8 @@ void run_complete_cpu_frames_noalloc(rt::ExecutorPolicy policy) {
                     frame,
                     std::chrono::nanoseconds(1),
                     std::nullopt,
-                });
+                },
+                &step_result);
             if (step_status != rt::Status::ok) {
                 break;
             }
@@ -545,6 +551,8 @@ void run_complete_cpu_frames_noalloc(rt::ExecutorPolicy policy) {
 
     EXPECT_EQ(step_status, rt::Status::ok);
     EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_FALSE(step_result.watchdog_fired);
+    EXPECT_EQ(step_result.degradation_level, 0u);
     EXPECT_EQ(first.errors.load(), 0u);
     EXPECT_EQ(second.errors.load(), 0u);
     EXPECT_EQ(sink.errors, 0u);

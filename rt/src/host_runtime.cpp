@@ -3,6 +3,8 @@
 #include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
 #include "executor.hpp"
+#include "native_platform_preflight.hpp"
+#include "watchdog_monitor.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,6 +17,7 @@
 #include <new>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include <rt/arch.hpp>
@@ -34,6 +37,9 @@ constexpr std::size_t kMaxMemoryBudgetBytes =
     sizeof(std::size_t) >= sizeof(std::uint64_t)
     ? static_cast<std::size_t>(std::uint64_t{1} << 40)
     : std::numeric_limits<std::size_t>::max();
+constexpr std::uint64_t kMaxWatchdogTimeoutNs =
+    std::uint64_t{24} * 60 * 60 * 1'000'000'000;
+constexpr std::uint32_t kMaxDegradationLevel = 255;
 constexpr std::size_t kNoCallback = std::numeric_limits<std::size_t>::max();
 
 std::atomic<std::uint32_t> g_next_graph_owner{1};
@@ -49,6 +55,51 @@ std::uint32_t next_graph_owner() noexcept {
     }
 }
 
+bool checked_time_add(
+    std::uint64_t left,
+    std::uint64_t right,
+    std::uint64_t& result) noexcept {
+    if (right > std::numeric_limits<std::uint64_t>::max() - left) {
+        result = 0;
+        return false;
+    }
+    result = left + right;
+    return true;
+}
+
+bool checked_time_multiply(
+    std::uint64_t left,
+    std::uint64_t right,
+    std::uint64_t& result) noexcept {
+    if (left != 0 &&
+        right > std::numeric_limits<std::uint64_t>::max() / left) {
+        result = 0;
+        return false;
+    }
+    result = left * right;
+    return true;
+}
+
+std::int64_t deadline_slack(
+    std::uint64_t deadline,
+    std::uint64_t finish) noexcept {
+    if (finish <= deadline) {
+        const auto magnitude = deadline - finish;
+        return magnitude >
+                static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max())
+            ? std::numeric_limits<std::int64_t>::max()
+            : static_cast<std::int64_t>(magnitude);
+    }
+    const auto magnitude = finish - deadline;
+    if (magnitude >
+        static_cast<std::uint64_t>(
+            std::numeric_limits<std::int64_t>::max())) {
+        return std::numeric_limits<std::int64_t>::min();
+    }
+    return -static_cast<std::int64_t>(magnitude);
+}
+
 class SteadyRuntimeClock final : public rt::RuntimeClock {
 public:
     SteadyRuntimeClock() noexcept
@@ -60,20 +111,56 @@ public:
             std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
     }
 
+    rt::Status sleep_until_ns(
+        std::uint64_t absolute_ns) noexcept override {
+        if (absolute_ns >
+            static_cast<std::uint64_t>(
+                std::chrono::nanoseconds::max().count())) {
+            return rt::Status::clock_failure;
+        }
+        const auto offset =
+            std::chrono::ceil<std::chrono::steady_clock::duration>(
+                std::chrono::nanoseconds(
+                    static_cast<std::chrono::nanoseconds::rep>(
+                        absolute_ns)));
+        if (offset < std::chrono::steady_clock::duration::zero() ||
+            origin_ >
+                std::chrono::steady_clock::time_point::max() -
+                    offset) {
+            return rt::Status::clock_failure;
+        }
+        std::this_thread::sleep_until(
+            origin_ + offset);
+        return rt::Status::ok;
+    }
+
+    bool supports_absolute_sleep() const noexcept override {
+        return std::chrono::steady_clock::is_steady;
+    }
+
 private:
     std::chrono::steady_clock::time_point origin_;
 };
 
-bool parse_size(std::string_view value, std::size_t& parsed) noexcept {
+bool parse_u64(
+    std::string_view value,
+    std::uint64_t& parsed) noexcept {
     if (value.empty()) {
         return false;
     }
 
-    std::uint64_t raw = 0;
     const auto* begin = value.data();
     const auto* end = begin + value.size();
-    const auto result = std::from_chars(begin, end, raw, 10);
-    if (result.ec != std::errc{} || result.ptr != end ||
+    const auto result = std::from_chars(begin, end, parsed, 10);
+    if (result.ec != std::errc{} || result.ptr != end) {
+        return false;
+    }
+    return true;
+}
+
+bool parse_size(std::string_view value, std::size_t& parsed) noexcept {
+    std::uint64_t raw = 0;
+    if (!parse_u64(value, raw) ||
         raw > std::numeric_limits<std::size_t>::max()) {
         return false;
     }
@@ -106,7 +193,10 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
         config.task_scratch_slots == 0 ||
         config.task_scratch_slots > kMaxTaskScratchSlots ||
         config.memory_budget_bytes == 0 ||
-        config.memory_budget_bytes > kMaxMemoryBudgetBytes) {
+        config.memory_budget_bytes > kMaxMemoryBudgetBytes ||
+        config.watchdog_timeout_ns > kMaxWatchdogTimeoutNs ||
+        config.watchdog_max_degradation_level >
+            kMaxDegradationLevel) {
         return rt::Status::invalid_config;
     }
     switch (config.numerical_mode) {
@@ -130,6 +220,13 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
     default:
         return rt::Status::invalid_config;
     }
+    switch (config.platform_preflight_mode) {
+    case rt::PlatformPreflightMode::disabled:
+    case rt::PlatformPreflightMode::strict:
+        break;
+    default:
+        return rt::Status::invalid_config;
+    }
     return rt::Status::ok;
 }
 
@@ -138,9 +235,9 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
 namespace rt {
 
 Capabilities query_capabilities() noexcept {
-    // M4 adds the finalized aligned scratch/queue plan and proves the
-    // allocation-free running-state CPU path.
-    return {true, true, true, true};
+    // M5 adds absolute periodic release control, one-shot watchdog events,
+    // frame-thread degradation, and fail-closed platform preflight.
+    return {true, true, true, true, true, true, true};
 }
 
 const char* status_message(Status status) noexcept {
@@ -171,6 +268,10 @@ const char* status_message(Status status) noexcept {
         return "executor queue is full";
     case Status::scratch_exhausted:
         return "task scratch plan is exhausted";
+    case Status::platform_preflight_failed:
+        return "strict platform preflight failed";
+    case Status::clock_failure:
+        return "runtime clock operation failed";
     }
     return "unknown runtime status";
 }
@@ -181,6 +282,7 @@ Status set_runtime_config_value(
     std::string_view value) noexcept {
     RuntimeConfig candidate = config;
     std::size_t parsed = 0;
+    std::uint64_t parsed_u64 = 0;
 
     if (key == "callback_capacity") {
         if (!parse_size(value, parsed)) {
@@ -255,6 +357,28 @@ Status set_runtime_config_value(
         } else {
             return Status::invalid_config;
         }
+    } else if (key == "watchdog_timeout_ns") {
+        if (!parse_u64(value, parsed_u64)) {
+            return Status::invalid_config;
+        }
+        candidate.watchdog_timeout_ns = parsed_u64;
+    } else if (key == "watchdog_max_degradation_level") {
+        if (!parse_size(value, parsed) ||
+            parsed > std::numeric_limits<std::uint32_t>::max()) {
+            return Status::invalid_config;
+        }
+        candidate.watchdog_max_degradation_level =
+            static_cast<std::uint32_t>(parsed);
+    } else if (key == "platform_preflight_mode") {
+        if (value == "disabled") {
+            candidate.platform_preflight_mode =
+                PlatformPreflightMode::disabled;
+        } else if (value == "strict") {
+            candidate.platform_preflight_mode =
+                PlatformPreflightMode::strict;
+        } else {
+            return Status::invalid_config;
+        }
     } else {
         return Status::invalid_config;
     }
@@ -309,9 +433,15 @@ struct Runtime::Impl {
         std::string name;
     };
 
-    explicit Impl(RuntimeClock* injected_clock)
+    explicit Impl(
+        RuntimeClock* injected_clock,
+        PlatformPreflightProbe* injected_preflight)
         : graph_owner(next_graph_owner()),
-          clock(injected_clock ? injected_clock : &owned_clock) {
+          clock(injected_clock ? injected_clock : &owned_clock),
+          preflight(
+              injected_preflight
+                  ? injected_preflight
+                  : &owned_preflight) {
         error[0] = '\0';
     }
 
@@ -412,6 +542,31 @@ struct Runtime::Impl {
         return clock->now_ns();
     }
 
+    [[nodiscard]] Status clock_sleep_until(
+        std::uint64_t absolute_ns) noexcept {
+        SpinGuard guard(clock_lock);
+        return clock->sleep_until_ns(absolute_ns);
+    }
+
+    Status fail_preflight() noexcept {
+        for (std::size_t index = 0;
+             index < preflight_report.check_count;
+             ++index) {
+            const auto& check = preflight_report.checks[index];
+            if (check.status != PlatformCheckStatus::passed) {
+                return fail(
+                    Status::platform_preflight_failed,
+                    check.message[0] != '\0'
+                        ? check.message.data()
+                        : "strict platform preflight prerequisite failed");
+            }
+        }
+        return fail(
+            Status::platform_preflight_failed,
+            "strict platform preflight report is incomplete or contains "
+            "duplicate prerequisites");
+    }
+
     void record(
         RuntimeTraceEventType type,
         Status status,
@@ -464,6 +619,7 @@ struct Runtime::Impl {
             phase_scratch,
             self.numerics,
             task_context,
+            self.degradation_level.load(std::memory_order_acquire),
         };
 
         CallbackResult result = CallbackResult::error;
@@ -489,6 +645,8 @@ struct Runtime::Impl {
     std::uint32_t graph_owner;
     SteadyRuntimeClock owned_clock;
     RuntimeClock* clock;
+    detail::NativePlatformPreflightProbe owned_preflight;
+    PlatformPreflightProbe* preflight;
     RuntimeConfig config{};
     RuntimeState state = RuntimeState::configuring;
     NumericalPolicy numerics{};
@@ -500,10 +658,17 @@ struct Runtime::Impl {
     detail::AlignedStorage phase_scratch;
     std::vector<RuntimeTraceEvent> trace;
     std::unique_ptr<detail::Executor> executor;
+    detail::WatchdogMonitor watchdog;
     MemoryPlan finalized_memory_plan{};
+    PlatformPreflightReport preflight_report{};
+    bool preflight_report_available = false;
     std::size_t trace_write = 0;
     std::size_t trace_count = 0;
     std::atomic<bool> in_step{false};
+    std::atomic<bool> in_periodic_run{false};
+    std::atomic<bool> periodic_dispatch{false};
+    std::atomic<std::uint32_t> degradation_level{0};
+    bool watchdog_started = false;
     const HostFrameContext* active_frame = nullptr;
     std::array<char, 256> error{};
     mutable std::atomic_flag trace_lock = ATOMIC_FLAG_INIT;
@@ -512,10 +677,15 @@ struct Runtime::Impl {
 };
 
 Runtime::Runtime()
-    : impl_(std::make_unique<Impl>(nullptr)) {}
+    : impl_(std::make_unique<Impl>(nullptr, nullptr)) {}
 
 Runtime::Runtime(RuntimeClock& clock)
-    : impl_(std::make_unique<Impl>(&clock)) {}
+    : impl_(std::make_unique<Impl>(&clock, nullptr)) {}
+
+Runtime::Runtime(
+    RuntimeClock& clock,
+    PlatformPreflightProbe& preflight)
+    : impl_(std::make_unique<Impl>(&clock, &preflight)) {}
 
 Runtime::~Runtime() = default;
 Runtime::Runtime(Runtime&&) noexcept = default;
@@ -971,8 +1141,70 @@ Status Runtime::start() noexcept {
             Status::internal_error,
             "finalized runtime has no executor");
     }
+
+    impl_->preflight_report = {};
+    impl_->preflight_report.mode =
+        impl_->config.platform_preflight_mode;
+    impl_->preflight_report_available = true;
+    if (impl_->config.platform_preflight_mode ==
+        PlatformPreflightMode::strict) {
+        impl_->preflight->inspect(
+            impl_->finalized_memory_plan.planned_bytes,
+            *impl_->clock,
+            impl_->preflight_report);
+        impl_->preflight_report.mode =
+            PlatformPreflightMode::strict;
+        if (impl_->preflight_report.check_count >
+            platform_check_capacity) {
+            impl_->preflight_report.check_count =
+                platform_check_capacity;
+        }
+        bool passed =
+            impl_->preflight_report.check_count ==
+            platform_check_capacity;
+        std::array<bool, platform_check_capacity> seen{};
+        for (std::size_t index = 0;
+             index < impl_->preflight_report.check_count;
+             ++index) {
+            auto& check = impl_->preflight_report.checks[index];
+            check.message.back() = '\0';
+            const auto id = static_cast<std::size_t>(check.id);
+            const bool id_valid = id < seen.size();
+            passed = passed && id_valid &&
+                check.status == PlatformCheckStatus::passed;
+            if (id_valid) {
+                passed = passed && !seen[id];
+                seen[id] = true;
+            }
+        }
+        for (const bool was_seen : seen) {
+            passed = passed && was_seen;
+        }
+        impl_->preflight_report.passed = passed;
+        if (!passed) {
+            return impl_->fail_preflight();
+        }
+    } else {
+        impl_->preflight_report.passed = true;
+    }
+
+    impl_->degradation_level.store(0, std::memory_order_release);
+    if (impl_->config.watchdog_timeout_ns != 0) {
+        const auto watchdog_status = impl_->watchdog.start();
+        if (watchdog_status != Status::ok) {
+            return impl_->fail(
+                watchdog_status,
+                "failed to start watchdog service lane");
+        }
+        impl_->watchdog_started = true;
+    }
+
     const auto start_status = impl_->executor->start();
     if (start_status != Status::ok) {
+        if (impl_->watchdog_started) {
+            impl_->watchdog.stop();
+            impl_->watchdog_started = false;
+        }
         return impl_->fail(start_status, "failed to start fixed executor team");
     }
     impl_->state = RuntimeState::running;
@@ -998,6 +1230,12 @@ Status Runtime::step(
     if (impl_->state != RuntimeState::running) {
         return impl_->fail(Status::invalid_state, "step requires non-reentrant running state");
     }
+    if (impl_->in_periodic_run.load(std::memory_order_acquire) &&
+        !impl_->periodic_dispatch.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "step cannot be entered from a periodic observer");
+    }
     bool expected = false;
     if (!impl_->in_step.compare_exchange_strong(
             expected,
@@ -1021,6 +1259,26 @@ Status Runtime::step(
 
     impl_->clear_error();
     output.start_ns = impl_->clock_now();
+    std::uint64_t watchdog_token = 0;
+    if (impl_->config.watchdog_timeout_ns != 0) {
+        std::uint64_t watchdog_deadline = 0;
+        if (!checked_time_add(
+                output.start_ns,
+                impl_->config.watchdog_timeout_ns,
+                watchdog_deadline)) {
+            return impl_->fail(
+                Status::clock_failure,
+                "watchdog deadline overflows the runtime clock domain");
+        }
+        watchdog_token = impl_->watchdog.arm(
+            watchdog_deadline,
+            impl_->config.watchdog_timeout_ns);
+        if (watchdog_token == 0) {
+            return impl_->fail(
+                Status::internal_error,
+                "watchdog service lane is unavailable");
+        }
+    }
     impl_->record(
         RuntimeTraceEventType::step_begin,
         Status::ok,
@@ -1037,6 +1295,37 @@ Status Runtime::step(
     impl_->active_frame = nullptr;
 
     output.finish_ns = impl_->clock_now();
+    if (watchdog_token != 0) {
+        output.watchdog_fired =
+            impl_->watchdog.complete(
+                watchdog_token,
+                output.finish_ns);
+        if (output.watchdog_fired) {
+            impl_->record(
+                RuntimeTraceEventType::watchdog_fired,
+                Status::ok,
+                output.finish_ns,
+                frame.frame_index);
+            const auto current =
+                impl_->degradation_level.load(
+                    std::memory_order_relaxed);
+            if (current <
+                impl_->config.watchdog_max_degradation_level) {
+                const auto next = current + 1;
+                impl_->degradation_level.store(
+                    next,
+                    std::memory_order_release);
+                impl_->record(
+                    RuntimeTraceEventType::degradation_applied,
+                    Status::ok,
+                    output.finish_ns,
+                    frame.frame_index,
+                    next);
+            }
+        }
+    }
+    output.degradation_level =
+        impl_->degradation_level.load(std::memory_order_acquire);
     output.deadline_missed =
         frame.deadline_ns && output.finish_ns > *frame.deadline_ns;
     impl_->record(
@@ -1056,12 +1345,227 @@ Status Runtime::step(
     return Status::ok;
 }
 
+Status Runtime::run_periodic(
+    const PeriodicRunConfig& config,
+    PeriodicFrameObserver observer,
+    void* observer_data,
+    PeriodicRunResult* result) noexcept {
+    PeriodicRunResult local_result{};
+    PeriodicRunResult& output = result ? *result : local_result;
+    output = {};
+
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::running) {
+        return impl_->fail(
+            Status::invalid_state,
+            "periodic execution requires running state");
+    }
+    output.final_degradation_level =
+        impl_->degradation_level.load(std::memory_order_acquire);
+    if (impl_->in_step.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "periodic execution cannot be entered from a frame callback");
+    }
+    if (config.frame_count == 0 ||
+        config.period.count() <= 0 ||
+        config.relative_deadline.count() <= 0) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "periodic frame_count, period, and relative deadline must be positive");
+    }
+
+    bool expected = false;
+    if (!impl_->in_periodic_run.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "periodic execution is already active");
+    }
+    struct PeriodicGuard {
+        std::atomic<bool>& flag;
+        explicit PeriodicGuard(std::atomic<bool>& value) : flag(value) {}
+        ~PeriodicGuard() {
+            flag.store(false, std::memory_order_release);
+        }
+    } guard(impl_->in_periodic_run);
+
+    const auto period_ns =
+        static_cast<std::uint64_t>(config.period.count());
+    const auto relative_deadline_ns =
+        static_cast<std::uint64_t>(
+            config.relative_deadline.count());
+    const auto first_release =
+        config.first_release_ns.value_or(impl_->clock_now());
+    output.first_release_ns = first_release;
+    output.next_release_ns = first_release;
+
+    const auto frames_minus_one =
+        static_cast<std::uint64_t>(config.frame_count - 1);
+    std::uint64_t last_offset = 0;
+    std::uint64_t last_release = 0;
+    std::uint64_t last_deadline = 0;
+    std::uint64_t requested_next_release = 0;
+    std::uint64_t last_frame_index = 0;
+    if (!checked_time_multiply(
+            frames_minus_one,
+            period_ns,
+            last_offset) ||
+        !checked_time_add(
+            first_release,
+            last_offset,
+            last_release) ||
+        !checked_time_add(
+            last_release,
+            relative_deadline_ns,
+            last_deadline) ||
+        !checked_time_add(
+            last_release,
+            period_ns,
+            requested_next_release) ||
+        !checked_time_add(
+            config.first_frame_index,
+            frames_minus_one,
+            last_frame_index)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "periodic release, deadline, or frame index overflows");
+    }
+    (void)last_deadline;
+    (void)last_frame_index;
+
+    impl_->clear_error();
+    std::uint64_t release = first_release;
+    for (std::size_t frame_offset = 0;
+         frame_offset < config.frame_count;
+         ++frame_offset) {
+        const auto frame_index =
+            config.first_frame_index +
+            static_cast<std::uint64_t>(frame_offset);
+        impl_->record(
+            RuntimeTraceEventType::periodic_release,
+            Status::ok,
+            release,
+            frame_index);
+
+        if (impl_->clock_sleep_until(release) != Status::ok) {
+            output.final_degradation_level =
+                impl_->degradation_level.load(
+                    std::memory_order_acquire);
+            return impl_->fail(
+                Status::clock_failure,
+                "runtime clock rejected an absolute periodic wait");
+        }
+        const auto wake = impl_->clock_now();
+        impl_->record(
+            RuntimeTraceEventType::periodic_wake,
+            Status::ok,
+            wake,
+            frame_index);
+
+        std::uint64_t deadline = 0;
+        if (!checked_time_add(
+                release,
+                relative_deadline_ns,
+                deadline)) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "periodic deadline overflows");
+        }
+
+        StepResult step_result;
+        Status step_status = Status::internal_error;
+        {
+            struct PeriodicDispatchGuard {
+                std::atomic<bool>& active;
+                explicit PeriodicDispatchGuard(
+                    std::atomic<bool>& value)
+                    : active(value) {
+                    active.store(true, std::memory_order_release);
+                }
+                ~PeriodicDispatchGuard() {
+                    active.store(false, std::memory_order_release);
+                }
+            } dispatch_guard(impl_->periodic_dispatch);
+            step_status = step(
+                HostFrameContext{
+                    frame_index,
+                    config.period,
+                    deadline,
+                },
+                &step_result);
+        }
+
+        PeriodicFrameResult frame_result;
+        frame_result.status = step_status;
+        frame_result.frame_index = frame_index;
+        frame_result.release_ns = release;
+        frame_result.wake_ns = wake;
+        frame_result.start_ns = step_result.start_ns;
+        frame_result.finish_ns = step_result.finish_ns;
+        frame_result.slack_ns =
+            deadline_slack(deadline, step_result.finish_ns);
+        frame_result.deadline_missed =
+            step_result.deadline_missed;
+        frame_result.watchdog_fired =
+            step_result.watchdog_fired;
+        frame_result.degradation_level =
+            step_result.degradation_level;
+
+        ++output.frames_executed;
+        if (frame_result.deadline_missed) {
+            ++output.deadline_misses;
+        }
+        if (frame_result.watchdog_fired) {
+            ++output.watchdog_events;
+        }
+        output.final_degradation_level =
+            frame_result.degradation_level;
+        output.last_frame = frame_result;
+        output.next_release_ns =
+            frame_offset + 1 == config.frame_count
+            ? requested_next_release
+            : release + period_ns;
+
+        CallbackResult observer_result = CallbackResult::ok;
+        if (observer) {
+            try {
+                observer_result = observer(
+                    observer_data,
+                    frame_result);
+            } catch (...) {
+                observer_result = CallbackResult::error;
+            }
+        }
+        if (observer_result != CallbackResult::ok) {
+            return impl_->fail(
+                Status::callback_failed,
+                "periodic frame observer failed");
+        }
+        if (step_status != Status::ok) {
+            return step_status;
+        }
+        release += period_ns;
+    }
+
+    impl_->clear_error();
+    return Status::ok;
+}
+
 Status Runtime::stop() noexcept {
     if (!impl_) {
         return Status::internal_error;
     }
-    if (impl_->in_step.load(std::memory_order_acquire)) {
-        return impl_->fail(Status::invalid_state, "stop cannot run from a callback");
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "stop cannot run from a callback or periodic loop");
     }
     if (impl_->state == RuntimeState::stopped) {
         impl_->clear_error();
@@ -1079,6 +1583,10 @@ Status Runtime::stop() noexcept {
         0);
     if (impl_->executor) {
         impl_->executor->stop();
+    }
+    if (impl_->watchdog_started) {
+        impl_->watchdog.stop();
+        impl_->watchdog_started = false;
     }
     impl_->state = RuntimeState::stopped;
     impl_->clear_error();
@@ -1162,6 +1670,22 @@ bool Runtime::memory_plan(MemoryPlan& plan) const noexcept {
     }
     plan = impl_->finalized_memory_plan;
     return true;
+}
+
+bool Runtime::platform_preflight_report(
+    PlatformPreflightReport& report) const noexcept {
+    report = {};
+    if (!impl_ || !impl_->preflight_report_available) {
+        return false;
+    }
+    report = impl_->preflight_report;
+    return true;
+}
+
+std::uint32_t Runtime::degradation_level() const noexcept {
+    return impl_
+        ? impl_->degradation_level.load(std::memory_order_acquire)
+        : 0;
 }
 
 std::uint64_t Runtime::now_ns() noexcept {

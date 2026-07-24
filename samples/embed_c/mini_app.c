@@ -226,34 +226,27 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    for (uint64_t frame_index = 0; frame_index < 5; ++frame_index) {
-        rtfw_frame_context frame;
-        rtfw_frame_context_init(&frame);
-        frame.frame_index = frame_index;
-        frame.delta_ns = 2000000;
-
-        uint64_t now_ns = 0;
-        if (!check_status(
+    rtfw_periodic_config periodic;
+    rtfw_periodic_config_init(&periodic);
+    periodic.frame_count = 5;
+    periodic.period_ns = 2000000;
+    periodic.relative_deadline_ns = 1000000000u;
+    rtfw_periodic_run_result periodic_result;
+    rtfw_periodic_run_result_init(&periodic_result);
+    if (!check_status(
+            runtime,
+            rtfw_run_periodic(
                 runtime,
-                rtfw_now_ns(runtime, &now_ns),
-                "read clock")) {
-            rtfw_destroy(runtime);
-            return EXIT_FAILURE;
-        }
-        frame.has_deadline = 1;
-        frame.deadline_ns = now_ns + 1000000000u;
-
-        rtfw_step_result result;
-        rtfw_step_result_init(&result);
-        if (!check_status(
-                runtime,
-                rtfw_step(runtime, &frame, &result),
-                "step") ||
-            result.callbacks_executed != 2 ||
-            result.deadline_missed) {
-            rtfw_destroy(runtime);
-            return EXIT_FAILURE;
-        }
+                &periodic,
+                NULL,
+                NULL,
+                &periodic_result),
+            "run periodic") ||
+        periodic_result.frames_executed != 5 ||
+        periodic_result.deadline_misses != 0 ||
+        periodic_result.watchdog_events != 0) {
+        rtfw_destroy(runtime);
+        return EXIT_FAILURE;
     }
 
     if (!check_status(runtime, rtfw_stop(runtime), "stop") ||
@@ -266,8 +259,8 @@ int main(void) {
 
     rtfw_destroy(runtime);
     printf(
-        "mini_app: executed 5 compiled graph frames with %llu planned "
-        "runtime bytes\n",
+        "mini_app: executed 5 absolute-cadence graph frames with %llu "
+        "planned runtime bytes\n",
         (unsigned long long)memory_plan.planned_bytes);
     return EXIT_SUCCESS;
 }

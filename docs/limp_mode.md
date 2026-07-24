@@ -15,11 +15,21 @@ This is policy scaffolding, not a general overload-safety guarantee:
 - a watchdog callback mutates runtime degradation state concurrently;
 - there is no qualified proof that the reduced workload meets a deadline.
 
-The target lifecycle will make optional-work shedding an explicit compiled-graph
-policy with thread-safe state transitions, telemetry, and overload tests.
+Release 0.6 adds a separate M5 target-path signal:
+`CallbackContext::degradation_level`. A one-shot watchdog event is consumed and
+the capped level is incremented only by the frame thread after the graph
+returns. The watchdog service lane never calls the host or mutates that state.
+Callbacks must explicitly choose cheaper work; 0.6 does not automatically
+disable phases and has no recovery policy. See the
+[time/platform contract](time_platform.md).
+
+Automatic optional-work shedding as a compiled-graph policy, recovery
+semantics, and versioned telemetry remain future work.
 
 ## Code anchors
 
 - Settings and rung behavior: `SimCore::Settings`,
   `SimCore::applyDegradeRung`; `include/simcore/SimCore.hpp`
 - Watchdog experiment: `rt::Watchdog`; `rt/include/rt/watchdog.hpp`
+- Target-path watchdog/degradation:
+  `rt/src/watchdog_monitor.cpp`, `rt/src/host_runtime.cpp`
