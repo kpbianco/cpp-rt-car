@@ -34,7 +34,7 @@ Capabilities query_capabilities() noexcept;
 // Example function using strong types
 core::seconds tick_duration(core::seconds dt) noexcept;
 
-inline constexpr std::uint32_t runtime_config_schema_version = 2;
+inline constexpr std::uint32_t runtime_config_schema_version = 3;
 
 enum class RuntimeState : std::uint8_t {
     configuring,
@@ -56,6 +56,7 @@ enum class Status : std::int32_t {
     graph_cycle = -9,
     resource_conflict = -10,
     queue_full = -11,
+    scratch_exhausted = -12,
 };
 
 [[nodiscard]] const char* status_message(Status status) noexcept;
@@ -68,6 +69,11 @@ enum class NumericalMode : std::uint8_t {
 enum class ExecutorPolicy : std::uint8_t {
     static_deterministic,
     bounded_throughput,
+};
+
+enum class OverloadPolicy : std::uint8_t {
+    reject_submission,
+    fail_frame,
 };
 
 enum class TaskResult : std::uint8_t {
@@ -123,22 +129,31 @@ public:
     [[nodiscard]] std::size_t task_index() const noexcept {
         return task_index_;
     }
+    // This callback-local block is reserved before the task is accepted,
+    // remains exclusively owned until the callback returns, and has
+    // unspecified contents on entry.
+    [[nodiscard]] std::span<std::byte> scratch() const noexcept {
+        return scratch_;
+    }
 
 private:
     TaskContext(
         detail::Executor& executor,
         std::size_t worker_index,
         std::size_t phase_index,
-        std::size_t task_index) noexcept
+        std::size_t task_index,
+        std::span<std::byte> scratch) noexcept
         : executor_(&executor),
           worker_index_(worker_index),
           phase_index_(phase_index),
-          task_index_(task_index) {}
+          task_index_(task_index),
+          scratch_(scratch) {}
 
     detail::Executor* executor_ = nullptr;
     std::size_t worker_index_ = 0;
     std::size_t phase_index_ = 0;
     std::size_t task_index_ = 0;
+    std::span<std::byte> scratch_{};
 
     friend class detail::Executor;
 };
@@ -151,12 +166,18 @@ struct RuntimeConfig {
     ExecutorPolicy executor_policy = ExecutorPolicy::static_deterministic;
     std::size_t worker_count = 1;
     std::size_t executor_queue_capacity = 1024;
+    std::size_t scratch_alignment = 64;
+    std::size_t task_scratch_bytes = 4 * 1024;
+    std::size_t task_scratch_slots = 1024;
+    std::size_t memory_budget_bytes = 256 * 1024 * 1024;
+    OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
 };
 
 // Applies one strict schema key to a typed configuration. The supported keys
 // are callback_capacity, scratch_bytes, trace_capacity, numerical_mode,
-// executor_policy, worker_count, and executor_queue_capacity. Unknown keys and
-// partially parsed values are rejected.
+// executor_policy, worker_count, executor_queue_capacity, scratch_alignment,
+// task_scratch_bytes, task_scratch_slots, memory_budget_bytes, and
+// overload_policy. Unknown keys and partially parsed values are rejected.
 [[nodiscard]] Status set_runtime_config_value(
     RuntimeConfig& config,
     std::string_view key,
@@ -229,12 +250,35 @@ struct ExecutorStats {
     std::uint64_t steal_attempts = 0;
     std::uint64_t successful_steals = 0;
     std::uint64_t queue_full_rejections = 0;
+    std::uint64_t scratch_exhaustions = 0;
     std::uint64_t worker_starts = 0;
 };
 
 struct StaticPhaseAssignment {
     PhaseHandle phase{};
     std::size_t worker_index = 0;
+};
+
+struct MemoryPlan {
+    // planned_bytes is the sum of both control fields and the three
+    // *_total/storage fields. It describes requested runtime storage, not RSS.
+    std::size_t memory_budget_bytes = 0;
+    std::size_t planned_bytes = 0;
+    std::size_t runtime_control_bytes = 0;
+    std::size_t executor_control_bytes = 0;
+    std::size_t phase_count = 0;
+    std::size_t phase_scratch_bytes = 0;
+    std::size_t phase_scratch_stride = 0;
+    std::size_t phase_scratch_total_bytes = 0;
+    std::size_t task_scratch_bytes = 0;
+    std::size_t task_scratch_stride = 0;
+    std::size_t task_scratch_slots = 0;
+    std::size_t task_scratch_total_bytes = 0;
+    std::size_t trace_capacity = 0;
+    std::size_t trace_storage_bytes = 0;
+    std::size_t queue_slots = 0;
+    std::size_t scratch_alignment = 0;
+    OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
 };
 
 enum class RuntimeTraceEventType : std::uint8_t {
@@ -313,6 +357,10 @@ public:
         std::size_t registration_index,
         StaticPhaseAssignment& assignment) const noexcept;
     [[nodiscard]] ExecutorStats executor_stats() const noexcept;
+    // Available after successful finalization. Counts describe requested
+    // runtime payload/control storage and exclude allocator metadata and OS
+    // thread stacks.
+    [[nodiscard]] bool memory_plan(MemoryPlan& plan) const noexcept;
     [[nodiscard]] std::uint64_t now_ns() noexcept;
     // The view remains valid until the next control operation or destruction.
     [[nodiscard]] std::string_view last_error() const noexcept;

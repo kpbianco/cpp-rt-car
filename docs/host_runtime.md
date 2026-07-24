@@ -1,15 +1,14 @@
 # Host Runtime Lifecycle
 
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
-extended with the M2 compiled graph and M3 unified executor. It provides an
-explicit, host-driven lifecycle without adopting the legacy `SimCore`
-scheduler or pacing loop.
+extended with the M2 compiled graph, M3 unified executor, and M4 finalized
+memory plan. It provides an explicit, host-driven lifecycle without adopting
+the legacy `SimCore` scheduler or pacing loop.
 
-The surface is RT0 functional behavior. It does not yet claim a complete
-zero-allocation callback lane or qualified latency. `query_capabilities()` and
-`rt_query_capabilities()` report that boundary directly: host-driven time,
-compiled-graph validation, and the unified CPU executor are available; the
-bounded-memory-plan capability remains false until M4.
+The surface is RT0 functional behavior, not qualified latency.
+`query_capabilities()` and `rt_query_capabilities()` report host-driven time,
+compiled-graph validation, the unified CPU executor, and the target-path
+bounded memory plan as available.
 
 ## Lifecycle
 
@@ -23,15 +22,15 @@ bounded-memory-plan capability remains false until M4.
 | `stopped` | repeated `stop()` | `stopped` |
 
 Other transitions return `rt::Status::invalid_state`. A stopped runtime is
-terminal. Destruction is always safe, but hosts should call `stop()` so their
-own resource lifecycle is explicit.
+terminal. Destruction requires that no host call or callback is active; hosts
+should call `stop()` so their own resource lifecycle is explicit.
 
-Control operations are single-host-thread operations in 0.4. `step()` is
+Control operations are single-host-thread operations in 0.5. `step()` is
 non-reentrant, and `stop()` called from inside a callback is rejected.
 
 ## Typed configuration
 
-`rt::RuntimeConfig` has seven schema keys:
+`rt::RuntimeConfig` has twelve schema keys:
 
 | Key | Type/default | Runtime behavior |
 | --- | --- | --- |
@@ -42,6 +41,11 @@ non-reentrant, and `stop()` called from inside a callback is rejected.
 | `executor_policy` | `static_deterministic` | Selects `static_deterministic` or `bounded_throughput` |
 | `worker_count` | positive integer, `1` | Fixed workers created by `start()`; accepted range is 1–256 |
 | `executor_queue_capacity` | power-of-two integer, `1024` | Fixed capacity of each worker-local queue; accepted range is 2–1,048,576 |
+| `scratch_alignment` | power-of-two integer, `64` | Alignment shared by phase/task scratch; accepted range is `alignof(max_align_t)`–4096 |
+| `task_scratch_bytes` | nonnegative integer, `4096` | Callback-local bytes owned by each accepted graph/range/reduction context; accepted maximum is 1,048,576 |
+| `task_scratch_slots` | positive integer, `1024` | Fixed simultaneous task-context reservations; accepted maximum is 1,048,576 |
+| `memory_budget_bytes` | positive integer, `268435456` | Maximum reported target-runtime plan accepted by finalization; ceiling is 1 TiB on 64-bit hosts and addressable `size_t` on 32-bit hosts |
+| `overload_policy` | `reject_submission` | Selects `reject_submission` or `fail_frame` for queue/scratch rejection |
 
 The typed structure can be supplied with `configure()`. Dynamic callers can use
 `configure_key()` or the C `rtfw_config_set()` equivalent. Unknown keys,
@@ -83,6 +87,7 @@ Each runtime owns:
 - its callback registry and copied callback names;
 - its logical resources, dependency declarations, and compiled phase order;
 - one fixed scratch block per registered phase;
+- a fixed pool of aligned task-scratch blocks reserved per accepted work item;
 - its trace ring and write cursor;
 - its numerical-helper policy;
 - its clock object or explicitly borrowed C++ clock.
@@ -110,18 +115,21 @@ The experimental C ABI mirrors the lifecycle:
 - `rtfw_add_dependency` / `rtfw_declare_resource_access`;
 - `rtfw_parallel_for` / `rtfw_parallel_reduce` from a callback-local task
   context;
+- `rtfw_task_scratch` for callback-local task storage;
 - `rtfw_finalize`;
+- `rtfw_get_memory_plan`;
 - `rtfw_start`;
 - `rtfw_step`;
 - `rtfw_stop`;
 - `rtfw_destroy`.
 
-Public configuration, frame, callback, and result structures carry sizes, and
-configuration carries `RTFW_C_ABI_VERSION` (version 2 in release 0.4). Call the supplied structure
-initializers and leave reserved fields zero. `rtfw_status_message()` provides
-status text even when no runtime handle was created; `rtfw_last_error()` adds
-handle-specific context. The ABI remains unfrozen before M11; incompatible
-pre-1.0 changes require a repository version increment.
+Public configuration, frame, callback, result, and memory-plan structures carry
+sizes, and configuration carries `RTFW_C_ABI_VERSION` (version 3 in release
+0.5). Call the supplied structure initializers and leave reserved fields zero.
+`rtfw_status_message()` provides status text even when no runtime handle was
+created; `rtfw_last_error()` adds handle-specific context. The ABI remains
+unfrozen before M11; incompatible pre-1.0 changes require a repository version
+increment.
 
 ## Compiled graph
 
@@ -137,11 +145,13 @@ traversal.
 
 ## Current boundary
 
-M3 places independent compiled work and nested ranges/reductions behind one
-bounded executor. M4 will complete the declared allocation/overflow plan,
-provide per-task scratch policy, and prove the full RT-lane allocation gate.
-Policy, queue, nesting, and overload details are in the
-[executor contract](executor.md).
+M4 finalizes aligned phase/task scratch, queue/control, and trace storage under
+a configured memory budget. The target CPU frame path has a multi-frame
+zero-allocation gate and explicit queue/scratch overload behavior. Plan scope
+and exclusions are specified in the
+[memory-plan contract](memory_plan.md); policy, queue, and nesting details are
+in the [executor contract](executor.md). Self-paced time and platform preflight
+remain M5.
 
 ## Code and evidence
 
@@ -153,6 +163,7 @@ Policy, queue, nesting, and overload details are in the
 - C++ lifecycle tests: `tests/test_host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Executor tests: `tests/test_executor.cpp`
+- Memory-plan tests: `tests/test_memory_plan.cpp`
 - Dynamic C ABI test: `tests/test_cabi_dlopen.c`
 - C sample: `samples/embed_c/mini_app.c`
 - C++ sample: `samples/embed_cpp/mini_app.cpp`

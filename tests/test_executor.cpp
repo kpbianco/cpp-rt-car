@@ -395,6 +395,41 @@ TEST(UnifiedExecutor, QueueFullSubmissionReturnsWithinBound) {
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }
 
+TEST(UnifiedExecutor, FailFrameEscalatesIgnoredQueueRejection) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 1;
+    config.scratch_bytes = 0;
+    config.trace_capacity = 0;
+    config.executor_policy = rt::ExecutorPolicy::static_deterministic;
+    config.worker_count = 1;
+    config.executor_queue_capacity = 2;
+    config.task_scratch_slots = 8;
+    config.overload_policy = rt::OverloadPolicy::fail_frame;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+
+    QueueFullProbe probe;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"queue-full-frame", &force_queue_full, &probe}),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    EXPECT_EQ(
+        runtime.step(
+            rt::HostFrameContext{
+                0,
+                std::chrono::nanoseconds(1),
+                std::nullopt,
+            }),
+        rt::Status::queue_full);
+
+    EXPECT_EQ(probe.status, rt::Status::queue_full);
+    EXPECT_EQ(probe.child_calls.load(), 2u);
+    EXPECT_EQ(runtime.executor_stats().queue_full_rejections, 1u);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
 TEST(UnifiedExecutor, IndependentNestedWorkPassesStaticStress) {
     run_nested_stress(rt::ExecutorPolicy::static_deterministic);
 }

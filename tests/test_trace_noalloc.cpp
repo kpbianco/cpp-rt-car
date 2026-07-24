@@ -42,6 +42,15 @@ void* allocate_raw(std::size_t size) {
     throw std::bad_alloc();
 }
 
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void deallocate_raw(void* ptr) noexcept {
+    std::free(ptr);
+}
+
 void* allocate_aligned(std::size_t size, std::size_t alignment) {
     if (alignment < alignof(std::max_align_t)) {
         alignment = alignof(std::max_align_t);
@@ -97,6 +106,137 @@ rt::CallbackResult record_runtime_phase(
     const rt::CallbackContext&) {
     auto& probe = *static_cast<RuntimeAllocationProbe*>(user_data);
     (*probe.execution)[(*probe.count)++] = probe.value;
+    return rt::CallbackResult::ok;
+}
+
+struct FullFramePhaseState {
+    std::uint64_t seed = 0;
+    std::uint64_t frame = 0;
+    std::uint64_t total = 0;
+    std::array<std::uint64_t, 64> values{};
+    std::array<std::uint64_t, 8> partials{};
+    std::atomic<std::size_t> errors{0};
+};
+
+bool valid_task_scratch(const rt::TaskContext& context) {
+    const auto scratch = context.scratch();
+    return scratch.size() == 64 &&
+        scratch.data() != nullptr &&
+        (reinterpret_cast<std::uintptr_t>(scratch.data()) % 64u) == 0u;
+}
+
+rt::TaskResult fill_full_frame_range(
+    void* user_data,
+    const rt::TaskContext& context,
+    const rt::TaskRange& range) {
+    auto& state = *static_cast<FullFramePhaseState*>(user_data);
+    if (!valid_task_scratch(context)) {
+        state.errors.fetch_add(1, std::memory_order_relaxed);
+        return rt::TaskResult::error;
+    }
+    context.scratch().front() = std::byte{0x3c};
+    for (std::size_t index = range.begin; index < range.end; ++index) {
+        state.values[index] = state.seed + state.frame + index;
+    }
+    return rt::TaskResult::ok;
+}
+
+rt::TaskResult reduce_full_frame_range(
+    void* user_data,
+    const rt::TaskContext& context,
+    const rt::TaskRange& range) {
+    auto& state = *static_cast<FullFramePhaseState*>(user_data);
+    if (!valid_task_scratch(context) ||
+        range.task_index >= state.partials.size()) {
+        state.errors.fetch_add(1, std::memory_order_relaxed);
+        return rt::TaskResult::error;
+    }
+    std::uint64_t partial = 0;
+    for (std::size_t index = range.begin; index < range.end; ++index) {
+        partial += state.values[index];
+    }
+    state.partials[range.task_index] = partial;
+    return rt::TaskResult::ok;
+}
+
+rt::TaskResult combine_full_frame_range(
+    void* user_data,
+    const rt::TaskContext& context,
+    std::size_t left,
+    std::size_t right) {
+    auto& state = *static_cast<FullFramePhaseState*>(user_data);
+    if (!valid_task_scratch(context) ||
+        left >= state.partials.size() ||
+        right >= state.partials.size()) {
+        state.errors.fetch_add(1, std::memory_order_relaxed);
+        return rt::TaskResult::error;
+    }
+    state.partials[left] += state.partials[right];
+    return rt::TaskResult::ok;
+}
+
+rt::CallbackResult run_full_frame_phase(
+    void* user_data,
+    const rt::CallbackContext& context) {
+    auto& state = *static_cast<FullFramePhaseState*>(user_data);
+    if (context.scratch.size() != 128 ||
+        context.scratch.data() == nullptr ||
+        (reinterpret_cast<std::uintptr_t>(
+             context.scratch.data()) % 64u) != 0u ||
+        !valid_task_scratch(context.tasks)) {
+        state.errors.fetch_add(1, std::memory_order_relaxed);
+        return rt::CallbackResult::error;
+    }
+
+    context.scratch.front() = std::byte{0x5a};
+    state.frame = context.frame.frame_index;
+    if (context.tasks.parallel_for(
+            state.values.size(),
+            8,
+            &fill_full_frame_range,
+            &state) != rt::Status::ok ||
+        context.tasks.parallel_reduce(
+            state.values.size(),
+            8,
+            &reduce_full_frame_range,
+            &combine_full_frame_range,
+            &state) != rt::Status::ok) {
+        state.errors.fetch_add(1, std::memory_order_relaxed);
+        return rt::CallbackResult::error;
+    }
+    state.total = state.partials[0];
+    return rt::CallbackResult::ok;
+}
+
+struct FullFrameSinkState {
+    FullFramePhaseState* first = nullptr;
+    FullFramePhaseState* second = nullptr;
+    std::uint64_t calls = 0;
+    std::size_t errors = 0;
+};
+
+std::uint64_t expected_full_frame_total(
+    std::uint64_t seed,
+    std::uint64_t frame) {
+    constexpr std::uint64_t kIndexSum = (63u * 64u) / 2u;
+    return 64u * (seed + frame) + kIndexSum;
+}
+
+rt::CallbackResult validate_full_frame(
+    void* user_data,
+    const rt::CallbackContext& context) {
+    auto& sink = *static_cast<FullFrameSinkState*>(user_data);
+    if (!sink.first || !sink.second ||
+        sink.first->total != expected_full_frame_total(
+            sink.first->seed,
+            context.frame.frame_index) ||
+        sink.second->total != expected_full_frame_total(
+            sink.second->seed,
+            context.frame.frame_index)) {
+        ++sink.errors;
+        return rt::CallbackResult::error;
+    }
+    ++sink.calls;
     return rt::CallbackResult::ok;
 }
 
@@ -157,19 +297,19 @@ void* operator new[](std::size_t size, std::align_val_t alignment,
 }
 
 void operator delete(void* ptr) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete[](void* ptr) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete(void* ptr, std::size_t) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete[](void* ptr, std::size_t) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete(void* ptr, std::align_val_t alignment) noexcept {
@@ -197,11 +337,11 @@ void operator delete[](void* ptr, std::size_t, std::align_val_t alignment) noexc
 }
 
 void operator delete(void* ptr, const std::nothrow_t&) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete[](void* ptr, const std::nothrow_t&) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete(void* ptr, std::align_val_t alignment,
@@ -219,11 +359,11 @@ void operator delete[](void* ptr, std::align_val_t alignment,
 }
 
 void operator delete(void* ptr, std::size_t, const std::nothrow_t&) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete[](void* ptr, std::size_t, const std::nothrow_t&) noexcept {
-    std::free(ptr);
+    deallocate_raw(ptr);
 }
 
 void operator delete(void* ptr, std::size_t, std::align_val_t alignment,
@@ -337,4 +477,87 @@ TEST(TraceNoAlloc, CompiledGraphFirstFrameDoesNotAllocate) {
     EXPECT_EQ(execution[0], 1u);
     EXPECT_EQ(execution[1], 0u);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+void run_complete_cpu_frames_noalloc(rt::ExecutorPolicy policy) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 3;
+    config.scratch_bytes = 128;
+    config.trace_capacity = 256;
+    config.executor_policy = policy;
+    config.worker_count = 4;
+    config.executor_queue_capacity = 64;
+    config.scratch_alignment = 64;
+    config.task_scratch_bytes = 64;
+    config.task_scratch_slots = 64;
+    config.memory_budget_bytes = 1024 * 1024;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+
+    FullFramePhaseState first;
+    first.seed = 11;
+    FullFramePhaseState second;
+    second.seed = 101;
+    FullFrameSinkState sink{&first, &second};
+    rt::PhaseHandle first_phase;
+    rt::PhaseHandle second_phase;
+    rt::PhaseHandle sink_phase;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"full-frame.first", &run_full_frame_phase, &first},
+            first_phase),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"full-frame.second", &run_full_frame_phase, &second},
+            second_phase),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"full-frame.sink", &validate_full_frame, &sink},
+            sink_phase),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.add_dependency(first_phase, sink_phase),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.add_dependency(second_phase, sink_phase),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    constexpr std::uint64_t kFrames = 64;
+    rt::Status step_status = rt::Status::ok;
+    {
+        AllocationGuard guard;
+        for (std::uint64_t frame = 0; frame < kFrames; ++frame) {
+            step_status = runtime.step(
+                rt::HostFrameContext{
+                    frame,
+                    std::chrono::nanoseconds(1),
+                    std::nullopt,
+                });
+            if (step_status != rt::Status::ok) {
+                break;
+            }
+        }
+    }
+
+    EXPECT_EQ(step_status, rt::Status::ok);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_EQ(first.errors.load(), 0u);
+    EXPECT_EQ(second.errors.load(), 0u);
+    EXPECT_EQ(sink.errors, 0u);
+    EXPECT_EQ(sink.calls, kFrames);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(TraceNoAlloc, CompleteCpuFramesDoNotAllocate) {
+    run_complete_cpu_frames_noalloc(
+        rt::ExecutorPolicy::bounded_throughput);
+}
+
+TEST(TraceNoAlloc, StaticCompleteCpuFramesDoNotAllocate) {
+    run_complete_cpu_frames_noalloc(
+        rt::ExecutorPolicy::static_deterministic);
 }

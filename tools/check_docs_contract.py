@@ -230,8 +230,11 @@ def check_runtime_contract() -> None:
     graph_source = read("rt/src/compiled_graph.cpp")
     graph_test = read("tests/test_compiled_graph.cpp")
     executor_doc = read("docs/executor.md")
+    memory_doc = read("docs/memory_plan.md")
+    aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
     executor_test = read("tests/test_executor.cpp")
+    memory_test = read("tests/test_memory_plan.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
 
     for method in (
@@ -258,6 +261,11 @@ def check_runtime_contract() -> None:
         "executor_policy",
         "worker_count",
         "executor_queue_capacity",
+        "scratch_alignment",
+        "task_scratch_bytes",
+        "task_scratch_slots",
+        "memory_budget_bytes",
+        "overload_policy",
     }
     implemented_keys = set(
         re.findall(r'key\s*==\s*"([a-z0-9_]+)"', runtime_source)
@@ -318,6 +326,21 @@ def check_runtime_contract() -> None:
         if function not in c_header:
             fail(f"rt/include/rt/c_api.h: missing M3 C ABI function {function!r}")
 
+    for method in (
+        "scratch() const noexcept",
+        "bool memory_plan(",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M4 method {method!r}")
+
+    for function in (
+        "rtfw_memory_plan_init(",
+        "rtfw_task_scratch(",
+        "rtfw_get_memory_plan(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M4 C ABI function {function!r}")
+
     for status in (
         "invalid_handle",
         "graph_cycle",
@@ -347,17 +370,18 @@ def check_runtime_contract() -> None:
         "| M1 | Complete |" not in roadmap
         or "| M2 | Complete |" not in roadmap
         or "| M3 | Complete |" not in roadmap
-        or "| M4 | Next |" not in roadmap
+        or "| M4 | Complete |" not in roadmap
+        or "| M5 | Next |" not in roadmap
     ):
-        fail("docs/roadmap.md: M3/M4 milestone status is not advanced")
+        fail("docs/roadmap.md: M4/M5 milestone status is not advanced")
 
     if not re.search(
-        r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*false\s*\}\s*;",
+        r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*\}\s*;",
         runtime_source,
     ):
         fail(
-            "rt/src/host_runtime.cpp: M3 capability tuple is not "
-            "true/true/true/false"
+            "rt/src/host_runtime.cpp: M4 capability tuple is not "
+            "true/true/true/true"
         )
 
     for token in (
@@ -411,11 +435,57 @@ def check_runtime_contract() -> None:
     for test_name in (
         "StaticAssignmentMetadataAndExecutionAreStable",
         "QueueFullSubmissionReturnsWithinBound",
+        "FailFrameEscalatesIgnoredQueueRejection",
         "IndependentNestedWorkPassesStaticStress",
         "ThroughputUsesLocalQueuesAndSuccessfulSteals",
     ):
         if test_name not in executor_test:
             fail(f"tests/test_executor.cpp: missing M3 gate {test_name!r}")
+
+    for token in (
+        "Status::scratch_exhausted",
+        "kScratchCasAttemptLimit",
+        "release_scratch_slot(",
+        "OverloadPolicy::fail_frame",
+    ):
+        if token not in executor_source and token not in runtime_source:
+            fail(f"M4 implementation is missing {token!r}")
+    for forbidden in (
+        "std::mutex",
+        "std::condition_variable",
+        "std::ifstream",
+        "std::ofstream",
+        "std::fstream",
+    ):
+        if forbidden in runtime_source or forbidden in executor_source:
+            fail(f"M4 target CPU path contains forbidden RT-lane primitive {forbidden!r}")
+    for token in (
+        "::operator new(bytes, std::align_val_t(alignment))",
+        "::operator delete(",
+        "std::align_val_t(alignment_)",
+    ):
+        if token not in aligned_storage:
+            fail(f"rt/src/aligned_storage.hpp: missing paired storage evidence {token!r}")
+    for phrase in (
+        "planned_bytes =",
+        "reject_submission",
+        "fail_frame",
+        "allocator metadata",
+        "OS thread stacks",
+        "accepted prefix",
+    ):
+        if phrase not in memory_doc:
+            fail(f"docs/memory_plan.md: missing M4 contract phrase {phrase!r}")
+    for test_name in (
+        "FinalizedPlanMatchesConfigurationAndAlignment",
+        "NestedExecutionContextsOwnDistinctScratch",
+        "RejectSubmissionReportsScratchExhaustion",
+        "FailFrameEscalatesIgnoredScratchExhaustion",
+    ):
+        if test_name not in memory_test:
+            fail(f"tests/test_memory_plan.cpp: missing M4 gate {test_name!r}")
+    if "CompleteCpuFramesDoNotAllocate" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing complete M4 allocation gate")
 
 
 def main() -> int:
@@ -428,6 +498,7 @@ def main() -> int:
             "docs/host_runtime.md",
             "docs/compiled_graph.md",
             "docs/executor.md",
+            "docs/memory_plan.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -437,6 +508,7 @@ def main() -> int:
             "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
             "rt/src/compiled_graph.cpp",
+            "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
             "rt/src/host_runtime.cpp",
             "samples/embed_c/mini_app.c",
@@ -444,6 +516,7 @@ def main() -> int:
             "tests/test_host_runtime.cpp",
             "tests/test_compiled_graph.cpp",
             "tests/test_executor.cpp",
+            "tests/test_memory_plan.cpp",
         )
     )
     check_version()

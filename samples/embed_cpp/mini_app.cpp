@@ -17,9 +17,15 @@ struct SampleState {
 
 rt::TaskResult produce_range(
     void* user_data,
-    const rt::TaskContext&,
+    const rt::TaskContext& context,
     const rt::TaskRange& range) {
     auto& state = *static_cast<SampleState*>(user_data);
+    const auto scratch = context.scratch();
+    if (scratch.size() < sizeof(std::uint64_t) ||
+        (reinterpret_cast<std::uintptr_t>(scratch.data()) % 64u) != 0u) {
+        return rt::TaskResult::error;
+    }
+    scratch.front() = std::byte{0x17};
     for (std::size_t index = range.begin; index < range.end; ++index) {
         state.lanes[index] = state.produced;
     }
@@ -88,6 +94,11 @@ int main() {
     config.executor_policy = rt::ExecutorPolicy::bounded_throughput;
     config.worker_count = 4;
     config.executor_queue_capacity = 128;
+    config.scratch_alignment = 64;
+    config.task_scratch_bytes = 64;
+    config.task_scratch_slots = 128;
+    config.memory_budget_bytes = 1024 * 1024;
+    config.overload_policy = rt::OverloadPolicy::fail_frame;
 
     SampleState state;
     rt::PhaseHandle consumer;
@@ -130,7 +141,15 @@ int main() {
                 simulation_state,
                 rt::ResourceAccess::read),
             "declare consumer access") ||
-        !check(runtime, runtime.finalize(), "finalize") ||
+        !check(runtime, runtime.finalize(), "finalize")) {
+        return 1;
+    }
+
+    rt::MemoryPlan memory_plan;
+    if (!runtime.memory_plan(memory_plan) ||
+        memory_plan.planned_bytes > memory_plan.memory_budget_bytes ||
+        memory_plan.task_scratch_bytes != config.task_scratch_bytes ||
+        memory_plan.overload_policy != config.overload_policy ||
         !check(runtime, runtime.start(), "start")) {
         return 1;
     }
@@ -157,6 +176,8 @@ int main() {
         return 1;
     }
 
-    std::cout << "mini_app_cpp: executed 5 compiled graph frames\n";
+    std::cout << "mini_app_cpp: executed 5 compiled graph frames with "
+              << memory_plan.planned_bytes
+              << " planned runtime bytes\n";
     return 0;
 }

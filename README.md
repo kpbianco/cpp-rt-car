@@ -8,7 +8,7 @@ simulation execution. The repository explores phase graphs, parallel range
 work, fixed-capacity queues, frame arenas, numerical controls, tracing, and
 asynchronous device patterns.
 
-> **Status: 0.4.0 experimental.** This release is not production-ready and has
+> **Status: 0.5.0 experimental.** This release is not production-ready and has
 > no hard-real-time, worst-case-latency, cross-platform bitwise-determinism, GPU,
 > or XDMA qualification. See the [product contract](docs/product_contract.md)
 > and [roadmap](docs/roadmap.md) before integrating it.
@@ -22,15 +22,16 @@ asynchronous device patterns.
 | Host-driven callbacks | Implemented RT0 surface | `step()` waits synchronously without pacing; dependency-ready callbacks may run concurrently on the fixed team |
 | Unified CPU executor | Implemented RT0 surface | Static deterministic assignment and bounded local-queue throughput policies run graph, range, and fixed-tree reduction work |
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
+| Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, queue/control storage, and the trace ring; post-start CPU-frame tests observe zero runtime heap allocation |
 | Legacy phase/range execution | Experimental | `SimCore` retains its separate phase, range, reduction, and pacing path for compatibility |
 | Legacy `SimCore` graph | Experimental | Topological levels exist, but this path does not inherit the target runtime's cycle/resource validation |
-| Memory | Experimental | Per-thread frame arenas and NUMA helpers exist; the current Release overflow path can fall back to heap allocation |
+| Legacy memory utilities | Experimental | Per-thread frame arenas and NUMA helpers remain outside the target plan; the Release arena overflow path can fall back to heap allocation |
 | Numerics | Experimental | FTZ/DAZ setup, explicit FMA gating, fixed reductions, fixed point, and counter PRNG utilities |
 | Trace | Experimental | Fixed-capacity per-thread binary event rings and offline exporters |
 | Metrics | Experimental | JSON counters and rolling phase histograms; default histogram capacity is 120 samples |
 | Snapshots | Experimental | Demo and low-level serialization helpers; stable validated replay format is planned |
-| C ABI | Experimental lifecycle surface | Size/version-checked configuration and frame structures expose create/register/finalize/start/step/stop with typed status codes |
-| Runtime configuration | Implemented M1–M3 schema | Seven strict typed keys control callback, scratch, trace, numerics, executor policy, workers, and queues; unknown keys fail |
+| C ABI | Experimental ABI v3 surface | Size/version-checked lifecycle, graph, nested-work, task-scratch, and memory-plan calls use fixed-width discriminators and typed status codes |
+| Runtime configuration | Implemented M1–M4 schema | Twelve strict typed keys include aligned phase/task scratch, a finalized memory budget, and overload policy; unknown keys fail |
 | Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
 | GPU | CPU mock only | The mock launches detached CPU threads; no CUDA/Vulkan backend exists |
 | XDMA | Planned | No backend exists |
@@ -87,14 +88,16 @@ demo/profile integration and self-paced execution remain planned.
 
 ## Embedding lifecycle
 
-Release 0.4 provides the M1 lifecycle, M2 compiled graph, and M3 executor in
+Release 0.5 provides the M1 lifecycle, M2 compiled graph, M3 executor, and M4
+memory closure in
 `<rt/runtime.hpp>` and `<rt/c_api.h>`:
 
 1. configure a typed runtime;
 2. register callback phases and logical resources while configuring;
 3. declare phase dependencies and read/write resource access;
-4. finalize to validate and compile the graph, allocate phase-local scratch,
-   trace, and fixed queue storage, and freeze topology and static assignments;
+4. finalize to validate and compile the graph, reject an over-budget memory
+   plan, allocate aligned phase/task scratch, trace, and fixed queue storage,
+   and freeze topology and static assignments;
 5. start the fixed worker team;
 6. submit host-owned frame index, simulation delta, and optional deadline to
    `step()`;
@@ -106,7 +109,8 @@ uses local queues and bounded steals. Both use the same team for nested
 `parallel_for()` and deterministic-tree `parallel_reduce()` calls. See the
 [host runtime contract](docs/host_runtime.md), the
 [compiled graph contract](docs/compiled_graph.md), the
-[executor contract](docs/executor.md), and the working
+[executor contract](docs/executor.md), the
+[memory-plan contract](docs/memory_plan.md), and the working
 [C](samples/embed_c/mini_app.c) and
 [C++](samples/embed_cpp/mini_app.cpp) examples.
 
@@ -130,9 +134,10 @@ Accepted architecture decisions:
 - [ADR-0002: host-driven time by default](docs/adr/0002-host-driven-time.md)
 - [ADR-0003: bounded device backend ABI](docs/adr/0003-device-backend-boundary.md)
 
-The M1–M3 host runtime now implements lifecycle, host-driven time, compiled
-graph validation, and the first two CPU policies. The existing `SimCore` demo
-and legacy scheduler components remain outside that target path. The
+The M1–M4 host runtime now implements lifecycle, host-driven time, compiled
+graph validation, the first two CPU policies, and the bounded target-path
+memory plan. The existing `SimCore` demo and legacy scheduler components
+remain outside that target path. The
 [architecture guide](docs/architecture.md) distinguishes current and target
 paths.
 
@@ -158,7 +163,7 @@ Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M3 host runtime, graph compiler, unified executor, plus experimental legacy scheduler/fiber, snapshot, and plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M4 host runtime, graph compiler, unified executor, memory plan, plus experimental legacy scheduler/fiber, snapshot, and plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |
@@ -198,6 +203,8 @@ CI currently provides:
   topology-allocation tests;
 - static-assignment, queue-saturation, nested range/reduction, throughput-steal,
   stress, and ThreadSanitizer executor gates;
+- aligned phase/task-scratch, memory-budget, overload-policy, and multi-frame
+  zero-allocation target-path gates;
 - shared/static C and C++ compiled-graph samples plus dynamic C ABI loading;
 - autotune mapping and synthetic autotune smoke;
 - scaling artifact smoke;

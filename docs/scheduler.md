@@ -1,6 +1,6 @@
 # Scheduler Status
 
-RTFW 0.4 has one target-path CPU executor owned by `rt::Runtime`. It implements
+RTFW 0.5 has one target-path CPU executor owned by `rt::Runtime`. It implements
 the first two policies accepted by
 [ADR-0001](adr/0001-one-executor-boundary.md). Several older execution
 components remain for source compatibility but are not used by that runtime.
@@ -15,8 +15,10 @@ queue removals.
 
 Graph callbacks, nested ranges, and fixed-tree reductions use the same task
 representation and worker team. A full or persistently contended queue returns
-`queue_full`; it never spins until space, executes a rejected task inline, or
-creates a helper. See the [executor contract](executor.md).
+`queue_full`; unavailable task scratch returns `scratch_exhausted`. Neither
+path spins until capacity, executes a rejected task inline, or creates a
+helper. See the [executor contract](executor.md) and
+[memory-plan contract](memory_plan.md).
 
 ## Legacy compatibility paths
 
@@ -59,10 +61,10 @@ with fixed backing storage, so upstream allocation remains possible.
 ## Remaining target work
 
 M3 completes the runtime-owned `static_deterministic` and
-`bounded_throughput` policies. The legacy classes are quarantined rather than
-silently presented as equivalent implementations. M4 closes executor memory,
-scratch, and frame-level overload planning. A host job-system adapter and
-periodic OS scheduling remain later, separately qualified policies.
+`bounded_throughput` policies, and M4 closes their target-path memory, scratch,
+and frame-level overload plan. The legacy classes are quarantined rather than
+silently presented as equivalent implementations. A host job-system adapter
+and periodic OS scheduling remain later, separately qualified policies.
 
 ## Scaling tool
 

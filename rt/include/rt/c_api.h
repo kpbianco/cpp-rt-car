@@ -24,7 +24,7 @@ extern "C" {
 #define RT_VERSION_MAJOR RTFW_VERSION_MAJOR
 #define RT_VERSION_MINOR RTFW_VERSION_MINOR
 #define RT_VERSION_PATCH RTFW_VERSION_PATCH
-#define RTFW_C_ABI_VERSION 2u
+#define RTFW_C_ABI_VERSION 3u
 
 typedef struct {
     uint8_t compiled_graph;
@@ -50,6 +50,7 @@ typedef int32_t rtfw_status;
 #define RTFW_STATUS_GRAPH_CYCLE ((rtfw_status)-9)
 #define RTFW_STATUS_RESOURCE_CONFLICT ((rtfw_status)-10)
 #define RTFW_STATUS_QUEUE_FULL ((rtfw_status)-11)
+#define RTFW_STATUS_SCRATCH_EXHAUSTED ((rtfw_status)-12)
 
 typedef uint32_t rtfw_runtime_state;
 #define RTFW_STATE_CONFIGURING ((rtfw_runtime_state)0u)
@@ -69,6 +70,10 @@ typedef uint32_t rtfw_executor_policy;
 #define RTFW_EXECUTOR_STATIC_DETERMINISTIC ((rtfw_executor_policy)0u)
 #define RTFW_EXECUTOR_BOUNDED_THROUGHPUT ((rtfw_executor_policy)1u)
 
+typedef uint32_t rtfw_overload_policy;
+#define RTFW_OVERLOAD_REJECT_SUBMISSION ((rtfw_overload_policy)0u)
+#define RTFW_OVERLOAD_FAIL_FRAME ((rtfw_overload_policy)1u)
+
 typedef struct rtfw_config {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -79,6 +84,12 @@ typedef struct rtfw_config {
     uint32_t executor_policy;
     uint64_t worker_count;
     uint64_t executor_queue_capacity;
+    uint64_t scratch_alignment;
+    uint64_t task_scratch_bytes;
+    uint64_t task_scratch_slots;
+    uint64_t memory_budget_bytes;
+    uint32_t overload_policy;
+    uint32_t reserved0;
     uint64_t reserved[2];
 } rtfw_config;
 
@@ -114,6 +125,28 @@ typedef struct rtfw_step_result {
     uint8_t deadline_missed;
     uint8_t reserved1[7];
 } rtfw_step_result;
+
+typedef struct rtfw_memory_plan {
+    uint32_t struct_size;
+    uint32_t overload_policy;
+    uint64_t memory_budget_bytes;
+    uint64_t planned_bytes;
+    uint64_t runtime_control_bytes;
+    uint64_t executor_control_bytes;
+    uint64_t phase_count;
+    uint64_t phase_scratch_bytes;
+    uint64_t phase_scratch_stride;
+    uint64_t phase_scratch_total_bytes;
+    uint64_t task_scratch_bytes;
+    uint64_t task_scratch_stride;
+    uint64_t task_scratch_slots;
+    uint64_t task_scratch_total_bytes;
+    uint64_t trace_capacity;
+    uint64_t trace_storage_bytes;
+    uint64_t queue_slots;
+    uint64_t scratch_alignment;
+    uint64_t reserved[4];
+} rtfw_memory_plan;
 
 typedef uint32_t rtfw_callback_result;
 #define RTFW_CALLBACK_OK ((rtfw_callback_result)0u)
@@ -166,13 +199,14 @@ RTFW_API rtfw_status rtfw_config_set(
     const char* value);
 RTFW_API void rtfw_frame_context_init(rtfw_frame_context* context);
 RTFW_API void rtfw_step_result_init(rtfw_step_result* result);
+RTFW_API void rtfw_memory_plan_init(rtfw_memory_plan* plan);
 
 /*
  * The runtime copies configuration and callback names. Callback user_data is
  * borrowed until the runtime is stopped/destroyed. Callback context and
  * scratch pointers are valid only for that synchronous callback invocation.
  * Lifecycle and graph functions are single-host-thread operations in ABI
- * version 1.
+ * version 3.
  */
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
@@ -205,7 +239,9 @@ RTFW_API rtfw_status rtfw_declare_resource_access(
 /*
  * Nested work uses the runtime's existing fixed worker team and waits
  * synchronously. A full/busy bounded queue returns RTFW_STATUS_QUEUE_FULL;
- * no helper thread or inline emergency path is created.
+ * unavailable task scratch returns RTFW_STATUS_SCRATCH_EXHAUSTED. The
+ * configured overload policy controls whether rejection also fails the active
+ * frame. No helper thread or inline emergency path is created.
  */
 RTFW_API rtfw_status rtfw_parallel_for(
     const rtfw_task_context* context,
@@ -223,6 +259,14 @@ RTFW_API rtfw_status rtfw_parallel_reduce(
 RTFW_API rtfw_status rtfw_task_worker_index(
     const rtfw_task_context* context,
     uint64_t* out_worker_index);
+/*
+ * Returns storage exclusively owned by this callback invocation. Contents are
+ * unspecified on entry; the pointer must not escape the callback.
+ */
+RTFW_API rtfw_status rtfw_task_scratch(
+    const rtfw_task_context* context,
+    void** out_scratch,
+    uint64_t* out_scratch_bytes);
 RTFW_API rtfw_status rtfw_finalize(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_start(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_step(
@@ -233,6 +277,13 @@ RTFW_API rtfw_status rtfw_stop(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_get_state(
     const rtfw_handle* handle,
     rtfw_runtime_state* out_state);
+/*
+ * Available after finalization. Initialize out_plan and keep reserved fields
+ * zero.
+ */
+RTFW_API rtfw_status rtfw_get_memory_plan(
+    const rtfw_handle* handle,
+    rtfw_memory_plan* out_plan);
 RTFW_API rtfw_status rtfw_now_ns(
     rtfw_handle* handle,
     uint64_t* out_now_ns);
