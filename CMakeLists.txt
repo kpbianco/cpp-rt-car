@@ -511,10 +511,12 @@ set(RT_SOURCES
     rt/src/compiled_graph.cpp
     rt/src/executor.cpp
     rt/src/host_runtime.cpp
+    rt/src/native_platform_preflight.cpp
     rt/src/runtime.cpp
     rt/src/plugin_manager.cpp
     rt/src/scheduler.cpp
     rt/src/fiber_pool.cpp
+    rt/src/watchdog_monitor.cpp
 )
 
 if (UNIX)

@@ -46,8 +46,16 @@ record and measurements are listed in the
 [product contract](product_contract.md). Host setup and library behavior stay
 separate.
 
+Release 0.6 provides an optional read-only strict Linux prerequisite preflight
+for the target `rt::Runtime`. It checks clock support, PREEMPT_RT, memory-lock
+coverage, isolated affinity, and realtime scheduling before runtime threads
+start. It deliberately does not apply any of those settings, and passing it is
+not an RT2 qualification. See the
+[time/platform contract](time_platform.md).
+
 ## Code anchors
 
 - Linux experiment: `tools/rt_harden.sh`
 - Windows experiment: `tools/rt_harden.ps1`
 - Qualification requirements: [product contract](product_contract.md)
+- Runtime preflight: [time/platform contract](time_platform.md)

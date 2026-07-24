@@ -1,6 +1,6 @@
 # Unified CPU Executor
 
-Release 0.5 carries the M3 CPU-execution surface in `rt::Runtime` into the M4
+Release 0.6 carries the M3 CPU-execution surface in `rt::Runtime` through the M4
 memory contract. The
 compiled graph, independent phase callbacks, nested range work, and nested
 reductions all use one runtime-owned worker team and one internal immutable work
@@ -19,7 +19,8 @@ and aligned phase/task scratch storage, and commits the memory plan. `start()`
 creates
 exactly the configured worker count. No executor thread is created after
 `start()` returns. `stop()` rejects calls during a step, stops the team, and
-joins every worker.
+joins every worker. If the M5 watchdog is configured, `start()` also creates
+one separate service lane; it never executes graph or nested CPU work.
 
 Workers use bounded lock-free local rings. They yield when idle; there is no
 condition-variable service thread, emergency spawn, detached task, or

@@ -24,13 +24,17 @@ extern "C" {
 #define RT_VERSION_MAJOR RTFW_VERSION_MAJOR
 #define RT_VERSION_MINOR RTFW_VERSION_MINOR
 #define RT_VERSION_PATCH RTFW_VERSION_PATCH
-#define RTFW_C_ABI_VERSION 3u
+#define RTFW_C_ABI_VERSION 4u
 
 typedef struct {
     uint8_t compiled_graph;
     uint8_t host_driven_time;
     uint8_t unified_cpu_executor;
     uint8_t bounded_memory_plan;
+    uint8_t self_paced_time;
+    uint8_t frame_watchdog;
+    uint8_t strict_platform_preflight;
+    uint8_t reserved0;
 } rt_capabilities_c;
 
 typedef struct rtfw_handle rtfw_handle;
@@ -51,6 +55,8 @@ typedef int32_t rtfw_status;
 #define RTFW_STATUS_RESOURCE_CONFLICT ((rtfw_status)-10)
 #define RTFW_STATUS_QUEUE_FULL ((rtfw_status)-11)
 #define RTFW_STATUS_SCRATCH_EXHAUSTED ((rtfw_status)-12)
+#define RTFW_STATUS_PLATFORM_PREFLIGHT_FAILED ((rtfw_status)-13)
+#define RTFW_STATUS_CLOCK_FAILURE ((rtfw_status)-14)
 
 typedef uint32_t rtfw_runtime_state;
 #define RTFW_STATE_CONFIGURING ((rtfw_runtime_state)0u)
@@ -74,6 +80,29 @@ typedef uint32_t rtfw_overload_policy;
 #define RTFW_OVERLOAD_REJECT_SUBMISSION ((rtfw_overload_policy)0u)
 #define RTFW_OVERLOAD_FAIL_FRAME ((rtfw_overload_policy)1u)
 
+typedef uint32_t rtfw_platform_preflight_mode;
+#define RTFW_PLATFORM_PREFLIGHT_DISABLED ((rtfw_platform_preflight_mode)0u)
+#define RTFW_PLATFORM_PREFLIGHT_STRICT ((rtfw_platform_preflight_mode)1u)
+
+typedef uint32_t rtfw_platform_check_id;
+#define RTFW_PLATFORM_CHECK_ABSOLUTE_MONOTONIC_CLOCK \
+    ((rtfw_platform_check_id)0u)
+#define RTFW_PLATFORM_CHECK_REALTIME_KERNEL ((rtfw_platform_check_id)1u)
+#define RTFW_PLATFORM_CHECK_MEMORY_LOCK_LIMIT ((rtfw_platform_check_id)2u)
+#define RTFW_PLATFORM_CHECK_LOCKED_MEMORY ((rtfw_platform_check_id)3u)
+#define RTFW_PLATFORM_CHECK_ISOLATED_CPU_AFFINITY \
+    ((rtfw_platform_check_id)4u)
+#define RTFW_PLATFORM_CHECK_REALTIME_SCHEDULER \
+    ((rtfw_platform_check_id)5u)
+
+typedef uint32_t rtfw_platform_check_status;
+#define RTFW_PLATFORM_CHECK_PASSED ((rtfw_platform_check_status)0u)
+#define RTFW_PLATFORM_CHECK_FAILED ((rtfw_platform_check_status)1u)
+#define RTFW_PLATFORM_CHECK_UNSUPPORTED ((rtfw_platform_check_status)2u)
+
+#define RTFW_PLATFORM_CHECK_CAPACITY 6u
+#define RTFW_PLATFORM_CHECK_MESSAGE_CAPACITY 96u
+
 typedef struct rtfw_config {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -89,6 +118,9 @@ typedef struct rtfw_config {
     uint64_t task_scratch_slots;
     uint64_t memory_budget_bytes;
     uint32_t overload_policy;
+    uint32_t platform_preflight_mode;
+    uint64_t watchdog_timeout_ns;
+    uint32_t watchdog_max_degradation_level;
     uint32_t reserved0;
     uint64_t reserved[2];
 } rtfw_config;
@@ -106,6 +138,8 @@ typedef struct rtfw_frame_context {
 typedef struct rtfw_callback_context {
     uint32_t struct_size;
     uint32_t numerical_mode;
+    uint32_t degradation_level;
+    uint32_t reserved0;
     uint64_t frame_index;
     int64_t delta_ns;
     uint8_t has_deadline;
@@ -123,8 +157,52 @@ typedef struct rtfw_step_result {
     uint64_t start_ns;
     uint64_t finish_ns;
     uint8_t deadline_missed;
-    uint8_t reserved1[7];
+    uint8_t watchdog_fired;
+    uint8_t reserved1[2];
+    uint32_t degradation_level;
 } rtfw_step_result;
+
+typedef struct rtfw_periodic_config {
+    uint32_t struct_size;
+    uint32_t reserved0;
+    uint64_t first_frame_index;
+    uint64_t frame_count;
+    uint64_t period_ns;
+    uint8_t has_first_release;
+    uint8_t reserved1[7];
+    uint64_t first_release_ns;
+    uint64_t relative_deadline_ns;
+    uint64_t reserved[2];
+} rtfw_periodic_config;
+
+typedef struct rtfw_periodic_frame_result {
+    uint32_t struct_size;
+    int32_t status;
+    uint64_t frame_index;
+    uint64_t release_ns;
+    uint64_t wake_ns;
+    uint64_t start_ns;
+    uint64_t finish_ns;
+    int64_t slack_ns;
+    uint8_t deadline_missed;
+    uint8_t watchdog_fired;
+    uint8_t reserved0[2];
+    uint32_t degradation_level;
+} rtfw_periodic_frame_result;
+
+typedef struct rtfw_periodic_run_result {
+    uint32_t struct_size;
+    uint32_t reserved0;
+    uint64_t frames_executed;
+    uint64_t deadline_misses;
+    uint64_t watchdog_events;
+    uint32_t final_degradation_level;
+    uint32_t reserved1;
+    uint64_t first_release_ns;
+    uint64_t next_release_ns;
+    rtfw_periodic_frame_result last_frame;
+    uint64_t reserved[2];
+} rtfw_periodic_run_result;
 
 typedef struct rtfw_memory_plan {
     uint32_t struct_size;
@@ -147,6 +225,24 @@ typedef struct rtfw_memory_plan {
     uint64_t scratch_alignment;
     uint64_t reserved[4];
 } rtfw_memory_plan;
+
+typedef struct rtfw_platform_check_result {
+    uint32_t id;
+    uint32_t status;
+    int32_t system_error;
+    uint32_t reserved0;
+    char message[RTFW_PLATFORM_CHECK_MESSAGE_CAPACITY];
+} rtfw_platform_check_result;
+
+typedef struct rtfw_platform_preflight_report {
+    uint32_t struct_size;
+    uint32_t mode;
+    uint8_t passed;
+    uint8_t reserved0[7];
+    uint64_t check_count;
+    rtfw_platform_check_result checks[RTFW_PLATFORM_CHECK_CAPACITY];
+    uint64_t reserved[2];
+} rtfw_platform_preflight_report;
 
 typedef uint32_t rtfw_callback_result;
 #define RTFW_CALLBACK_OK ((rtfw_callback_result)0u)
@@ -184,6 +280,10 @@ typedef rtfw_callback_result (*rtfw_reduction_callback)(
     uint64_t left_task_index,
     uint64_t right_task_index);
 
+typedef rtfw_callback_result (*rtfw_periodic_frame_callback)(
+    void* user_data,
+    const rtfw_periodic_frame_result* frame);
+
 /* Capability bytes are 0 or 1 and report completed target-path guarantees. */
 RTFW_API uint32_t rt_version_major(void);
 RTFW_API uint32_t rt_version_minor(void);
@@ -199,14 +299,19 @@ RTFW_API rtfw_status rtfw_config_set(
     const char* value);
 RTFW_API void rtfw_frame_context_init(rtfw_frame_context* context);
 RTFW_API void rtfw_step_result_init(rtfw_step_result* result);
+RTFW_API void rtfw_periodic_config_init(rtfw_periodic_config* config);
+RTFW_API void rtfw_periodic_run_result_init(
+    rtfw_periodic_run_result* result);
 RTFW_API void rtfw_memory_plan_init(rtfw_memory_plan* plan);
+RTFW_API void rtfw_platform_preflight_report_init(
+    rtfw_platform_preflight_report* report);
 
 /*
  * The runtime copies configuration and callback names. Callback user_data is
  * borrowed until the runtime is stopped/destroyed. Callback context and
  * scratch pointers are valid only for that synchronous callback invocation.
  * Lifecycle and graph functions are single-host-thread operations in ABI
- * version 3.
+ * version 4.
  */
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
@@ -273,6 +378,16 @@ RTFW_API rtfw_status rtfw_step(
     rtfw_handle* handle,
     const rtfw_frame_context* frame,
     rtfw_step_result* result);
+/*
+ * Executes a finite runtime-paced loop on the calling frame thread. Release
+ * timestamps are absolute and never drift after a late frame.
+ */
+RTFW_API rtfw_status rtfw_run_periodic(
+    rtfw_handle* handle,
+    const rtfw_periodic_config* config,
+    rtfw_periodic_frame_callback observer,
+    void* observer_data,
+    rtfw_periodic_run_result* result);
 RTFW_API rtfw_status rtfw_stop(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_get_state(
     const rtfw_handle* handle,
@@ -284,6 +399,13 @@ RTFW_API rtfw_status rtfw_get_state(
 RTFW_API rtfw_status rtfw_get_memory_plan(
     const rtfw_handle* handle,
     rtfw_memory_plan* out_plan);
+/* Available after start is attempted, including strict preflight failure. */
+RTFW_API rtfw_status rtfw_get_platform_preflight_report(
+    const rtfw_handle* handle,
+    rtfw_platform_preflight_report* out_report);
+RTFW_API rtfw_status rtfw_get_degradation_level(
+    const rtfw_handle* handle,
+    uint32_t* out_level);
 RTFW_API rtfw_status rtfw_now_ns(
     rtfw_handle* handle,
     uint64_t* out_now_ns);

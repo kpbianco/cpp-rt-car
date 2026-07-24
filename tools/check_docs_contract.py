@@ -231,10 +231,16 @@ def check_runtime_contract() -> None:
     graph_test = read("tests/test_compiled_graph.cpp")
     executor_doc = read("docs/executor.md")
     memory_doc = read("docs/memory_plan.md")
+    time_doc = read("docs/time_platform.md")
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
+    watchdog_source = read("rt/src/watchdog_monitor.cpp")
+    preflight_source = read("rt/src/native_platform_preflight.cpp")
+    host_test = read("tests/test_host_runtime.cpp")
     executor_test = read("tests/test_executor.cpp")
     memory_test = read("tests/test_memory_plan.cpp")
+    periodic_test = read("tests/test_periodic_runtime.cpp")
+    preflight_test = read("tests/test_platform_preflight.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
 
     for method in (
@@ -248,10 +254,12 @@ def check_runtime_contract() -> None:
         if method not in runtime_header:
             fail(f"rt/include/rt/runtime.hpp: missing M1 lifecycle method {method!r}")
 
-    forbidden_host_pacing = ("sleep_for", "sleep_until", "std::thread")
+    forbidden_host_pacing = ("sleep_for", "std::thread")
     for token in forbidden_host_pacing:
         if token in runtime_source:
             fail(f"rt/src/host_runtime.cpp: host-driven runtime contains {token!r}")
+    if "HostDrivenStepDoesNotPace" not in host_test:
+        fail("tests/test_host_runtime.cpp: missing host-driven no-pacing gate")
 
     schema_keys = {
         "callback_capacity",
@@ -266,6 +274,9 @@ def check_runtime_contract() -> None:
         "task_scratch_slots",
         "memory_budget_bytes",
         "overload_policy",
+        "watchdog_timeout_ns",
+        "watchdog_max_degradation_level",
+        "platform_preflight_mode",
     }
     implemented_keys = set(
         re.findall(r'key\s*==\s*"([a-z0-9_]+)"', runtime_source)
@@ -341,6 +352,26 @@ def check_runtime_contract() -> None:
         if function not in c_header:
             fail(f"rt/include/rt/c_api.h: missing M4 C ABI function {function!r}")
 
+    for method in (
+        "Status run_periodic(",
+        "bool platform_preflight_report(",
+        "std::uint32_t degradation_level()",
+        "sleep_until_ns(",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M5 method {method!r}")
+
+    for function in (
+        "rtfw_run_periodic(",
+        "rtfw_get_platform_preflight_report(",
+        "rtfw_get_degradation_level(",
+        "rtfw_periodic_config_init(",
+        "rtfw_periodic_run_result_init(",
+        "rtfw_platform_preflight_report_init(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M5 C ABI function {function!r}")
+
     for status in (
         "invalid_handle",
         "graph_cycle",
@@ -349,11 +380,18 @@ def check_runtime_contract() -> None:
         if status not in runtime_header:
             fail(f"rt/include/rt/runtime.hpp: missing M2 status {status!r}")
 
+    for status in ("platform_preflight_failed", "clock_failure"):
+        if status not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M5 status {status!r}")
+
     for capability in (
         "compiled_graph",
         "host_driven_time",
         "unified_cpu_executor",
         "bounded_memory_plan",
+        "self_paced_time",
+        "frame_watchdog",
+        "strict_platform_preflight",
     ):
         if capability not in runtime_header or capability not in c_header:
             fail(f"M1 capability contract is missing {capability!r}")
@@ -371,17 +409,18 @@ def check_runtime_contract() -> None:
         or "| M2 | Complete |" not in roadmap
         or "| M3 | Complete |" not in roadmap
         or "| M4 | Complete |" not in roadmap
-        or "| M5 | Next |" not in roadmap
+        or "| M5 | Complete |" not in roadmap
+        or "| M6 | Next |" not in roadmap
     ):
-        fail("docs/roadmap.md: M4/M5 milestone status is not advanced")
+        fail("docs/roadmap.md: M5/M6 milestone status is not advanced")
 
     if not re.search(
-        r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*\}\s*;",
+        r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
+        r"\s*true\s*,\s*true\s*,\s*true\s*\}\s*;",
         runtime_source,
     ):
         fail(
-            "rt/src/host_runtime.cpp: M4 capability tuple is not "
-            "true/true/true/true"
+            "rt/src/host_runtime.cpp: M5 capability tuple is not seven true values"
         )
 
     for token in (
@@ -487,6 +526,67 @@ def check_runtime_contract() -> None:
     if "CompleteCpuFramesDoNotAllocate" not in noalloc_test:
         fail("tests/test_trace_noalloc.cpp: missing complete M4 allocation gate")
 
+    for token in (
+        "Runtime::run_periodic(",
+        "clock_sleep_until(",
+        "RuntimeTraceEventType::watchdog_fired",
+        "PlatformPreflightMode::strict",
+    ):
+        if token not in runtime_source:
+            fail(f"rt/src/host_runtime.cpp: missing M5 evidence {token!r}")
+    for token in (
+        "active_state_.compare_exchange",
+        "service_cv_.wait_for(",
+        "WatchdogMonitor::complete(",
+    ):
+        if token not in watchdog_source:
+            fail(f"rt/src/watchdog_monitor.cpp: missing M5 evidence {token!r}")
+    for forbidden in (
+        "mlockall(",
+        "sched_setaffinity(",
+        "sched_setscheduler(",
+        "setrlimit(",
+    ):
+        if forbidden in preflight_source:
+            fail(
+                "rt/src/native_platform_preflight.cpp: strict preflight "
+                f"contains host mutation {forbidden!r}"
+            )
+    for phrase in (
+        "first_release + i * period",
+        "at most one event",
+        "frame thread",
+        "fails closed",
+        "does not establish RT2",
+    ):
+        if phrase not in time_doc:
+            fail(f"docs/time_platform.md: missing M5 contract phrase {phrase!r}")
+    for test_name in (
+        "UsesAbsoluteEpochBasedReleasesAndDeadlines",
+        "LateFramesDoNotShiftTheReleaseEpoch",
+        "WatchdogIsOneShotAndDegradesOnTheFrameThread",
+        "WatchdogServiceDetectsExpiryWithoutRuntimeClockAdvance",
+        "PropagatesClockFailureWithoutExecutingAFrame",
+    ):
+        if test_name not in periodic_test:
+            fail(f"tests/test_periodic_runtime.cpp: missing M5 gate {test_name!r}")
+    for test_name in (
+        "StrictModePassesOnlyACompleteUniqueReport",
+        "StrictFailureIsReportedBeforeWorkersStart",
+        "DuplicatePrerequisiteCannotPassStrictMode",
+        "DisabledModeDoesNotProbeOrMutateTheHost",
+    ):
+        if test_name not in preflight_test:
+            fail(f"tests/test_platform_preflight.cpp: missing M5 gate {test_name!r}")
+    if "watchdog_timeout_ns" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing armed-watchdog allocation gate")
+    if "#define RTFW_C_ABI_VERSION 4u" not in c_header:
+        fail("rt/include/rt/c_api.h: M5 requires experimental ABI version 4")
+    if "rtfw_run_periodic(" not in read("samples/embed_c/mini_app.c"):
+        fail("samples/embed_c/mini_app.c: missing M5 periodic sample")
+    if "runtime.run_periodic(" not in read("samples/embed_cpp/mini_app.cpp"):
+        fail("samples/embed_cpp/mini_app.cpp: missing M5 periodic sample")
+
 
 def main() -> int:
     require_files(
@@ -499,6 +599,7 @@ def main() -> int:
             "docs/compiled_graph.md",
             "docs/executor.md",
             "docs/memory_plan.md",
+            "docs/time_platform.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -511,12 +612,18 @@ def main() -> int:
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
             "rt/src/host_runtime.cpp",
+            "rt/src/watchdog_monitor.hpp",
+            "rt/src/watchdog_monitor.cpp",
+            "rt/src/native_platform_preflight.hpp",
+            "rt/src/native_platform_preflight.cpp",
             "samples/embed_c/mini_app.c",
             "samples/embed_cpp/mini_app.cpp",
             "tests/test_host_runtime.cpp",
             "tests/test_compiled_graph.cpp",
             "tests/test_executor.cpp",
             "tests/test_memory_plan.cpp",
+            "tests/test_periodic_runtime.cpp",
+            "tests/test_platform_preflight.cpp",
         )
     )
     check_version()

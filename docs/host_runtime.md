@@ -1,14 +1,16 @@
 # Host Runtime Lifecycle
 
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
-extended with the M2 compiled graph, M3 unified executor, and M4 finalized
-memory plan. It provides an explicit, host-driven lifecycle without adopting
-the legacy `SimCore` scheduler or pacing loop.
+extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
+plan, and M5 time/platform controls. It provides explicit host-driven and
+finite self-paced operation without adopting the legacy `SimCore` scheduler
+or pacing loop.
 
 The surface is RT0 functional behavior, not qualified latency.
 `query_capabilities()` and `rt_query_capabilities()` report host-driven time,
-compiled-graph validation, the unified CPU executor, and the target-path
-bounded memory plan as available.
+compiled-graph validation, the unified CPU executor, the target-path bounded
+memory plan, self-paced time, the frame watchdog, and strict platform preflight
+as available.
 
 ## Lifecycle
 
@@ -16,21 +18,26 @@ bounded memory plan as available.
 | --- | --- | --- |
 | `configuring` | typed configuration, graph registration and declarations | `configuring` |
 | `configuring` | `finalize()` | `finalized` |
-| `finalized` | `start()` and create the fixed worker team | `running` |
+| `finalized` | `start()`, preflight, and create configured worker/service lanes | `running` |
 | `running` | `step(frame)` | `running` |
+| `running` | `run_periodic(config)` | `running` |
 | `finalized` or `running` | `stop()` | `stopped` |
 | `stopped` | repeated `stop()` | `stopped` |
 
 Other transitions return `rt::Status::invalid_state`. A stopped runtime is
 terminal. Destruction requires that no host call or callback is active; hosts
 should call `stop()` so their own resource lifecycle is explicit.
+Strict preflight failure leaves the runtime `finalized` without creating a
+runtime thread, so the host can inspect the report or retry after external
+setup.
 
-Control operations are single-host-thread operations in 0.5. `step()` is
-non-reentrant, and `stop()` called from inside a callback is rejected.
+Control operations are single-host-thread operations in 0.6. `step()` and
+`run_periodic()` are non-reentrant. A periodic observer cannot recursively
+step, and `stop()` called from inside a callback or periodic loop is rejected.
 
 ## Typed configuration
 
-`rt::RuntimeConfig` has twelve schema keys:
+`rt::RuntimeConfig` has fifteen schema keys:
 
 | Key | Type/default | Runtime behavior |
 | --- | --- | --- |
@@ -46,6 +53,9 @@ non-reentrant, and `stop()` called from inside a callback is rejected.
 | `task_scratch_slots` | positive integer, `1024` | Fixed simultaneous task-context reservations; accepted maximum is 1,048,576 |
 | `memory_budget_bytes` | positive integer, `268435456` | Maximum reported target-runtime plan accepted by finalization; ceiling is 1 TiB on 64-bit hosts and addressable `size_t` on 32-bit hosts |
 | `overload_policy` | `reject_submission` | Selects `reject_submission` or `fail_frame` for queue/scratch rejection |
+| `watchdog_timeout_ns` | nonnegative integer, `0` | Nanoseconds from measured step start to watchdog expiry; zero disables the watchdog and the maximum is 24 hours |
+| `watchdog_max_degradation_level` | nonnegative integer, `0` | Caps frame-thread degradation increments; accepted range is 0–255 |
+| `platform_preflight_mode` | `disabled` | Selects `disabled` or fail-closed, read-only `strict` prerequisite checks |
 
 The typed structure can be supplied with `configure()`. Dynamic callers can use
 `configure_key()` or the C `rtfw_config_set()` equivalent. Unknown keys,
@@ -68,7 +78,8 @@ executor and waits for the graph to quiesce. It never sleeps, advances no
 hidden frame counter, or creates a thread. The canonical registration-index
 topological order remains available for introspection, but independent
 callback completion is not a total order. `StepResult` reports callback count,
-start/finish timestamps, and whether the optional deadline was missed.
+start/finish timestamps, deadline miss, watchdog event, and committed
+degradation level.
 
 Use `Runtime::now_ns()` or `rtfw_now_ns()` to form a deadline in the correct
 clock domain. The default clock epoch is local to the runtime instance. C++ tests
@@ -80,6 +91,35 @@ already-running independent callbacks may finish. The runtime remains running
 so the host can inspect the error and decide whether to retry or stop. A C
 callback must not throw across the language boundary.
 
+## Self-paced frames
+
+`Runtime::run_periodic()` runs a finite frame count on the calling frame
+thread. It waits for `first_release + i * period`, never shifts the release
+epoch after a late frame, and supplies `release + relative_deadline` to each
+step. Results expose release, wake, start, finish, signed slack, miss,
+watchdog, and degradation fields. The C equivalent is `rtfw_run_periodic()`.
+
+The injected clock must implement absolute waiting; otherwise the call returns
+`clock_failure` without inventing a fallback cadence. Complete arithmetic is
+validated before the first frame. The exact late-frame, observer, watchdog,
+and overflow semantics are in the
+[time/platform contract](time_platform.md).
+
+## Watchdog, degradation, and preflight
+
+A nonzero watchdog timeout creates one service lane during `start()`. One arm
+can produce at most one event. The service never invokes host code or mutates
+degradation; the frame thread consumes the event after graph quiescence and
+increments the capped level for following frames. The watchdog cannot abort a
+stuck callback.
+
+Strict platform preflight is disabled by default. When enabled, it inspects all
+six Linux prerequisites before any runtime thread starts and fails closed with
+`platform_preflight_failed`. A complete report remains inspectable while the
+runtime stays finalized. The native probe reads host state but does not change
+memory locking, affinity, scheduling, limits, or system policy. Passing these
+checks is not RT2 qualification.
+
 ## Ownership and isolation
 
 Each runtime owns:
@@ -90,7 +130,9 @@ Each runtime owns:
 - a fixed pool of aligned task-scratch blocks reserved per accepted work item;
 - its trace ring and write cursor;
 - its numerical-helper policy;
-- its clock object or explicitly borrowed C++ clock.
+- its clock object or explicitly borrowed C++ clock;
+- its watchdog state and degradation level;
+- its fixed-capacity platform-preflight report.
 
 Callback user data remains host-owned and must outlive every step that can use
 it. A phase's scratch contents may persist across frames, but no phase sees
@@ -120,12 +162,16 @@ The experimental C ABI mirrors the lifecycle:
 - `rtfw_get_memory_plan`;
 - `rtfw_start`;
 - `rtfw_step`;
+- `rtfw_run_periodic`;
+- `rtfw_get_platform_preflight_report`;
+- `rtfw_get_degradation_level`;
 - `rtfw_stop`;
 - `rtfw_destroy`.
 
 Public configuration, frame, callback, result, and memory-plan structures carry
-sizes, and configuration carries `RTFW_C_ABI_VERSION` (version 3 in release
-0.5). Call the supplied structure initializers and leave reserved fields zero.
+sizes, and configuration carries `RTFW_C_ABI_VERSION` (version 4 in release
+0.6). Periodic and preflight structures follow the same initialized-output
+rule. Call the supplied structure initializers and leave reserved fields zero.
 `rtfw_status_message()` provides status text even when no runtime handle was
 created; `rtfw_last_error()` adds handle-specific context. The ABI remains
 unfrozen before M11; incompatible pre-1.0 changes require a repository version
@@ -150,8 +196,10 @@ a configured memory budget. The target CPU frame path has a multi-frame
 zero-allocation gate and explicit queue/scratch overload behavior. Plan scope
 and exclusions are specified in the
 [memory-plan contract](memory_plan.md); policy, queue, and nesting details are
-in the [executor contract](executor.md). Self-paced time and platform preflight
-remain M5.
+in the [executor contract](executor.md). M5 adds absolute cadence, one-shot
+watchdog/degradation, and fail-closed prerequisite reporting. It does not
+preempt callbacks or qualify a deployment; see the
+[time/platform contract](time_platform.md).
 
 ## Code and evidence
 
@@ -164,6 +212,8 @@ remain M5.
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Executor tests: `tests/test_executor.cpp`
 - Memory-plan tests: `tests/test_memory_plan.cpp`
+- Time/watchdog tests: `tests/test_periodic_runtime.cpp`
+- Platform-preflight tests: `tests/test_platform_preflight.cpp`
 - Dynamic C ABI test: `tests/test_cabi_dlopen.c`
 - C sample: `samples/embed_c/mini_app.c`
 - C++ sample: `samples/embed_cpp/mini_app.cpp`

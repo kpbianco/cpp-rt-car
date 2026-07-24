@@ -107,6 +107,9 @@ TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     EXPECT_TRUE(capabilities.host_driven_time);
     EXPECT_TRUE(capabilities.unified_cpu_executor);
     EXPECT_TRUE(capabilities.bounded_memory_plan);
+    EXPECT_TRUE(capabilities.self_paced_time);
+    EXPECT_TRUE(capabilities.frame_watchdog);
+    EXPECT_TRUE(capabilities.strict_platform_preflight);
 }
 
 TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
@@ -165,7 +168,7 @@ TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
 }
 
 TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
-    EXPECT_EQ(rt::runtime_config_schema_version, 3u);
+    EXPECT_EQ(rt::runtime_config_schema_version, 4u);
 
     rt::RuntimeConfig standalone;
     const auto unchanged = standalone;
@@ -178,6 +181,24 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
             standalone,
             "callback_capacity",
             "2garbage"),
+        rt::Status::invalid_config);
+    EXPECT_EQ(
+        rt::set_runtime_config_value(
+            standalone,
+            "watchdog_timeout_ns",
+            "86400000000001"),
+        rt::Status::invalid_config);
+    EXPECT_EQ(
+        rt::set_runtime_config_value(
+            standalone,
+            "watchdog_max_degradation_level",
+            "256"),
+        rt::Status::invalid_config);
+    EXPECT_EQ(
+        rt::set_runtime_config_value(
+            standalone,
+            "platform_preflight_mode",
+            "best_effort"),
         rt::Status::invalid_config);
 
     rt::Runtime runtime;
@@ -211,6 +232,19 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
     ASSERT_EQ(
         runtime.configure_key("overload_policy", "reject_submission"),
         rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("watchdog_timeout_ns", "0"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key(
+            "watchdog_max_degradation_level",
+            "2"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key(
+            "platform_preflight_mode",
+            "disabled"),
+        rt::Status::ok);
     EXPECT_EQ(
         runtime.configure_key("worker_threads", "8"),
         rt::Status::invalid_config);
@@ -237,6 +271,11 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
     EXPECT_EQ(
         runtime.config().overload_policy,
         rt::OverloadPolicy::reject_submission);
+    EXPECT_EQ(runtime.config().watchdog_timeout_ns, 0u);
+    EXPECT_EQ(runtime.config().watchdog_max_degradation_level, 2u);
+    EXPECT_EQ(
+        runtime.config().platform_preflight_mode,
+        rt::PlatformPreflightMode::disabled);
     EXPECT_EQ(runtime.trace_event_count(), 3u);
     EXPECT_NE(first.multiply_add, 0.0);
 

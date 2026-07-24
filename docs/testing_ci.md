@@ -17,13 +17,20 @@ latency qualification and does not prove the complete product contract.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent
-  phases, range work, fixed-tree reductions, aligned task scratch, and tracing.
+  phases, range work, fixed-tree reductions, aligned task scratch, tracing,
+  and an armed M5 watchdog.
+- Fake-clock tests prove exact absolute releases/deadlines, no epoch drift after
+  late frames, clock-failure propagation, one-shot watchdog events, and
+  frame-thread degradation.
+- Injected platform probes prove strict pass/fail reporting, rejection before
+  worker creation, duplicate-prerequisite rejection, and disabled-mode
+  non-interference.
 - Unified-executor tests stress independent phases with nested ranges and
   fixed-tree reductions under both policies, verify stable static assignment
   metadata, force deterministic queue saturation, and require real local
   execution and successful cross-worker steals.
-- A focused GCC ThreadSanitizer job runs the unified-executor and M4
-  memory-plan suites.
+- A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
+  and M5 time/platform suites.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -61,9 +68,11 @@ predeclared thresholds, and the measurement procedure.
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
 - Optional fuzz harness: `tests/jobqueue_fuzz.cpp`
-- M1–M4 lifecycle, graph, executor, and memory tests:
+- M1–M5 lifecycle, graph, executor, memory, time, and platform tests:
   `tests/test_host_runtime.cpp`,
   `tests/test_compiled_graph.cpp`, `tests/test_executor.cpp`,
   `tests/test_memory_plan.cpp`,
+  `tests/test_periodic_runtime.cpp`,
+  `tests/test_platform_preflight.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`

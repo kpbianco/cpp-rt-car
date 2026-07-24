@@ -2,7 +2,7 @@
 
 ## Trust boundary
 
-RTFW 0.5 is an in-process native library prototype. The host application,
+RTFW 0.6 is an in-process native library prototype. The host application,
 runtime, callbacks, and loaded plugins share one address space and authority.
 Plugins and device backends are trusted code; ABI validation is not a security
 boundary.
@@ -27,7 +27,7 @@ boundary.
 | Device hang/loss | CPU mock only; no bounded backend reset/health contract |
 | Telemetry leakage/corruption | Paths and runtime data can be written to files; schemas and access policy are not frozen |
 | Supply-chain substitution | Submodule/SBOM helpers and CI dependency review exist; signed release provenance is not established |
-| Host-policy mutation | Hardening scripts can make privileged system-wide changes and require operator review |
+| Host-policy mutation | Hardening scripts can make privileged system-wide changes and require operator review; M5 strict preflight is read-only |
 
 ## Required controls
 

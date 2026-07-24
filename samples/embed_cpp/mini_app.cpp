@@ -154,19 +154,23 @@ int main() {
         return 1;
     }
 
-    for (std::uint64_t frame_index = 0; frame_index < 5; ++frame_index) {
-        const auto deadline = runtime.now_ns() + 1'000'000'000u;
-        const rt::HostFrameContext frame{
-            frame_index,
-            std::chrono::milliseconds(2),
-            deadline,
-        };
-        rt::StepResult result;
-        if (!check(runtime, runtime.step(frame, &result), "step") ||
-            result.callbacks_executed != 2 ||
-            result.deadline_missed) {
-            return 1;
-        }
+    rt::PeriodicRunConfig periodic;
+    periodic.frame_count = 5;
+    periodic.period = std::chrono::milliseconds(2);
+    periodic.relative_deadline = std::chrono::seconds(1);
+    rt::PeriodicRunResult periodic_result;
+    if (!check(
+            runtime,
+            runtime.run_periodic(
+                periodic,
+                nullptr,
+                nullptr,
+                &periodic_result),
+            "run periodic") ||
+        periodic_result.frames_executed != 5 ||
+        periodic_result.deadline_misses != 0 ||
+        periodic_result.watchdog_events != 0) {
+        return 1;
     }
 
     if (!check(runtime, runtime.stop(), "stop") ||
@@ -176,7 +180,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "mini_app_cpp: executed 5 compiled graph frames with "
+    std::cout << "mini_app_cpp: executed 5 absolute-cadence graph frames with "
               << memory_plan.planned_bytes
               << " planned runtime bytes\n";
     return 0;

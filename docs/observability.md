@@ -6,8 +6,9 @@ contract.
 
 ## Binary trace
 
-The M1–M4 host runtime owns a separate fixed-capacity ring for lifecycle, step,
-and callback events. Its cursor and clock domain are instance-local, overflow
+The M1–M5 host runtime owns a separate fixed-capacity ring for lifecycle,
+periodic release/wake, step, callback, watchdog, and degradation events. Its
+cursor and clock domain are instance-local, overflow
 overwrites the oldest event, and `trace_event()` reads retained events in
 chronological order. Callback indices are stable phase registration indices,
 even when compiled execution order differs. This is functional lifecycle
@@ -62,7 +63,7 @@ These definitions can change before the M6 schema is frozen.
 ## Code anchors
 
 - Trace rings: `bintrace::Trace`; `include/simcore/bintrace.hpp`
-- M1–M4 lifecycle trace and executor counters: `rt::Runtime`;
+- M1–M5 lifecycle/time trace and executor counters: `rt::Runtime`;
   `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - Export adapters: `tools/trace_export.hpp`

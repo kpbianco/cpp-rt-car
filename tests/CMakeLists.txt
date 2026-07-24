@@ -75,6 +75,8 @@ if (SIM_GTEST_AVAILABLE)
         test_perf_artifacts.cpp
         test_scheduler.cpp
         test_host_runtime.cpp
+        test_periodic_runtime.cpp
+        test_platform_preflight.cpp
         test_compiled_graph.cpp
         test_executor.cpp
         test_memory_plan.cpp

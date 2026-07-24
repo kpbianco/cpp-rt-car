@@ -31,7 +31,7 @@ These commands validate tooling and schemas. They do not validate that
 `tools/autotune/spec.yaml` describes the intended runtime integration. The
 orchestrator launches an application with generated `--config` input,
 `--run`-bounded warm-up/measurement windows, and optional `--rt` arguments.
-RTFW 0.5's demo implements none of those three options and does not read
+RTFW 0.6's demo implements none of those three options and does not read
 `RTFW_PROFILE`.
 
 The current profile schema also contains settings that are not mapped into
@@ -45,10 +45,11 @@ layout selection. Consequently:
 - generated recommendations are not production profiles.
 
 M1 supplies the embedding runtime's typed configuration contract, M3 adds
-executor policy, worker count, and queue capacity, and M4 adds the memory and
-overload fields. M5 and M6 must still supply the measurement-window and
-telemetry contracts—and the profile mapper must target the actual M1–M4
-fields—before runtime autotuning is valid.
+executor policy, worker count, and queue capacity, M4 adds the memory and
+overload fields, and M5 adds direct finite cadence/deadline results. M6 must
+still supply the measurement-window and versioned telemetry contracts—and the
+profile mapper must target the actual M1–M5 fields—before runtime autotuning is
+valid.
 
 ## Intended workflow after integration
 

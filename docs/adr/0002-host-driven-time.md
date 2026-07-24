@@ -39,8 +39,11 @@ wake-up, start, finish, slack, and miss data.
 
 M1 implements host-driven `rt::Runtime::step()` and its C equivalent. Each
 runtime has a local clock domain, and tests verify that a large simulation
-delta does not pace the calling thread. Self-paced absolute release control is
-still M5.
+delta does not pace the calling thread. M5 adds finite
+`Runtime::run_periodic()` / `rtfw_run_periodic()` loops using
+`first_release + i * period`, with fake-clock evidence for exact deadlines and
+no epoch drift after a late frame. See the
+[time/platform contract](../time_platform.md).
 
 ## Rejected alternatives
 

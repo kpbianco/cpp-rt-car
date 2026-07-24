@@ -4,11 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(RTFW_C_ABI_VERSION == 3u, "unexpected C ABI version");
+_Static_assert(RTFW_C_ABI_VERSION == 4u, "unexpected C ABI version");
 _Static_assert(sizeof(rtfw_status) == sizeof(int32_t), "status width changed");
 _Static_assert(
     sizeof(rtfw_overload_policy) == sizeof(uint32_t),
     "overload policy width changed");
+_Static_assert(
+    sizeof(rtfw_platform_preflight_mode) == sizeof(uint32_t),
+    "platform preflight mode width changed");
 
 #if defined(_WIN32)
 #    define WIN32_LEAN_AND_MEAN
@@ -85,7 +88,11 @@ typedef rt_capabilities_c (*rt_query_capabilities_fn)(void);
 typedef const char *(*rtfw_status_message_fn)(rtfw_status);
 typedef void (*rtfw_frame_context_init_fn)(rtfw_frame_context *);
 typedef void (*rtfw_step_result_init_fn)(rtfw_step_result *);
+typedef void (*rtfw_periodic_config_init_fn)(rtfw_periodic_config *);
+typedef void (*rtfw_periodic_run_result_init_fn)(rtfw_periodic_run_result *);
 typedef void (*rtfw_memory_plan_init_fn)(rtfw_memory_plan *);
+typedef void (*rtfw_platform_preflight_report_init_fn)(
+    rtfw_platform_preflight_report *);
 typedef rtfw_status (*rtfw_create_fn)(const rtfw_config *, rtfw_handle **);
 typedef rtfw_status (*rtfw_register_callback_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *);
@@ -123,10 +130,20 @@ typedef rtfw_status (*rtfw_task_scratch_fn)(
 typedef rtfw_status (*rtfw_lifecycle_fn)(rtfw_handle *);
 typedef rtfw_status (*rtfw_step_fn)(
     rtfw_handle *, const rtfw_frame_context *, rtfw_step_result *);
+typedef rtfw_status (*rtfw_run_periodic_fn)(
+    rtfw_handle *,
+    const rtfw_periodic_config *,
+    rtfw_periodic_frame_callback,
+    void *,
+    rtfw_periodic_run_result *);
 typedef rtfw_status (*rtfw_get_state_fn)(
     const rtfw_handle *, rtfw_runtime_state *);
 typedef rtfw_status (*rtfw_get_memory_plan_fn)(
     const rtfw_handle *, rtfw_memory_plan *);
+typedef rtfw_status (*rtfw_get_platform_preflight_report_fn)(
+    const rtfw_handle *, rtfw_platform_preflight_report *);
+typedef rtfw_status (*rtfw_get_degradation_level_fn)(
+    const rtfw_handle *, uint32_t *);
 typedef const char *(*rtfw_last_error_fn)(const rtfw_handle *);
 typedef void (*rtfw_destroy_fn)(rtfw_handle *);
 
@@ -163,6 +180,9 @@ typedef struct callback_state {
     uint64_t last_frame;
     uint32_t next_slot;
     uint32_t ordering_errors;
+    uint32_t periodic_observations;
+    uint32_t periodic_errors;
+    uint64_t first_periodic_release;
 } callback_state;
 
 typedef struct callback_probe {
@@ -243,6 +263,8 @@ static rtfw_callback_result test_callback(
     callback_state *state = probe ? probe->state : NULL;
     if (!state || !context ||
         context->struct_size < sizeof(rtfw_callback_context) ||
+        context->reserved0 != 0u ||
+        context->degradation_level != 0u ||
         context->delta_ns != 1000000 ||
         context->scratch_bytes != 64 ||
         !context->scratch ||
@@ -291,6 +313,32 @@ static rtfw_callback_result malformed_result_callback(
     return (rtfw_callback_result)UINT32_MAX;
 }
 
+static rtfw_callback_result periodic_observer(
+    void *user_data,
+    const rtfw_periodic_frame_result *frame) {
+    callback_state *state = (callback_state *)user_data;
+    uint64_t expected_release;
+    if (!state || !frame ||
+        frame->struct_size < sizeof(rtfw_periodic_frame_result) ||
+        frame->status != RTFW_STATUS_OK ||
+        frame->frame_index !=
+            100u + state->periodic_observations ||
+        frame->watchdog_fired != 0u ||
+        frame->degradation_level != 0u) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    if (state->periodic_observations == 0u) {
+        state->first_periodic_release = frame->release_ns;
+    }
+    expected_release = state->first_periodic_release +
+        (uint64_t)state->periodic_observations * 1000000u;
+    if (frame->release_ns != expected_release) {
+        ++state->periodic_errors;
+    }
+    ++state->periodic_observations;
+    return RTFW_CALLBACK_OK;
+}
+
 int main(void) {
 #ifndef RTFW_LIB_PATH
 #error "RTFW_LIB_PATH must be defined with the runtime library path"
@@ -309,7 +357,10 @@ int main(void) {
     rtfw_status_message_fn status_message_fn;
     rtfw_frame_context_init_fn frame_init_fn;
     rtfw_step_result_init_fn result_init_fn;
+    rtfw_periodic_config_init_fn periodic_config_init_fn;
+    rtfw_periodic_run_result_init_fn periodic_result_init_fn;
     rtfw_memory_plan_init_fn memory_plan_init_fn;
+    rtfw_platform_preflight_report_init_fn preflight_report_init_fn;
     rtfw_create_fn create_fn;
     rtfw_register_callback_fn register_fn;
     rtfw_register_phase_fn register_phase_fn;
@@ -323,9 +374,12 @@ int main(void) {
     rtfw_lifecycle_fn finalize_fn;
     rtfw_lifecycle_fn start_fn;
     rtfw_step_fn step_fn;
+    rtfw_run_periodic_fn run_periodic_fn;
     rtfw_lifecycle_fn stop_fn;
     rtfw_get_state_fn get_state_fn;
     rtfw_get_memory_plan_fn get_memory_plan_fn;
+    rtfw_get_platform_preflight_report_fn get_preflight_report_fn;
+    rtfw_get_degradation_level_fn get_degradation_level_fn;
     rtfw_last_error_fn last_error_fn;
     rtfw_destroy_fn destroy_fn;
 
@@ -335,7 +389,12 @@ int main(void) {
     LOAD_FUNCTION(status_message_fn, "rtfw_status_message");
     LOAD_FUNCTION(frame_init_fn, "rtfw_frame_context_init");
     LOAD_FUNCTION(result_init_fn, "rtfw_step_result_init");
+    LOAD_FUNCTION(periodic_config_init_fn, "rtfw_periodic_config_init");
+    LOAD_FUNCTION(periodic_result_init_fn, "rtfw_periodic_run_result_init");
     LOAD_FUNCTION(memory_plan_init_fn, "rtfw_memory_plan_init");
+    LOAD_FUNCTION(
+        preflight_report_init_fn,
+        "rtfw_platform_preflight_report_init");
     LOAD_FUNCTION(create_fn, "rtfw_create");
     LOAD_FUNCTION(register_fn, "rtfw_register_callback");
     LOAD_FUNCTION(register_phase_fn, "rtfw_register_phase");
@@ -349,9 +408,16 @@ int main(void) {
     LOAD_FUNCTION(finalize_fn, "rtfw_finalize");
     LOAD_FUNCTION(start_fn, "rtfw_start");
     LOAD_FUNCTION(step_fn, "rtfw_step");
+    LOAD_FUNCTION(run_periodic_fn, "rtfw_run_periodic");
     LOAD_FUNCTION(stop_fn, "rtfw_stop");
     LOAD_FUNCTION(get_state_fn, "rtfw_get_state");
     LOAD_FUNCTION(get_memory_plan_fn, "rtfw_get_memory_plan");
+    LOAD_FUNCTION(
+        get_preflight_report_fn,
+        "rtfw_get_platform_preflight_report");
+    LOAD_FUNCTION(
+        get_degradation_level_fn,
+        "rtfw_get_degradation_level");
     LOAD_FUNCTION(last_error_fn, "rtfw_last_error");
     LOAD_FUNCTION(destroy_fn, "rtfw_destroy");
     loaded_parallel_for = parallel_for_fn;
@@ -365,6 +431,10 @@ int main(void) {
             capabilities.host_driven_time != 1 ||
             capabilities.unified_cpu_executor != 1 ||
             capabilities.bounded_memory_plan != 1 ||
+            capabilities.self_paced_time != 1 ||
+            capabilities.frame_watchdog != 1 ||
+            capabilities.strict_platform_preflight != 1 ||
+            capabilities.reserved0 != 0 ||
             strcmp(
                 status_message_fn(RTFW_STATUS_INVALID_CONFIG),
                 "invalid runtime configuration") != 0 ||
@@ -377,6 +447,13 @@ int main(void) {
             strcmp(
                 status_message_fn(RTFW_STATUS_SCRATCH_EXHAUSTED),
                 "task scratch plan is exhausted") != 0 ||
+            strcmp(
+                status_message_fn(
+                    RTFW_STATUS_PLATFORM_PREFLIGHT_FAILED),
+                "strict platform preflight failed") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_CLOCK_FAILURE),
+                "runtime clock operation failed") != 0 ||
             strcmp(
                 status_message_fn((rtfw_status)INT32_MAX),
                 "unknown runtime status") != 0) {
@@ -419,6 +496,18 @@ int main(void) {
             &config,
             "overload_policy",
             "reject_submission") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "watchdog_timeout_ns",
+            "0") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "watchdog_max_degradation_level",
+            "2") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "platform_preflight_mode",
+            "disabled") != RTFW_STATUS_OK ||
         config_set_fn(
             &config,
             "executor_queue_capacity",
@@ -473,6 +562,15 @@ int main(void) {
         return EXIT_FAILURE;
     }
     config.overload_policy = RTFW_OVERLOAD_REJECT_SUBMISSION;
+    config.platform_preflight_mode = UINT32_MAX;
+    if (create_fn(&config, &instance) != RTFW_STATUS_INVALID_CONFIG ||
+        instance != NULL) {
+        fprintf(stderr, "runtime accepted a malformed preflight mode\n");
+        destroy_fn(instance);
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    config.platform_preflight_mode = RTFW_PLATFORM_PREFLIGHT_DISABLED;
     if (create_fn(&config, &instance) != RTFW_STATUS_OK || !instance) {
         fprintf(stderr, "rtfw_create failed\n");
         lib_close(handle);
@@ -640,6 +738,32 @@ int main(void) {
         lib_close(handle);
         return EXIT_FAILURE;
     }
+    {
+        rtfw_platform_preflight_report report;
+        uint32_t degradation_level = UINT32_MAX;
+        preflight_report_init_fn(&report);
+        report.reserved[0] = 1;
+        if (get_preflight_report_fn(instance, &report) !=
+            RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "preflight report accepted reserved data\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        preflight_report_init_fn(&report);
+        if (get_preflight_report_fn(instance, &report) != RTFW_STATUS_OK ||
+            report.mode != RTFW_PLATFORM_PREFLIGHT_DISABLED ||
+            report.passed != 1u ||
+            report.check_count != 0u ||
+            get_degradation_level_fn(instance, &degradation_level) !=
+                RTFW_STATUS_OK ||
+            degradation_level != 0u) {
+            fprintf(stderr, "preflight or degradation query failed\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+    }
     if (register_fn(
             instance,
             "cabi.too-late",
@@ -653,12 +777,69 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    {
+        rtfw_periodic_config periodic;
+        rtfw_periodic_run_result periodic_result;
+        periodic_config_init_fn(&periodic);
+        periodic.first_frame_index = 100;
+        periodic.frame_count = 2;
+        periodic.period_ns = 1000000;
+        periodic.relative_deadline_ns = 1000000000;
+        periodic.reserved[0] = 1;
+        periodic_result_init_fn(&periodic_result);
+        if (run_periodic_fn(
+                instance,
+                &periodic,
+                periodic_observer,
+                &state,
+                &periodic_result) != RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "periodic config accepted reserved data\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        periodic.reserved[0] = 0;
+        periodic_result.last_frame.reserved0[0] = 1;
+        if (run_periodic_fn(
+                instance,
+                &periodic,
+                periodic_observer,
+                &state,
+                &periodic_result) != RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "periodic result accepted reserved data\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        periodic_result_init_fn(&periodic_result);
+        if (run_periodic_fn(
+                instance,
+                &periodic,
+                periodic_observer,
+                &state,
+                &periodic_result) != RTFW_STATUS_OK ||
+            periodic_result.frames_executed != 2u ||
+            periodic_result.deadline_misses != 0u ||
+            periodic_result.watchdog_events != 0u ||
+            periodic_result.final_degradation_level != 0u ||
+            periodic_result.last_frame.frame_index != 101u ||
+            periodic_result.next_release_ns !=
+                periodic_result.first_release_ns + 2000000u ||
+            state.periodic_observations != 2u ||
+            state.periodic_errors != 0u) {
+            fprintf(stderr, "periodic C ABI contract failed\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+    }
+
     for (uint64_t i = 0; i < 5; ++i) {
         frame.frame_index = i;
         rtfw_step_result result;
         result_init_fn(&result);
         if (i == 0) {
-            result.reserved1[4] = 1;
+            result.reserved1[1] = 1;
             if (step_fn(instance, &frame, &result) !=
                     RTFW_STATUS_INVALID_ARGUMENT) {
                 fprintf(stderr, "result accepted a nonzero reserved field\n");
@@ -669,7 +850,10 @@ int main(void) {
             result_init_fn(&result);
         }
         rtfw_status status = step_fn(instance, &frame, &result);
-        if (status != RTFW_STATUS_OK || result.callbacks_executed != 2) {
+        if (status != RTFW_STATUS_OK ||
+            result.callbacks_executed != 2 ||
+            result.watchdog_fired != 0u ||
+            result.degradation_level != 0u) {
             fprintf(
                 stderr,
                 "step %llu failed with status %d\n",
@@ -685,10 +869,10 @@ int main(void) {
     if (stop_fn(instance) != RTFW_STATUS_OK ||
         get_state_fn(instance, &runtime_state) != RTFW_STATUS_OK ||
         runtime_state != RTFW_STATE_STOPPED ||
-        state.calls != 10 ||
-        state.range_calls != 20 ||
+        state.calls != 14 ||
+        state.range_calls != 28 ||
         state.reduction_result != 10 ||
-        state.combine_calls != 15 ||
+        state.combine_calls != 21 ||
         state.last_frame != 4 ||
         state.ordering_errors != 0 ||
         state.next_slot != 0) {
