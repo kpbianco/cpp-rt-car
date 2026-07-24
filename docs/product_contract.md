@@ -2,7 +2,7 @@
 
 Status: accepted target contract for the pre-1.0 development line
 
-Current release: 0.3.0 experimental
+Current release: 0.4.0 experimental
 
 ## Product definition
 
@@ -12,10 +12,10 @@ before execution, and runs it on a preallocated CPU executor. The target
 runtime supports host-driven and self-paced frames and integrates asynchronous
 device backends through bounded submission and completion interfaces.
 
-The current 0.3 implementation is a research prototype. Its target-path host
-runtime satisfies the M1 lifecycle/callback contract and the M2 compiled-graph
-contract at RT0, alongside useful primitives and experiments, but it does not
-yet satisfy the complete contract in this document.
+The current 0.4 implementation is a research prototype. Its target-path host
+runtime satisfies the M1 lifecycle/callback, M2 compiled-graph, and M3 unified
+CPU-executor contracts at RT0, alongside useful primitives and experiments,
+but it does not yet satisfy the complete contract in this document.
 
 ## Claim policy
 
@@ -53,8 +53,10 @@ The 1.0 lifecycle is:
 
 `rt::Runtime` now enforces the configure/finalize/start/step/stop state machine,
 compiles dependencies and logical resource access at finalization, and freezes
-the complete graph topology. The legacy `SimCore` constructor/run/destructor
-path remains experimental and does not inherit that lifecycle.
+the complete graph topology and static assignment metadata. `start()` creates
+the configured fixed CPU team. The legacy `SimCore`
+constructor/run/destructor path remains experimental and does not inherit that
+lifecycle.
 
 ### Time ownership
 
@@ -65,9 +67,10 @@ Host-driven time is the default embedding contract:
 - A host-driven step does not sleep or advance a hidden wall clock.
 - A separate self-paced mode owns an absolute periodic release schedule.
 
-The 0.3 `rt::Runtime` implements the host-driven half: the host supplies frame
-index, delta, and optional deadline, and callbacks execute synchronously without
-runtime pacing. Self-paced absolute releases remain milestone M5.
+The 0.4 `rt::Runtime` implements the host-driven half: the host supplies frame
+index, delta, and optional deadline, and `step()` waits synchronously without
+runtime pacing while worker callbacks execute. Self-paced absolute releases
+remain milestone M5.
 
 See [ADR-0002](adr/0002-host-driven-time.md).
 
@@ -83,9 +86,12 @@ policies may differ:
 | `host_adapter` | Execution through a host job-system contract with explicit scratch and completion contexts |
 | `periodic_rt` | Static execution plus qualified absolute release/deadline control |
 
-The current `SimCore` workers, optional `WorkerPool`, `rt::Scheduler`, and
-`FiberPool` are separate experimental paths. They are not the target executor.
-See [ADR-0001](adr/0001-one-executor-boundary.md).
+Release 0.4 implements `static_deterministic` and `bounded_throughput` in the
+runtime-owned executor. Graph phases, nested ranges, and reductions share that
+team. The current `SimCore` workers, optional `WorkerPool`, `rt::Scheduler`,
+and `FiberPool` are separate compatibility experiments, not target policies.
+See [ADR-0001](adr/0001-one-executor-boundary.md) and the
+[executor contract](executor.md).
 
 ### Memory and overload
 
@@ -99,7 +105,9 @@ The target running state has:
 - configured behavior for capacity exhaustion: reject, drop optional work,
   fail the frame, or terminate.
 
-The current frame arena and telemetry paths do not yet satisfy this contract.
+M3 bounds executor queue attempts and rejects saturation, but the complete
+frame-wide allocation, scratch, telemetry, and configurable overload plan does
+not yet satisfy this contract.
 
 ### Device execution
 
@@ -108,7 +116,7 @@ must define capabilities, buffer registration, bounded submission, completion,
 timeout, cancellation where supported, health, reset, and shutdown.
 
 The current GPU implementation is a CPU mock that launches detached threads.
-There is no CUDA, Vulkan, or XDMA backend in 0.3. See
+There is no CUDA, Vulkan, or XDMA backend in 0.4. See
 [ADR-0003](adr/0003-device-backend-boundary.md).
 
 ## Real-time tiers
@@ -133,7 +141,7 @@ An RT2 qualification record must include:
 - raw release, wake-up, compute, completion, slack, and miss samples;
 - thresholds chosen before the run and the final pass/fail result.
 
-No RT2 qualification exists in 0.3.
+No RT2 qualification exists in 0.4.
 
 ## Determinism tiers
 
@@ -151,11 +159,12 @@ instance-local helper does not constrain arbitrary callback expressions.
 
 ## Current support matrix
 
-| Surface | 0.3 status | Notes |
+| Surface | 0.4 status | Notes |
 | --- | --- | --- |
 | `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen topology |
 | Compiled graph | Implemented RT0 surface | Deterministic topological order; invalid/foreign handles, cycles, and unordered conflicting resource access fail before start |
-| Host-driven callbacks | Implemented RT0 surface | Synchronous compiled-order execution; no sleeping or worker creation |
+| Host-driven callbacks | Implemented RT0 surface | Synchronous host wait; dependency-ready callbacks may overlap without step-time pacing or worker creation |
+| Unified CPU executor | Implemented RT0 surface | Static assignments and bounded local-queue throughput; graph, range, and reduction work share one fixed team |
 | GCC/Clang C++20 build | Experimental | Linux CI covers selected compiler/build combinations |
 | MSVC build | Experimental | Windows CI is a portability check, not an RT qualification |
 | `SimCore` phase/range API | Experimental | Graph cycles and nested phase/range concurrency require redesign |
@@ -166,7 +175,7 @@ instance-local helper does not constrain arbitrary callback expressions.
 | Legacy binary trace ring | Experimental | Fixed storage exists; schema/time-domain integration is not final |
 | Metrics JSON | Experimental | Phase histograms are rolling windows, default capacity 120 |
 | Snapshot helpers | Experimental | Input validation and stable interchange compatibility are incomplete |
-| C ABI | Experimental M2 surface | Size/version-checked lifecycle plus phase, resource, dependency, and access declarations; ABI freezes at M11 |
+| C ABI | Experimental M3 surface | ABI v2 adds executor configuration and callback-local nested range/reduction work; ABI freezes at M11 |
 | JSON profiles/runtime autotune | Planned integration | Generators exist; `rtfw_demo` does not load their output |
 | GPU | CPU mock only | Detached-thread stub; no hardware backend |
 | XDMA | Planned | No implementation |

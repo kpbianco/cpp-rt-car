@@ -105,6 +105,7 @@ TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     const auto capabilities = rt::query_capabilities();
     EXPECT_TRUE(capabilities.compiled_graph);
     EXPECT_TRUE(capabilities.host_driven_time);
+    EXPECT_TRUE(capabilities.unified_cpu_executor);
     EXPECT_FALSE(capabilities.bounded_memory_plan);
 }
 
@@ -164,6 +165,8 @@ TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
 }
 
 TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
+    EXPECT_EQ(rt::runtime_config_schema_version, 2u);
+
     rt::RuntimeConfig standalone;
     const auto unchanged = standalone;
     EXPECT_EQ(
@@ -185,6 +188,13 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
     ASSERT_EQ(runtime.configure_key("trace_capacity", "3"), rt::Status::ok);
     ASSERT_EQ(
         runtime.configure_key("numerical_mode", "fused_multiply_add"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("executor_policy", "static_deterministic"),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.configure_key("worker_count", "1"), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("executor_queue_capacity", "8"),
         rt::Status::ok);
     EXPECT_EQ(
         runtime.configure_key("worker_threads", "8"),

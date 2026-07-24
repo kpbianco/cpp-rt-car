@@ -1,3 +1,4 @@
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +12,19 @@ struct SampleState {
     std::uint64_t produced = 0;
     std::uint64_t consumed = 0;
     std::uint64_t last_frame = 0;
+    std::array<std::uint64_t, 64> lanes{};
 };
+
+rt::TaskResult produce_range(
+    void* user_data,
+    const rt::TaskContext&,
+    const rt::TaskRange& range) {
+    auto& state = *static_cast<SampleState*>(user_data);
+    for (std::size_t index = range.begin; index < range.end; ++index) {
+        state.lanes[index] = state.produced;
+    }
+    return rt::TaskResult::ok;
+}
 
 rt::CallbackResult produce(
     void* user_data,
@@ -25,7 +38,13 @@ rt::CallbackResult produce(
     ++state.produced;
     state.last_frame = context.frame.frame_index;
     context.scratch.front() = std::byte{0x2a};
-    return rt::CallbackResult::ok;
+    return context.tasks.parallel_for(
+               state.lanes.size(),
+               8,
+               &produce_range,
+               &state) == rt::Status::ok
+        ? rt::CallbackResult::ok
+        : rt::CallbackResult::error;
 }
 
 rt::CallbackResult consume(
@@ -34,9 +53,13 @@ rt::CallbackResult consume(
     auto& state = *static_cast<SampleState*>(user_data);
     if (context.frame.delta != std::chrono::milliseconds(2) ||
         context.scratch.empty() ||
-        context.scratch.front() != std::byte{0x2a} ||
         state.produced != state.consumed + 1) {
         return rt::CallbackResult::error;
+    }
+    for (const auto lane : state.lanes) {
+        if (lane != state.produced) {
+            return rt::CallbackResult::error;
+        }
     }
     ++state.consumed;
     return rt::CallbackResult::ok;
@@ -62,6 +85,9 @@ int main() {
     config.callback_capacity = 2;
     config.scratch_bytes = 128;
     config.trace_capacity = 32;
+    config.executor_policy = rt::ExecutorPolicy::bounded_throughput;
+    config.worker_count = 4;
+    config.executor_queue_capacity = 128;
 
     SampleState state;
     rt::PhaseHandle consumer;

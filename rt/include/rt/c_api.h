@@ -24,41 +24,50 @@ extern "C" {
 #define RT_VERSION_MAJOR RTFW_VERSION_MAJOR
 #define RT_VERSION_MINOR RTFW_VERSION_MINOR
 #define RT_VERSION_PATCH RTFW_VERSION_PATCH
-#define RTFW_C_ABI_VERSION 1u
+#define RTFW_C_ABI_VERSION 2u
 
 typedef struct {
     uint8_t compiled_graph;
     uint8_t host_driven_time;
+    uint8_t unified_cpu_executor;
     uint8_t bounded_memory_plan;
 } rt_capabilities_c;
 
 typedef struct rtfw_handle rtfw_handle;
+typedef struct rtfw_task_context rtfw_task_context;
 
-typedef enum rtfw_status {
-    RTFW_STATUS_OK = 0,
-    RTFW_STATUS_INVALID_ARGUMENT = -1,
-    RTFW_STATUS_INVALID_STATE = -2,
-    RTFW_STATUS_INVALID_CONFIG = -3,
-    RTFW_STATUS_CAPACITY_EXCEEDED = -4,
-    RTFW_STATUS_CALLBACK_FAILED = -5,
-    RTFW_STATUS_RESOURCE_EXHAUSTED = -6,
-    RTFW_STATUS_INTERNAL_ERROR = -7,
-    RTFW_STATUS_INVALID_HANDLE = -8,
-    RTFW_STATUS_GRAPH_CYCLE = -9,
-    RTFW_STATUS_RESOURCE_CONFLICT = -10
-} rtfw_status;
+/* All C ABI discriminators are fixed-width so malformed input is readable. */
+typedef int32_t rtfw_status;
+#define RTFW_STATUS_OK ((rtfw_status)0)
+#define RTFW_STATUS_INVALID_ARGUMENT ((rtfw_status)-1)
+#define RTFW_STATUS_INVALID_STATE ((rtfw_status)-2)
+#define RTFW_STATUS_INVALID_CONFIG ((rtfw_status)-3)
+#define RTFW_STATUS_CAPACITY_EXCEEDED ((rtfw_status)-4)
+#define RTFW_STATUS_CALLBACK_FAILED ((rtfw_status)-5)
+#define RTFW_STATUS_RESOURCE_EXHAUSTED ((rtfw_status)-6)
+#define RTFW_STATUS_INTERNAL_ERROR ((rtfw_status)-7)
+#define RTFW_STATUS_INVALID_HANDLE ((rtfw_status)-8)
+#define RTFW_STATUS_GRAPH_CYCLE ((rtfw_status)-9)
+#define RTFW_STATUS_RESOURCE_CONFLICT ((rtfw_status)-10)
+#define RTFW_STATUS_QUEUE_FULL ((rtfw_status)-11)
 
-typedef enum rtfw_runtime_state {
-    RTFW_STATE_CONFIGURING = 0,
-    RTFW_STATE_FINALIZED = 1,
-    RTFW_STATE_RUNNING = 2,
-    RTFW_STATE_STOPPED = 3
-} rtfw_runtime_state;
+typedef uint32_t rtfw_runtime_state;
+#define RTFW_STATE_CONFIGURING ((rtfw_runtime_state)0u)
+#define RTFW_STATE_FINALIZED ((rtfw_runtime_state)1u)
+#define RTFW_STATE_RUNNING ((rtfw_runtime_state)2u)
+#define RTFW_STATE_STOPPED ((rtfw_runtime_state)3u)
 
-typedef enum rtfw_numerical_mode {
-    RTFW_NUMERICAL_PRECISE = 0,
-    RTFW_NUMERICAL_FUSED_MULTIPLY_ADD = 1
-} rtfw_numerical_mode;
+typedef uint32_t rtfw_numerical_mode;
+#define RTFW_NUMERICAL_PRECISE ((rtfw_numerical_mode)0u)
+#define RTFW_NUMERICAL_FUSED_MULTIPLY_ADD ((rtfw_numerical_mode)1u)
+
+/*
+ * Fixed-width so malformed numeric input remains well-defined at the C
+ * boundary. Policies are immutable after finalization.
+ */
+typedef uint32_t rtfw_executor_policy;
+#define RTFW_EXECUTOR_STATIC_DETERMINISTIC ((rtfw_executor_policy)0u)
+#define RTFW_EXECUTOR_BOUNDED_THROUGHPUT ((rtfw_executor_policy)1u)
 
 typedef struct rtfw_config {
     uint32_t struct_size;
@@ -67,7 +76,10 @@ typedef struct rtfw_config {
     uint64_t scratch_bytes;
     uint64_t trace_capacity;
     uint32_t numerical_mode;
-    uint32_t reserved;
+    uint32_t executor_policy;
+    uint64_t worker_count;
+    uint64_t executor_queue_capacity;
+    uint64_t reserved[2];
 } rtfw_config;
 
 typedef struct rtfw_frame_context {
@@ -90,6 +102,7 @@ typedef struct rtfw_callback_context {
     uint64_t deadline_ns;
     void* scratch;
     uint64_t scratch_bytes;
+    const rtfw_task_context* tasks;
 } rtfw_callback_context;
 
 typedef struct rtfw_step_result {
@@ -102,10 +115,9 @@ typedef struct rtfw_step_result {
     uint8_t reserved1[7];
 } rtfw_step_result;
 
-typedef enum rtfw_callback_result {
-    RTFW_CALLBACK_OK = 0,
-    RTFW_CALLBACK_ERROR = 1
-} rtfw_callback_result;
+typedef uint32_t rtfw_callback_result;
+#define RTFW_CALLBACK_OK ((rtfw_callback_result)0u)
+#define RTFW_CALLBACK_ERROR ((rtfw_callback_result)1u)
 
 /* Opaque process-local values: do not persist, decode, or mix their kinds. */
 typedef uint64_t rtfw_phase_id;
@@ -125,6 +137,19 @@ typedef uint32_t rtfw_resource_access;
 typedef rtfw_callback_result (*rtfw_frame_callback)(
     void* user_data,
     const rtfw_callback_context* context);
+
+typedef rtfw_callback_result (*rtfw_range_callback)(
+    void* user_data,
+    const rtfw_task_context* context,
+    uint64_t begin,
+    uint64_t end,
+    uint64_t task_index);
+
+typedef rtfw_callback_result (*rtfw_reduction_callback)(
+    void* user_data,
+    const rtfw_task_context* context,
+    uint64_t left_task_index,
+    uint64_t right_task_index);
 
 /* Capability bytes are 0 or 1 and report completed target-path guarantees. */
 RTFW_API uint32_t rt_version_major(void);
@@ -177,6 +202,27 @@ RTFW_API rtfw_status rtfw_declare_resource_access(
     rtfw_phase_id phase,
     rtfw_resource_id resource,
     rtfw_resource_access access);
+/*
+ * Nested work uses the runtime's existing fixed worker team and waits
+ * synchronously. A full/busy bounded queue returns RTFW_STATUS_QUEUE_FULL;
+ * no helper thread or inline emergency path is created.
+ */
+RTFW_API rtfw_status rtfw_parallel_for(
+    const rtfw_task_context* context,
+    uint64_t item_count,
+    uint64_t grain_size,
+    rtfw_range_callback callback,
+    void* user_data);
+RTFW_API rtfw_status rtfw_parallel_reduce(
+    const rtfw_task_context* context,
+    uint64_t item_count,
+    uint64_t grain_size,
+    rtfw_range_callback range_callback,
+    rtfw_reduction_callback combine_callback,
+    void* user_data);
+RTFW_API rtfw_status rtfw_task_worker_index(
+    const rtfw_task_context* context,
+    uint64_t* out_worker_index);
 RTFW_API rtfw_status rtfw_finalize(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_start(rtfw_handle* handle);
 RTFW_API rtfw_status rtfw_step(

@@ -1,29 +1,32 @@
 # Architecture
 
-This page separates the 0.3 implementation from the accepted target
+This page separates the 0.4 implementation from the accepted target
 architecture. The normative target is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.3 implementation
+## Current 0.4 implementation
 
-### M1/M2 host runtime
+### M1–M3 host runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
-compiler, frozen phase/resource topology, runtime-local scratch and trace
-storage, a runtime-local clock, and an explicit numerical helper policy.
+compiler, frozen phase/resource topology, phase-local scratch and trace storage,
+a runtime-local clock, an explicit numerical helper policy, and one fixed CPU
+worker team.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
-deadline. It executes the deterministic compiled order synchronously on the
-calling thread and never sleeps. Finalization rejects invalid/foreign handles,
-cycles, and unordered conflicting resource access. There is deliberately no
-internal worker team yet; M3 adds the unified executor.
+deadline. It waits synchronously without pacing while dependency-ready phases
+run on either a static-assignment or bounded-throughput policy. Finalization
+rejects invalid/foreign handles, cycles, unordered conflicting resource access,
+and an undersized graph queue plan. Nested ranges and deterministic-tree
+reductions use the same executor.
 
 The experimental C ABI mirrors this lifecycle with size/version-checked
 structures and encoded graph handles. See the
 [host runtime contract](host_runtime.md) and
-[compiled graph contract](compiled_graph.md).
+[compiled graph contract](compiled_graph.md), and the executor is specified in
+the [executor contract](executor.md).
 
 ### Legacy simulation path
 
@@ -46,8 +49,9 @@ dependent constraint, integration, and telemetry phases.
 ### Important limitations
 
 - `buildTopoLevels()` does not report a cycle as a configuration error.
-- `SimCore`, `WorkerPool`, `rt::Scheduler`, and `FiberPool` are separate
-  scheduling surfaces with different task and lifetime rules.
+- `SimCore`, `WorkerPool`, `rt::Scheduler`, and `FiberPool` remain compatibility
+  experiments with different task and lifetime rules. `rt::Runtime` does not
+  invoke them.
 - `WorkerPool` has one bounded global FIFO queue. Its normal dequeue path does
   not honor `Job::priority`; its “steal” counter measures unsuccessful polling
   while work is outstanding, not successful cross-worker steals.
@@ -81,10 +85,11 @@ execution plan. One executor boundary runs CPU work under a selected policy.
 Device backends receive bounded submissions and publish completions; CPU
 workers do not block on device futures.
 
-M1 implements the state machine and synchronous host-driven callback path. M2
-compiles and freezes dependency/resource topology. Finalization does not yet
-create the complete M4 memory plan, and start does not yet create the M3
-executor. A distinct self-paced API will own absolute release times in M5. See
+M1 implements the state machine and host-driven callback path. M2 compiles and
+freezes dependency/resource topology. M3 creates the fixed team in `start()`
+and routes graph and nested CPU work through it. Finalization does not yet
+create the complete M4 memory and overload plan. A distinct self-paced API will
+own absolute release times in M5. See
 [ADR-0001](adr/0001-one-executor-boundary.md),
 [ADR-0002](adr/0002-host-driven-time.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
@@ -97,9 +102,10 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1/M2 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M3 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
+- M3 executor: `rt/src/executor.cpp`
 - Experimental C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - Phase registration and graph: `SimCore::addPhase`,
   `SimCore::addDependency`, `SimCore::buildTopoLevels`;

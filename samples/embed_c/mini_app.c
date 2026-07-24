@@ -9,7 +9,28 @@ typedef struct sample_state {
     uint64_t produced;
     uint64_t consumed;
     uint64_t last_frame;
+    uint64_t lanes[64];
 } sample_state;
+
+static rtfw_callback_result produce_range(
+    void* user_data,
+    const rtfw_task_context* context,
+    uint64_t begin,
+    uint64_t end,
+    uint64_t task_index) {
+    sample_state* state = (sample_state*)user_data;
+    uint64_t worker_index = 0;
+    (void)task_index;
+    if (!state || !context ||
+        rtfw_task_worker_index(context, &worker_index) != RTFW_STATUS_OK) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    (void)worker_index;
+    for (uint64_t index = begin; index < end; ++index) {
+        state->lanes[index] = state->produced;
+    }
+    return RTFW_CALLBACK_OK;
+}
 
 static rtfw_callback_result produce(
     void* user_data,
@@ -25,24 +46,33 @@ static rtfw_callback_result produce(
     ++state->produced;
     state->last_frame = context->frame_index;
     memcpy(context->scratch, &state->produced, sizeof(state->produced));
-    return RTFW_CALLBACK_OK;
+    return rtfw_parallel_for(
+               context->tasks,
+               64,
+               8,
+               produce_range,
+               state) == RTFW_STATUS_OK
+        ? RTFW_CALLBACK_OK
+        : RTFW_CALLBACK_ERROR;
 }
 
 static rtfw_callback_result consume(
     void* user_data,
     const rtfw_callback_context* context) {
     sample_state* state = (sample_state*)user_data;
-    uint64_t produced = 0;
     if (!state || !context ||
         context->struct_size < sizeof(rtfw_callback_context) ||
         context->delta_ns != 2000000 ||
-        context->scratch_bytes < sizeof(produced)) {
+        context->scratch_bytes < sizeof(uint64_t)) {
         return RTFW_CALLBACK_ERROR;
     }
-    memcpy(&produced, context->scratch, sizeof(produced));
-    if (produced != state->produced ||
-        state->produced != state->consumed + 1) {
+    if (state->produced != state->consumed + 1) {
         return RTFW_CALLBACK_ERROR;
+    }
+    for (uint64_t index = 0; index < 64; ++index) {
+        if (state->lanes[index] != state->produced) {
+            return RTFW_CALLBACK_ERROR;
+        }
     }
     ++state->consumed;
     return RTFW_CALLBACK_OK;
@@ -75,7 +105,16 @@ int main(void) {
     rtfw_config_init(&config);
     if (rtfw_config_set(&config, "callback_capacity", "2") != RTFW_STATUS_OK ||
         rtfw_config_set(&config, "scratch_bytes", "128") != RTFW_STATUS_OK ||
-        rtfw_config_set(&config, "trace_capacity", "32") != RTFW_STATUS_OK) {
+        rtfw_config_set(&config, "trace_capacity", "32") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "executor_policy",
+            "bounded_throughput") != RTFW_STATUS_OK ||
+        rtfw_config_set(&config, "worker_count", "4") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "executor_queue_capacity",
+            "128") != RTFW_STATUS_OK) {
         fprintf(stderr, "mini_app: failed to build configuration\n");
         return EXIT_FAILURE;
     }
@@ -88,7 +127,7 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    sample_state state = {0, 0, 0};
+    sample_state state = {0};
     rtfw_phase_id consumer_phase = RTFW_INVALID_PHASE_ID;
     rtfw_phase_id producer_phase = RTFW_INVALID_PHASE_ID;
     rtfw_resource_id simulation_state = RTFW_INVALID_RESOURCE_ID;

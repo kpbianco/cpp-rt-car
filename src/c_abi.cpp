@@ -38,6 +38,8 @@ rtfw_status to_c_status(rt::Status status) noexcept {
         return RTFW_STATUS_GRAPH_CYCLE;
     case rt::Status::resource_conflict:
         return RTFW_STATUS_RESOURCE_CONFLICT;
+    case rt::Status::queue_full:
+        return RTFW_STATUS_QUEUE_FULL;
     }
     return RTFW_STATUS_INTERNAL_ERROR;
 }
@@ -54,7 +56,9 @@ bool bytes_are_zero(const uint8_t* bytes, std::size_t size) noexcept {
 bool config_header_valid(const rtfw_config& config) noexcept {
     return config.struct_size >= sizeof(rtfw_config) &&
            config.abi_version == RTFW_C_ABI_VERSION &&
-           config.reserved == 0u;
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(config.reserved),
+               sizeof(config.reserved));
 }
 
 bool frame_header_valid(const rtfw_frame_context& frame) noexcept {
@@ -75,7 +79,10 @@ bool to_cpp_config(
     if (!config_header_valid(source) ||
         source.callback_capacity > std::numeric_limits<std::size_t>::max() ||
         source.scratch_bytes > std::numeric_limits<std::size_t>::max() ||
-        source.trace_capacity > std::numeric_limits<std::size_t>::max()) {
+        source.trace_capacity > std::numeric_limits<std::size_t>::max() ||
+        source.worker_count > std::numeric_limits<std::size_t>::max() ||
+        source.executor_queue_capacity >
+            std::numeric_limits<std::size_t>::max()) {
         return false;
     }
 
@@ -93,6 +100,22 @@ bool to_cpp_config(
     default:
         return false;
     }
+    switch (source.executor_policy) {
+    case RTFW_EXECUTOR_STATIC_DETERMINISTIC:
+        target.executor_policy =
+            rt::ExecutorPolicy::static_deterministic;
+        break;
+    case RTFW_EXECUTOR_BOUNDED_THROUGHPUT:
+        target.executor_policy =
+            rt::ExecutorPolicy::bounded_throughput;
+        break;
+    default:
+        return false;
+    }
+    target.worker_count =
+        static_cast<std::size_t>(source.worker_count);
+    target.executor_queue_capacity =
+        static_cast<std::size_t>(source.executor_queue_capacity);
     return true;
 }
 
@@ -106,6 +129,14 @@ void from_cpp_config(
         source.numerical_mode == rt::NumericalMode::fused_multiply_add
         ? RTFW_NUMERICAL_FUSED_MULTIPLY_ADD
         : RTFW_NUMERICAL_PRECISE;
+    target.executor_policy =
+        source.executor_policy ==
+            rt::ExecutorPolicy::bounded_throughput
+        ? RTFW_EXECUTOR_BOUNDED_THROUGHPUT
+        : RTFW_EXECUTOR_STATIC_DETERMINISTIC;
+    target.worker_count = source.worker_count;
+    target.executor_queue_capacity =
+        source.executor_queue_capacity;
 }
 
 rtfw_runtime_state to_c_state(rt::RuntimeState state) noexcept {
@@ -127,6 +158,67 @@ struct CCallback {
     void* user_data = nullptr;
 };
 
+[[nodiscard]] const rtfw_task_context* to_c_task_context(
+    const rt::TaskContext& context) noexcept {
+    return reinterpret_cast<const rtfw_task_context*>(&context);
+}
+
+struct CRangeInvocation {
+    rtfw_range_callback callback = nullptr;
+    void* user_data = nullptr;
+};
+
+rt::TaskResult invoke_c_range(
+    void* opaque,
+    const rt::TaskContext& context,
+    const rt::TaskRange& range) {
+    auto& invocation = *static_cast<CRangeInvocation*>(opaque);
+    return invocation.callback(
+               invocation.user_data,
+               to_c_task_context(context),
+               range.begin,
+               range.end,
+               range.task_index) == RTFW_CALLBACK_OK
+        ? rt::TaskResult::ok
+        : rt::TaskResult::error;
+}
+
+struct CReductionInvocation {
+    rtfw_range_callback range_callback = nullptr;
+    rtfw_reduction_callback combine_callback = nullptr;
+    void* user_data = nullptr;
+};
+
+rt::TaskResult invoke_c_reduction_range(
+    void* opaque,
+    const rt::TaskContext& context,
+    const rt::TaskRange& range) {
+    auto& invocation = *static_cast<CReductionInvocation*>(opaque);
+    return invocation.range_callback(
+               invocation.user_data,
+               to_c_task_context(context),
+               range.begin,
+               range.end,
+               range.task_index) == RTFW_CALLBACK_OK
+        ? rt::TaskResult::ok
+        : rt::TaskResult::error;
+}
+
+rt::TaskResult invoke_c_reduction_combine(
+    void* opaque,
+    const rt::TaskContext& context,
+    std::size_t left_task_index,
+    std::size_t right_task_index) {
+    auto& invocation = *static_cast<CReductionInvocation*>(opaque);
+    return invocation.combine_callback(
+               invocation.user_data,
+               to_c_task_context(context),
+               left_task_index,
+               right_task_index) == RTFW_CALLBACK_OK
+        ? rt::TaskResult::ok
+        : rt::TaskResult::error;
+}
+
 rt::CallbackResult invoke_c_callback(
     void* opaque,
     const rt::CallbackContext& context) {
@@ -143,6 +235,7 @@ rt::CallbackResult invoke_c_callback(
     c_context.deadline_ns = context.frame.deadline_ns.value_or(0);
     c_context.scratch = context.scratch.data();
     c_context.scratch_bytes = context.scratch.size();
+    c_context.tasks = to_c_task_context(context.tasks);
 
     return registration->callback(registration->user_data, &c_context) ==
             RTFW_CALLBACK_OK
@@ -190,6 +283,7 @@ RTFW_API rt_capabilities_c rt_query_capabilities(void) {
     return {
         static_cast<uint8_t>(capabilities.compiled_graph),
         static_cast<uint8_t>(capabilities.host_driven_time),
+        static_cast<uint8_t>(capabilities.unified_cpu_executor),
         static_cast<uint8_t>(capabilities.bounded_memory_plan),
     };
 }
@@ -218,6 +312,8 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
         return rt::status_message(rt::Status::graph_cycle);
     case RTFW_STATUS_RESOURCE_CONFLICT:
         return rt::status_message(rt::Status::resource_conflict);
+    case RTFW_STATUS_QUEUE_FULL:
+        return rt::status_message(rt::Status::queue_full);
     }
     return "unknown runtime status";
 }
@@ -444,6 +540,69 @@ RTFW_API rtfw_status rtfw_declare_resource_access(
         rt::PhaseHandle{phase},
         rt::ResourceHandle{resource},
         cpp_access));
+}
+
+RTFW_API rtfw_status rtfw_parallel_for(
+    const rtfw_task_context* context,
+    uint64_t item_count,
+    uint64_t grain_size,
+    rtfw_range_callback callback,
+    void* user_data) {
+    if (!context || !callback ||
+        item_count > std::numeric_limits<std::size_t>::max() ||
+        grain_size > std::numeric_limits<std::size_t>::max()) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    const auto& cpp_context =
+        *reinterpret_cast<const rt::TaskContext*>(context);
+    CRangeInvocation invocation{callback, user_data};
+    return to_c_status(cpp_context.parallel_for(
+        static_cast<std::size_t>(item_count),
+        static_cast<std::size_t>(grain_size),
+        &invoke_c_range,
+        &invocation));
+}
+
+RTFW_API rtfw_status rtfw_parallel_reduce(
+    const rtfw_task_context* context,
+    uint64_t item_count,
+    uint64_t grain_size,
+    rtfw_range_callback range_callback,
+    rtfw_reduction_callback combine_callback,
+    void* user_data) {
+    if (!context || !range_callback || !combine_callback ||
+        item_count > std::numeric_limits<std::size_t>::max() ||
+        grain_size > std::numeric_limits<std::size_t>::max()) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    const auto& cpp_context =
+        *reinterpret_cast<const rt::TaskContext*>(context);
+    CReductionInvocation invocation{
+        range_callback,
+        combine_callback,
+        user_data,
+    };
+    return to_c_status(cpp_context.parallel_reduce(
+        static_cast<std::size_t>(item_count),
+        static_cast<std::size_t>(grain_size),
+        &invoke_c_reduction_range,
+        &invoke_c_reduction_combine,
+        &invocation));
+}
+
+RTFW_API rtfw_status rtfw_task_worker_index(
+    const rtfw_task_context* context,
+    uint64_t* out_worker_index) {
+    if (!context || !out_worker_index) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    const auto& cpp_context =
+        *reinterpret_cast<const rt::TaskContext*>(context);
+    *out_worker_index =
+        static_cast<uint64_t>(cpp_context.worker_index());
+    return RTFW_STATUS_OK;
 }
 
 RTFW_API rtfw_status rtfw_finalize(rtfw_handle* handle) {

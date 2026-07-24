@@ -509,6 +509,7 @@ target_include_directories(simcore_core INTERFACE
 # Runtime module providing C API surface
 set(RT_SOURCES
     rt/src/compiled_graph.cpp
+    rt/src/executor.cpp
     rt/src/host_runtime.cpp
     rt/src/runtime.cpp
     rt/src/plugin_manager.cpp

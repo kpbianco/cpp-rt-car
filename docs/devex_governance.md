@@ -20,7 +20,7 @@ must not invent one.
 
 ## ABI policy
 
-The plugin and C surfaces are experimental in 0.3. The M1/M2 C configuration,
+The plugin and C surfaces are experimental in 0.4. The M1–M3 C configuration,
 frame, callback, result, and graph surfaces carry their current validation
 metadata, and configuration carries `RTFW_C_ABI_VERSION`; those checks do not
 yet constitute a stable ABI

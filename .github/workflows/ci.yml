@@ -119,6 +119,35 @@ jobs:
         if: github.event_name == 'pull_request'
         continue-on-error: true
 
+  executor-tsan:
+    name: Unified executor (GCC ThreadSanitizer)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure executor ThreadSanitizer gate
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake -S . -B build-tsan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_TESTS=ON \
+            -DENABLE_RAPIDCHECK=OFF \
+            -DSIM_SANITIZERS=thread \
+            -DSIM_WERROR=ON
+      - name: Build executor ThreadSanitizer gate
+        run: cmake --build build-tsan --target simcore_tests -- -j2
+      - name: Run executor ThreadSanitizer gate
+        env:
+          GTEST_FILTER: UnifiedExecutor.*
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-tsan --output-on-failure -R simcore_all
+
   build-windows:
     runs-on: windows-latest
     strategy:

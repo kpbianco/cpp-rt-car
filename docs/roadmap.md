@@ -18,8 +18,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M0 | Complete | Product contract, truthful documentation, versioning, and license |
 | M1 | Complete | Runtime lifecycle, typed configuration, host-driven API, C ABI draft |
 | M2 | Complete | Compiled graph, cycle rejection, and resource hazards |
-| M3 | Next | Unified CPU executor with honest selectable policies |
-| M4 | Planned | Memory plan and zero-allocation RT-lane closure |
+| M3 | Complete | Unified CPU executor with honest selectable policies |
+| M4 | Next | Memory plan and zero-allocation RT-lane closure |
 | M5 | Planned | Self-paced absolute cadence, watchdog, and platform preflight |
 | M6 | Planned | RT-safe, versioned observability |
 | M7 | Planned | Determinism tiers, safe snapshots, and replay |
@@ -92,6 +92,18 @@ Exit gates:
 - no topology allocation occurs on the first frame.
 
 ## M3 — Unified executor
+
+Delivered in 0.4:
+
+- one runtime-owned fixed worker team for graph phases and nested CPU work;
+- `static_deterministic` precomputed phase assignment and
+  `bounded_throughput` per-worker queues with real successful-steal counters;
+- synchronous nested range work and fixed-tree deterministic reductions;
+- bounded queue submission with an explicit `queue_full` result;
+- phase-local scratch isolation for concurrent callbacks;
+- fixed thread creation in `start()` and joining in `stop()`, with no
+  emergency, detached, or inline-bypass execution path in the unified
+  executor.
 
 Exit gates:
 

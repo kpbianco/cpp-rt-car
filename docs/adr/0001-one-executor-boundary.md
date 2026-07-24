@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-23
 - Implementation milestone: M3
+- Implemented: 0.4 target-path `rt::Runtime`
 
 ## Context
 

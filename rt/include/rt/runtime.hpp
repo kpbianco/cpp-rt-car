@@ -24,6 +24,7 @@ namespace rt {
 struct Capabilities {
     bool compiled_graph;
     bool host_driven_time;
+    bool unified_cpu_executor;
     bool bounded_memory_plan;
 };
 
@@ -33,7 +34,7 @@ Capabilities query_capabilities() noexcept;
 // Example function using strong types
 core::seconds tick_duration(core::seconds dt) noexcept;
 
-inline constexpr std::uint32_t runtime_config_schema_version = 1;
+inline constexpr std::uint32_t runtime_config_schema_version = 2;
 
 enum class RuntimeState : std::uint8_t {
     configuring,
@@ -54,6 +55,7 @@ enum class Status : std::int32_t {
     invalid_handle = -8,
     graph_cycle = -9,
     resource_conflict = -10,
+    queue_full = -11,
 };
 
 [[nodiscard]] const char* status_message(Status status) noexcept;
@@ -63,16 +65,98 @@ enum class NumericalMode : std::uint8_t {
     fused_multiply_add,
 };
 
+enum class ExecutorPolicy : std::uint8_t {
+    static_deterministic,
+    bounded_throughput,
+};
+
+enum class TaskResult : std::uint8_t {
+    ok,
+    error,
+};
+
+namespace detail {
+class Executor;
+}
+
+class TaskContext;
+
+struct TaskRange {
+    std::size_t begin = 0;
+    std::size_t end = 0;
+    std::size_t task_index = 0;
+};
+
+using RangeTaskCallback = TaskResult (*)(
+    void* user_data,
+    const TaskContext& context,
+    const TaskRange& range);
+
+using ReductionTaskCallback = TaskResult (*)(
+    void* user_data,
+    const TaskContext& context,
+    std::size_t left_task_index,
+    std::size_t right_task_index);
+
+// A TaskContext is valid only while its callback is running. Nested work is
+// synchronous: these methods return only after every accepted child finishes.
+class TaskContext {
+public:
+    [[nodiscard]] Status parallel_for(
+        std::size_t item_count,
+        std::size_t grain_size,
+        RangeTaskCallback callback,
+        void* user_data = nullptr) const noexcept;
+    [[nodiscard]] Status parallel_reduce(
+        std::size_t item_count,
+        std::size_t grain_size,
+        RangeTaskCallback range_callback,
+        ReductionTaskCallback combine_callback,
+        void* user_data = nullptr) const noexcept;
+
+    [[nodiscard]] std::size_t worker_index() const noexcept {
+        return worker_index_;
+    }
+    [[nodiscard]] std::size_t phase_index() const noexcept {
+        return phase_index_;
+    }
+    [[nodiscard]] std::size_t task_index() const noexcept {
+        return task_index_;
+    }
+
+private:
+    TaskContext(
+        detail::Executor& executor,
+        std::size_t worker_index,
+        std::size_t phase_index,
+        std::size_t task_index) noexcept
+        : executor_(&executor),
+          worker_index_(worker_index),
+          phase_index_(phase_index),
+          task_index_(task_index) {}
+
+    detail::Executor* executor_ = nullptr;
+    std::size_t worker_index_ = 0;
+    std::size_t phase_index_ = 0;
+    std::size_t task_index_ = 0;
+
+    friend class detail::Executor;
+};
+
 struct RuntimeConfig {
     std::size_t callback_capacity = 64;
     std::size_t scratch_bytes = 64 * 1024;
     std::size_t trace_capacity = 1024;
     NumericalMode numerical_mode = NumericalMode::precise;
+    ExecutorPolicy executor_policy = ExecutorPolicy::static_deterministic;
+    std::size_t worker_count = 1;
+    std::size_t executor_queue_capacity = 1024;
 };
 
 // Applies one strict schema key to a typed configuration. The supported keys
-// are callback_capacity, scratch_bytes, trace_capacity, and numerical_mode.
-// Unknown keys and partially parsed values are rejected.
+// are callback_capacity, scratch_bytes, trace_capacity, numerical_mode,
+// executor_policy, worker_count, and executor_queue_capacity. Unknown keys and
+// partially parsed values are rejected.
 [[nodiscard]] Status set_runtime_config_value(
     RuntimeConfig& config,
     std::string_view key,
@@ -107,10 +191,11 @@ struct HostFrameContext {
 
 struct CallbackContext {
     const HostFrameContext& frame;
-    // Valid only for the callback invocation. The same instance-local block is
-    // presented to callbacks in compiled execution order.
+    // Valid only for this phase callback. Each phase owns a distinct block so
+    // independent phases cannot race through runtime-provided scratch.
     std::span<std::byte> scratch;
     const NumericalPolicy& numerics;
+    const TaskContext& tasks;
 };
 
 enum class CallbackResult : std::uint8_t {
@@ -133,6 +218,23 @@ struct StepResult {
     std::uint64_t start_ns = 0;
     std::uint64_t finish_ns = 0;
     bool deadline_missed = false;
+};
+
+struct ExecutorStats {
+    ExecutorPolicy policy = ExecutorPolicy::static_deterministic;
+    std::size_t worker_count = 0;
+    std::size_t queue_capacity = 0;
+    std::uint64_t submitted_tasks = 0;
+    std::uint64_t local_executions = 0;
+    std::uint64_t steal_attempts = 0;
+    std::uint64_t successful_steals = 0;
+    std::uint64_t queue_full_rejections = 0;
+    std::uint64_t worker_starts = 0;
+};
+
+struct StaticPhaseAssignment {
+    PhaseHandle phase{};
+    std::size_t worker_index = 0;
 };
 
 enum class RuntimeTraceEventType : std::uint8_t {
@@ -207,6 +309,10 @@ public:
     [[nodiscard]] bool compiled_phase_at(
         std::size_t execution_index,
         PhaseHandle& phase) const noexcept;
+    [[nodiscard]] bool static_phase_assignment_at(
+        std::size_t registration_index,
+        StaticPhaseAssignment& assignment) const noexcept;
+    [[nodiscard]] ExecutorStats executor_stats() const noexcept;
     [[nodiscard]] std::uint64_t now_ns() noexcept;
     // The view remains valid until the next control operation or destruction.
     [[nodiscard]] std::string_view last_error() const noexcept;

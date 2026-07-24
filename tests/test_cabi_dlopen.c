@@ -93,6 +93,22 @@ typedef rtfw_status (*rtfw_declare_resource_access_fn)(
     rtfw_phase_id,
     rtfw_resource_id,
     rtfw_resource_access);
+typedef rtfw_status (*rtfw_parallel_for_fn)(
+    const rtfw_task_context *,
+    uint64_t,
+    uint64_t,
+    rtfw_range_callback,
+    void *);
+typedef rtfw_status (*rtfw_parallel_reduce_fn)(
+    const rtfw_task_context *,
+    uint64_t,
+    uint64_t,
+    rtfw_range_callback,
+    rtfw_reduction_callback,
+    void *);
+typedef rtfw_status (*rtfw_task_worker_index_fn)(
+    const rtfw_task_context *,
+    uint64_t *);
 typedef rtfw_status (*rtfw_lifecycle_fn)(rtfw_handle *);
 typedef rtfw_status (*rtfw_step_fn)(
     rtfw_handle *, const rtfw_frame_context *, rtfw_step_result *);
@@ -127,6 +143,10 @@ static int check_symbol(void *sym, const char *name) {
 
 typedef struct callback_state {
     uint64_t calls;
+    uint64_t range_calls;
+    uint64_t reduction_partials[4];
+    uint64_t reduction_result;
+    uint64_t combine_calls;
     uint64_t last_frame;
     uint32_t next_slot;
     uint32_t ordering_errors;
@@ -137,6 +157,66 @@ typedef struct callback_probe {
     uint32_t phase;
 } callback_probe;
 
+static rtfw_parallel_for_fn loaded_parallel_for = NULL;
+static rtfw_parallel_reduce_fn loaded_parallel_reduce = NULL;
+static rtfw_task_worker_index_fn loaded_task_worker_index = NULL;
+
+static rtfw_callback_result test_range_callback(
+    void *user_data,
+    const rtfw_task_context *context,
+    uint64_t begin,
+    uint64_t end,
+    uint64_t task_index) {
+    callback_state *state = (callback_state *)user_data;
+    uint64_t worker_index = UINT64_MAX;
+    (void)task_index;
+    if (!state || !context || !loaded_task_worker_index ||
+        loaded_task_worker_index(context, &worker_index) != RTFW_STATUS_OK ||
+        worker_index == UINT64_MAX) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    state->range_calls += end - begin;
+    return RTFW_CALLBACK_OK;
+}
+
+static rtfw_callback_result test_reduction_range(
+    void *user_data,
+    const rtfw_task_context *context,
+    uint64_t begin,
+    uint64_t end,
+    uint64_t task_index) {
+    callback_state *state = (callback_state *)user_data;
+    uint64_t worker_index = UINT64_MAX;
+    if (!state || !context || task_index >= 4 || end != begin + 1 ||
+        !loaded_task_worker_index ||
+        loaded_task_worker_index(context, &worker_index) != RTFW_STATUS_OK ||
+        worker_index == UINT64_MAX) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    state->reduction_partials[task_index] = begin + 1;
+    return RTFW_CALLBACK_OK;
+}
+
+static rtfw_callback_result test_reduction_combine(
+    void *user_data,
+    const rtfw_task_context *context,
+    uint64_t left_task_index,
+    uint64_t right_task_index) {
+    callback_state *state = (callback_state *)user_data;
+    uint64_t worker_index = UINT64_MAX;
+    if (!state || !context ||
+        left_task_index >= 4 || right_task_index >= 4 ||
+        !loaded_task_worker_index ||
+        loaded_task_worker_index(context, &worker_index) != RTFW_STATUS_OK ||
+        worker_index == UINT64_MAX) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    state->reduction_partials[left_task_index] +=
+        state->reduction_partials[right_task_index];
+    ++state->combine_calls;
+    return RTFW_CALLBACK_OK;
+}
+
 static rtfw_callback_result test_callback(
     void *user_data,
     const rtfw_callback_context *context) {
@@ -145,8 +225,30 @@ static rtfw_callback_result test_callback(
     if (!state || !context ||
         context->struct_size < sizeof(rtfw_callback_context) ||
         context->delta_ns != 1000000 ||
-        context->scratch_bytes != 64) {
+        context->scratch_bytes != 64 ||
+        !context->tasks) {
         return RTFW_CALLBACK_ERROR;
+    }
+    if (probe->phase == 1 &&
+        (!loaded_parallel_for ||
+         loaded_parallel_for(
+             context->tasks,
+             4,
+             1,
+             test_range_callback,
+             state) != RTFW_STATUS_OK ||
+         !loaded_parallel_reduce ||
+         loaded_parallel_reduce(
+             context->tasks,
+             4,
+             1,
+             test_reduction_range,
+             test_reduction_combine,
+             state) != RTFW_STATUS_OK)) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    if (probe->phase == 1) {
+        state->reduction_result = state->reduction_partials[0];
     }
     {
         const uint32_t expected_phase = state->next_slot == 0 ? 1u : 0u;
@@ -158,6 +260,14 @@ static rtfw_callback_result test_callback(
     ++state->calls;
     state->last_frame = context->frame_index;
     return RTFW_CALLBACK_OK;
+}
+
+static rtfw_callback_result malformed_result_callback(
+    void *user_data,
+    const rtfw_callback_context *context) {
+    (void)user_data;
+    (void)context;
+    return (rtfw_callback_result)UINT32_MAX;
 }
 
 int main(void) {
@@ -184,6 +294,9 @@ int main(void) {
     rtfw_register_resource_fn register_resource_fn;
     rtfw_add_dependency_fn add_dependency_fn;
     rtfw_declare_resource_access_fn declare_access_fn;
+    rtfw_parallel_for_fn parallel_for_fn;
+    rtfw_parallel_reduce_fn parallel_reduce_fn;
+    rtfw_task_worker_index_fn task_worker_index_fn;
     rtfw_lifecycle_fn finalize_fn;
     rtfw_lifecycle_fn start_fn;
     rtfw_step_fn step_fn;
@@ -204,6 +317,9 @@ int main(void) {
     LOAD_FUNCTION(register_resource_fn, "rtfw_register_resource");
     LOAD_FUNCTION(add_dependency_fn, "rtfw_add_dependency");
     LOAD_FUNCTION(declare_access_fn, "rtfw_declare_resource_access");
+    LOAD_FUNCTION(parallel_for_fn, "rtfw_parallel_for");
+    LOAD_FUNCTION(parallel_reduce_fn, "rtfw_parallel_reduce");
+    LOAD_FUNCTION(task_worker_index_fn, "rtfw_task_worker_index");
     LOAD_FUNCTION(finalize_fn, "rtfw_finalize");
     LOAD_FUNCTION(start_fn, "rtfw_start");
     LOAD_FUNCTION(step_fn, "rtfw_step");
@@ -211,18 +327,28 @@ int main(void) {
     LOAD_FUNCTION(get_state_fn, "rtfw_get_state");
     LOAD_FUNCTION(last_error_fn, "rtfw_last_error");
     LOAD_FUNCTION(destroy_fn, "rtfw_destroy");
+    loaded_parallel_for = parallel_for_fn;
+    loaded_parallel_reduce = parallel_reduce_fn;
+    loaded_task_worker_index = task_worker_index_fn;
 
     {
         const rt_capabilities_c capabilities = capabilities_fn();
         if (capabilities.compiled_graph != 1 ||
             capabilities.host_driven_time != 1 ||
+            capabilities.unified_cpu_executor != 1 ||
             capabilities.bounded_memory_plan != 0 ||
             strcmp(
                 status_message_fn(RTFW_STATUS_INVALID_CONFIG),
                 "invalid runtime configuration") != 0 ||
             strcmp(
                 status_message_fn(RTFW_STATUS_RESOURCE_CONFLICT),
-                "unordered conflicting resource access") != 0) {
+                "unordered conflicting resource access") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_QUEUE_FULL),
+                "executor queue is full") != 0 ||
+            strcmp(
+                status_message_fn((rtfw_status)INT32_MAX),
+                "unknown runtime status") != 0) {
             fprintf(stderr, "capability or status contract mismatch\n");
             lib_close(handle);
             return EXIT_FAILURE;
@@ -233,21 +359,52 @@ int main(void) {
     config_init_fn(&config);
     if (config_set_fn(&config, "scratch_bytes", "64") != RTFW_STATUS_OK ||
         config_set_fn(&config, "callback_capacity", "2") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "executor_policy",
+            "static_deterministic") != RTFW_STATUS_OK ||
+        config_set_fn(&config, "worker_count", "1") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "executor_queue_capacity",
+            "8") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "executor_queue_capacity",
+            "3") != RTFW_STATUS_INVALID_CONFIG ||
         config_set_fn(&config, "unknown", "1") != RTFW_STATUS_INVALID_CONFIG) {
         fprintf(stderr, "strict configuration parsing failed\n");
         lib_close(handle);
         return EXIT_FAILURE;
     }
-    config.reserved = 1;
+    config.reserved[0] = 1;
     if (config_set_fn(&config, "scratch_bytes", "64") !=
             RTFW_STATUS_INVALID_ARGUMENT) {
         fprintf(stderr, "configuration accepted a nonzero reserved field\n");
         lib_close(handle);
         return EXIT_FAILURE;
     }
-    config.reserved = 0;
+    config.reserved[0] = 0;
 
     rtfw_handle *instance = NULL;
+    config.numerical_mode = UINT32_MAX;
+    if (create_fn(&config, &instance) != RTFW_STATUS_INVALID_CONFIG ||
+        instance != NULL) {
+        fprintf(stderr, "runtime accepted a malformed numerical mode\n");
+        destroy_fn(instance);
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    config.numerical_mode = RTFW_NUMERICAL_PRECISE;
+    config.executor_policy = UINT32_MAX;
+    if (create_fn(&config, &instance) != RTFW_STATUS_INVALID_CONFIG ||
+        instance != NULL) {
+        fprintf(stderr, "runtime accepted a malformed executor policy\n");
+        destroy_fn(instance);
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    config.executor_policy = RTFW_EXECUTOR_STATIC_DETERMINISTIC;
     if (create_fn(&config, &instance) != RTFW_STATUS_OK || !instance) {
         fprintf(stderr, "rtfw_create failed\n");
         lib_close(handle);
@@ -280,7 +437,7 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    callback_state state = {0, 0, 0, 0};
+    callback_state state = {0};
     callback_probe consumer_probe = {&state, 0};
     callback_probe producer_probe = {&state, 1};
     rtfw_phase_id consumer = RTFW_INVALID_PHASE_ID;
@@ -401,6 +558,9 @@ int main(void) {
         get_state_fn(instance, &runtime_state) != RTFW_STATUS_OK ||
         runtime_state != RTFW_STATE_STOPPED ||
         state.calls != 10 ||
+        state.range_calls != 20 ||
+        state.reduction_result != 10 ||
+        state.combine_calls != 15 ||
         state.last_frame != 4 ||
         state.ordering_errors != 0 ||
         state.next_slot != 0) {
@@ -453,6 +613,34 @@ int main(void) {
             return EXIT_FAILURE;
         }
         destroy_fn(conflict_instance);
+    }
+
+    {
+        rtfw_handle *malformed_instance = NULL;
+        rtfw_frame_context malformed_frame;
+        if (create_fn(&config, &malformed_instance) != RTFW_STATUS_OK ||
+            register_fn(
+                malformed_instance,
+                "malformed-result",
+                malformed_result_callback,
+                NULL) != RTFW_STATUS_OK ||
+            finalize_fn(malformed_instance) != RTFW_STATUS_OK ||
+            start_fn(malformed_instance) != RTFW_STATUS_OK) {
+            fprintf(stderr, "malformed callback result setup failed\n");
+            destroy_fn(malformed_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        frame_init_fn(&malformed_frame);
+        malformed_frame.delta_ns = 1000000;
+        if (step_fn(malformed_instance, &malformed_frame, NULL) !=
+            RTFW_STATUS_CALLBACK_FAILED) {
+            fprintf(stderr, "malformed callback result was not rejected\n");
+            destroy_fn(malformed_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        destroy_fn(malformed_instance);
     }
 
     if (lib_close(handle) != 0) {
