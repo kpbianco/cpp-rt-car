@@ -1,5 +1,6 @@
 #include <rt/runtime.hpp>
 
+#include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
 #include "executor.hpp"
 
@@ -26,6 +27,13 @@ constexpr std::size_t kMaxScratchBytes = std::size_t{1} << 30;
 constexpr std::size_t kMaxTraceEvents = std::size_t{1} << 20;
 constexpr std::size_t kMaxWorkers = 256;
 constexpr std::size_t kMaxExecutorQueueCapacity = std::size_t{1} << 20;
+constexpr std::size_t kMaxTaskScratchBytes = std::size_t{1} << 20;
+constexpr std::size_t kMaxTaskScratchSlots = std::size_t{1} << 20;
+constexpr std::size_t kMaxScratchAlignment = std::size_t{1} << 12;
+constexpr std::size_t kMaxMemoryBudgetBytes =
+    sizeof(std::size_t) >= sizeof(std::uint64_t)
+    ? static_cast<std::size_t>(std::uint64_t{1} << 40)
+    : std::numeric_limits<std::size_t>::max();
 constexpr std::size_t kNoCallback = std::numeric_limits<std::size_t>::max();
 
 std::atomic<std::uint32_t> g_next_graph_owner{1};
@@ -90,6 +98,17 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
          (config.executor_queue_capacity - 1)) != 0) {
         return rt::Status::invalid_config;
     }
+    if (config.scratch_alignment < alignof(std::max_align_t) ||
+        config.scratch_alignment > kMaxScratchAlignment ||
+        (config.scratch_alignment &
+         (config.scratch_alignment - 1)) != 0 ||
+        config.task_scratch_bytes > kMaxTaskScratchBytes ||
+        config.task_scratch_slots == 0 ||
+        config.task_scratch_slots > kMaxTaskScratchSlots ||
+        config.memory_budget_bytes == 0 ||
+        config.memory_budget_bytes > kMaxMemoryBudgetBytes) {
+        return rt::Status::invalid_config;
+    }
     switch (config.numerical_mode) {
     case rt::NumericalMode::precise:
     case rt::NumericalMode::fused_multiply_add:
@@ -104,6 +123,13 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
     default:
         return rt::Status::invalid_config;
     }
+    switch (config.overload_policy) {
+    case rt::OverloadPolicy::reject_submission:
+    case rt::OverloadPolicy::fail_frame:
+        break;
+    default:
+        return rt::Status::invalid_config;
+    }
     return rt::Status::ok;
 }
 
@@ -112,9 +138,9 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
 namespace rt {
 
 Capabilities query_capabilities() noexcept {
-    // M3 provides the compiled graph and unified CPU executor. The proven
-    // complete bounded memory plan remains an M4 deliverable.
-    return {true, true, true, false};
+    // M4 adds the finalized aligned scratch/queue plan and proves the
+    // allocation-free running-state CPU path.
+    return {true, true, true, true};
 }
 
 const char* status_message(Status status) noexcept {
@@ -143,6 +169,8 @@ const char* status_message(Status status) noexcept {
         return "unordered conflicting resource access";
     case Status::queue_full:
         return "executor queue is full";
+    case Status::scratch_exhausted:
+        return "task scratch plan is exhausted";
     }
     return "unknown runtime status";
 }
@@ -197,6 +225,36 @@ Status set_runtime_config_value(
             return Status::invalid_config;
         }
         candidate.executor_queue_capacity = parsed;
+    } else if (key == "scratch_alignment") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.scratch_alignment = parsed;
+    } else if (key == "task_scratch_bytes") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.task_scratch_bytes = parsed;
+    } else if (key == "task_scratch_slots") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.task_scratch_slots = parsed;
+    } else if (key == "memory_budget_bytes") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.memory_budget_bytes = parsed;
+    } else if (key == "overload_policy") {
+        if (value == "reject_submission") {
+            candidate.overload_policy =
+                OverloadPolicy::reject_submission;
+        } else if (value == "fail_frame") {
+            candidate.overload_policy =
+                OverloadPolicy::fail_frame;
+        } else {
+            return Status::invalid_config;
+        }
     } else {
         return Status::invalid_config;
     }
@@ -396,7 +454,9 @@ struct Runtime::Impl {
         std::span<std::byte> phase_scratch;
         if (self.config.scratch_bytes != 0) {
             phase_scratch = std::span<std::byte>(
-                self.scratch.data() + (index * self.config.scratch_bytes),
+                self.phase_scratch.data() +
+                    (index *
+                     self.finalized_memory_plan.phase_scratch_stride),
                 self.config.scratch_bytes);
         }
         CallbackContext callback_context{
@@ -437,9 +497,10 @@ struct Runtime::Impl {
     std::vector<detail::GraphDependency> dependencies;
     std::vector<detail::GraphResourceAccess> resource_accesses;
     std::vector<PhaseHandle> compiled_order;
-    std::vector<std::byte> scratch;
+    detail::AlignedStorage phase_scratch;
     std::vector<RuntimeTraceEvent> trace;
     std::unique_ptr<detail::Executor> executor;
+    MemoryPlan finalized_memory_plan{};
     std::size_t trace_write = 0;
     std::size_t trace_count = 0;
     std::atomic<bool> in_step{false};
@@ -719,19 +780,143 @@ Status Runtime::finalize() noexcept {
             Status::invalid_config,
             "executor_queue_capacity is too small for the compiled graph");
     }
-    if (impl_->config.scratch_bytes != 0 &&
-        impl_->callbacks.size() >
-            std::numeric_limits<std::size_t>::max() /
-                impl_->config.scratch_bytes) {
+    if (impl_->config.task_scratch_slots <
+        impl_->callbacks.size()) {
         return impl_->fail(
-            Status::resource_exhausted,
-            "phase scratch plan overflows addressable storage");
+            Status::invalid_config,
+            "task_scratch_slots is too small for the compiled graph");
     }
-    const auto scratch_plan_bytes =
-        impl_->callbacks.size() * impl_->config.scratch_bytes;
+
+    MemoryPlan memory_plan;
+    memory_plan.memory_budget_bytes =
+        impl_->config.memory_budget_bytes;
+    memory_plan.phase_count = impl_->callbacks.size();
+    memory_plan.phase_scratch_bytes =
+        impl_->config.scratch_bytes;
+    memory_plan.task_scratch_bytes =
+        impl_->config.task_scratch_bytes;
+    memory_plan.task_scratch_slots =
+        impl_->config.task_scratch_slots;
+    memory_plan.trace_capacity =
+        impl_->config.trace_capacity;
+    memory_plan.scratch_alignment =
+        impl_->config.scratch_alignment;
+    memory_plan.overload_policy =
+        impl_->config.overload_policy;
+
+    bool plan_valid = detail::checked_align_up(
+        memory_plan.phase_scratch_bytes,
+        memory_plan.scratch_alignment,
+        memory_plan.phase_scratch_stride);
+    plan_valid = plan_valid && detail::checked_multiply(
+        memory_plan.phase_count,
+        memory_plan.phase_scratch_stride,
+        memory_plan.phase_scratch_total_bytes);
+    plan_valid = plan_valid && detail::checked_align_up(
+        memory_plan.task_scratch_bytes,
+        memory_plan.scratch_alignment,
+        memory_plan.task_scratch_stride);
+    plan_valid = plan_valid && detail::checked_multiply(
+        memory_plan.task_scratch_slots,
+        memory_plan.task_scratch_stride,
+        memory_plan.task_scratch_total_bytes);
+    plan_valid = plan_valid && detail::checked_multiply(
+        memory_plan.trace_capacity,
+        sizeof(RuntimeTraceEvent),
+        memory_plan.trace_storage_bytes);
+    plan_valid = plan_valid && detail::checked_multiply(
+        impl_->config.worker_count,
+        impl_->config.executor_queue_capacity,
+        memory_plan.queue_slots);
+    plan_valid = plan_valid &&
+        detail::Executor::estimate_control_storage(
+            impl_->config.worker_count,
+            impl_->config.executor_queue_capacity,
+            impl_->callbacks.size(),
+            impl_->dependencies.size(),
+            impl_->config.task_scratch_slots,
+            memory_plan.executor_control_bytes);
+
+    memory_plan.runtime_control_bytes = sizeof(Impl);
+    const auto add_runtime_bytes =
+        [&](std::size_t bytes) {
+            std::size_t total = 0;
+            if (!detail::checked_add(
+                    memory_plan.runtime_control_bytes,
+                    bytes,
+                    total)) {
+                return false;
+            }
+            memory_plan.runtime_control_bytes = total;
+            return true;
+        };
+    const auto add_runtime_array =
+        [&](std::size_t count, std::size_t element_size) {
+            std::size_t bytes = 0;
+            return detail::checked_multiply(
+                       count,
+                       element_size,
+                       bytes) &&
+                   add_runtime_bytes(bytes);
+        };
+
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->callbacks.capacity(),
+        sizeof(Impl::RegisteredCallback));
+    for (const auto& callback : impl_->callbacks) {
+        plan_valid = plan_valid &&
+            add_runtime_bytes(callback.name.capacity() + 1);
+    }
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->resources.capacity(),
+        sizeof(Impl::RegisteredResource));
+    for (const auto& resource : impl_->resources) {
+        plan_valid = plan_valid &&
+            add_runtime_bytes(resource.name.capacity() + 1);
+    }
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->dependencies.capacity(),
+        sizeof(detail::GraphDependency));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->resource_accesses.capacity(),
+        sizeof(detail::GraphResourceAccess));
+    plan_valid = plan_valid && add_runtime_array(
+        compiled_order.capacity(),
+        sizeof(PhaseHandle));
+
+    memory_plan.planned_bytes =
+        memory_plan.runtime_control_bytes;
+    const auto add_planned_bytes =
+        [&](std::size_t bytes) {
+            std::size_t total = 0;
+            if (!detail::checked_add(
+                    memory_plan.planned_bytes,
+                    bytes,
+                    total)) {
+                return false;
+            }
+            memory_plan.planned_bytes = total;
+            return true;
+        };
+    plan_valid = plan_valid &&
+        add_planned_bytes(memory_plan.executor_control_bytes) &&
+        add_planned_bytes(memory_plan.phase_scratch_total_bytes) &&
+        add_planned_bytes(memory_plan.task_scratch_total_bytes) &&
+        add_planned_bytes(memory_plan.trace_storage_bytes);
+    if (!plan_valid) {
+        return impl_->fail(
+            Status::invalid_config,
+            "finalized memory plan overflows addressable storage");
+    }
+    if (memory_plan.planned_bytes >
+        memory_plan.memory_budget_bytes) {
+        return impl_->fail(
+            Status::invalid_config,
+            "finalized memory plan exceeds memory_budget_bytes");
+    }
 
     std::unique_ptr<detail::Executor> executor;
-    std::vector<std::byte> scratch;
+    detail::AlignedStorage phase_scratch;
     std::vector<RuntimeTraceEvent> trace;
     try {
         executor = std::make_unique<detail::Executor>(
@@ -739,8 +924,14 @@ Status Runtime::finalize() noexcept {
             impl_->config.worker_count,
             impl_->config.executor_queue_capacity,
             impl_->callbacks.size(),
+            impl_->config.task_scratch_bytes,
+            impl_->config.task_scratch_slots,
+            impl_->config.scratch_alignment,
+            impl_->config.overload_policy,
             impl_->dependencies);
-        scratch.assign(scratch_plan_bytes, std::byte{0});
+        phase_scratch.allocate(
+            memory_plan.phase_scratch_total_bytes,
+            memory_plan.scratch_alignment);
         trace.assign(
             impl_->config.trace_capacity,
             RuntimeTraceEvent{});
@@ -752,9 +943,10 @@ Status Runtime::finalize() noexcept {
 
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
     impl_->compiled_order = std::move(compiled_order);
-    impl_->scratch = std::move(scratch);
+    impl_->phase_scratch = std::move(phase_scratch);
     impl_->trace = std::move(trace);
     impl_->executor = std::move(executor);
+    impl_->finalized_memory_plan = memory_plan;
     impl_->trace_write = 0;
     impl_->trace_count = 0;
     impl_->state = RuntimeState::finalized;
@@ -959,6 +1151,17 @@ ExecutorStats Runtime::executor_stats() const noexcept {
         return {};
     }
     return impl_->executor->stats();
+}
+
+bool Runtime::memory_plan(MemoryPlan& plan) const noexcept {
+    plan = {};
+    if (!impl_ ||
+        impl_->state == RuntimeState::configuring ||
+        !impl_->executor) {
+        return false;
+    }
+    plan = impl_->finalized_memory_plan;
+    return true;
 }
 
 std::uint64_t Runtime::now_ns() noexcept {

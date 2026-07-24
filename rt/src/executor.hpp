@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
 
 #include <atomic>
@@ -26,6 +27,10 @@ public:
         std::size_t worker_count,
         std::size_t queue_capacity,
         std::size_t phase_count,
+        std::size_t task_scratch_bytes,
+        std::size_t task_scratch_slots,
+        std::size_t scratch_alignment,
+        OverloadPolicy overload_policy,
         std::span<const GraphDependency> dependencies);
     ~Executor();
 
@@ -60,6 +65,13 @@ public:
     [[nodiscard]] bool static_assignment(
         std::size_t phase_index,
         std::size_t& worker_index) const noexcept;
+    [[nodiscard]] static bool estimate_control_storage(
+        std::size_t worker_count,
+        std::size_t queue_capacity,
+        std::size_t phase_count,
+        std::size_t dependency_count,
+        std::size_t task_scratch_slots,
+        std::size_t& bytes) noexcept;
 
 private:
     enum class WorkKind : std::uint8_t {
@@ -89,6 +101,7 @@ private:
         std::size_t range_begin = 0;
         std::size_t range_end = 0;
         std::size_t peer_task_index = 0;
+        std::size_t scratch_slot = static_cast<std::size_t>(-1);
     };
 
     class Queue;
@@ -97,6 +110,12 @@ private:
         WorkItem item,
         std::size_t target_worker) noexcept;
     [[nodiscard]] Status submit_phase(std::uint32_t phase_index) noexcept;
+    [[nodiscard]] bool acquire_scratch_slot(
+        std::size_t& scratch_slot) noexcept;
+    void release_scratch_slot(std::size_t scratch_slot) noexcept;
+    [[nodiscard]] Status reject_overload(
+        Status status,
+        std::size_t phase_index) noexcept;
     [[nodiscard]] Status wait(
         TaskGroup& group,
         std::size_t helping_worker) noexcept;
@@ -116,8 +135,17 @@ private:
     std::size_t worker_count_;
     std::size_t queue_capacity_;
     std::size_t phase_count_;
+    std::size_t task_scratch_bytes_;
+    std::size_t task_scratch_stride_;
+    std::size_t task_scratch_slots_;
+    std::size_t scratch_alignment_;
+    OverloadPolicy overload_policy_;
     std::vector<std::unique_ptr<Queue>> queues_;
     std::vector<std::thread> threads_;
+    AlignedStorage task_scratch_storage_;
+    std::unique_ptr<std::atomic<std::uint64_t>[]> free_scratch_words_;
+    std::size_t free_scratch_word_count_ = 0;
+    std::atomic<std::size_t> scratch_word_hint_{0};
 
     std::vector<std::uint32_t> initial_indegree_;
     std::unique_ptr<std::atomic<std::uint32_t>[]> current_indegree_;
@@ -140,6 +168,7 @@ private:
     std::atomic<std::uint64_t> steal_attempts_{0};
     std::atomic<std::uint64_t> successful_steals_{0};
     std::atomic<std::uint64_t> queue_full_rejections_{0};
+    std::atomic<std::uint64_t> scratch_exhaustions_{0};
     std::atomic<std::uint64_t> worker_starts_{0};
 };
 

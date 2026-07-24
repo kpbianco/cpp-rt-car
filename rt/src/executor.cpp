@@ -1,6 +1,7 @@
 #include "executor.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <new>
 #include <utility>
@@ -11,13 +12,22 @@
 namespace {
 
 constexpr std::size_t kInvalidWorker = std::numeric_limits<std::size_t>::max();
+constexpr std::size_t kInvalidScratchSlot =
+    std::numeric_limits<std::size_t>::max();
 constexpr std::size_t kQueueCasAttemptLimit = 64;
+constexpr std::size_t kScratchCasAttemptLimit = 64;
+constexpr std::size_t kScratchWordBits = 64;
 
 } // namespace
 
 namespace rt::detail {
 
 class Executor::Queue final {
+    struct Cell {
+        std::atomic<std::size_t> sequence{0};
+        WorkItem item{};
+    };
+
 public:
     explicit Queue(std::size_t capacity)
         : cells_(std::make_unique<Cell[]>(capacity)),
@@ -94,12 +104,11 @@ public:
         return false;
     }
 
-private:
-    struct Cell {
-        std::atomic<std::size_t> sequence{0};
-        WorkItem item{};
-    };
+    [[nodiscard]] static constexpr std::size_t cell_size() noexcept {
+        return sizeof(Cell);
+    }
 
+private:
     std::unique_ptr<Cell[]> cells_;
     std::size_t capacity_;
     std::size_t mask_;
@@ -135,11 +144,19 @@ Executor::Executor(
     std::size_t worker_count,
     std::size_t queue_capacity,
     std::size_t phase_count,
+    std::size_t task_scratch_bytes,
+    std::size_t task_scratch_slots,
+    std::size_t scratch_alignment,
+    OverloadPolicy overload_policy,
     std::span<const GraphDependency> dependencies)
     : policy_(policy),
       worker_count_(worker_count),
       queue_capacity_(queue_capacity),
       phase_count_(phase_count),
+      task_scratch_bytes_(task_scratch_bytes),
+      task_scratch_slots_(task_scratch_slots),
+      scratch_alignment_(scratch_alignment),
+      overload_policy_(overload_policy),
       initial_indegree_(phase_count, 0),
       current_indegree_(
           phase_count == 0
@@ -147,6 +164,40 @@ Executor::Executor(
               : std::make_unique<std::atomic<std::uint32_t>[]>(phase_count)),
       successor_offsets_(phase_count + 1, 0),
       static_assignments_(phase_count, 0) {
+    std::size_t task_scratch_total = 0;
+    if (!checked_align_up(
+            task_scratch_bytes_,
+            scratch_alignment_,
+            task_scratch_stride_) ||
+        !checked_multiply(
+            task_scratch_stride_,
+            task_scratch_slots_,
+            task_scratch_total)) {
+        throw std::bad_alloc();
+    }
+    task_scratch_storage_.allocate(
+        task_scratch_total,
+        scratch_alignment_);
+
+    free_scratch_word_count_ =
+        1 + ((task_scratch_slots_ - 1) / kScratchWordBits);
+    free_scratch_words_ =
+        std::make_unique<std::atomic<std::uint64_t>[]>(
+            free_scratch_word_count_);
+    for (std::size_t word = 0;
+         word < free_scratch_word_count_;
+         ++word) {
+        free_scratch_words_[word].store(
+            std::numeric_limits<std::uint64_t>::max(),
+            std::memory_order_relaxed);
+    }
+    const auto final_bits = task_scratch_slots_ % kScratchWordBits;
+    if (final_bits != 0) {
+        free_scratch_words_[free_scratch_word_count_ - 1].store(
+            (std::uint64_t{1} << final_bits) - 1,
+            std::memory_order_relaxed);
+    }
+
     queues_.reserve(worker_count_);
     threads_.reserve(worker_count_);
     for (std::size_t worker = 0; worker < worker_count_; ++worker) {
@@ -183,6 +234,64 @@ Executor::~Executor() {
     stop();
 }
 
+bool Executor::estimate_control_storage(
+    std::size_t worker_count,
+    std::size_t queue_capacity,
+    std::size_t phase_count,
+    std::size_t dependency_count,
+    std::size_t task_scratch_slots,
+    std::size_t& bytes) noexcept {
+    bytes = sizeof(Executor);
+
+    const auto add_product =
+        [&](std::size_t count, std::size_t element_size) {
+            std::size_t product = 0;
+            std::size_t total = 0;
+            if (!checked_multiply(count, element_size, product) ||
+                !checked_add(bytes, product, total)) {
+                return false;
+            }
+            bytes = total;
+            return true;
+        };
+
+    std::size_t queue_slots = 0;
+    std::size_t phase_offsets = 0;
+    if (!checked_multiply(
+            worker_count,
+            queue_capacity,
+            queue_slots) ||
+        !checked_add(phase_count, 1, phase_offsets) ||
+        !add_product(
+            worker_count,
+            sizeof(std::unique_ptr<Queue>)) ||
+        !add_product(worker_count, sizeof(std::thread)) ||
+        !add_product(worker_count, sizeof(Queue)) ||
+        !add_product(queue_slots, Queue::cell_size()) ||
+        !add_product(phase_count, sizeof(std::uint32_t)) ||
+        !add_product(
+            phase_count,
+            sizeof(std::atomic<std::uint32_t>)) ||
+        !add_product(phase_offsets, sizeof(std::size_t)) ||
+        !add_product(dependency_count, sizeof(std::uint32_t)) ||
+        !add_product(phase_count, sizeof(std::size_t))) {
+        bytes = 0;
+        return false;
+    }
+
+    const auto scratch_words =
+        task_scratch_slots == 0
+        ? std::size_t{0}
+        : 1 + ((task_scratch_slots - 1) / kScratchWordBits);
+    if (!add_product(
+            scratch_words,
+            sizeof(std::atomic<std::uint64_t>))) {
+        bytes = 0;
+        return false;
+    }
+    return true;
+}
+
 Status Executor::start() noexcept {
     if (started_.load(std::memory_order_acquire)) {
         return Status::invalid_state;
@@ -194,6 +303,7 @@ Status Executor::start() noexcept {
     steal_attempts_.store(0, std::memory_order_relaxed);
     successful_steals_.store(0, std::memory_order_relaxed);
     queue_full_rejections_.store(0, std::memory_order_relaxed);
+    scratch_exhaustions_.store(0, std::memory_order_relaxed);
     worker_starts_.store(0, std::memory_order_relaxed);
     started_.store(true, std::memory_order_release);
 
@@ -234,6 +344,70 @@ void Executor::stop() noexcept {
     threads_.clear();
 }
 
+bool Executor::acquire_scratch_slot(
+    std::size_t& scratch_slot) noexcept {
+    scratch_slot = kInvalidScratchSlot;
+    if (free_scratch_word_count_ == 0) {
+        return false;
+    }
+
+    const auto first_word =
+        scratch_word_hint_.fetch_add(1, std::memory_order_relaxed) %
+        free_scratch_word_count_;
+    std::size_t cas_attempts = 0;
+    for (std::size_t offset = 0;
+         offset < free_scratch_word_count_;
+         ++offset) {
+        const auto word_index =
+            (first_word + offset) % free_scratch_word_count_;
+        auto available = free_scratch_words_[word_index].load(
+            std::memory_order_acquire);
+        while (available != 0 &&
+               cas_attempts < kScratchCasAttemptLimit) {
+            const auto bit =
+                static_cast<std::size_t>(std::countr_zero(available));
+            const auto mask = std::uint64_t{1} << bit;
+            const auto desired = available & ~mask;
+            ++cas_attempts;
+            if (free_scratch_words_[word_index].compare_exchange_weak(
+                    available,
+                    desired,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
+                scratch_slot =
+                    (word_index * kScratchWordBits) + bit;
+                return scratch_slot < task_scratch_slots_;
+            }
+            rt::cpu_relax();
+        }
+        if (cas_attempts >= kScratchCasAttemptLimit) {
+            return false;
+        }
+    }
+    return false;
+}
+
+void Executor::release_scratch_slot(
+    std::size_t scratch_slot) noexcept {
+    if (scratch_slot >= task_scratch_slots_) {
+        return;
+    }
+    const auto word = scratch_slot / kScratchWordBits;
+    const auto bit = scratch_slot % kScratchWordBits;
+    free_scratch_words_[word].fetch_or(
+        std::uint64_t{1} << bit,
+        std::memory_order_release);
+}
+
+Status Executor::reject_overload(
+    Status status,
+    std::size_t phase_index) noexcept {
+    if (overload_policy_ == OverloadPolicy::fail_frame) {
+        cancel_graph(status, phase_index);
+    }
+    return status;
+}
+
 Status Executor::submit(
     WorkItem item,
     std::size_t target_worker) noexcept {
@@ -243,11 +417,21 @@ Status Executor::submit(
         return Status::invalid_state;
     }
 
+    if (!acquire_scratch_slot(item.scratch_slot)) {
+        scratch_exhaustions_.fetch_add(1, std::memory_order_relaxed);
+        return reject_overload(
+            Status::scratch_exhausted,
+            item.phase_index);
+    }
+
     item.group->pending.fetch_add(1, std::memory_order_acq_rel);
     if (!queues_[target_worker]->try_push(item)) {
         item.group->pending.fetch_sub(1, std::memory_order_acq_rel);
+        release_scratch_slot(item.scratch_slot);
         queue_full_rejections_.fetch_add(1, std::memory_order_relaxed);
-        return Status::queue_full;
+        return reject_overload(
+            Status::queue_full,
+            item.phase_index);
     }
     submitted_tasks_.fetch_add(1, std::memory_order_relaxed);
     return Status::ok;
@@ -486,11 +670,20 @@ bool Executor::execute_one(std::size_t worker_index) noexcept {
 void Executor::execute(
     std::size_t worker_index,
     const WorkItem& item) noexcept {
+    std::span<std::byte> scratch;
+    if (task_scratch_bytes_ != 0 &&
+        item.scratch_slot < task_scratch_slots_) {
+        scratch = std::span<std::byte>(
+            task_scratch_storage_.data() +
+                (item.scratch_slot * task_scratch_stride_),
+            task_scratch_bytes_);
+    }
     TaskContext context(
         *this,
         worker_index,
         item.phase_index,
-        item.task_index);
+        item.task_index,
+        scratch);
     Status status = Status::ok;
     try {
         switch (item.kind) {
@@ -523,6 +716,7 @@ void Executor::execute(
     }
 
     item.group->record(status);
+    release_scratch_slot(item.scratch_slot);
     item.group->pending.fetch_sub(1, std::memory_order_acq_rel);
 }
 
@@ -596,6 +790,7 @@ ExecutorStats Executor::stats() const noexcept {
         steal_attempts_.load(std::memory_order_acquire),
         successful_steals_.load(std::memory_order_acquire),
         queue_full_rejections_.load(std::memory_order_acquire),
+        scratch_exhaustions_.load(std::memory_order_acquire),
         worker_starts_.load(std::memory_order_acquire),
     };
 }

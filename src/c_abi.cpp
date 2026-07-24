@@ -40,6 +40,8 @@ rtfw_status to_c_status(rt::Status status) noexcept {
         return RTFW_STATUS_RESOURCE_CONFLICT;
     case rt::Status::queue_full:
         return RTFW_STATUS_QUEUE_FULL;
+    case rt::Status::scratch_exhausted:
+        return RTFW_STATUS_SCRATCH_EXHAUSTED;
     }
     return RTFW_STATUS_INTERNAL_ERROR;
 }
@@ -56,6 +58,7 @@ bool bytes_are_zero(const uint8_t* bytes, std::size_t size) noexcept {
 bool config_header_valid(const rtfw_config& config) noexcept {
     return config.struct_size >= sizeof(rtfw_config) &&
            config.abi_version == RTFW_C_ABI_VERSION &&
+           config.reserved0 == 0u &&
            bytes_are_zero(
                reinterpret_cast<const uint8_t*>(config.reserved),
                sizeof(config.reserved));
@@ -73,6 +76,14 @@ bool result_header_valid(const rtfw_step_result& result) noexcept {
            bytes_are_zero(result.reserved1, sizeof(result.reserved1));
 }
 
+bool memory_plan_header_valid(
+    const rtfw_memory_plan& plan) noexcept {
+    return plan.struct_size >= sizeof(rtfw_memory_plan) &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(plan.reserved),
+               sizeof(plan.reserved));
+}
+
 bool to_cpp_config(
     const rtfw_config& source,
     rt::RuntimeConfig& target) noexcept {
@@ -82,6 +93,14 @@ bool to_cpp_config(
         source.trace_capacity > std::numeric_limits<std::size_t>::max() ||
         source.worker_count > std::numeric_limits<std::size_t>::max() ||
         source.executor_queue_capacity >
+            std::numeric_limits<std::size_t>::max() ||
+        source.scratch_alignment >
+            std::numeric_limits<std::size_t>::max() ||
+        source.task_scratch_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        source.task_scratch_slots >
+            std::numeric_limits<std::size_t>::max() ||
+        source.memory_budget_bytes >
             std::numeric_limits<std::size_t>::max()) {
         return false;
     }
@@ -116,6 +135,26 @@ bool to_cpp_config(
         static_cast<std::size_t>(source.worker_count);
     target.executor_queue_capacity =
         static_cast<std::size_t>(source.executor_queue_capacity);
+    target.scratch_alignment =
+        static_cast<std::size_t>(source.scratch_alignment);
+    target.task_scratch_bytes =
+        static_cast<std::size_t>(source.task_scratch_bytes);
+    target.task_scratch_slots =
+        static_cast<std::size_t>(source.task_scratch_slots);
+    target.memory_budget_bytes =
+        static_cast<std::size_t>(source.memory_budget_bytes);
+    switch (source.overload_policy) {
+    case RTFW_OVERLOAD_REJECT_SUBMISSION:
+        target.overload_policy =
+            rt::OverloadPolicy::reject_submission;
+        break;
+    case RTFW_OVERLOAD_FAIL_FRAME:
+        target.overload_policy =
+            rt::OverloadPolicy::fail_frame;
+        break;
+    default:
+        return false;
+    }
     return true;
 }
 
@@ -137,6 +176,14 @@ void from_cpp_config(
     target.worker_count = source.worker_count;
     target.executor_queue_capacity =
         source.executor_queue_capacity;
+    target.scratch_alignment = source.scratch_alignment;
+    target.task_scratch_bytes = source.task_scratch_bytes;
+    target.task_scratch_slots = source.task_scratch_slots;
+    target.memory_budget_bytes = source.memory_budget_bytes;
+    target.overload_policy =
+        source.overload_policy == rt::OverloadPolicy::fail_frame
+        ? RTFW_OVERLOAD_FAIL_FRAME
+        : RTFW_OVERLOAD_REJECT_SUBMISSION;
 }
 
 rtfw_runtime_state to_c_state(rt::RuntimeState state) noexcept {
@@ -151,6 +198,33 @@ rtfw_runtime_state to_c_state(rt::RuntimeState state) noexcept {
         return RTFW_STATE_STOPPED;
     }
     return RTFW_STATE_STOPPED;
+}
+
+void from_cpp_memory_plan(
+    const rt::MemoryPlan& source,
+    rtfw_memory_plan& target) noexcept {
+    target.overload_policy =
+        source.overload_policy == rt::OverloadPolicy::fail_frame
+        ? RTFW_OVERLOAD_FAIL_FRAME
+        : RTFW_OVERLOAD_REJECT_SUBMISSION;
+    target.memory_budget_bytes = source.memory_budget_bytes;
+    target.planned_bytes = source.planned_bytes;
+    target.runtime_control_bytes = source.runtime_control_bytes;
+    target.executor_control_bytes = source.executor_control_bytes;
+    target.phase_count = source.phase_count;
+    target.phase_scratch_bytes = source.phase_scratch_bytes;
+    target.phase_scratch_stride = source.phase_scratch_stride;
+    target.phase_scratch_total_bytes =
+        source.phase_scratch_total_bytes;
+    target.task_scratch_bytes = source.task_scratch_bytes;
+    target.task_scratch_stride = source.task_scratch_stride;
+    target.task_scratch_slots = source.task_scratch_slots;
+    target.task_scratch_total_bytes =
+        source.task_scratch_total_bytes;
+    target.trace_capacity = source.trace_capacity;
+    target.trace_storage_bytes = source.trace_storage_bytes;
+    target.queue_slots = source.queue_slots;
+    target.scratch_alignment = source.scratch_alignment;
 }
 
 struct CCallback {
@@ -314,6 +388,8 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
         return rt::status_message(rt::Status::resource_conflict);
     case RTFW_STATUS_QUEUE_FULL:
         return rt::status_message(rt::Status::queue_full);
+    case RTFW_STATUS_SCRATCH_EXHAUSTED:
+        return rt::status_message(rt::Status::scratch_exhausted);
     }
     return "unknown runtime status";
 }
@@ -362,6 +438,14 @@ RTFW_API void rtfw_step_result_init(rtfw_step_result* result) {
     }
     std::memset(result, 0, sizeof(*result));
     result->struct_size = sizeof(*result);
+}
+
+RTFW_API void rtfw_memory_plan_init(rtfw_memory_plan* plan) {
+    if (!plan) {
+        return;
+    }
+    std::memset(plan, 0, sizeof(*plan));
+    plan->struct_size = sizeof(*plan);
 }
 
 RTFW_API rtfw_status rtfw_create(
@@ -605,6 +689,22 @@ RTFW_API rtfw_status rtfw_task_worker_index(
     return RTFW_STATUS_OK;
 }
 
+RTFW_API rtfw_status rtfw_task_scratch(
+    const rtfw_task_context* context,
+    void** out_scratch,
+    uint64_t* out_scratch_bytes) {
+    if (!context || !out_scratch || !out_scratch_bytes) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    const auto& cpp_context =
+        *reinterpret_cast<const rt::TaskContext*>(context);
+    const auto scratch = cpp_context.scratch();
+    *out_scratch = scratch.data();
+    *out_scratch_bytes =
+        static_cast<uint64_t>(scratch.size());
+    return RTFW_STATUS_OK;
+}
+
 RTFW_API rtfw_status rtfw_finalize(rtfw_handle* handle) {
     if (!handle) {
         return RTFW_STATUS_INVALID_ARGUMENT;
@@ -681,6 +781,27 @@ RTFW_API rtfw_status rtfw_get_state(
         return RTFW_STATUS_INVALID_ARGUMENT;
     }
     *out_state = to_c_state(handle->runtime.state());
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_get_memory_plan(
+    const rtfw_handle* handle,
+    rtfw_memory_plan* out_plan) {
+    if (!handle || !out_plan) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    if (!memory_plan_header_valid(*out_plan)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+
+    rt::MemoryPlan cpp_plan;
+    if (!handle->runtime.memory_plan(cpp_plan)) {
+        return RTFW_STATUS_INVALID_STATE;
+    }
+    const auto struct_size = out_plan->struct_size;
+    std::memset(out_plan, 0, sizeof(*out_plan));
+    out_plan->struct_size = struct_size;
+    from_cpp_memory_plan(cpp_plan, *out_plan);
     return RTFW_STATUS_OK;
 }
 

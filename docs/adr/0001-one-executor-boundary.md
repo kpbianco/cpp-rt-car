@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-23
 - Implementation milestone: M3
-- Implemented: 0.4 target-path `rt::Runtime`
+- Implemented: 0.4 target-path `rt::Runtime`; M4 memory closure in 0.5
 
 ## Context
 

@@ -77,6 +77,7 @@ if (SIM_GTEST_AVAILABLE)
         test_host_runtime.cpp
         test_compiled_graph.cpp
         test_executor.cpp
+        test_memory_plan.cpp
         test_rt_pipeline.cpp
         test_platform_gate.cpp
         integration/test_determinism.cpp

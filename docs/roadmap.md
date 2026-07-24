@@ -19,8 +19,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M1 | Complete | Runtime lifecycle, typed configuration, host-driven API, C ABI draft |
 | M2 | Complete | Compiled graph, cycle rejection, and resource hazards |
 | M3 | Complete | Unified CPU executor with honest selectable policies |
-| M4 | Next | Memory plan and zero-allocation RT-lane closure |
-| M5 | Planned | Self-paced absolute cadence, watchdog, and platform preflight |
+| M4 | Complete | Memory plan and zero-allocation RT-lane closure |
+| M5 | Next | Self-paced absolute cadence, watchdog, and platform preflight |
 | M6 | Planned | RT-safe, versioned observability |
 | M7 | Planned | Determinism tiers, safe snapshots, and replay |
 | M8 | Planned | Device ABI and deterministic fault-injectable mock |
@@ -114,6 +114,19 @@ Exit gates:
 - throughput policy demonstrates real local execution and successful steals.
 
 ## M4 — Memory closure
+
+Delivered in 0.5:
+
+- a finalization-time budget and inspectable immutable memory plan covering
+  target-runtime control structures, queues, aligned phase/task scratch, and
+  the trace ring;
+- exclusive scratch slots reserved before graph/range/reduction work is
+  accepted and retained through callback completion and nested helping;
+- explicit `reject_submission` and `fail_frame` overload policies for bounded
+  queue and scratch reservation failure;
+- matching aligned allocation/deallocation ownership;
+- a multi-frame allocation gate covering concurrent phases, nested range work,
+  fixed-tree reductions, and tracing after start.
 
 Exit gates:
 

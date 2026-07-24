@@ -1,21 +1,22 @@
 # Unified CPU Executor
 
-Release 0.4 completes the M3 CPU-execution surface in `rt::Runtime`. The
+Release 0.5 carries the M3 CPU-execution surface in `rt::Runtime` into the M4
+memory contract. The
 compiled graph, independent phase callbacks, nested range work, and nested
 reductions all use one runtime-owned worker team and one internal immutable work
 record. The legacy `SimCore`, `WorkerPool`, `rt::Scheduler`, and `FiberPool`
 remain compatibility experiments; `rt::Runtime` does not call them.
 
 This is portable RT0 functionality. It is not a hard-real-time or
-worst-case-latency claim, and the complete M4 memory/overload proof remains
-open.
+worst-case-latency claim.
 
 ## Lifecycle and ownership
 
 Configuration selects an executor policy, worker count, and fixed per-worker
 queue capacity. `finalize()` validates that configuration, compiles successor
 and indegree tables, precomputes static phase assignments, allocates the queue
-storage, and gives every phase a distinct scratch block. `start()` creates
+and aligned phase/task scratch storage, and commits the memory plan. `start()`
+creates
 exactly the configured worker count. No executor thread is created after
 `start()` returns. `stop()` rejects calls during a step, stops the team, and
 joins every worker.
@@ -36,7 +37,8 @@ execution and prevents nested-pool deadlock.
 `Runtime::static_phase_assignment_at()` exposes the frozen phase metadata for
 the static policy. `Runtime::executor_stats()` reports the selected policy,
 configured worker and queue counts, accepted submissions, local executions,
-steal attempts, successful steals, queue rejections, and worker starts. These
+steal attempts, successful steals, queue rejections, scratch exhaustions, and
+worker starts. These
 counters are functional M3 evidence, not the versioned production
 observability schema planned for M6.
 
@@ -76,13 +78,18 @@ queue, or one that remains contended for that bounded attempt budget, returns
 `rt::Status::queue_full` / `RTFW_STATUS_QUEUE_FULL`.
 
 A range or reduction call can therefore produce an accepted prefix of child
-tasks before
-a later submission is rejected. Every accepted child finishes before the call
-returns, and the rejection is then reported. There is no retry-until-success,
-heap spill, detached helper, or direct execution of the rejected task. Hosts
-should finalize enough capacity and treat partial side effects as part of the
-current experimental overload contract. M4 will add the complete declared
-memory plan and configurable frame-level overflow policy.
+tasks before a later submission is rejected. Every accepted child finishes
+before the call returns, and the rejection is then reported. There is no
+retry-until-success, heap spill, detached helper, or direct execution of the
+rejected task.
+
+Each accepted work item also reserves one slot from the finalized task-scratch
+pool. Reservation uses the same bounded-attempt rule. Exhaustion or persistent
+contention returns `scratch_exhausted`. `reject_submission` reports queue or
+scratch rejection to the immediate caller; `fail_frame` also marks the active
+frame failed even when a callback ignores that returned status. Root graph
+submission failure always fails the step. The complete accounting and
+ownership rules are in the [memory-plan contract](memory_plan.md).
 
 Finalization also rejects a queue capacity too small to hold the compiled
 graph's worst static per-worker phase count.
@@ -100,11 +107,12 @@ already-running independent phases may finish. The reported phase is the lowest
 registration index among observed failures. Nested callback errors are returned
 to the calling phase, which must propagate them if the frame should fail.
 
-Runtime scratch is phase-local in 0.4. Its address is stable across frames, but
-it is not shared between phases. Cross-phase state belongs in host-owned memory
-described by graph resource declarations. Nested tasks must partition
-phase-local scratch themselves or use host-owned disjoint storage; complete
-per-task scratch planning is M4.
+Phase scratch remains phase-local and stable across frames. Every graph,
+range, and reduction callback additionally receives exclusive aligned task
+scratch through `TaskContext::scratch()`. Its slot remains owned through nested
+helping and is released only after that callback returns. Contents are
+unspecified on entry and pointers must not escape the invocation. Cross-phase
+state belongs in host-owned memory described by graph resource declarations.
 
 ## Evidence
 
@@ -112,6 +120,8 @@ per-task scratch planning is M4.
 - runtime integration: `rt/src/host_runtime.cpp`;
 - policy, saturation, nested-work, reduction, stress, and steal tests:
   `tests/test_executor.cpp`;
+- plan, task-scratch, nested ownership, and overload tests:
+  `tests/test_memory_plan.cpp`;
 - graph/reference and allocation regression tests:
   `tests/test_compiled_graph.cpp`, `tests/test_trace_noalloc.cpp`;
 - dynamic C ABI coverage: `tests/test_cabi_dlopen.c`;

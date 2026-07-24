@@ -106,7 +106,7 @@ TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     EXPECT_TRUE(capabilities.compiled_graph);
     EXPECT_TRUE(capabilities.host_driven_time);
     EXPECT_TRUE(capabilities.unified_cpu_executor);
-    EXPECT_FALSE(capabilities.bounded_memory_plan);
+    EXPECT_TRUE(capabilities.bounded_memory_plan);
 }
 
 TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
@@ -165,7 +165,7 @@ TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
 }
 
 TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
-    EXPECT_EQ(rt::runtime_config_schema_version, 2u);
+    EXPECT_EQ(rt::runtime_config_schema_version, 3u);
 
     rt::RuntimeConfig standalone;
     const auto unchanged = standalone;
@@ -196,6 +196,21 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
     ASSERT_EQ(
         runtime.configure_key("executor_queue_capacity", "8"),
         rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("scratch_alignment", "64"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("task_scratch_bytes", "31"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("task_scratch_slots", "8"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("memory_budget_bytes", "1048576"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("overload_policy", "reject_submission"),
+        rt::Status::ok);
     EXPECT_EQ(
         runtime.configure_key("worker_threads", "8"),
         rt::Status::invalid_config);
@@ -217,6 +232,11 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
 
     EXPECT_EQ(first.scratch_size, 7u);
     EXPECT_EQ(first.numerical_mode, rt::NumericalMode::fused_multiply_add);
+    EXPECT_EQ(runtime.config().task_scratch_bytes, 31u);
+    EXPECT_EQ(runtime.config().task_scratch_slots, 8u);
+    EXPECT_EQ(
+        runtime.config().overload_policy,
+        rt::OverloadPolicy::reject_submission);
     EXPECT_EQ(runtime.trace_event_count(), 3u);
     EXPECT_NE(first.multiply_add, 0.0);
 

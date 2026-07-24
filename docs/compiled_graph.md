@@ -5,9 +5,9 @@ The graph is an RT0 functional surface: it validates dependency and logical
 resource ordering before start, supplies an immutable deterministic phase order
 for introspection, and provides dependency tables to the M3 executor.
 
-Release 0.4 adds parallel execution without changing the M2 validation rules.
-A complete bounded memory plan and latency qualification remain M4 and
-deployment-specific work.
+Release 0.4 added parallel execution without changing the M2 validation rules.
+Release 0.5 includes the committed graph and executor storage in the M4 memory
+plan. Latency qualification remains deployment-specific work.
 
 ## Graph vocabulary
 
@@ -42,8 +42,9 @@ self-dependency is rejected immediately. Longer cycles are diagnosed by
 
 The 0.3 safety ceiling is 65,536 registered resources; callback phases are
 bounded by `callback_capacity`, whose accepted maximum is also 65,536.
-Dependency and access-declaration storage can still grow during configuration,
-so this is not the M4 bounded memory plan.
+Dependency and access-declaration storage can grow during configuration.
+Finalization includes their committed capacities in the M4 runtime-control
+accounting; configure-time temporary allocation remains permitted.
 
 Finalization is the only graph compile point. It:
 
@@ -98,10 +99,12 @@ The committed step path does not build, sort, or mutate topology. An allocation
 instrumentation test covers the first frame of a representative compiled graph
 and observes no heap allocation.
 
-That test closes only the M2 topology gate. Arbitrary callbacks can allocate,
-and the complete scratch, overload, and RT-lane allocation proof remains M4.
-`bounded_memory_plan` therefore remains false. Executor semantics are specified
-in the [M3 executor contract](executor.md).
+The M4 gate extends that evidence across multiple complete frames with
+independent phases, range work, fixed-tree reductions, task scratch, and
+tracing. `bounded_memory_plan` is therefore true for the target CPU runtime.
+Arbitrary callbacks can still allocate or block. Executor semantics are
+specified in the [M3 executor contract](executor.md), and accounting scope is
+specified in the [memory-plan contract](memory_plan.md).
 
 ## C and C++ entry points
 

@@ -1,32 +1,34 @@
 # Architecture
 
-This page separates the 0.4 implementation from the accepted target
+This page separates the 0.5 implementation from the accepted target
 architecture. The normative target is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.4 implementation
+## Current 0.5 implementation
 
-### M1–M3 host runtime
+### M1–M4 host runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
-compiler, frozen phase/resource topology, phase-local scratch and trace storage,
-a runtime-local clock, an explicit numerical helper policy, and one fixed CPU
-worker team.
+compiler, frozen phase/resource topology, a finalized aligned scratch/queue/
+trace memory plan, a runtime-local clock, an explicit numerical helper policy,
+and one fixed CPU worker team.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
 run on either a static-assignment or bounded-throughput policy. Finalization
 rejects invalid/foreign handles, cycles, unordered conflicting resource access,
-and an undersized graph queue plan. Nested ranges and deterministic-tree
-reductions use the same executor.
+an undersized graph queue plan, task-scratch underprovisioning, and a plan over
+the configured memory budget. Nested ranges and deterministic-tree reductions
+use the same executor.
 
 The experimental C ABI mirrors this lifecycle with size/version-checked
 structures and encoded graph handles. See the
 [host runtime contract](host_runtime.md) and
-[compiled graph contract](compiled_graph.md), and the executor is specified in
-the [executor contract](executor.md).
+[compiled graph contract](compiled_graph.md), the
+[executor contract](executor.md), and the
+[memory-plan contract](memory_plan.md).
 
 ### Legacy simulation path
 
@@ -87,9 +89,9 @@ workers do not block on device futures.
 
 M1 implements the state machine and host-driven callback path. M2 compiles and
 freezes dependency/resource topology. M3 creates the fixed team in `start()`
-and routes graph and nested CPU work through it. Finalization does not yet
-create the complete M4 memory and overload plan. A distinct self-paced API will
-own absolute release times in M5. See
+and routes graph and nested CPU work through it. M4 creates the finalized
+memory plan, aligned execution-context scratch, and bounded frame-overload
+policy. A distinct self-paced API will own absolute release times in M5. See
 [ADR-0001](adr/0001-one-executor-boundary.md),
 [ADR-0002](adr/0002-host-driven-time.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
@@ -102,10 +104,12 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M3 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M4 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
+- M4 memory plan: `rt/src/aligned_storage.hpp`,
+  `docs/memory_plan.md`
 - Experimental C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - Phase registration and graph: `SimCore::addPhase`,
   `SimCore::addDependency`, `SimCore::buildTopoLevels`;

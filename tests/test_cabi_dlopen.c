@@ -4,6 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+_Static_assert(RTFW_C_ABI_VERSION == 3u, "unexpected C ABI version");
+_Static_assert(sizeof(rtfw_status) == sizeof(int32_t), "status width changed");
+_Static_assert(
+    sizeof(rtfw_overload_policy) == sizeof(uint32_t),
+    "overload policy width changed");
+
 #if defined(_WIN32)
 #    define WIN32_LEAN_AND_MEAN
 #    include <windows.h>
@@ -79,6 +85,7 @@ typedef rt_capabilities_c (*rt_query_capabilities_fn)(void);
 typedef const char *(*rtfw_status_message_fn)(rtfw_status);
 typedef void (*rtfw_frame_context_init_fn)(rtfw_frame_context *);
 typedef void (*rtfw_step_result_init_fn)(rtfw_step_result *);
+typedef void (*rtfw_memory_plan_init_fn)(rtfw_memory_plan *);
 typedef rtfw_status (*rtfw_create_fn)(const rtfw_config *, rtfw_handle **);
 typedef rtfw_status (*rtfw_register_callback_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *);
@@ -109,11 +116,17 @@ typedef rtfw_status (*rtfw_parallel_reduce_fn)(
 typedef rtfw_status (*rtfw_task_worker_index_fn)(
     const rtfw_task_context *,
     uint64_t *);
+typedef rtfw_status (*rtfw_task_scratch_fn)(
+    const rtfw_task_context *,
+    void **,
+    uint64_t *);
 typedef rtfw_status (*rtfw_lifecycle_fn)(rtfw_handle *);
 typedef rtfw_status (*rtfw_step_fn)(
     rtfw_handle *, const rtfw_frame_context *, rtfw_step_result *);
 typedef rtfw_status (*rtfw_get_state_fn)(
     const rtfw_handle *, rtfw_runtime_state *);
+typedef rtfw_status (*rtfw_get_memory_plan_fn)(
+    const rtfw_handle *, rtfw_memory_plan *);
 typedef const char *(*rtfw_last_error_fn)(const rtfw_handle *);
 typedef void (*rtfw_destroy_fn)(rtfw_handle *);
 
@@ -160,6 +173,21 @@ typedef struct callback_probe {
 static rtfw_parallel_for_fn loaded_parallel_for = NULL;
 static rtfw_parallel_reduce_fn loaded_parallel_reduce = NULL;
 static rtfw_task_worker_index_fn loaded_task_worker_index = NULL;
+static rtfw_task_scratch_fn loaded_task_scratch = NULL;
+
+static int task_context_valid(const rtfw_task_context *context) {
+    uint64_t worker_index = UINT64_MAX;
+    uint64_t scratch_bytes = 0;
+    void *scratch = NULL;
+    return context && loaded_task_worker_index && loaded_task_scratch &&
+        loaded_task_worker_index(context, &worker_index) == RTFW_STATUS_OK &&
+        loaded_task_scratch(context, &scratch, &scratch_bytes) ==
+            RTFW_STATUS_OK &&
+        worker_index != UINT64_MAX &&
+        scratch != NULL &&
+        scratch_bytes == 32 &&
+        ((uintptr_t)scratch % 64u) == 0u;
+}
 
 static rtfw_callback_result test_range_callback(
     void *user_data,
@@ -168,11 +196,8 @@ static rtfw_callback_result test_range_callback(
     uint64_t end,
     uint64_t task_index) {
     callback_state *state = (callback_state *)user_data;
-    uint64_t worker_index = UINT64_MAX;
     (void)task_index;
-    if (!state || !context || !loaded_task_worker_index ||
-        loaded_task_worker_index(context, &worker_index) != RTFW_STATUS_OK ||
-        worker_index == UINT64_MAX) {
+    if (!state || !task_context_valid(context)) {
         return RTFW_CALLBACK_ERROR;
     }
     state->range_calls += end - begin;
@@ -186,11 +211,8 @@ static rtfw_callback_result test_reduction_range(
     uint64_t end,
     uint64_t task_index) {
     callback_state *state = (callback_state *)user_data;
-    uint64_t worker_index = UINT64_MAX;
     if (!state || !context || task_index >= 4 || end != begin + 1 ||
-        !loaded_task_worker_index ||
-        loaded_task_worker_index(context, &worker_index) != RTFW_STATUS_OK ||
-        worker_index == UINT64_MAX) {
+        !task_context_valid(context)) {
         return RTFW_CALLBACK_ERROR;
     }
     state->reduction_partials[task_index] = begin + 1;
@@ -203,12 +225,9 @@ static rtfw_callback_result test_reduction_combine(
     uint64_t left_task_index,
     uint64_t right_task_index) {
     callback_state *state = (callback_state *)user_data;
-    uint64_t worker_index = UINT64_MAX;
     if (!state || !context ||
         left_task_index >= 4 || right_task_index >= 4 ||
-        !loaded_task_worker_index ||
-        loaded_task_worker_index(context, &worker_index) != RTFW_STATUS_OK ||
-        worker_index == UINT64_MAX) {
+        !task_context_valid(context)) {
         return RTFW_CALLBACK_ERROR;
     }
     state->reduction_partials[left_task_index] +=
@@ -226,7 +245,9 @@ static rtfw_callback_result test_callback(
         context->struct_size < sizeof(rtfw_callback_context) ||
         context->delta_ns != 1000000 ||
         context->scratch_bytes != 64 ||
-        !context->tasks) {
+        !context->scratch ||
+        ((uintptr_t)context->scratch % 64u) != 0u ||
+        !task_context_valid(context->tasks)) {
         return RTFW_CALLBACK_ERROR;
     }
     if (probe->phase == 1 &&
@@ -288,6 +309,7 @@ int main(void) {
     rtfw_status_message_fn status_message_fn;
     rtfw_frame_context_init_fn frame_init_fn;
     rtfw_step_result_init_fn result_init_fn;
+    rtfw_memory_plan_init_fn memory_plan_init_fn;
     rtfw_create_fn create_fn;
     rtfw_register_callback_fn register_fn;
     rtfw_register_phase_fn register_phase_fn;
@@ -297,11 +319,13 @@ int main(void) {
     rtfw_parallel_for_fn parallel_for_fn;
     rtfw_parallel_reduce_fn parallel_reduce_fn;
     rtfw_task_worker_index_fn task_worker_index_fn;
+    rtfw_task_scratch_fn task_scratch_fn;
     rtfw_lifecycle_fn finalize_fn;
     rtfw_lifecycle_fn start_fn;
     rtfw_step_fn step_fn;
     rtfw_lifecycle_fn stop_fn;
     rtfw_get_state_fn get_state_fn;
+    rtfw_get_memory_plan_fn get_memory_plan_fn;
     rtfw_last_error_fn last_error_fn;
     rtfw_destroy_fn destroy_fn;
 
@@ -311,6 +335,7 @@ int main(void) {
     LOAD_FUNCTION(status_message_fn, "rtfw_status_message");
     LOAD_FUNCTION(frame_init_fn, "rtfw_frame_context_init");
     LOAD_FUNCTION(result_init_fn, "rtfw_step_result_init");
+    LOAD_FUNCTION(memory_plan_init_fn, "rtfw_memory_plan_init");
     LOAD_FUNCTION(create_fn, "rtfw_create");
     LOAD_FUNCTION(register_fn, "rtfw_register_callback");
     LOAD_FUNCTION(register_phase_fn, "rtfw_register_phase");
@@ -320,23 +345,26 @@ int main(void) {
     LOAD_FUNCTION(parallel_for_fn, "rtfw_parallel_for");
     LOAD_FUNCTION(parallel_reduce_fn, "rtfw_parallel_reduce");
     LOAD_FUNCTION(task_worker_index_fn, "rtfw_task_worker_index");
+    LOAD_FUNCTION(task_scratch_fn, "rtfw_task_scratch");
     LOAD_FUNCTION(finalize_fn, "rtfw_finalize");
     LOAD_FUNCTION(start_fn, "rtfw_start");
     LOAD_FUNCTION(step_fn, "rtfw_step");
     LOAD_FUNCTION(stop_fn, "rtfw_stop");
     LOAD_FUNCTION(get_state_fn, "rtfw_get_state");
+    LOAD_FUNCTION(get_memory_plan_fn, "rtfw_get_memory_plan");
     LOAD_FUNCTION(last_error_fn, "rtfw_last_error");
     LOAD_FUNCTION(destroy_fn, "rtfw_destroy");
     loaded_parallel_for = parallel_for_fn;
     loaded_parallel_reduce = parallel_reduce_fn;
     loaded_task_worker_index = task_worker_index_fn;
+    loaded_task_scratch = task_scratch_fn;
 
     {
         const rt_capabilities_c capabilities = capabilities_fn();
         if (capabilities.compiled_graph != 1 ||
             capabilities.host_driven_time != 1 ||
             capabilities.unified_cpu_executor != 1 ||
-            capabilities.bounded_memory_plan != 0 ||
+            capabilities.bounded_memory_plan != 1 ||
             strcmp(
                 status_message_fn(RTFW_STATUS_INVALID_CONFIG),
                 "invalid runtime configuration") != 0 ||
@@ -346,6 +374,9 @@ int main(void) {
             strcmp(
                 status_message_fn(RTFW_STATUS_QUEUE_FULL),
                 "executor queue is full") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_SCRATCH_EXHAUSTED),
+                "task scratch plan is exhausted") != 0 ||
             strcmp(
                 status_message_fn((rtfw_status)INT32_MAX),
                 "unknown runtime status") != 0) {
@@ -370,6 +401,26 @@ int main(void) {
             "8") != RTFW_STATUS_OK ||
         config_set_fn(
             &config,
+            "scratch_alignment",
+            "64") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "task_scratch_bytes",
+            "32") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "task_scratch_slots",
+            "16") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "memory_budget_bytes",
+            "1048576") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "overload_policy",
+            "reject_submission") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
             "executor_queue_capacity",
             "3") != RTFW_STATUS_INVALID_CONFIG ||
         config_set_fn(&config, "unknown", "1") != RTFW_STATUS_INVALID_CONFIG) {
@@ -377,6 +428,14 @@ int main(void) {
         lib_close(handle);
         return EXIT_FAILURE;
     }
+    config.reserved0 = 1;
+    if (config_set_fn(&config, "scratch_bytes", "64") !=
+            RTFW_STATUS_INVALID_ARGUMENT) {
+        fprintf(stderr, "configuration accepted reserved0\n");
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    config.reserved0 = 0;
     config.reserved[0] = 1;
     if (config_set_fn(&config, "scratch_bytes", "64") !=
             RTFW_STATUS_INVALID_ARGUMENT) {
@@ -405,6 +464,15 @@ int main(void) {
         return EXIT_FAILURE;
     }
     config.executor_policy = RTFW_EXECUTOR_STATIC_DETERMINISTIC;
+    config.overload_policy = UINT32_MAX;
+    if (create_fn(&config, &instance) != RTFW_STATUS_INVALID_CONFIG ||
+        instance != NULL) {
+        fprintf(stderr, "runtime accepted a malformed overload policy\n");
+        destroy_fn(instance);
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    config.overload_policy = RTFW_OVERLOAD_REJECT_SUBMISSION;
     if (create_fn(&config, &instance) != RTFW_STATUS_OK || !instance) {
         fprintf(stderr, "rtfw_create failed\n");
         lib_close(handle);
@@ -435,6 +503,17 @@ int main(void) {
         destroy_fn(instance);
         lib_close(handle);
         return EXIT_FAILURE;
+    }
+    {
+        rtfw_memory_plan plan;
+        memory_plan_init_fn(&plan);
+        if (get_memory_plan_fn(instance, &plan) !=
+            RTFW_STATUS_INVALID_STATE) {
+            fprintf(stderr, "memory plan was visible before finalization\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
     }
 
     callback_state state = {0};
@@ -505,9 +584,58 @@ int main(void) {
             test_callback,
             &consumer_probe) !=
             RTFW_STATUS_CAPACITY_EXCEEDED ||
-        finalize_fn(instance) != RTFW_STATUS_OK ||
-        start_fn(instance) != RTFW_STATUS_OK) {
+        finalize_fn(instance) != RTFW_STATUS_OK) {
         fprintf(stderr, "runtime setup failed\n");
+        destroy_fn(instance);
+        lib_close(handle);
+        return EXIT_FAILURE;
+    }
+    {
+        rtfw_memory_plan plan;
+        uint64_t summed_bytes;
+        memory_plan_init_fn(&plan);
+        plan.reserved[2] = 1;
+        if (get_memory_plan_fn(instance, &plan) !=
+            RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "memory plan accepted a nonzero reserved field\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        memory_plan_init_fn(&plan);
+        if (get_memory_plan_fn(instance, &plan) != RTFW_STATUS_OK) {
+            fprintf(stderr, "finalized memory plan was unavailable\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        summed_bytes = plan.runtime_control_bytes +
+            plan.executor_control_bytes +
+            plan.phase_scratch_total_bytes +
+            plan.task_scratch_total_bytes +
+            plan.trace_storage_bytes;
+        if (plan.memory_budget_bytes != 1048576 ||
+            plan.planned_bytes != summed_bytes ||
+            plan.planned_bytes > plan.memory_budget_bytes ||
+            plan.phase_count != 2 ||
+            plan.phase_scratch_bytes != 64 ||
+            plan.phase_scratch_stride != 64 ||
+            plan.phase_scratch_total_bytes != 128 ||
+            plan.task_scratch_bytes != 32 ||
+            plan.task_scratch_stride != 64 ||
+            plan.task_scratch_slots != 16 ||
+            plan.task_scratch_total_bytes != 1024 ||
+            plan.queue_slots != 8 ||
+            plan.scratch_alignment != 64 ||
+            plan.overload_policy != RTFW_OVERLOAD_REJECT_SUBMISSION) {
+            fprintf(stderr, "finalized memory plan contract mismatch\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+    }
+    if (start_fn(instance) != RTFW_STATUS_OK) {
+        fprintf(stderr, "runtime start failed\n");
         destroy_fn(instance);
         lib_close(handle);
         return EXIT_FAILURE;

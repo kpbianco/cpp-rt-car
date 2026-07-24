@@ -20,11 +20,19 @@ static rtfw_callback_result produce_range(
     uint64_t task_index) {
     sample_state* state = (sample_state*)user_data;
     uint64_t worker_index = 0;
+    uint64_t scratch_bytes = 0;
+    void* scratch = NULL;
     (void)task_index;
     if (!state || !context ||
-        rtfw_task_worker_index(context, &worker_index) != RTFW_STATUS_OK) {
+        rtfw_task_worker_index(context, &worker_index) != RTFW_STATUS_OK ||
+        rtfw_task_scratch(context, &scratch, &scratch_bytes) !=
+            RTFW_STATUS_OK ||
+        !scratch ||
+        scratch_bytes < sizeof(uint64_t) ||
+        ((uintptr_t)scratch % 64u) != 0u) {
         return RTFW_CALLBACK_ERROR;
     }
+    ((uint8_t*)scratch)[0] = 0x17u;
     (void)worker_index;
     for (uint64_t index = begin; index < end; ++index) {
         state->lanes[index] = state->produced;
@@ -114,7 +122,27 @@ int main(void) {
         rtfw_config_set(
             &config,
             "executor_queue_capacity",
-            "128") != RTFW_STATUS_OK) {
+            "128") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "scratch_alignment",
+            "64") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "task_scratch_bytes",
+            "64") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "task_scratch_slots",
+            "128") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "memory_budget_bytes",
+            "1048576") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "overload_policy",
+            "fail_frame") != RTFW_STATUS_OK) {
         fprintf(stderr, "mini_app: failed to build configuration\n");
         return EXIT_FAILURE;
     }
@@ -179,7 +207,20 @@ int main(void) {
                 simulation_state,
                 RTFW_RESOURCE_READ),
             "declare consumer access") ||
-        !check_status(runtime, rtfw_finalize(runtime), "finalize") ||
+        !check_status(runtime, rtfw_finalize(runtime), "finalize")) {
+        rtfw_destroy(runtime);
+        return EXIT_FAILURE;
+    }
+
+    rtfw_memory_plan memory_plan;
+    rtfw_memory_plan_init(&memory_plan);
+    if (!check_status(
+            runtime,
+            rtfw_get_memory_plan(runtime, &memory_plan),
+            "read memory plan") ||
+        memory_plan.planned_bytes > memory_plan.memory_budget_bytes ||
+        memory_plan.task_scratch_bytes != 64 ||
+        memory_plan.overload_policy != RTFW_OVERLOAD_FAIL_FRAME ||
         !check_status(runtime, rtfw_start(runtime), "start")) {
         rtfw_destroy(runtime);
         return EXIT_FAILURE;
@@ -224,6 +265,9 @@ int main(void) {
     }
 
     rtfw_destroy(runtime);
-    printf("mini_app: executed 5 compiled graph frames\n");
+    printf(
+        "mini_app: executed 5 compiled graph frames with %llu planned "
+        "runtime bytes\n",
+        (unsigned long long)memory_plan.planned_bytes);
     return EXIT_SUCCESS;
 }
