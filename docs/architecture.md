@@ -1,13 +1,13 @@
 # Architecture
 
-This page separates the 0.7 implementation from the accepted target
+This page separates the 0.8 implementation from the accepted target
 architecture. The normative target is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.7 implementation
+## Current 0.8 implementation
 
-### M1–M6 host runtime
+### M1–M7 host runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -21,6 +21,13 @@ slots. It adds stable event/metric IDs, cumulative and caller-cursor interval
 windows, exact trace-sequence loss reporting, and immutable
 version/build/config/workload metadata. Export is explicitly a non-RT host
 operation; the runtime creates no exporter thread and performs no output I/O.
+
+M7 adds an explicit D0/D1 determinism contract, caller-owned canonical state
+registration, bounded versioned checkpoint and input-log artifacts, validated
+transactional restore, and synchronous replay. Artifact parsing and runtime
+identity checks allocate nothing. D2 reproducible-build and D3 portable
+determinism remain unsupported and fail configuration rather than silently
+weakening the requested tier.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
@@ -43,8 +50,9 @@ structures and encoded graph handles. See the
 [host runtime contract](host_runtime.md) and
 [compiled graph contract](compiled_graph.md), the
 [executor contract](executor.md), and the
-[memory-plan contract](memory_plan.md), and the
-[observability contract](observability.md).
+[memory-plan contract](memory_plan.md), the
+[observability contract](observability.md), and the
+[determinism/replay contract](determinism_replay.md).
 
 ### Legacy simulation path
 
@@ -109,7 +117,10 @@ and routes graph and nested CPU work through it. M4 creates the finalized
 memory plan, aligned execution-context scratch, and bounded frame-overload
 policy. M5 adds the distinct absolute-release loop, one-shot watchdog with
 frame-thread degradation, and fail-closed prerequisite reporting. M6 adds
-bounded schema-v1 trace/counter emission and isolated non-RT export cursors. See
+bounded schema-v1 trace/counter emission and isolated non-RT export cursors.
+M7 adds D1 schedule-independent identity, canonical registered state, bounded
+checkpoint/input-log codecs, transactional restore, and synchronous replay.
+See the [determinism/replay contract](determinism_replay.md),
 [ADR-0001](adr/0001-one-executor-boundary.md),
 [ADR-0002](adr/0002-host-driven-time.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
@@ -122,7 +133,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M6 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M7 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
@@ -132,6 +143,8 @@ that arbitrary host data is automatically optimized.
   `rt/src/native_platform_preflight.cpp`, `docs/time_platform.md`
 - M6 observability: `rt/src/telemetry.cpp`,
   `rt/src/observability_export.cpp`, `docs/observability.md`
+- M7 determinism/replay: `rt/src/snapshot_codec.cpp`,
+  `docs/determinism_replay.md`
 - Experimental C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - Phase registration and graph: `SimCore::addPhase`,
   `SimCore::addDependency`, `SimCore::buildTopoLevels`;

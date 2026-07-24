@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include <rt/runtime.hpp>
+#include <rt/snapshot.hpp>
 
 namespace {
 
@@ -108,6 +109,7 @@ int main() {
     }
 
     SampleState state;
+    std::array<std::byte, 24> canonical_state{};
     rt::PhaseHandle consumer;
     rt::PhaseHandle producer;
     rt::ResourceHandle simulation_state;
@@ -130,6 +132,11 @@ int main() {
                 "sample.simulation-state",
                 simulation_state),
             "register resource") ||
+        !check(
+            runtime,
+            runtime.register_state(
+                {"sample.canonical-state", 1, canonical_state}),
+            "register replay state") ||
         !check(
             runtime,
             runtime.add_dependency(producer, consumer),
@@ -156,8 +163,42 @@ int main() {
     if (!runtime.memory_plan(memory_plan) ||
         memory_plan.planned_bytes > memory_plan.memory_budget_bytes ||
         memory_plan.task_scratch_bytes != config.task_scratch_bytes ||
+        memory_plan.state_count != 1 ||
         memory_plan.overload_policy != config.overload_policy ||
         !check(runtime, runtime.start(), "start")) {
+        return 1;
+    }
+
+    if (!rt::store_u64_le(
+            canonical_state,
+            0,
+            state.produced) ||
+        !rt::store_u64_le(
+            canonical_state,
+            8,
+            state.consumed) ||
+        !rt::store_u64_le(
+            canonical_state,
+            16,
+            state.last_frame)) {
+        return 1;
+    }
+    std::array<std::byte, 1024> checkpoint{};
+    rt::ArtifactWriteResult checkpoint_result;
+    rt::CheckpointMetadata checkpoint_metadata;
+    if (!check(
+            runtime,
+            runtime.write_checkpoint(
+                state.last_frame,
+                checkpoint,
+                checkpoint_result),
+            "write checkpoint") ||
+        rt::inspect_checkpoint_artifact(
+            std::span<const std::byte>(
+                checkpoint.data(),
+                checkpoint_result.bytes_written),
+            checkpoint_metadata) != rt::Status::ok ||
+        checkpoint_metadata.state_count != 1) {
         return 1;
     }
 
@@ -222,6 +263,8 @@ int main() {
               << metrics.metadata.schema_version
               << " retained "
               << trace_result.events_read
-              << " events\n";
+              << " events; checkpoint state hash "
+              << checkpoint_metadata.state_hash
+              << '\n';
     return 0;
 }

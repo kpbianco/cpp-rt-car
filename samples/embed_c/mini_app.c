@@ -12,6 +12,13 @@ typedef struct sample_state {
     uint64_t lanes[64];
 } sample_state;
 
+static void store_u64_le(uint8_t* output, uint64_t value) {
+    size_t index;
+    for (index = 0; index < sizeof(value); ++index) {
+        output[index] = (uint8_t)(value >> (index * 8u));
+    }
+}
+
 static rtfw_callback_result produce_range(
     void* user_data,
     const rtfw_task_context* context,
@@ -160,6 +167,7 @@ int main(void) {
     }
 
     sample_state state = {0};
+    uint8_t canonical_state[24] = {0};
     rtfw_phase_id consumer_phase = RTFW_INVALID_PHASE_ID;
     rtfw_phase_id producer_phase = RTFW_INVALID_PHASE_ID;
     rtfw_resource_id simulation_state = RTFW_INVALID_RESOURCE_ID;
@@ -188,6 +196,15 @@ int main(void) {
                 "sample.simulation-state",
                 &simulation_state),
             "register resource") ||
+        !check_status(
+            runtime,
+            rtfw_register_state(
+                runtime,
+                "sample.canonical-state",
+                1,
+                canonical_state,
+                sizeof(canonical_state)),
+            "register replay state") ||
         !check_status(
             runtime,
             rtfw_add_dependency(
@@ -224,6 +241,7 @@ int main(void) {
             "read memory plan") ||
         memory_plan.planned_bytes > memory_plan.memory_budget_bytes ||
         memory_plan.task_scratch_bytes != 64 ||
+        memory_plan.state_count != 1 ||
         memory_plan.overload_policy != RTFW_OVERLOAD_FAIL_FRAME ||
         !check_status(runtime, rtfw_start(runtime), "start")) {
         rtfw_destroy(runtime);
@@ -257,6 +275,35 @@ int main(void) {
         state.produced != 5 ||
         state.consumed != 5 ||
         state.last_frame != 4) {
+        rtfw_destroy(runtime);
+        return EXIT_FAILURE;
+    }
+
+    uint8_t checkpoint[1024];
+    rtfw_artifact_write_result checkpoint_result;
+    rtfw_checkpoint_metadata checkpoint_metadata;
+    store_u64_le(canonical_state, state.produced);
+    store_u64_le(canonical_state + 8, state.consumed);
+    store_u64_le(canonical_state + 16, state.last_frame);
+    rtfw_artifact_write_result_init(&checkpoint_result);
+    rtfw_checkpoint_metadata_init(&checkpoint_metadata);
+    if (!check_status(
+            runtime,
+            rtfw_checkpoint_write(
+                runtime,
+                state.last_frame,
+                checkpoint,
+                sizeof(checkpoint),
+                &checkpoint_result),
+            "write checkpoint") ||
+        !check_status(
+            runtime,
+            rtfw_checkpoint_inspect(
+                checkpoint,
+                checkpoint_result.bytes_written,
+                &checkpoint_metadata),
+            "inspect checkpoint") ||
+        checkpoint_metadata.state_count != 1) {
         rtfw_destroy(runtime);
         return EXIT_FAILURE;
     }
@@ -299,9 +346,10 @@ int main(void) {
     printf(
         "mini_app: executed 5 absolute-cadence graph frames with %llu "
         "planned runtime bytes; observability schema %u retained %llu "
-        "events\n",
+        "events; checkpoint state hash %llu\n",
         (unsigned long long)memory_plan.planned_bytes,
         metrics.metadata.schema_version,
-        (unsigned long long)trace_result.events_read);
+        (unsigned long long)trace_result.events_read,
+        (unsigned long long)checkpoint_metadata.state_hash);
     return EXIT_SUCCESS;
 }

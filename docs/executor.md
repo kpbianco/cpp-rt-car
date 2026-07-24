@@ -1,7 +1,7 @@
 # Unified CPU Executor
 
-Release 0.7 carries the M3 CPU-execution surface in `rt::Runtime` through the M4
-memory contract. The
+Release 0.8 carries the M3 CPU-execution surface in `rt::Runtime` through the
+M7 release. The M4 memory contract still governs executor storage. The
 compiled graph, independent phase callbacks, nested range work, and nested
 reductions all use one runtime-owned worker team and one internal immutable work
 record. The legacy `SimCore`, `WorkerPool`, `rt::Scheduler`, and `FiberPool`

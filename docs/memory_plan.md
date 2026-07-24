@@ -1,13 +1,15 @@
 # Finalized Memory and Overload Contract
 
-Release 0.7 retains the M4 memory closure for the target-path CPU runtime,
+Release 0.8 retains the M4 memory closure for the target-path CPU runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.
 
 The legacy `SimCore`, frame arenas, `WorkerPool`, `rt::Scheduler`, `FiberPool`,
-GPU mock, plugins, snapshots, and device experiments are outside this
-contract.
+GPU mock, plugins, legacy snapshots, and device experiments are outside this
+contract. M7 target-path checkpoint and replay registry metadata is included;
+caller-owned canonical state and artifact buffers are explicitly reported or
+bounded but not allocated by the runtime.
 
 ## Finalization-time plan
 
@@ -34,10 +36,16 @@ planned_bytes =
 The plan reports requested payload/control bytes, not a process resident-set
 size. It excludes allocator metadata and rounding internal to the C++ runtime,
 OS thread stacks and implementation-owned thread state, executable and shared
-library pages, host-owned callback/resource data, the small C ABI adapter
+library pages, host-owned callback/resource data and registered canonical state
+bytes, caller-owned checkpoint/input-log buffers, the small C ABI adapter
 handle, and every legacy or device subsystem outside `rt::Runtime`.
 Configuration/finalization temporaries are also excluded because they are
 released before the running state.
+
+`state_count` and `registered_state_bytes` report the frozen borrowed state.
+`snapshot_max_bytes`, `replay_input_capacity`, and `input_log_max_bytes` expose
+the enforced artifact bounds. State-registry entries themselves are included
+in `runtime_control_bytes`.
 
 ## Configuration
 
@@ -48,6 +56,10 @@ released before the running state.
 | `task_scratch_slots` | 1024 | Maximum simultaneously accepted execution contexts; must be at least the compiled phase count |
 | `memory_budget_bytes` | 268435456 | Upper bound applied to `planned_bytes` at finalization; accepted ceiling is 1 TiB on 64-bit hosts and addressable `size_t` on 32-bit hosts |
 | `overload_policy` | `reject_submission` | Selects `reject_submission` or `fail_frame` |
+| `state_capacity` | 64 | Maximum registered canonical state regions; registry metadata contributes to runtime control bytes |
+| `snapshot_max_bytes` | 1048576 | Maximum encoded checkpoint size; output storage is caller-owned |
+| `replay_input_capacity` | 4096 | Maximum input records accepted by input-log write/replay |
+| `input_log_max_bytes` | 1048576 | Maximum encoded input-log size; output storage is caller-owned |
 
 `scratch_bytes`, `trace_capacity`, `worker_count`, and
 `executor_queue_capacity` also contribute directly to the plan. Queue slots
@@ -104,6 +116,21 @@ allowed to quiesce before `step()` returns.
 publishes them through the versioned metric schema without adding an RT-lane
 allocation or output sink.
 
+## Checkpoint and replay storage
+
+Canonical state registrations are borrowed fixed byte spans. The runtime copies
+only each stable identifier, schema version, pointer, and length. Registrations
+with overlapping storage are rejected so restore destinations are independent.
+
+The core C++ checkpoint and input-log codecs accept caller-provided buffers and
+perform no heap allocation. The non-RT C input-log adapter may allocate a
+capacity-bounded descriptor vector while validating C records. Output buffers
+may not overlap registered state, input descriptors, or encoded input
+payloads. A short buffer returns `capacity_exceeded` with
+`required_bytes` and writes no partial artifact. Restore validates the entire
+source before copying any state, so malformed or incompatible checkpoints
+leave all registered bytes unchanged.
+
 ## Running-state boundary
 
 `start()` creates the configured fixed worker team and, only when enabled, one
@@ -131,6 +158,10 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
   `tests/test_trace_noalloc.cpp`;
 - C ABI plan, scratch, malformed discriminator, and reserved-field checks:
   `tests/test_cabi_dlopen.c`;
+- canonical-state accounting, overlap rejection, allocation-free artifact
+  writing/restoring, corrupt-input transactionality, and parser mutation tests:
+  `tests/test_memory_plan.cpp`, `tests/test_trace_noalloc.cpp`,
+  `tests/test_determinism_replay.cpp`;
 - allocation/deallocation pairing:
   `rt/src/aligned_storage.hpp`;
 - implementation:

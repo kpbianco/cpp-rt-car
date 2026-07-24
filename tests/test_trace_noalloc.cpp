@@ -3,6 +3,7 @@
 #include <rt/runtime.hpp>
 #include <simcore/bintrace.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <new>
+#include <span>
 
 #if defined(_MSC_VER)
 #include <malloc.h>
@@ -476,6 +478,99 @@ TEST(TraceNoAlloc, CompiledGraphFirstFrameDoesNotAllocate) {
     EXPECT_EQ(execution_count, 2u);
     EXPECT_EQ(execution[0], 1u);
     EXPECT_EQ(execution[1], 0u);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(TraceNoAlloc, CheckpointAndInputCodecDoNotAllocate) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 1;
+    config.trace_capacity = 8;
+    config.executor_queue_capacity = 8;
+    config.task_scratch_slots = 8;
+    config.memory_budget_bytes = 1024 * 1024;
+    config.determinism_tier =
+        rt::DeterminismTier::schedule_independent;
+    config.state_capacity = 1;
+    config.snapshot_max_bytes = 1024;
+    config.replay_input_capacity = 1;
+    config.input_log_max_bytes = 1024;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+
+    std::array<std::byte, 16> state{};
+    ASSERT_EQ(
+        runtime.register_state(
+            {"state", 1, state}),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    std::array<std::byte, 1024> checkpoint{};
+    std::array<std::byte, 1024> input_log{};
+    std::array<std::byte, 8> payload{};
+    const std::array records{
+        rt::ReplayInputRecord{
+            rt::HostFrameContext{
+                1,
+                std::chrono::nanoseconds(1),
+                std::nullopt,
+            },
+            1,
+            payload,
+        },
+    };
+    rt::ArtifactWriteResult checkpoint_result;
+    rt::ArtifactWriteResult input_result;
+    rt::CheckpointMetadata checkpoint_metadata;
+    rt::InputLogMetadata input_metadata;
+    rt::Status checkpoint_status = rt::Status::internal_error;
+    rt::Status checkpoint_inspect_status =
+        rt::Status::internal_error;
+    rt::Status restore_status = rt::Status::internal_error;
+    rt::Status input_status = rt::Status::internal_error;
+    rt::Status input_inspect_status =
+        rt::Status::internal_error;
+
+    {
+        AllocationGuard guard;
+        checkpoint_status = runtime.write_checkpoint(
+            0,
+            checkpoint,
+            checkpoint_result);
+        checkpoint_inspect_status =
+            rt::inspect_checkpoint_artifact(
+                std::span<const std::byte>(
+                    checkpoint.data(),
+                    checkpoint_result.bytes_written),
+                checkpoint_metadata);
+        state.fill(std::byte{0x5a});
+        restore_status = runtime.restore_checkpoint(
+            std::span<const std::byte>(
+                checkpoint.data(),
+                checkpoint_result.bytes_written));
+        input_status = runtime.write_input_log(
+            records,
+            input_log,
+            input_result);
+        input_inspect_status =
+            rt::inspect_input_log_artifact(
+                std::span<const std::byte>(
+                    input_log.data(),
+                    input_result.bytes_written),
+                input_metadata);
+    }
+
+    EXPECT_EQ(checkpoint_status, rt::Status::ok);
+    EXPECT_EQ(checkpoint_inspect_status, rt::Status::ok);
+    EXPECT_EQ(restore_status, rt::Status::ok);
+    EXPECT_EQ(input_status, rt::Status::ok);
+    EXPECT_EQ(input_inspect_status, rt::Status::ok);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_TRUE(std::all_of(
+        state.begin(),
+        state.end(),
+        [](std::byte value) {
+            return value == std::byte{0};
+        }));
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }
 

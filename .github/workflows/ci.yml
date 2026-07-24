@@ -44,14 +44,73 @@ jobs:
             -DSIM_SANITIZERS= \
             -DSIM_WERROR=ON
       - name: Build determinism tests
-        run: cmake --build build --config ${BUILD_TYPE} --target simcore_tests -- -j2
+        run: cmake --build build --config ${BUILD_TYPE} --target simcore_tests rtfw_determinism_artifact -- -j2
       - name: Run determinism tests
         env:
           ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           GTEST_DEATH_TEST_STYLE: threadsafe
-          GTEST_FILTER: DeterminismIntegration.*
+          GTEST_FILTER: DeterminismIntegration.*:DeterminismReplay.*
         run: ctest --test-dir build -C ${BUILD_TYPE} --output-on-failure -R simcore_all
+      - name: Produce M7 checkpoint artifact
+        run: |
+          build/tests/rtfw_determinism_artifact \
+            "m7-${{ matrix.compiler }}-fma-${{ matrix.fma }}.rtcp"
+      - name: Upload M7 checkpoint artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: m7-checkpoint-${{ matrix.compiler }}-${{ matrix.fma }}
+          path: m7-${{ matrix.compiler }}-fma-${{ matrix.fma }}.rtcp
+          if-no-files-found: error
+
+  determinism-artifact-exchange:
+    name: Determinism artifact exchange
+    needs: determinism-linux
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download compiler artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: m7-checkpoint-*
+          path: artifacts
+          merge-multiple: true
+      - name: Compare GCC, Clang, FMA-on, and FMA-off artifacts
+        shell: bash
+        run: |
+          mapfile -t files < <(find artifacts -type f -name '*.rtcp' | sort)
+          test "${#files[@]}" -eq 4
+          baseline="${files[0]}"
+          for artifact in "${files[@]:1}"; do
+            cmp "$baseline" "$artifact"
+          done
+          sha256sum "${files[@]}"
+
+  snapshot-fuzz-linux:
+    name: Snapshot parser fuzz smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure snapshot fuzzer
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-fuzz \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_TESTS=ON \
+            -DENABLE_RAPIDCHECK=OFF \
+            -DSIM_BUILD_FUZZERS=ON \
+            -DSIM_SANITIZERS= \
+            -DSIM_WERROR=ON
+      - name: Build snapshot fuzzer
+        run: cmake --build build-fuzz --target snapshot_fuzz -- -j2
+      - name: Run bounded snapshot fuzz corpus
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: build-fuzz/tests/snapshot_fuzz -runs=20000 -max_len=65536 -timeout=5
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -144,7 +203,7 @@ jobs:
         run: cmake --build build-tsan --target simcore_tests -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
-          GTEST_FILTER: UnifiedExecutor.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*
+          GTEST_FILTER: UnifiedExecutor.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*
           TSAN_OPTIONS: halt_on_error=1
         run: ctest --test-dir build-tsan --output-on-failure -R simcore_all
 

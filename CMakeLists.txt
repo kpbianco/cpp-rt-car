@@ -526,6 +526,7 @@ set(RT_SOURCES
     rt/src/native_platform_preflight.cpp
     rt/src/observability_export.cpp
     rt/src/runtime.cpp
+    rt/src/snapshot_codec.cpp
     rt/src/plugin_manager.cpp
     rt/src/scheduler.cpp
     rt/src/telemetry.cpp

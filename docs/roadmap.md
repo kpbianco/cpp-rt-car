@@ -22,8 +22,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M4 | Complete | Memory plan and zero-allocation RT-lane closure |
 | M5 | Complete | Self-paced absolute cadence, watchdog, and platform preflight |
 | M6 | Complete | RT-safe, versioned observability |
-| M7 | Next | Determinism tiers, safe snapshots, and replay |
-| M8 | Planned | Device ABI and deterministic fault-injectable mock |
+| M7 | Complete | Determinism tiers, safe snapshots, and replay |
+| M8 | Next | Device ABI and deterministic fault-injectable mock |
 | M9 | Planned | Real CUDA backend |
 | M10 | Planned | Real XDMA backend for one named host/FPGA stack |
 | M11 | Planned | Stable ABI, package/export cleanup, and engine adapters |
@@ -192,12 +192,31 @@ The exact schema, cursor behavior, and legacy boundary are in
 
 ## M7 — Determinism and replay
 
+Delivered in 0.8:
+
+- explicit D0/D1 configuration with D2/D3 rejected until their evidence
+  profiles exist;
+- fixed-size caller-owned canonical state registration, frozen graph/state
+  schema identities, and worker-count-independent D1 replay compatibility;
+- versioned little-endian checkpoint and input-log formats with complete
+  bounds, reserved-field, identity, and checksum validation;
+- allocation-free inspectors and codecs that never allocate from encoded
+  lengths, plus transactional registered-byte restore;
+- checkpoint-plus-input replay through the existing synchronous `step()` path,
+  with validation-before-restore and a final registered-state hash;
+- C ABI v6, embedding samples, deterministic mutation tests, libFuzzer smoke,
+  and compiler-exchanged artifact comparison.
+
 Exit gates:
 
 - D1 workloads match across supported worker counts;
 - cross-compiler claims compare exchanged artifacts;
 - snapshot fuzzing finds no crash or unbounded allocation;
 - checkpoint plus input log reproduces registered state.
+
+The supported tier boundary, exact artifact behavior, callback obligations, and
+legacy exclusions are in
+[the determinism/replay contract](determinism_replay.md).
 
 ## M8 — Device ABI and mock
 
