@@ -232,15 +232,18 @@ def check_runtime_contract() -> None:
     executor_doc = read("docs/executor.md")
     memory_doc = read("docs/memory_plan.md")
     time_doc = read("docs/time_platform.md")
+    observability_doc = read("docs/observability.md")
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
     preflight_source = read("rt/src/native_platform_preflight.cpp")
+    telemetry_source = read("rt/src/telemetry.cpp")
     host_test = read("tests/test_host_runtime.cpp")
     executor_test = read("tests/test_executor.cpp")
     memory_test = read("tests/test_memory_plan.cpp")
     periodic_test = read("tests/test_periodic_runtime.cpp")
     preflight_test = read("tests/test_platform_preflight.cpp")
+    observability_test = read("tests/test_observability.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
 
     for method in (
@@ -277,6 +280,7 @@ def check_runtime_contract() -> None:
         "watchdog_timeout_ns",
         "watchdog_max_degradation_level",
         "platform_preflight_mode",
+        "workload_id",
     }
     implemented_keys = set(
         re.findall(r'key\s*==\s*"([a-z0-9_]+)"', runtime_source)
@@ -372,6 +376,24 @@ def check_runtime_contract() -> None:
         if function not in c_header:
             fail(f"rt/include/rt/c_api.h: missing M5 C ABI function {function!r}")
 
+    for method in (
+        "Status observability_metadata(",
+        "Status metrics_snapshot(",
+        "Status read_trace(",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M6 method {method!r}")
+
+    for function in (
+        "rtfw_get_observability_metadata(",
+        "rtfw_get_metrics(",
+        "rtfw_read_trace(",
+        "rtfw_metric_cursor_init(",
+        "rtfw_trace_cursor_init(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M6 C ABI function {function!r}")
+
     for status in (
         "invalid_handle",
         "graph_cycle",
@@ -392,6 +414,7 @@ def check_runtime_contract() -> None:
         "self_paced_time",
         "frame_watchdog",
         "strict_platform_preflight",
+        "versioned_observability",
     ):
         if capability not in runtime_header or capability not in c_header:
             fail(f"M1 capability contract is missing {capability!r}")
@@ -410,17 +433,18 @@ def check_runtime_contract() -> None:
         or "| M3 | Complete |" not in roadmap
         or "| M4 | Complete |" not in roadmap
         or "| M5 | Complete |" not in roadmap
-        or "| M6 | Next |" not in roadmap
+        or "| M6 | Complete |" not in roadmap
+        or "| M7 | Next |" not in roadmap
     ):
-        fail("docs/roadmap.md: M5/M6 milestone status is not advanced")
+        fail("docs/roadmap.md: M6/M7 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
-        r"\s*true\s*,\s*true\s*,\s*true\s*\}\s*;",
+        r"\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*\}\s*;",
         runtime_source,
     ):
         fail(
-            "rt/src/host_runtime.cpp: M5 capability tuple is not seven true values"
+            "rt/src/host_runtime.cpp: M6 capability tuple is not eight true values"
         )
 
     for token in (
@@ -580,12 +604,62 @@ def check_runtime_contract() -> None:
             fail(f"tests/test_platform_preflight.cpp: missing M5 gate {test_name!r}")
     if "watchdog_timeout_ns" not in noalloc_test:
         fail("tests/test_trace_noalloc.cpp: missing armed-watchdog allocation gate")
-    if "#define RTFW_C_ABI_VERSION 4u" not in c_header:
-        fail("rt/include/rt/c_api.h: M5 requires experimental ABI version 4")
+    if "#define RTFW_C_ABI_VERSION 5u" not in c_header:
+        fail("rt/include/rt/c_api.h: M6 requires experimental ABI version 5")
     if "rtfw_run_periodic(" not in read("samples/embed_c/mini_app.c"):
         fail("samples/embed_c/mini_app.c: missing M5 periodic sample")
     if "runtime.run_periodic(" not in read("samples/embed_cpp/mini_app.cpp"):
         fail("samples/embed_cpp/mini_app.cpp: missing M5 periodic sample")
+
+    for token in (
+        "TelemetryRing::emit(",
+        "committed_sequence",
+        "overwritten_",
+        "dropped_",
+        "TelemetryCounters::increment(",
+    ):
+        if token not in telemetry_source:
+            fail(f"rt/src/telemetry.cpp: missing M6 evidence {token!r}")
+    for forbidden in (
+        "std::mutex",
+        "std::condition_variable",
+        ".wait(",
+        ".detach(",
+    ):
+        if forbidden in telemetry_source:
+            fail(
+                "rt/src/telemetry.cpp: M6 emission contains forbidden "
+                f"RT-lane primitive {forbidden!r}"
+            )
+    for phrase in (
+        "caller-owned",
+        "Gauges are sampled",
+        "version/build/config/workload",
+        "non-RT host",
+        "exact skipped sequence count",
+    ):
+        if phrase not in observability_doc:
+            fail(
+                "docs/observability.md: missing M6 contract phrase "
+                f"{phrase!r}"
+            )
+    for test_name in (
+        "MetadataCarriesStableProvenance",
+        "IntervalWindowsPartitionCumulativeCounters",
+        "TraceCursorReportsOverwriteLossExactly",
+        "RuntimeInstancesRejectForeignCursors",
+        "RejectsMalformedFreshCursors",
+        "JsonExportCommitsCursorsOnlyAfterSuccess",
+        "ContendedRingDropsInsteadOfWaiting",
+    ):
+        if test_name not in observability_test:
+            fail(f"tests/test_observability.cpp: missing M6 gate {test_name!r}")
+    if "Observability.*" not in read(".github/workflows/ci.yml"):
+        fail(".github/workflows/ci.yml: M6 is missing from the TSAN filter")
+    if "rtfw_get_metrics(" not in read("samples/embed_c/mini_app.c"):
+        fail("samples/embed_c/mini_app.c: missing M6 metric sample")
+    if "runtime.metrics_snapshot(" not in read("samples/embed_cpp/mini_app.cpp"):
+        fail("samples/embed_cpp/mini_app.cpp: missing M6 metric sample")
 
 
 def main() -> int:
@@ -600,6 +674,7 @@ def main() -> int:
             "docs/executor.md",
             "docs/memory_plan.md",
             "docs/time_platform.md",
+            "docs/observability.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -616,6 +691,10 @@ def main() -> int:
             "rt/src/watchdog_monitor.cpp",
             "rt/src/native_platform_preflight.hpp",
             "rt/src/native_platform_preflight.cpp",
+            "rt/src/telemetry.hpp",
+            "rt/src/telemetry.cpp",
+            "rt/include/rt/observability_export.hpp",
+            "rt/src/observability_export.cpp",
             "samples/embed_c/mini_app.c",
             "samples/embed_cpp/mini_app.cpp",
             "tests/test_host_runtime.cpp",
@@ -624,6 +703,7 @@ def main() -> int:
             "tests/test_memory_plan.cpp",
             "tests/test_periodic_runtime.cpp",
             "tests/test_platform_preflight.cpp",
+            "tests/test_observability.cpp",
         )
     )
     check_version()

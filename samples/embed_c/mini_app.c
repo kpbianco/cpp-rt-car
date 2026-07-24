@@ -142,7 +142,11 @@ int main(void) {
         rtfw_config_set(
             &config,
             "overload_policy",
-            "fail_frame") != RTFW_STATUS_OK) {
+            "fail_frame") != RTFW_STATUS_OK ||
+        rtfw_config_set(
+            &config,
+            "workload_id",
+            "sample.embed_c") != RTFW_STATUS_OK) {
         fprintf(stderr, "mini_app: failed to build configuration\n");
         return EXIT_FAILURE;
     }
@@ -257,10 +261,47 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    rtfw_metric_snapshot metrics;
+    rtfw_trace_cursor trace_cursor;
+    rtfw_trace_read_result trace_result;
+    rtfw_trace_event trace_events[32];
+    rtfw_metric_snapshot_init(&metrics);
+    rtfw_trace_cursor_init(&trace_cursor);
+    rtfw_trace_read_result_init(&trace_result);
+    if (!check_status(
+            runtime,
+            rtfw_get_metrics(
+                runtime,
+                RTFW_METRIC_CUMULATIVE,
+                NULL,
+                &metrics),
+            "read metrics") ||
+        metrics.samples[RTFW_METRIC_FRAMES_COMPLETED].value != 5 ||
+        metrics.samples[RTFW_METRIC_CALLBACKS_COMPLETED].value != 10 ||
+        !check_status(
+            runtime,
+            rtfw_read_trace(
+                runtime,
+                &trace_cursor,
+                trace_events,
+                32,
+                &trace_result),
+            "read trace") ||
+        trace_result.events_read == 0 ||
+        strcmp(
+            metrics.metadata.workload_id,
+            "sample.embed_c") != 0) {
+        rtfw_destroy(runtime);
+        return EXIT_FAILURE;
+    }
+
     rtfw_destroy(runtime);
     printf(
         "mini_app: executed 5 absolute-cadence graph frames with %llu "
-        "planned runtime bytes\n",
-        (unsigned long long)memory_plan.planned_bytes);
+        "planned runtime bytes; observability schema %u retained %llu "
+        "events\n",
+        (unsigned long long)memory_plan.planned_bytes,
+        metrics.metadata.schema_version,
+        (unsigned long long)trace_result.events_read);
     return EXIT_SUCCESS;
 }

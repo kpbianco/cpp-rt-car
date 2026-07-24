@@ -25,12 +25,16 @@ latency qualification and does not prove the complete product contract.
 - Injected platform probes prove strict pass/fail reporting, rejection before
   worker creation, duplicate-prerequisite rejection, and disabled-mode
   non-interference.
+- Observability tests prove stable provenance, adjacent-interval partitioning
+  of cumulative counters, gauge sampling, exact trace-cursor loss, runtime
+  isolation, JSON schema fields, and drop-without-wait behavior under slot
+  contention.
 - Unified-executor tests stress independent phases with nested ranges and
   fixed-tree reductions under both policies, verify stable static assignment
   metadata, force deterministic queue saturation, and require real local
   execution and successful cross-worker steals.
 - A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
-  and M5 time/platform suites.
+  M5 time/platform, and M6 observability suites.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -68,11 +72,13 @@ predeclared thresholds, and the measurement procedure.
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
 - Optional fuzz harness: `tests/jobqueue_fuzz.cpp`
-- M1–M5 lifecycle, graph, executor, memory, time, and platform tests:
+- M1–M6 lifecycle, graph, executor, memory, time, platform, and observability
+  tests:
   `tests/test_host_runtime.cpp`,
   `tests/test_compiled_graph.cpp`, `tests/test_executor.cpp`,
   `tests/test_memory_plan.cpp`,
   `tests/test_periodic_runtime.cpp`,
   `tests/test_platform_preflight.cpp`,
+  `tests/test_observability.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`

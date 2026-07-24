@@ -208,9 +208,12 @@ TEST(MemoryPlan, FinalizedPlanMatchesConfigurationAndAlignment) {
     EXPECT_EQ(plan.task_scratch_stride, 64u);
     EXPECT_EQ(plan.task_scratch_slots, 8u);
     EXPECT_EQ(plan.task_scratch_total_bytes, 512u);
+    EXPECT_GE(
+        plan.trace_slot_bytes,
+        sizeof(rt::RuntimeTraceEvent));
     EXPECT_EQ(
         plan.trace_storage_bytes,
-        config.trace_capacity * sizeof(rt::RuntimeTraceEvent));
+        config.trace_capacity * plan.trace_slot_bytes);
     EXPECT_EQ(plan.queue_slots, 8u);
     EXPECT_EQ(plan.scratch_alignment, 64u);
     EXPECT_EQ(

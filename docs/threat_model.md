@@ -2,7 +2,7 @@
 
 ## Trust boundary
 
-RTFW 0.6 is an in-process native library prototype. The host application,
+RTFW 0.7 is an in-process native library prototype. The host application,
 runtime, callbacks, and loaded plugins share one address space and authority.
 Plugins and device backends are trusted code; ABI validation is not a security
 boundary.
@@ -25,17 +25,17 @@ boundary.
 | Queue/memory exhaustion | Target `rt::Runtime` has a budgeted plan and bounded queue/task-scratch rejection; legacy arenas, workers, and device experiments still contain spin, fallback-allocation, detached-helper, or unchecked paths |
 | Malformed snapshot/config | M1 runtime keys and C structure headers fail closed; snapshot, profile, and other experimental parsers still need comprehensive bounds, fuzzing, and schema identity |
 | Device hang/loss | CPU mock only; no bounded backend reset/health contract |
-| Telemetry leakage/corruption | Paths and runtime data can be written to files; schemas and access policy are not frozen |
+| Telemetry leakage/corruption | M6 target records are size/schema tagged with cursor loss accounting, but non-RT exporters can disclose runtime data and no sink access policy exists; legacy telemetry remains experimental |
 | Supply-chain substitution | Submodule/SBOM helpers and CI dependency review exist; signed release provenance is not established |
 | Host-policy mutation | Hardening scripts can make privileged system-wide changes and require operator review; M5 strict preflight is read-only |
 
 ## Required controls
 
 Before stable release, the project needs bounds-checked parsers, explicit
-resource ceilings, backend timeouts/reset, versioned telemetry, release
-provenance, and a documented trusted-plugin policy. Untrusted extensions require
-an out-of-process boundary; the tiny `enable_sandbox()` experiment is not
-sufficient.
+resource ceilings, backend timeouts/reset, signed release provenance, exporter
+access policy, and a documented trusted-plugin policy. Untrusted extensions
+require an out-of-process boundary; the tiny `enable_sandbox()` experiment is
+not sufficient.
 
 See [security status](security_supply_chain.md) and the
 [product contract](product_contract.md).

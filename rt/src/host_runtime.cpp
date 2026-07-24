@@ -4,6 +4,7 @@
 #include "compiled_graph.hpp"
 #include "executor.hpp"
 #include "native_platform_preflight.hpp"
+#include "telemetry.hpp"
 #include "watchdog_monitor.hpp"
 
 #include <algorithm>
@@ -41,6 +42,18 @@ constexpr std::uint64_t kMaxWatchdogTimeoutNs =
     std::uint64_t{24} * 60 * 60 * 1'000'000'000;
 constexpr std::uint32_t kMaxDegradationLevel = 255;
 constexpr std::size_t kNoCallback = std::numeric_limits<std::size_t>::max();
+constexpr std::size_t kNoWorker = std::numeric_limits<std::size_t>::max();
+constexpr std::uint64_t kFnvOffset = 14'695'981'039'346'656'037ull;
+constexpr std::uint64_t kFnvPrime = 1'099'511'628'211ull;
+
+#ifndef RTFW_BUILD_ID_STRING
+#define RTFW_BUILD_ID_STRING "rtfw-" RTFW_VERSION_STRING
+#endif
+
+constexpr char kBuildId[] = RTFW_BUILD_ID_STRING;
+static_assert(
+    sizeof(kBuildId) <= rt::observability_identifier_capacity,
+    "RTFW_BUILD_ID_STRING exceeds the observability identifier capacity");
 
 std::atomic<std::uint32_t> g_next_graph_owner{1};
 
@@ -168,6 +181,94 @@ bool parse_size(std::string_view value, std::size_t& parsed) noexcept {
     return true;
 }
 
+bool identifier_character(char value) noexcept {
+    return (value >= 'a' && value <= 'z') ||
+           (value >= 'A' && value <= 'Z') ||
+           (value >= '0' && value <= '9') ||
+           value == '.' || value == '_' || value == ':' ||
+           value == '/' || value == '@' || value == '-';
+}
+
+bool valid_identifier(
+    const std::array<
+        char,
+        rt::observability_identifier_capacity>& identifier) noexcept {
+    std::size_t length = 0;
+    while (length < identifier.size() &&
+           identifier[length] != '\0') {
+        if (!identifier_character(identifier[length])) {
+            return false;
+        }
+        ++length;
+    }
+    return length != 0 && length < identifier.size();
+}
+
+bool set_identifier(
+    std::array<
+        char,
+        rt::observability_identifier_capacity>& identifier,
+    std::string_view value) noexcept {
+    if (value.empty() || value.size() >= identifier.size()) {
+        return false;
+    }
+    for (const char character : value) {
+        if (!identifier_character(character)) {
+            return false;
+        }
+    }
+    identifier.fill('\0');
+    std::copy(value.begin(), value.end(), identifier.begin());
+    return true;
+}
+
+void hash_byte(std::uint64_t& hash, std::uint8_t value) noexcept {
+    hash ^= value;
+    hash *= kFnvPrime;
+}
+
+void hash_u64(std::uint64_t& hash, std::uint64_t value) noexcept {
+    for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+        hash_byte(
+            hash,
+            static_cast<std::uint8_t>(
+                (value >> (byte * 8u)) & 0xffu));
+    }
+}
+
+std::uint64_t config_identifier(
+    const rt::RuntimeConfig& config) noexcept {
+    std::uint64_t hash = kFnvOffset;
+    hash_u64(hash, rt::runtime_config_schema_version);
+    hash_u64(hash, config.callback_capacity);
+    hash_u64(hash, config.scratch_bytes);
+    hash_u64(hash, config.trace_capacity);
+    hash_u64(
+        hash,
+        static_cast<std::uint64_t>(config.numerical_mode));
+    hash_u64(
+        hash,
+        static_cast<std::uint64_t>(config.executor_policy));
+    hash_u64(hash, config.worker_count);
+    hash_u64(hash, config.executor_queue_capacity);
+    hash_u64(hash, config.scratch_alignment);
+    hash_u64(hash, config.task_scratch_bytes);
+    hash_u64(hash, config.task_scratch_slots);
+    hash_u64(hash, config.memory_budget_bytes);
+    hash_u64(
+        hash,
+        static_cast<std::uint64_t>(config.overload_policy));
+    hash_u64(hash, config.watchdog_timeout_ns);
+    hash_u64(
+        hash,
+        config.watchdog_max_degradation_level);
+    hash_u64(
+        hash,
+        static_cast<std::uint64_t>(
+            config.platform_preflight_mode));
+    return hash;
+}
+
 rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
     if (config.callback_capacity == 0 ||
         config.callback_capacity > kMaxCallbacks) {
@@ -196,7 +297,8 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
         config.memory_budget_bytes > kMaxMemoryBudgetBytes ||
         config.watchdog_timeout_ns > kMaxWatchdogTimeoutNs ||
         config.watchdog_max_degradation_level >
-            kMaxDegradationLevel) {
+            kMaxDegradationLevel ||
+        !valid_identifier(config.workload_id)) {
         return rt::Status::invalid_config;
     }
     switch (config.numerical_mode) {
@@ -235,9 +337,9 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
 namespace rt {
 
 Capabilities query_capabilities() noexcept {
-    // M5 adds absolute periodic release control, one-shot watchdog events,
-    // frame-thread degradation, and fail-closed platform preflight.
-    return {true, true, true, true, true, true, true};
+    // M6 adds schema-versioned, instance-local trace and metric export with
+    // fixed RT-lane emission storage.
+    return {true, true, true, true, true, true, true, true};
 }
 
 const char* status_message(Status status) noexcept {
@@ -377,6 +479,10 @@ Status set_runtime_config_value(
             candidate.platform_preflight_mode =
                 PlatformPreflightMode::strict;
         } else {
+            return Status::invalid_config;
+        }
+    } else if (key == "workload_id") {
+        if (!set_identifier(candidate.workload_id, value)) {
             return Status::invalid_config;
         }
     } else {
@@ -572,20 +678,135 @@ struct Runtime::Impl {
         Status status,
         std::uint64_t timestamp_ns,
         std::uint64_t frame_index,
-        std::size_t callback_index = kNoCallback) noexcept {
-        SpinGuard guard(trace_lock);
-        if (trace.empty()) {
+        std::size_t callback_index = kNoCallback,
+        RuntimeTraceProducer producer =
+            RuntimeTraceProducer::host,
+        std::size_t worker_index = kNoWorker,
+        std::uint64_t value = 0) noexcept {
+        switch (type) {
+        case RuntimeTraceEventType::step_begin:
+            telemetry_counters.increment(
+                RuntimeMetricId::frames_started);
+            break;
+        case RuntimeTraceEventType::step_end:
+            telemetry_counters.increment(
+                RuntimeMetricId::frames_completed);
+            if (status != Status::ok) {
+                telemetry_counters.increment(
+                    RuntimeMetricId::frames_failed);
+            }
+            break;
+        case RuntimeTraceEventType::callback_begin:
+            telemetry_counters.increment(
+                RuntimeMetricId::callbacks_started);
+            break;
+        case RuntimeTraceEventType::callback_end:
+            telemetry_counters.increment(
+                RuntimeMetricId::callbacks_completed);
+            if (status != Status::ok) {
+                telemetry_counters.increment(
+                    RuntimeMetricId::callback_failures);
+            }
+            break;
+        case RuntimeTraceEventType::watchdog_fired:
+            telemetry_counters.increment(
+                RuntimeMetricId::watchdog_events);
+            break;
+        case RuntimeTraceEventType::degradation_applied:
+            telemetry_counters.increment(
+                RuntimeMetricId::degradation_events);
+            break;
+        case RuntimeTraceEventType::periodic_release:
+            telemetry_counters.increment(
+                RuntimeMetricId::periodic_releases);
+            break;
+        case RuntimeTraceEventType::periodic_wake:
+            telemetry_counters.increment(
+                RuntimeMetricId::periodic_wakes);
+            break;
+        case RuntimeTraceEventType::finalized:
+        case RuntimeTraceEventType::started:
+        case RuntimeTraceEventType::stopped:
+            break;
+        }
+
+        if (!telemetry) {
             return;
         }
-        trace[trace_write] = RuntimeTraceEvent{
-            type,
-            status,
-            timestamp_ns,
-            frame_index,
-            callback_index,
-        };
-        trace_write = (trace_write + 1) % trace.size();
-        trace_count = std::min(trace_count + 1, trace.size());
+        RuntimeTraceEvent event;
+        event.type = type;
+        event.status = status;
+        event.producer = producer;
+        event.timestamp_ns = timestamp_ns;
+        event.frame_index = frame_index;
+        event.callback_index =
+            callback_index == kNoCallback
+            ? std::numeric_limits<std::uint32_t>::max()
+            : static_cast<std::uint32_t>(callback_index);
+        event.worker_index =
+            worker_index == kNoWorker
+            ? std::numeric_limits<std::uint32_t>::max()
+            : static_cast<std::uint32_t>(worker_index);
+        event.value = value;
+        (void)telemetry->emit(event);
+    }
+
+    [[nodiscard]] std::array<
+        std::uint64_t,
+        runtime_metric_count> metric_values() const noexcept {
+        std::array<std::uint64_t, runtime_metric_count> values{};
+        for (std::size_t index = 0;
+             index < values.size();
+             ++index) {
+            values[index] = telemetry_counters.load(
+                static_cast<RuntimeMetricId>(index));
+        }
+
+        const auto set =
+            [&values](
+                RuntimeMetricId id,
+                std::uint64_t value) {
+                values[static_cast<std::size_t>(id)] = value;
+            };
+        if (telemetry) {
+            set(
+                RuntimeMetricId::trace_events_emitted,
+                telemetry->emitted());
+            set(
+                RuntimeMetricId::trace_events_overwritten,
+                telemetry->overwritten());
+            set(
+                RuntimeMetricId::trace_events_dropped,
+                telemetry->dropped());
+        }
+        if (executor) {
+            const auto stats = executor->stats();
+            set(
+                RuntimeMetricId::executor_submitted_tasks,
+                stats.submitted_tasks);
+            set(
+                RuntimeMetricId::executor_local_executions,
+                stats.local_executions);
+            set(
+                RuntimeMetricId::executor_steal_attempts,
+                stats.steal_attempts);
+            set(
+                RuntimeMetricId::executor_successful_steals,
+                stats.successful_steals);
+            set(
+                RuntimeMetricId::executor_queue_rejections,
+                stats.queue_full_rejections);
+            set(
+                RuntimeMetricId::executor_scratch_exhaustions,
+                stats.scratch_exhaustions);
+            set(
+                RuntimeMetricId::executor_worker_starts,
+                stats.worker_starts);
+        }
+        set(
+            RuntimeMetricId::degradation_level,
+            degradation_level.load(std::memory_order_acquire));
+        return values;
     }
 
     static CallbackResult run_phase(
@@ -604,7 +825,10 @@ struct Runtime::Impl {
             Status::ok,
             self.clock_now(),
             self.active_frame->frame_index,
-            index);
+            index,
+            RuntimeTraceProducer::worker,
+            task_context.worker_index(),
+            task_context.task_index());
 
         std::span<std::byte> phase_scratch;
         if (self.config.scratch_bytes != 0) {
@@ -638,7 +862,10 @@ struct Runtime::Impl {
                 : Status::callback_failed,
             self.clock_now(),
             self.active_frame->frame_index,
-            index);
+            index,
+            RuntimeTraceProducer::worker,
+            task_context.worker_index(),
+            task_context.task_index());
         return result;
     }
 
@@ -656,14 +883,16 @@ struct Runtime::Impl {
     std::vector<detail::GraphResourceAccess> resource_accesses;
     std::vector<PhaseHandle> compiled_order;
     detail::AlignedStorage phase_scratch;
-    std::vector<RuntimeTraceEvent> trace;
+    std::unique_ptr<detail::TelemetryRing> telemetry;
+    detail::TelemetryCounters telemetry_counters;
+    ObservabilityMetadata observability{};
+    std::uint64_t telemetry_epoch_ns = 0;
+    std::uint64_t metric_snapshot_sequence = 0;
     std::unique_ptr<detail::Executor> executor;
     detail::WatchdogMonitor watchdog;
     MemoryPlan finalized_memory_plan{};
     PlatformPreflightReport preflight_report{};
     bool preflight_report_available = false;
-    std::size_t trace_write = 0;
-    std::size_t trace_count = 0;
     std::atomic<bool> in_step{false};
     std::atomic<bool> in_periodic_run{false};
     std::atomic<bool> periodic_dispatch{false};
@@ -671,7 +900,6 @@ struct Runtime::Impl {
     bool watchdog_started = false;
     const HostFrameContext* active_frame = nullptr;
     std::array<char, 256> error{};
-    mutable std::atomic_flag trace_lock = ATOMIC_FLAG_INIT;
     mutable std::atomic_flag error_lock = ATOMIC_FLAG_INIT;
     std::atomic_flag clock_lock = ATOMIC_FLAG_INIT;
 };
@@ -969,6 +1197,8 @@ Status Runtime::finalize() noexcept {
         impl_->config.task_scratch_slots;
     memory_plan.trace_capacity =
         impl_->config.trace_capacity;
+    memory_plan.trace_slot_bytes =
+        detail::TelemetryRing::slot_size();
     memory_plan.scratch_alignment =
         impl_->config.scratch_alignment;
     memory_plan.overload_policy =
@@ -992,7 +1222,7 @@ Status Runtime::finalize() noexcept {
         memory_plan.task_scratch_total_bytes);
     plan_valid = plan_valid && detail::checked_multiply(
         memory_plan.trace_capacity,
-        sizeof(RuntimeTraceEvent),
+        memory_plan.trace_slot_bytes,
         memory_plan.trace_storage_bytes);
     plan_valid = plan_valid && detail::checked_multiply(
         impl_->config.worker_count,
@@ -1053,6 +1283,8 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_runtime_array(
         compiled_order.capacity(),
         sizeof(PhaseHandle));
+    plan_valid = plan_valid &&
+        add_runtime_bytes(sizeof(detail::TelemetryRing));
 
     memory_plan.planned_bytes =
         memory_plan.runtime_control_bytes;
@@ -1086,8 +1318,8 @@ Status Runtime::finalize() noexcept {
     }
 
     std::unique_ptr<detail::Executor> executor;
+    std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::AlignedStorage phase_scratch;
-    std::vector<RuntimeTraceEvent> trace;
     try {
         executor = std::make_unique<detail::Executor>(
             impl_->config.executor_policy,
@@ -1102,9 +1334,9 @@ Status Runtime::finalize() noexcept {
         phase_scratch.allocate(
             memory_plan.phase_scratch_total_bytes,
             memory_plan.scratch_alignment);
-        trace.assign(
-            impl_->config.trace_capacity,
-            RuntimeTraceEvent{});
+        telemetry =
+            std::make_unique<detail::TelemetryRing>(
+                impl_->config.trace_capacity);
     } catch (const std::bad_alloc&) {
         return impl_->fail(Status::resource_exhausted, nullptr);
     } catch (...) {
@@ -1114,18 +1346,37 @@ Status Runtime::finalize() noexcept {
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
     impl_->compiled_order = std::move(compiled_order);
     impl_->phase_scratch = std::move(phase_scratch);
-    impl_->trace = std::move(trace);
+    impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
     impl_->finalized_memory_plan = memory_plan;
-    impl_->trace_write = 0;
-    impl_->trace_count = 0;
+    impl_->telemetry_counters.reset();
+    impl_->metric_snapshot_sequence = 0;
+    impl_->observability = {};
+    impl_->observability.config_id =
+        config_identifier(impl_->config);
+    impl_->observability.runtime_id =
+        static_cast<std::uint64_t>(impl_->graph_owner);
+    impl_->observability.trace_capacity =
+        static_cast<std::uint64_t>(
+            impl_->config.trace_capacity);
+    std::copy_n(
+        kBuildId,
+        sizeof(kBuildId),
+        impl_->observability.build_id.begin());
+    impl_->observability.workload_id =
+        impl_->config.workload_id;
+    impl_->telemetry_epoch_ns = impl_->clock_now();
     impl_->state = RuntimeState::finalized;
     impl_->clear_error();
     impl_->record(
         RuntimeTraceEventType::finalized,
         Status::ok,
-        impl_->clock_now(),
-        0);
+        impl_->telemetry_epoch_ns,
+        0,
+        kNoCallback,
+        RuntimeTraceProducer::host,
+        kNoWorker,
+        impl_->observability.config_id);
     return Status::ok;
 }
 
@@ -1305,7 +1556,11 @@ Status Runtime::step(
                 RuntimeTraceEventType::watchdog_fired,
                 Status::ok,
                 output.finish_ns,
-                frame.frame_index);
+                frame.frame_index,
+                kNoCallback,
+                RuntimeTraceProducer::host,
+                kNoWorker,
+                impl_->config.watchdog_timeout_ns);
             const auto current =
                 impl_->degradation_level.load(
                     std::memory_order_relaxed);
@@ -1320,6 +1575,9 @@ Status Runtime::step(
                     Status::ok,
                     output.finish_ns,
                     frame.frame_index,
+                    kNoCallback,
+                    RuntimeTraceProducer::host,
+                    kNoWorker,
                     next);
             }
         }
@@ -1328,6 +1586,10 @@ Status Runtime::step(
         impl_->degradation_level.load(std::memory_order_acquire);
     output.deadline_missed =
         frame.deadline_ns && output.finish_ns > *frame.deadline_ns;
+    if (output.deadline_missed) {
+        impl_->telemetry_counters.increment(
+            RuntimeMetricId::deadline_misses);
+    }
     impl_->record(
         RuntimeTraceEventType::step_end,
         execution_status,
@@ -1451,7 +1713,11 @@ Status Runtime::run_periodic(
             RuntimeTraceEventType::periodic_release,
             Status::ok,
             release,
-            frame_index);
+            frame_index,
+            kNoCallback,
+            RuntimeTraceProducer::host,
+            kNoWorker,
+            release);
 
         if (impl_->clock_sleep_until(release) != Status::ok) {
             output.final_degradation_level =
@@ -1466,7 +1732,11 @@ Status Runtime::run_periodic(
             RuntimeTraceEventType::periodic_wake,
             Status::ok,
             wake,
-            frame_index);
+            frame_index,
+            kNoCallback,
+            RuntimeTraceProducer::host,
+            kNoWorker,
+            release);
 
         std::uint64_t deadline = 0;
         if (!checked_time_add(
@@ -1696,32 +1966,229 @@ std::string_view Runtime::last_error() const noexcept {
     return impl_ ? std::string_view(impl_->error.data()) : std::string_view{};
 }
 
-std::size_t Runtime::trace_event_count() const noexcept {
+Status Runtime::observability_metadata(
+    ObservabilityMetadata& metadata) noexcept {
+    metadata = {};
     if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring ||
+        !impl_->telemetry) {
+        return impl_->fail(
+            Status::invalid_state,
+            "observability metadata requires a finalized runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "observability export cannot run during a frame or periodic loop");
+    }
+    metadata = impl_->observability;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::metrics_snapshot(
+    RuntimeMetricWindow window,
+    RuntimeMetricCursor* cursor,
+    RuntimeMetricSnapshot& snapshot) noexcept {
+    snapshot = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring ||
+        !impl_->telemetry) {
+        return impl_->fail(
+            Status::invalid_state,
+            "metric export requires a finalized runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "metric export cannot run during a frame or periodic loop");
+    }
+    if (window != RuntimeMetricWindow::cumulative &&
+        window != RuntimeMetricWindow::interval) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "metric window is invalid");
+    }
+    if (window == RuntimeMetricWindow::interval &&
+        (!cursor ||
+         cursor->schema_version != observability_schema_version ||
+         cursor->reserved0 != 0 ||
+         (cursor->runtime_id != 0 &&
+          cursor->runtime_id != impl_->observability.runtime_id))) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "interval metric cursor is invalid or belongs to another runtime");
+    }
+    const bool fresh_interval_cursor =
+        window == RuntimeMetricWindow::interval &&
+        cursor->runtime_id == 0;
+    if (fresh_interval_cursor &&
+        (cursor->window_end_ns != 0 ||
+         !std::all_of(
+             cursor->counters.begin(),
+             cursor->counters.end(),
+             [](std::uint64_t value) {
+                 return value == 0;
+             }))) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "fresh interval metric cursor is not zero initialized");
+    }
+
+    const auto current = impl_->metric_values();
+    const auto end_ns = impl_->clock_now();
+    if (window == RuntimeMetricWindow::interval &&
+        !fresh_interval_cursor &&
+        (cursor->window_end_ns < impl_->telemetry_epoch_ns ||
+         cursor->window_end_ns > end_ns)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "interval metric cursor window is outside the runtime clock range");
+    }
+    snapshot.metadata = impl_->observability;
+    snapshot.window = window;
+    snapshot.window_start_ns =
+        window == RuntimeMetricWindow::interval &&
+            !fresh_interval_cursor
+        ? cursor->window_end_ns
+        : impl_->telemetry_epoch_ns;
+    snapshot.window_end_ns = end_ns;
+    snapshot.sample_count = runtime_metric_count;
+
+    for (std::size_t index = 0;
+         index < runtime_metric_count;
+         ++index) {
+        RuntimeMetricDefinition definition;
+        if (!runtime_metric_definition(index, definition)) {
+            return impl_->fail(
+                Status::internal_error,
+                "metric schema is incomplete");
+        }
+        auto value = current[index];
+        if (window == RuntimeMetricWindow::interval &&
+            definition.kind == RuntimeMetricKind::counter) {
+            if (value < cursor->counters[index]) {
+                return impl_->fail(
+                    Status::internal_error,
+                    "monotonic metric counter regressed");
+            }
+            value -= cursor->counters[index];
+        }
+        snapshot.samples[index] = RuntimeMetricSample{
+            definition.id,
+            definition.kind,
+            0,
+            0,
+            value,
+        };
+    }
+
+    snapshot.snapshot_sequence =
+        ++impl_->metric_snapshot_sequence;
+    if (window == RuntimeMetricWindow::interval) {
+        cursor->runtime_id =
+            impl_->observability.runtime_id;
+        cursor->window_end_ns = end_ns;
+        cursor->counters = current;
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::read_trace(
+    RuntimeTraceCursor& cursor,
+    std::span<RuntimeTraceEvent> output,
+    RuntimeTraceReadResult& result) noexcept {
+    result = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state == RuntimeState::configuring ||
+        !impl_->telemetry) {
+        return impl_->fail(
+            Status::invalid_state,
+            "trace export requires a finalized runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "trace export cannot run during a frame or periodic loop");
+    }
+    if (cursor.schema_version != observability_schema_version ||
+        cursor.reserved0 != 0 ||
+        (cursor.runtime_id == 0 &&
+         cursor.next_sequence != 0) ||
+        (cursor.runtime_id != 0 &&
+         cursor.runtime_id != impl_->observability.runtime_id)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "trace cursor is invalid or belongs to another runtime");
+    }
+
+    const auto end = impl_->telemetry->next_sequence();
+    const auto oldest =
+        impl_->telemetry->oldest_sequence(end);
+    std::uint64_t sequence = cursor.next_sequence;
+    if (cursor.runtime_id == 0) {
+        cursor.runtime_id = impl_->observability.runtime_id;
+        sequence = oldest;
+    } else if (sequence > end) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "trace cursor points beyond the current sequence");
+    }
+
+    result.metadata = impl_->observability;
+    if (sequence < oldest) {
+        result.lost_events = oldest - sequence;
+        sequence = oldest;
+    }
+    result.first_sequence = sequence;
+
+    while (sequence < end &&
+           result.events_read < output.size()) {
+        RuntimeTraceEvent event;
+        if (impl_->telemetry->read_sequence(
+                sequence,
+                event)) {
+            output[result.events_read] = event;
+            ++result.events_read;
+        } else {
+            ++result.lost_events;
+        }
+        ++sequence;
+    }
+
+    cursor.next_sequence = sequence;
+    result.next_sequence = sequence;
+    result.remaining_sequence_count = end - sequence;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+std::size_t Runtime::trace_event_count() const noexcept {
+    if (!impl_ || !impl_->telemetry) {
         return 0;
     }
-    Impl::SpinGuard guard(impl_->trace_lock);
-    return impl_->trace_count;
+    return impl_->telemetry->retained_count();
 }
 
 bool Runtime::trace_event(
     std::size_t chronological_index,
     RuntimeTraceEvent& event) const noexcept {
-    if (!impl_) {
+    if (!impl_ || !impl_->telemetry) {
         return false;
     }
-    Impl::SpinGuard guard(impl_->trace_lock);
-    if (chronological_index >= impl_->trace_count || impl_->trace.empty()) {
-        return false;
-    }
-
-    const std::size_t oldest = impl_->trace_count == impl_->trace.size()
-        ? impl_->trace_write
-        : 0;
-    const std::size_t physical =
-        (oldest + chronological_index) % impl_->trace.size();
-    event = impl_->trace[physical];
-    return true;
+    return impl_->telemetry->event_at(
+        chronological_index,
+        event);
 }
 
 } // namespace rt

@@ -1,6 +1,6 @@
 # Unified CPU Executor
 
-Release 0.6 carries the M3 CPU-execution surface in `rt::Runtime` through the M4
+Release 0.7 carries the M3 CPU-execution surface in `rt::Runtime` through the M4
 memory contract. The
 compiled graph, independent phase callbacks, nested range work, and nested
 reductions all use one runtime-owned worker team and one internal immutable work
@@ -41,7 +41,7 @@ configured worker and queue counts, accepted submissions, local executions,
 steal attempts, successful steals, queue rejections, scratch exhaustions, and
 worker starts. These
 counters are functional M3 evidence, not the versioned production
-observability schema planned for M6.
+schema-v1 observability counters completed in M6.
 
 The graph compiler's registration-index topological order remains the canonical
 introspection order returned by `compiled_phase_at()`. Runtime callback

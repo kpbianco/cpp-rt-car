@@ -1,6 +1,6 @@
 # Scheduler Status
 
-RTFW 0.6 has one target-path CPU executor owned by `rt::Runtime`. It implements
+RTFW 0.7 has one target-path CPU executor owned by `rt::Runtime`. It implements
 the first two policies accepted by
 [ADR-0001](adr/0001-one-executor-boundary.md). Several older execution
 components remain for source compatibility but are not used by that runtime.

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(RTFW_C_ABI_VERSION == 4u, "unexpected C ABI version");
+_Static_assert(RTFW_C_ABI_VERSION == 5u, "unexpected C ABI version");
 _Static_assert(sizeof(rtfw_status) == sizeof(int32_t), "status width changed");
 _Static_assert(
     sizeof(rtfw_overload_policy) == sizeof(uint32_t),
@@ -86,6 +86,8 @@ typedef void (*rtfw_config_init_fn)(rtfw_config *);
 typedef rtfw_status (*rtfw_config_set_fn)(rtfw_config *, const char *, const char *);
 typedef rt_capabilities_c (*rt_query_capabilities_fn)(void);
 typedef const char *(*rtfw_status_message_fn)(rtfw_status);
+typedef const char *(*rtfw_metric_name_fn)(rtfw_metric_id);
+typedef const char *(*rtfw_trace_event_name_fn)(rtfw_trace_event_type);
 typedef void (*rtfw_frame_context_init_fn)(rtfw_frame_context *);
 typedef void (*rtfw_step_result_init_fn)(rtfw_step_result *);
 typedef void (*rtfw_periodic_config_init_fn)(rtfw_periodic_config *);
@@ -93,6 +95,12 @@ typedef void (*rtfw_periodic_run_result_init_fn)(rtfw_periodic_run_result *);
 typedef void (*rtfw_memory_plan_init_fn)(rtfw_memory_plan *);
 typedef void (*rtfw_platform_preflight_report_init_fn)(
     rtfw_platform_preflight_report *);
+typedef void (*rtfw_observability_metadata_init_fn)(
+    rtfw_observability_metadata *);
+typedef void (*rtfw_metric_cursor_init_fn)(rtfw_metric_cursor *);
+typedef void (*rtfw_metric_snapshot_init_fn)(rtfw_metric_snapshot *);
+typedef void (*rtfw_trace_cursor_init_fn)(rtfw_trace_cursor *);
+typedef void (*rtfw_trace_read_result_init_fn)(rtfw_trace_read_result *);
 typedef rtfw_status (*rtfw_create_fn)(const rtfw_config *, rtfw_handle **);
 typedef rtfw_status (*rtfw_register_callback_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *);
@@ -144,6 +152,19 @@ typedef rtfw_status (*rtfw_get_platform_preflight_report_fn)(
     const rtfw_handle *, rtfw_platform_preflight_report *);
 typedef rtfw_status (*rtfw_get_degradation_level_fn)(
     const rtfw_handle *, uint32_t *);
+typedef rtfw_status (*rtfw_get_observability_metadata_fn)(
+    rtfw_handle *, rtfw_observability_metadata *);
+typedef rtfw_status (*rtfw_get_metrics_fn)(
+    rtfw_handle *,
+    rtfw_metric_window,
+    rtfw_metric_cursor *,
+    rtfw_metric_snapshot *);
+typedef rtfw_status (*rtfw_read_trace_fn)(
+    rtfw_handle *,
+    rtfw_trace_cursor *,
+    rtfw_trace_event *,
+    uint64_t,
+    rtfw_trace_read_result *);
 typedef const char *(*rtfw_last_error_fn)(const rtfw_handle *);
 typedef void (*rtfw_destroy_fn)(rtfw_handle *);
 
@@ -355,12 +376,19 @@ int main(void) {
     rtfw_config_set_fn config_set_fn;
     rt_query_capabilities_fn capabilities_fn;
     rtfw_status_message_fn status_message_fn;
+    rtfw_metric_name_fn metric_name_fn;
+    rtfw_trace_event_name_fn trace_event_name_fn;
     rtfw_frame_context_init_fn frame_init_fn;
     rtfw_step_result_init_fn result_init_fn;
     rtfw_periodic_config_init_fn periodic_config_init_fn;
     rtfw_periodic_run_result_init_fn periodic_result_init_fn;
     rtfw_memory_plan_init_fn memory_plan_init_fn;
     rtfw_platform_preflight_report_init_fn preflight_report_init_fn;
+    rtfw_observability_metadata_init_fn observability_metadata_init_fn;
+    rtfw_metric_cursor_init_fn metric_cursor_init_fn;
+    rtfw_metric_snapshot_init_fn metric_snapshot_init_fn;
+    rtfw_trace_cursor_init_fn trace_cursor_init_fn;
+    rtfw_trace_read_result_init_fn trace_read_result_init_fn;
     rtfw_create_fn create_fn;
     rtfw_register_callback_fn register_fn;
     rtfw_register_phase_fn register_phase_fn;
@@ -380,6 +408,9 @@ int main(void) {
     rtfw_get_memory_plan_fn get_memory_plan_fn;
     rtfw_get_platform_preflight_report_fn get_preflight_report_fn;
     rtfw_get_degradation_level_fn get_degradation_level_fn;
+    rtfw_get_observability_metadata_fn get_observability_metadata_fn;
+    rtfw_get_metrics_fn get_metrics_fn;
+    rtfw_read_trace_fn read_trace_fn;
     rtfw_last_error_fn last_error_fn;
     rtfw_destroy_fn destroy_fn;
 
@@ -387,6 +418,8 @@ int main(void) {
     LOAD_FUNCTION(config_set_fn, "rtfw_config_set");
     LOAD_FUNCTION(capabilities_fn, "rt_query_capabilities");
     LOAD_FUNCTION(status_message_fn, "rtfw_status_message");
+    LOAD_FUNCTION(metric_name_fn, "rtfw_metric_name");
+    LOAD_FUNCTION(trace_event_name_fn, "rtfw_trace_event_name");
     LOAD_FUNCTION(frame_init_fn, "rtfw_frame_context_init");
     LOAD_FUNCTION(result_init_fn, "rtfw_step_result_init");
     LOAD_FUNCTION(periodic_config_init_fn, "rtfw_periodic_config_init");
@@ -395,6 +428,15 @@ int main(void) {
     LOAD_FUNCTION(
         preflight_report_init_fn,
         "rtfw_platform_preflight_report_init");
+    LOAD_FUNCTION(
+        observability_metadata_init_fn,
+        "rtfw_observability_metadata_init");
+    LOAD_FUNCTION(metric_cursor_init_fn, "rtfw_metric_cursor_init");
+    LOAD_FUNCTION(metric_snapshot_init_fn, "rtfw_metric_snapshot_init");
+    LOAD_FUNCTION(trace_cursor_init_fn, "rtfw_trace_cursor_init");
+    LOAD_FUNCTION(
+        trace_read_result_init_fn,
+        "rtfw_trace_read_result_init");
     LOAD_FUNCTION(create_fn, "rtfw_create");
     LOAD_FUNCTION(register_fn, "rtfw_register_callback");
     LOAD_FUNCTION(register_phase_fn, "rtfw_register_phase");
@@ -418,6 +460,11 @@ int main(void) {
     LOAD_FUNCTION(
         get_degradation_level_fn,
         "rtfw_get_degradation_level");
+    LOAD_FUNCTION(
+        get_observability_metadata_fn,
+        "rtfw_get_observability_metadata");
+    LOAD_FUNCTION(get_metrics_fn, "rtfw_get_metrics");
+    LOAD_FUNCTION(read_trace_fn, "rtfw_read_trace");
     LOAD_FUNCTION(last_error_fn, "rtfw_last_error");
     LOAD_FUNCTION(destroy_fn, "rtfw_destroy");
     loaded_parallel_for = parallel_for_fn;
@@ -434,7 +481,13 @@ int main(void) {
             capabilities.self_paced_time != 1 ||
             capabilities.frame_watchdog != 1 ||
             capabilities.strict_platform_preflight != 1 ||
-            capabilities.reserved0 != 0 ||
+            capabilities.versioned_observability != 1 ||
+            strcmp(
+                metric_name_fn(RTFW_METRIC_FRAMES_COMPLETED),
+                "runtime.frames_completed") != 0 ||
+            strcmp(
+                trace_event_name_fn(RTFW_TRACE_STEP_END),
+                "frame.end") != 0 ||
             strcmp(
                 status_message_fn(RTFW_STATUS_INVALID_CONFIG),
                 "invalid runtime configuration") != 0 ||
@@ -508,6 +561,14 @@ int main(void) {
             &config,
             "platform_preflight_mode",
             "disabled") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "workload_id",
+            "cabi.dynamic") != RTFW_STATUS_OK ||
+        config_set_fn(
+            &config,
+            "workload_id",
+            "invalid workload") != RTFW_STATUS_INVALID_CONFIG ||
         config_set_fn(
             &config,
             "executor_queue_capacity",
@@ -723,10 +784,42 @@ int main(void) {
             plan.task_scratch_stride != 64 ||
             plan.task_scratch_slots != 16 ||
             plan.task_scratch_total_bytes != 1024 ||
+            plan.trace_slot_bytes < sizeof(rtfw_trace_event) ||
+            plan.trace_storage_bytes !=
+                plan.trace_capacity * plan.trace_slot_bytes ||
             plan.queue_slots != 8 ||
             plan.scratch_alignment != 64 ||
             plan.overload_policy != RTFW_OVERLOAD_REJECT_SUBMISSION) {
             fprintf(stderr, "finalized memory plan contract mismatch\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+    }
+    {
+        rtfw_observability_metadata metadata;
+        observability_metadata_init_fn(&metadata);
+        --metadata.struct_size;
+        if (get_observability_metadata_fn(instance, &metadata) !=
+            RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "observability metadata accepted a short struct\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        observability_metadata_init_fn(&metadata);
+        if (get_observability_metadata_fn(instance, &metadata) !=
+                RTFW_STATUS_OK ||
+            metadata.schema_version !=
+                RTFW_OBSERVABILITY_SCHEMA_VERSION ||
+            metadata.trace_event_size != sizeof(rtfw_trace_event) ||
+            metadata.metric_sample_size != sizeof(rtfw_metric_sample) ||
+            metadata.metric_count != RTFW_RUNTIME_METRIC_COUNT ||
+            metadata.config_id == 0u ||
+            metadata.runtime_id == 0u ||
+            metadata.build_id[0] == '\0' ||
+            strcmp(metadata.workload_id, "cabi.dynamic") != 0) {
+            fprintf(stderr, "observability metadata contract mismatch\n");
             destroy_fn(instance);
             lib_close(handle);
             return EXIT_FAILURE;
@@ -880,6 +973,146 @@ int main(void) {
         destroy_fn(instance);
         lib_close(handle);
         return EXIT_FAILURE;
+    }
+
+    {
+        rtfw_metric_snapshot cumulative;
+        rtfw_metric_snapshot first_interval;
+        rtfw_metric_snapshot empty_interval;
+        rtfw_metric_cursor metric_cursor;
+        metric_snapshot_init_fn(&cumulative);
+        metric_cursor_init_fn(&metric_cursor);
+        metric_cursor.reserved[0] = 1u;
+        if (get_metrics_fn(
+                instance,
+                RTFW_METRIC_INTERVAL,
+                &metric_cursor,
+                &cumulative) != RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "metric cursor accepted reserved data\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        metric_cursor_init_fn(&metric_cursor);
+        metric_cursor.counters[RTFW_METRIC_FRAMES_STARTED] = 1u;
+        metric_snapshot_init_fn(&cumulative);
+        if (get_metrics_fn(
+                instance,
+                RTFW_METRIC_INTERVAL,
+                &metric_cursor,
+                &cumulative) != RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "metric cursor accepted a nonzero fresh baseline\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        metric_cursor_init_fn(&metric_cursor);
+        metric_snapshot_init_fn(&cumulative);
+        if (get_metrics_fn(
+                instance,
+                RTFW_METRIC_CUMULATIVE,
+                NULL,
+                &cumulative) != RTFW_STATUS_OK ||
+            cumulative.sample_count != RTFW_RUNTIME_METRIC_COUNT ||
+            cumulative.samples[RTFW_METRIC_FRAMES_COMPLETED].value != 7u ||
+            cumulative.samples[RTFW_METRIC_CALLBACKS_COMPLETED].value !=
+                14u ||
+            cumulative.samples[RTFW_METRIC_FRAMES_COMPLETED].kind !=
+                RTFW_METRIC_COUNTER ||
+            cumulative.samples[RTFW_METRIC_DEGRADATION_LEVEL].kind !=
+                RTFW_METRIC_GAUGE) {
+            fprintf(stderr, "cumulative metric C ABI contract failed\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        metric_snapshot_init_fn(&first_interval);
+        if (get_metrics_fn(
+                instance,
+                RTFW_METRIC_INTERVAL,
+                &metric_cursor,
+                &first_interval) != RTFW_STATUS_OK ||
+            first_interval.samples[RTFW_METRIC_FRAMES_COMPLETED].value !=
+                cumulative.samples[RTFW_METRIC_FRAMES_COMPLETED].value) {
+            fprintf(stderr, "first interval metric snapshot failed\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        metric_snapshot_init_fn(&empty_interval);
+        if (get_metrics_fn(
+                instance,
+                RTFW_METRIC_INTERVAL,
+                &metric_cursor,
+                &empty_interval) != RTFW_STATUS_OK ||
+            empty_interval.samples[RTFW_METRIC_FRAMES_COMPLETED].value !=
+                0u ||
+            empty_interval.samples[RTFW_METRIC_CALLBACKS_COMPLETED].value !=
+                0u ||
+            empty_interval.samples[RTFW_METRIC_DEGRADATION_LEVEL].value !=
+                cumulative.samples[RTFW_METRIC_DEGRADATION_LEVEL].value) {
+            fprintf(stderr, "empty interval metric snapshot failed\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+    }
+
+    {
+        rtfw_trace_cursor trace_cursor;
+        rtfw_trace_read_result trace_result;
+        rtfw_trace_event events[64];
+        trace_cursor_init_fn(&trace_cursor);
+        trace_read_result_init_fn(&trace_result);
+        trace_cursor.next_sequence = 1u;
+        if (read_trace_fn(
+                instance,
+                &trace_cursor,
+                events,
+                64,
+                &trace_result) != RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "trace cursor accepted a nonzero fresh position\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        trace_cursor_init_fn(&trace_cursor);
+        trace_read_result_init_fn(&trace_result);
+        if (read_trace_fn(
+                instance,
+                &trace_cursor,
+                events,
+                64,
+                &trace_result) != RTFW_STATUS_OK ||
+            trace_result.events_read == 0u ||
+            trace_result.remaining_sequence_count != 0u ||
+            trace_result.metadata.schema_version !=
+                RTFW_OBSERVABILITY_SCHEMA_VERSION ||
+            strcmp(
+                trace_result.metadata.workload_id,
+                "cabi.dynamic") != 0 ||
+            events[0].schema_version !=
+                RTFW_OBSERVABILITY_SCHEMA_VERSION ||
+            events[0].record_size != sizeof(rtfw_trace_event)) {
+            fprintf(stderr, "trace cursor C ABI contract failed\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        trace_read_result_init_fn(&trace_result);
+        if (read_trace_fn(
+                instance,
+                &trace_cursor,
+                events,
+                64,
+                &trace_result) != RTFW_STATUS_OK ||
+            trace_result.events_read != 0u ||
+            trace_result.lost_events != 0u) {
+            fprintf(stderr, "trace cursor did not resume cleanly\n");
+            destroy_fn(instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
     }
 
     destroy_fn(instance);

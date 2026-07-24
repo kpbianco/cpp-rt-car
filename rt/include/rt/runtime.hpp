@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -29,6 +30,7 @@ struct Capabilities {
     bool self_paced_time;
     bool frame_watchdog;
     bool strict_platform_preflight;
+    bool versioned_observability;
 };
 
 // Query runtime capabilities
@@ -37,7 +39,10 @@ Capabilities query_capabilities() noexcept;
 // Example function using strong types
 core::seconds tick_duration(core::seconds dt) noexcept;
 
-inline constexpr std::uint32_t runtime_config_schema_version = 4;
+inline constexpr std::uint32_t runtime_config_schema_version = 5;
+inline constexpr std::uint32_t observability_schema_version = 1;
+inline constexpr std::size_t observability_identifier_capacity = 64;
+inline constexpr std::uint32_t observability_metadata_size = 184;
 
 enum class RuntimeState : std::uint8_t {
     configuring,
@@ -217,15 +222,19 @@ struct RuntimeConfig {
     std::uint32_t watchdog_max_degradation_level = 0;
     PlatformPreflightMode platform_preflight_mode =
         PlatformPreflightMode::disabled;
+    // Stable caller-supplied provenance copied into every observability
+    // snapshot. IDs use [A-Za-z0-9._:/@-] and must be NUL terminated.
+    std::array<char, observability_identifier_capacity> workload_id{
+        'u', 'n', 's', 'p', 'e', 'c', 'i', 'f', 'i', 'e', 'd', '\0'};
 };
 
 // Applies one strict schema key to a typed configuration. The supported keys
 // are callback_capacity, scratch_bytes, trace_capacity, numerical_mode,
 // executor_policy, worker_count, executor_queue_capacity, scratch_alignment,
 // task_scratch_bytes, task_scratch_slots, memory_budget_bytes,
-// overload_policy, watchdog_timeout_ns, watchdog_max_degradation_level, and
-// platform_preflight_mode. Unknown keys and partially parsed values are
-// rejected.
+// overload_policy, watchdog_timeout_ns, watchdog_max_degradation_level,
+// platform_preflight_mode, and workload_id. Unknown keys and partially parsed
+// values are rejected.
 [[nodiscard]] Status set_runtime_config_value(
     RuntimeConfig& config,
     std::string_view key,
@@ -386,32 +395,171 @@ struct MemoryPlan {
     std::size_t task_scratch_slots = 0;
     std::size_t task_scratch_total_bytes = 0;
     std::size_t trace_capacity = 0;
+    std::size_t trace_slot_bytes = 0;
     std::size_t trace_storage_bytes = 0;
     std::size_t queue_slots = 0;
     std::size_t scratch_alignment = 0;
     OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
 };
 
-enum class RuntimeTraceEventType : std::uint8_t {
-    finalized,
-    started,
-    periodic_release,
-    periodic_wake,
-    step_begin,
-    callback_begin,
-    callback_end,
-    watchdog_fired,
-    degradation_applied,
-    step_end,
-    stopped,
+enum class RuntimeTraceEventType : std::uint16_t {
+    finalized = 1,
+    started = 2,
+    periodic_release = 3,
+    periodic_wake = 4,
+    step_begin = 5,
+    callback_begin = 6,
+    callback_end = 7,
+    watchdog_fired = 8,
+    degradation_applied = 9,
+    step_end = 10,
+    stopped = 11,
+};
+
+enum class RuntimeTraceProducer : std::uint16_t {
+    host = 0,
+    worker = 1,
 };
 
 struct RuntimeTraceEvent {
+    std::uint32_t schema_version = observability_schema_version;
+    std::uint16_t record_size = 64;
     RuntimeTraceEventType type = RuntimeTraceEventType::step_begin;
     Status status = Status::ok;
+    RuntimeTraceProducer producer = RuntimeTraceProducer::host;
+    std::uint16_t reserved0 = 0;
+    std::uint64_t sequence = 0;
     std::uint64_t timestamp_ns = 0;
     std::uint64_t frame_index = 0;
-    std::size_t callback_index = 0;
+    std::uint32_t callback_index =
+        std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t worker_index =
+        std::numeric_limits<std::uint32_t>::max();
+    // Event-specific fixed-width value. Finalization carries config_id,
+    // callback events carry task_index, periodic release/wake carry their
+    // absolute release, watchdog carries its timeout, and degradation carries
+    // the applied level.
+    std::uint64_t value = 0;
+    std::uint64_t reserved1 = 0;
+};
+
+static_assert(sizeof(RuntimeTraceEvent) == 64);
+
+enum class RuntimeMetricKind : std::uint8_t {
+    counter = 0,
+    gauge = 1,
+};
+
+enum class RuntimeMetricWindow : std::uint8_t {
+    cumulative = 0,
+    interval = 1,
+};
+
+// Numeric values are schema identifiers and remain stable for observability
+// schema version 1.
+enum class RuntimeMetricId : std::uint16_t {
+    frames_started = 0,
+    frames_completed = 1,
+    frames_failed = 2,
+    callbacks_started = 3,
+    callbacks_completed = 4,
+    callback_failures = 5,
+    deadline_misses = 6,
+    watchdog_events = 7,
+    degradation_events = 8,
+    periodic_releases = 9,
+    periodic_wakes = 10,
+    trace_events_emitted = 11,
+    trace_events_overwritten = 12,
+    trace_events_dropped = 13,
+    executor_submitted_tasks = 14,
+    executor_local_executions = 15,
+    executor_steal_attempts = 16,
+    executor_successful_steals = 17,
+    executor_queue_rejections = 18,
+    executor_scratch_exhaustions = 19,
+    executor_worker_starts = 20,
+    degradation_level = 21,
+    count = 22,
+};
+
+inline constexpr std::size_t runtime_metric_count =
+    static_cast<std::size_t>(RuntimeMetricId::count);
+
+struct RuntimeMetricDefinition {
+    RuntimeMetricId id = RuntimeMetricId::frames_started;
+    RuntimeMetricKind kind = RuntimeMetricKind::counter;
+    std::string_view name{};
+};
+
+[[nodiscard]] bool runtime_metric_definition(
+    std::size_t schema_index,
+    RuntimeMetricDefinition& definition) noexcept;
+[[nodiscard]] const char* runtime_trace_event_name(
+    RuntimeTraceEventType type) noexcept;
+
+struct ObservabilityMetadata {
+    std::uint32_t struct_size = observability_metadata_size;
+    std::uint32_t schema_version = observability_schema_version;
+    std::uint32_t runtime_version_major = version_major;
+    std::uint32_t runtime_version_minor = version_minor;
+    std::uint32_t runtime_version_patch = version_patch;
+    std::uint32_t trace_event_size =
+        static_cast<std::uint32_t>(sizeof(RuntimeTraceEvent));
+    std::uint32_t metric_sample_size = 16;
+    std::uint32_t metric_count = runtime_metric_count;
+    std::uint64_t config_id = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t trace_capacity = 0;
+    std::array<char, observability_identifier_capacity> build_id{};
+    std::array<char, observability_identifier_capacity> workload_id{};
+};
+
+static_assert(sizeof(ObservabilityMetadata) == observability_metadata_size);
+
+struct RuntimeMetricSample {
+    RuntimeMetricId id = RuntimeMetricId::frames_started;
+    RuntimeMetricKind kind = RuntimeMetricKind::counter;
+    std::uint8_t reserved0 = 0;
+    std::uint32_t reserved1 = 0;
+    std::uint64_t value = 0;
+};
+
+static_assert(sizeof(RuntimeMetricSample) == 16);
+
+struct RuntimeMetricCursor {
+    std::uint32_t schema_version = observability_schema_version;
+    std::uint32_t reserved0 = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t window_end_ns = 0;
+    std::array<std::uint64_t, runtime_metric_count> counters{};
+};
+
+struct RuntimeMetricSnapshot {
+    ObservabilityMetadata metadata{};
+    RuntimeMetricWindow window = RuntimeMetricWindow::cumulative;
+    std::array<std::uint8_t, 7> reserved0{};
+    std::uint64_t snapshot_sequence = 0;
+    std::uint64_t window_start_ns = 0;
+    std::uint64_t window_end_ns = 0;
+    std::size_t sample_count = 0;
+    std::array<RuntimeMetricSample, runtime_metric_count> samples{};
+};
+
+struct RuntimeTraceCursor {
+    std::uint32_t schema_version = observability_schema_version;
+    std::uint32_t reserved0 = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t next_sequence = 0;
+};
+
+struct RuntimeTraceReadResult {
+    ObservabilityMetadata metadata{};
+    std::uint64_t first_sequence = 0;
+    std::uint64_t next_sequence = 0;
+    std::size_t events_read = 0;
+    std::uint64_t lost_events = 0;
+    std::uint64_t remaining_sequence_count = 0;
 };
 
 // Host-driven lifecycle introduced by M1. Control methods are single-host-
@@ -493,6 +641,29 @@ public:
     // The view remains valid until the next control operation or destruction.
     [[nodiscard]] std::string_view last_error() const noexcept;
 
+    // Observability export is a non-RT host operation. These calls reject an
+    // active step/periodic loop and never invoke host callbacks.
+    [[nodiscard]] Status observability_metadata(
+        ObservabilityMetadata& metadata) noexcept;
+    // Interval windows use a caller-owned cursor. The first interval covers
+    // finalization through this call; later intervals partition cumulative
+    // counters without mutating runtime-global baselines. Gauges are sampled
+    // at the window end and are never differenced. Fresh cursors must be
+    // default initialized.
+    [[nodiscard]] Status metrics_snapshot(
+        RuntimeMetricWindow window,
+        RuntimeMetricCursor* cursor,
+        RuntimeMetricSnapshot& snapshot) noexcept;
+    // A zeroed/default cursor starts at the oldest retained event. If an
+    // established cursor falls behind, lost_events reports the exact skipped
+    // sequence span. The caller owns output storage; fresh cursors must be
+    // default initialized.
+    [[nodiscard]] Status read_trace(
+        RuntimeTraceCursor& cursor,
+        std::span<RuntimeTraceEvent> output,
+        RuntimeTraceReadResult& result) noexcept;
+
+    // Compatibility accessors over the latest retained trace window.
     [[nodiscard]] std::size_t trace_event_count() const noexcept;
     [[nodiscard]] bool trace_event(
         std::size_t chronological_index,
