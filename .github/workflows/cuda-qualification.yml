@@ -1,0 +1,62 @@
+name: CUDA qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      warmup:
+        description: Warm-up iterations discarded before measurement
+        required: true
+        default: "1000"
+        type: string
+      iterations:
+        description: Per-stage measurement iterations
+        required: true
+        default: "10000"
+        type: string
+
+jobs:
+  cuda-linux:
+    name: CUDA hardware evidence
+    runs-on: [self-hosted, linux, x64, nvidia-gpu]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure CUDA candidate
+        run: |
+          cmake -S . -B build-cuda \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_TESTS=ON \
+            -DRTFW_ENABLE_CUDA=ON \
+            -DSIM_WERROR=ON
+      - name: Build backend and qualification tool
+        run: |
+          cmake --build build-cuda \
+            --config RelWithDebInfo \
+            --target simcore_tests sample_cuda_qualification \
+            --parallel 2
+      - name: Run CPU-only CUDA state-machine tests
+        env:
+          GTEST_FILTER: CudaBackend.*
+        run: |
+          ctest --test-dir build-cuda \
+            -C RelWithDebInfo \
+            --output-on-failure \
+            -R simcore_all
+      - name: Capture raw hardware evidence
+        env:
+          RTFW_CUDA_WARMUP: ${{ inputs.warmup }}
+          RTFW_CUDA_ITERATIONS: ${{ inputs.iterations }}
+        run: |
+          mkdir -p cuda-evidence
+          ./build-cuda/samples/sample_cuda_qualification \
+            --warmup "$RTFW_CUDA_WARMUP" \
+            --iterations "$RTFW_CUDA_ITERATIONS" \
+            > cuda-evidence/cuda-qualification.json
+      - name: Upload raw evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cuda-qualification-${{ github.sha }}
+          path: cuda-evidence/cuda-qualification.json
+          if-no-files-found: error

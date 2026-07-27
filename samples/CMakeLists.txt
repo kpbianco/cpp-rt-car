@@ -29,6 +29,13 @@ target_link_libraries(sample_embed_cpp PRIVATE simcore_rt)
 add_executable(sample_device_mock device_mock.cpp)
 target_link_libraries(sample_device_mock PRIVATE simcore_rt)
 
+if (RTFW_ENABLE_CUDA)
+    add_executable(sample_cuda_qualification cuda_qualification.cpp)
+    target_link_libraries(
+        sample_cuda_qualification
+        PRIVATE rtfw_cuda_driver)
+endif()
+
 if (ENABLE_TESTS)
     add_test(NAME sample_particles COMMAND sample_particles)
     add_test(NAME sample_tyre_belt COMMAND sample_tyre_belt)

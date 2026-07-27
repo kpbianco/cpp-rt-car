@@ -1,11 +1,11 @@
 # Architecture
 
-This page separates the 0.9 implementation from the accepted target
+This page separates the 0.10 implementation from the accepted target
 architecture. The normative target is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.9 implementation
+## Current 0.10 implementation
 
 ### M1–M8 host runtime
 
@@ -38,6 +38,13 @@ The ABI has no completion callback, and stop joins the service lane before
 unregistering buffers and shutting down backends. The included deterministic
 CPU mock injects saturation, delay, timeout, error, and loss/reset behavior;
 it is not a hardware backend.
+
+M9 implements a separate optional CUDA Driver API backend around a host-owned
+context and stream set. It pre-creates fixed event slots, supports explicit
+copies and fixed-payload kernel launch, integrates through the unchanged M8
+ABI, and has a CPU-only injected-driver test suite. It remains a candidate
+because no versioned hardware support tuple has passed the required resource,
+failure/recovery, and latency gates.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
@@ -133,8 +140,11 @@ M7 adds D1 schedule-independent identity, canonical registered state, bounded
 checkpoint/input-log codecs, transactional restore, and synchronous replay.
 M8 adds the poll-only device ABI, graph-held device completion tokens,
 preallocated device-manager storage, and deterministic mock.
+M9 adds the optional CUDA candidate without coupling the scheduler to vendor
+headers or changing the portable device contract.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
+[CUDA backend contract](cuda_backend.md),
 [ADR-0001](adr/0001-one-executor-boundary.md),
 [ADR-0002](adr/0002-host-driven-time.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
@@ -162,6 +172,9 @@ that arbitrary host data is automatically optimized.
 - M8 device ABI/manager/mock: `rt/include/rt/device_abi.h`,
   `rt/src/device_manager.cpp`, `rt/src/mock_device.cpp`,
   `docs/device_backend.md`
+- M9 CUDA candidate: `rt/include/rt/cuda_backend.hpp`,
+  `rt/src/cuda_backend.cpp`, `rt/src/cuda_driver.cpp`,
+  `docs/cuda_backend.md`
 - Experimental C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - Phase registration and graph: `SimCore::addPhase`,
   `SimCore::addDependency`, `SimCore::buildTopoLevels`;

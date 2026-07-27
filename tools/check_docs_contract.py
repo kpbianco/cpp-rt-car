@@ -65,6 +65,17 @@ def check_version() -> str:
         if manifest.get("version-string") != version:
             fail("vcpkg.json: version-string does not match VERSION.txt")
 
+    try:
+        cuda_matrix = json.loads(read("docs/cuda_support_matrix.json"))
+    except json.JSONDecodeError as exc:
+        fail(f"docs/cuda_support_matrix.json: invalid JSON: {exc}")
+    else:
+        if cuda_matrix.get("runtime_version") != version:
+            fail(
+                "docs/cuda_support_matrix.json: runtime_version does not "
+                "match VERSION.txt"
+            )
+
     cmake = read("CMakeLists.txt")
     required_cmake = (
         'file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/VERSION.txt"',
@@ -236,9 +247,13 @@ def check_runtime_contract() -> None:
     observability_doc = read("docs/observability.md")
     determinism_doc = read("docs/determinism_replay.md")
     device_doc = read("docs/device_backend.md")
+    cuda_doc = read("docs/cuda_backend.md")
     device_abi = read("rt/include/rt/device_abi.h")
+    cuda_header = read("rt/include/rt/cuda_backend.hpp")
     device_manager = read("rt/src/device_manager.cpp")
     mock_device = read("rt/src/mock_device.cpp")
+    cuda_backend = read("rt/src/cuda_backend.cpp")
+    cuda_driver = read("rt/src/cuda_driver.cpp")
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
@@ -254,12 +269,15 @@ def check_runtime_contract() -> None:
     observability_test = read("tests/test_observability.cpp")
     determinism_test = read("tests/test_determinism_replay.cpp")
     device_test = read("tests/test_device_runtime.cpp")
+    cuda_test = read("tests/test_cuda_backend.cpp")
     snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
     ci_workflow = read(".github/workflows/ci.yml")
     c_sample = read("samples/embed_c/mini_app.c")
     cpp_sample = read("samples/embed_cpp/mini_app.cpp")
     device_sample = read("samples/device_mock.cpp")
+    cuda_sample = read("samples/cuda_qualification.cpp")
+    cuda_workflow = read(".github/workflows/cuda-qualification.yml")
 
     for method in (
         "Status configure(",
@@ -525,7 +543,7 @@ def check_runtime_contract() -> None:
         or "| M6 | Complete |" not in roadmap
         or "| M7 | Complete |" not in roadmap
         or "| M8 | Complete |" not in roadmap
-        or "| M9 | Next |" not in roadmap
+        or "| M9 | Candidate |" not in roadmap
     ):
         fail("docs/roadmap.md: M8/M9 milestone status is not advanced")
 
@@ -924,6 +942,117 @@ def check_runtime_contract() -> None:
         if token not in device_sample:
             fail(f"samples/device_mock.cpp: missing M8 usage {token!r}")
 
+    for token in (
+        "struct CudaDriverApi",
+        "class CudaDeviceBackend",
+        "bind_device_buffer(",
+        "register_kernel(",
+        "cuda_device_opcode_copy_host_to_device",
+        "cuda_device_opcode_launch_kernel",
+        "struct CudaKernelLaunch",
+    ):
+        if token not in cuda_header:
+            fail(f"rt/include/rt/cuda_backend.hpp: missing M9 evidence {token!r}")
+    for token in (
+        "kSlotQuarantined",
+        "driver.event_query(",
+        "driver.host_register(",
+        "driver.stream_synchronize(",
+        "RTFW_DEVICE_STATUS_TIMEOUT",
+        "RTFW_DEVICE_HEALTH_LOST",
+    ):
+        if token not in cuda_backend:
+            fail(f"rt/src/cuda_backend.cpp: missing M9 evidence {token!r}")
+    for forbidden in (".detach(", "std::async", "std::condition_variable"):
+        if forbidden in cuda_backend:
+            fail(f"M9 CUDA state machine contains forbidden primitive {forbidden!r}")
+    for token in (
+        "cuEventQuery(",
+        "cuMemHostRegister(",
+        "cuMemcpyHtoDAsync(",
+        "cuMemcpyDtoHAsync(",
+        "cuLaunchKernel(",
+    ):
+        if token not in cuda_driver:
+            fail(f"rt/src/cuda_driver.cpp: missing M9 Driver API call {token!r}")
+    for phrase in (
+        "host supplies a live `CUcontext`",
+        "timeout quarantine",
+        "No RT1, RT2",
+        "qualified tuple",
+        "drain-before-release",
+    ):
+        if phrase.lower() not in cuda_doc.lower():
+            fail(f"docs/cuda_backend.md: missing M9 contract phrase {phrase!r}")
+    for test_name in (
+        "BoundedQueueSaturatesAndTimeoutQuarantinesUntilReady",
+        "CopiesLaunchesKernelAndReturnsDeviceData",
+        "DeviceCopyAndMemsetValidateAndPreserveRanges",
+        "ExternalDeviceBindingRetainsCallerOwnership",
+        "FailedRegistrationRetainsOwnershipForShutdown",
+        "FailedEnqueueIsQuarantinedAndResetDrainsIt",
+        "QueryFailureRequiresSuccessfulDrainBeforeReuse",
+        "ShutdownDrainsOutstandingWorkBeforeFreeingBuffers",
+        "FailedShutdownRetainsResourcesAndCanBeRetried",
+        "ContextLossCompletesAsLostAndCannotSoftReset",
+        "ConcurrentSubmissionsStayWithinFixedCapacity",
+        "RuntimeGraphAcceptsCandidateBackendAtD0",
+    ):
+        if test_name not in cuda_test:
+            fail(f"tests/test_cuda_backend.cpp: missing M9 gate {test_name!r}")
+    if "CudaSubmitAndPollDoNotAllocateAfterInitialization" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing M9 allocation gate")
+    for token in (
+        "rt/src/cuda_backend.cpp",
+        "rt/src/cuda_driver.cpp",
+        "test_cuda_backend.cpp",
+        "cuda_qualification.cpp",
+        "RTFW_ENABLE_CUDA",
+        "target_compile_features(rtfw_cuda_backend PUBLIC cxx_std_20)",
+    ):
+        if (
+            token not in cmake
+            and token not in tests_cmake
+            and token not in samples_cmake
+        ):
+            fail(f"CMake M9 integration is missing {token!r}")
+    if "CudaBackend.*" not in ci_workflow:
+        fail(".github/workflows/ci.yml: M9 is missing from the TSAN filter")
+    for token in (
+        "sample_cuda_qualification",
+        "cuda-qualification.json",
+        "workflow_dispatch",
+        "self-hosted",
+        "--warmup",
+    ):
+        if token not in cuda_workflow:
+            fail(f"CUDA qualification workflow is missing {token!r}")
+    for token in (
+        "cuDevicePrimaryCtxRetain(",
+        "cuda_driver_api()",
+        "cuda_kernel_add_buffer_argument(",
+        "qualification_claim",
+        "warmup_iterations",
+        "measurement_iterations",
+    ):
+        if token not in cuda_sample:
+            fail(f"samples/cuda_qualification.cpp: missing M9 evidence {token!r}")
+
+    try:
+        cuda_support = json.loads(read("docs/cuda_support_matrix.json"))
+    except json.JSONDecodeError as exc:
+        fail(f"docs/cuda_support_matrix.json: invalid JSON: {exc}")
+    else:
+        if (
+            cuda_support.get("schema_version") != 1
+            or cuda_support.get("status") != "candidate"
+            or cuda_support.get("qualified_tuples") != []
+        ):
+            fail(
+                "docs/cuda_support_matrix.json: candidate matrix must be "
+                "schema 1 with no qualified tuples"
+            )
+
 
 def main() -> int:
     require_files(
@@ -940,6 +1069,8 @@ def main() -> int:
             "docs/observability.md",
             "docs/determinism_replay.md",
             "docs/device_backend.md",
+            "docs/cuda_backend.md",
+            "docs/cuda_support_matrix.json",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -951,6 +1082,8 @@ def main() -> int:
             "rt/include/rt/device_abi.h",
             "rt/include/rt/device.hpp",
             "rt/include/rt/mock_device.hpp",
+            "rt/include/rt/cuda_backend.hpp",
+            "rt/include/rt/cuda_driver.hpp",
             "rt/src/compiled_graph.cpp",
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
@@ -966,11 +1099,14 @@ def main() -> int:
             "rt/src/device_manager.hpp",
             "rt/src/device_manager.cpp",
             "rt/src/mock_device.cpp",
+            "rt/src/cuda_backend.cpp",
+            "rt/src/cuda_driver.cpp",
             "rt/include/rt/observability_export.hpp",
             "rt/src/observability_export.cpp",
             "samples/embed_c/mini_app.c",
             "samples/embed_cpp/mini_app.cpp",
             "samples/device_mock.cpp",
+            "samples/cuda_qualification.cpp",
             "tests/test_host_runtime.cpp",
             "tests/test_compiled_graph.cpp",
             "tests/test_executor.cpp",
@@ -980,6 +1116,7 @@ def main() -> int:
             "tests/test_observability.cpp",
             "tests/test_determinism_replay.cpp",
             "tests/test_device_runtime.cpp",
+            "tests/test_cuda_backend.cpp",
             "tests/determinism_artifact.cpp",
             "tests/snapshot_fuzz.cpp",
         )

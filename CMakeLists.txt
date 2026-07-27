@@ -30,6 +30,10 @@ option(ENABLE_RAPIDCHECK "Enable RapidCheck property tests" OFF)
 option(SIM_BUILD_FUZZERS "Build the Clang libFuzzer harness" OFF)
 option(SIM_ENABLE_IWYU "Run include-what-you-use during builds" OFF)
 option(SIM_WARN_ODR "Enable -Wodr to detect ODR violations" OFF)
+option(
+  RTFW_ENABLE_CUDA
+  "Build the optional CUDA Driver API adapter and hardware qualification tool"
+  OFF)
 
 # Sanitizer toggles (semicolons to enable multiple: address;thread;leak;memory;hwaddress;safe-stack;cfi)
 set(SIM_SANITIZERS "" CACHE STRING "Sanitizers to enable for all targets")
@@ -559,6 +563,46 @@ if (UNIX)
     target_link_libraries(simcore_rt PUBLIC dl)
 endif()
 
+# CUDA backend state machine. This target deliberately has no toolkit
+# dependency so its bounded behavior remains testable on CPU-only builders.
+add_library(rtfw_cuda_backend STATIC rt/src/cuda_backend.cpp)
+target_compile_features(rtfw_cuda_backend PUBLIC cxx_std_20)
+target_include_directories(rtfw_cuda_backend PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(rtfw_cuda_backend PUBLIC simcore_core)
+set_target_properties(rtfw_cuda_backend PROPERTIES
+    EXPORT_NAME cuda_backend
+    OUTPUT_NAME rtfw_cuda_backend
+    POSITION_INDEPENDENT_CODE ON
+)
+add_library(rtfw::cuda_backend ALIAS rtfw_cuda_backend)
+
+# Vendor headers and symbols stay in a separate opt-in adapter.
+if (RTFW_ENABLE_CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    add_library(rtfw_cuda_driver STATIC rt/src/cuda_driver.cpp)
+    target_include_directories(rtfw_cuda_driver PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_compile_definitions(
+        rtfw_cuda_driver
+        PUBLIC RTFW_CUDA_DRIVER_AVAILABLE=1)
+    target_link_libraries(
+        rtfw_cuda_driver
+        PUBLIC rtfw_cuda_backend CUDA::cuda_driver)
+    set_target_properties(rtfw_cuda_driver PROPERTIES
+        EXPORT_NAME cuda_driver
+        OUTPUT_NAME rtfw_cuda_driver
+        POSITION_INDEPENDENT_CODE ON
+    )
+    add_library(rtfw::cuda_driver ALIAS rtfw_cuda_driver)
+endif()
+
 set(RTFW_SOURCES src/c_abi.cpp)
 
 add_library(rtfw_shared SHARED ${RTFW_SOURCES})
@@ -653,13 +697,29 @@ include(CMakePackageConfigHelpers)
 set(RTFW_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/rtfw")
 
 install(
-    TARGETS rtfw_shared rtfw_static simcore_platform simcore_rt
+    TARGETS
+        rtfw_shared
+        rtfw_static
+        simcore_platform
+        simcore_rt
+        rtfw_cuda_backend
     EXPORT rtfwTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
+
+if (RTFW_ENABLE_CUDA)
+    install(
+        TARGETS rtfw_cuda_driver
+        EXPORT rtfwTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
 
 install(
     TARGETS simcore simcore_core

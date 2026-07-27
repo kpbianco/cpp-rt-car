@@ -1,10 +1,13 @@
 # Bounded Device Backend Contract
 
-RTFW 0.9 completes M8 for the target `rt::Runtime` path. It adds a
+RTFW 0.10 retains the M8 target `rt::Runtime` device contract introduced in
+0.9. The base contract adds a
 size/versioned C backend ABI, device phases in the compiled graph, one
 runtime-owned completion-service lane, and a deterministic fault-injectable
-CPU mock. This is portable RT0 functional behavior. It is not CUDA, Vulkan,
-XDMA, driver, latency, or RT2 qualification.
+CPU mock. This base is portable RT0 functional behavior. It is not itself
+CUDA, Vulkan, XDMA, driver, latency, or RT2 qualification. The optional M9
+CUDA implementation and its separate hardware-evidence boundary are in
+[the CUDA backend contract](cuda_backend.md).
 
 The legacy `hal/gpu_stub.hpp` detached-thread experiment is unchanged and
 outside this contract. `rt::Runtime` does not invoke it.
@@ -167,7 +170,9 @@ loading, memory-plan accounting, steady-state allocation, and sanitizer
 execution in `tests/test_device_runtime.cpp`, `tests/test_trace_noalloc.cpp`, and
 `tests/test_cabi_dlopen.c`. `samples/device_mock.cpp` is the minimal C++ flow.
 
-M9 and M10 remain separate: a real CUDA or XDMA backend needs a named driver,
-hardware, OS, firmware, and workload support tuple plus functional, recovery,
-resource, and latency-decomposition evidence. No portable completion-time
-claim is inherited from M8.
+M9 remains separately gated even though 0.10 contains a real CUDA Driver API
+adapter candidate. It still needs a named driver, toolkit, hardware, OS, and
+workload support tuple plus functional, recovery, resource, and
+latency-decomposition evidence before its support matrix can contain a
+qualified tuple. M10 XDMA remains unimplemented. Neither backend inherits a
+portable completion-time claim from M8.

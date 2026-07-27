@@ -83,6 +83,7 @@ if (SIM_GTEST_AVAILABLE)
         test_observability.cpp
         test_determinism_replay.cpp
         test_device_runtime.cpp
+        test_cuda_backend.cpp
         test_rt_pipeline.cpp
         test_platform_gate.cpp
         integration/test_determinism.cpp
@@ -101,7 +102,13 @@ if (SIM_GTEST_AVAILABLE)
     endif()
 
     add_executable(simcore_tests ${TEST_SOURCES})
-    target_link_libraries(simcore_tests PRIVATE simcore_platform simcore_rt ${SIM_GTEST_LIBRARIES})
+    target_link_libraries(
+        simcore_tests
+        PRIVATE
+            simcore_platform
+            simcore_rt
+            rtfw_cuda_backend
+            ${SIM_GTEST_LIBRARIES})
     if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
         target_link_libraries(simcore_tests PRIVATE rapidcheck rapidcheck_gtest)
     endif()

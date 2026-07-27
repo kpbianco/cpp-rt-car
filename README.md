@@ -8,9 +8,10 @@ simulation execution. The repository explores phase graphs, parallel range
 work, fixed-capacity queues, frame arenas, numerical controls, tracing, and
 asynchronous device patterns.
 
-> **Status: 0.9.0 experimental.** This release is not production-ready and has
-> no hard-real-time, worst-case-latency, cross-platform bitwise-determinism, GPU,
-> or XDMA qualification. See the [product contract](docs/product_contract.md)
+> **Status: 0.10.0 experimental.** This release is not production-ready and has
+> no hard-real-time, worst-case-latency, cross-platform bitwise-determinism,
+> CUDA-hardware, or XDMA qualification. See the
+> [product contract](docs/product_contract.md)
 > and [roadmap](docs/roadmap.md) before integrating it.
 
 ## Current implementation
@@ -29,6 +30,7 @@ asynchronous device patterns.
 | Target-path observability | Implemented RT0 surface | Schema-v2 fixed records and 32 metrics, bounded nonblocking emission, runtime-bound trace/metric cursors, explicit loss, provenance metadata, and non-RT JSON export |
 | Target-path checkpoint/replay | Implemented D0/D1 surface | Canonical state registration, stable little-endian checkpoints/input logs, transactional restore, worker-count-independent D1 identity, and synchronous input replay |
 | Target-path device ABI/mock | Implemented RT0 surface | Size/versioned poll-only backend ABI, registered buffers, nonblocking device phases, a runtime-owned completion lane, and deterministic fault-injectable CPU mock |
+| CUDA Driver API backend | Candidate; not hardware-qualified | Optional caller-owned context/stream adapter with fixed event/buffer/kernel registries, pinned-host registration, async copies/kernel launch, timeout quarantine, fake-driver tests, and a raw-evidence tool |
 | Legacy phase/range execution | Experimental | `SimCore` retains its separate phase, range, reduction, and pacing path for compatibility |
 | Legacy `SimCore` graph | Experimental | Topological levels exist, but this path does not inherit the target runtime's cycle/resource validation |
 | Legacy memory utilities | Experimental | Per-thread frame arenas and NUMA helpers remain outside the target plan; the Release arena overflow path can fall back to heap allocation |
@@ -39,7 +41,7 @@ asynchronous device patterns.
 | C ABI | Experimental ABI v7 surface | Size/version-checked lifecycle, graph, nested-work, memory, time/platform, observability, replay, and device calls use fixed-width discriminators and typed status codes |
 | Runtime configuration | Implemented M1–M8 schema | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, and artifact limits; unknown keys fail |
 | Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
-| Legacy GPU stub | Experimental compatibility path | Detached CPU-thread stub outside `rt::Runtime`; no CUDA/Vulkan backend exists |
+| Legacy GPU stub | Experimental compatibility path | Detached CPU-thread stub outside `rt::Runtime`; superseded for new CUDA work by the separate M9 candidate |
 | XDMA | Planned | No backend exists |
 
 `rt::Runtime` does not use the legacy `WorkerPool`, `rt::Scheduler`, or
@@ -64,6 +66,20 @@ ctest --test-dir build --output-on-failure
 The demo runs 3,000 frames at a nominal 1 kHz and emits one JSON snapshot at
 exit. Successful execution is a functional smoke test, not an RT
 qualification.
+
+The CUDA candidate is opt-in and uses the Driver API, so the host owns CUDA
+initialization, context, stream, module, and kernel lifetimes:
+
+```bash
+cmake -S . -B build-cuda -DRTFW_ENABLE_CUDA=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build-cuda --target sample_cuda_qualification --parallel 2
+./build-cuda/samples/sample_cuda_qualification \
+  --warmup 1000 --iterations 10000 > cuda-evidence.json
+```
+
+That command produces raw functional and latency-decomposition evidence. It
+does not by itself add a tuple to the versioned support matrix or establish
+real-time qualification.
 
 ## Demo command line
 
@@ -94,7 +110,7 @@ embedding runtime; demo/profile integration remains planned.
 
 ## Embedding lifecycle
 
-Release 0.9 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
+Release 0.10 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
 memory closure, M5 time/platform controls, M6 observability, and M7
 checkpoint/replay plus the M8 device ABI/mock in
 `<rt/runtime.hpp>` and `<rt/c_api.h>`:
@@ -131,7 +147,8 @@ uses local queues and bounded steals. Both use the same team for nested
 [device backend contract](docs/device_backend.md), and the working
 [C](samples/embed_c/mini_app.c) and
 [C++](samples/embed_cpp/mini_app.cpp) examples plus the
-[mock-device sample](samples/device_mock.cpp).
+[mock-device sample](samples/device_mock.cpp). The optional M9 CUDA candidate
+has a separate [backend and qualification contract](docs/cuda_backend.md).
 
 ## Architecture direction
 
@@ -157,7 +174,8 @@ The M1–M8 host runtime now implements lifecycle, both explicit time modes,
 compiled graph validation, the first two CPU policies, the bounded target-path
 memory plan, watchdog/degradation, platform preflight, versioned
 observability, bounded registered-state replay, and the bounded poll-only
-device path. The existing
+device path. M9 adds an optional CUDA Driver API backend candidate without
+changing the core device ABI or claiming a qualified deployment. The existing
 `SimCore` demo and legacy scheduler components remain outside that target
 path. The [architecture guide](docs/architecture.md) distinguishes current
 and target paths.
@@ -174,7 +192,7 @@ RTFW separates portable functionality from deployment qualification:
 No RT2 record exists yet.
 
 Determinism is tiered from D0 (unspecified) through D3 (portable approved
-fixed-point/specified math). Release 0.9 supports D0 and an explicit D1
+fixed-point/specified math). Release 0.10 supports D0 and an explicit D1
 contract for registered canonical state. Its worker-count and compiler-artifact
 fixtures do not prove D2, arbitrary floating-point identity, or cross-machine
 D3 behavior. Definitions and evidence requirements are in the
@@ -186,7 +204,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M8 host runtime, graph compiler, unified executor, memory/time/platform/observability/replay/device controls, plus experimental legacy scheduler/fiber and plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M8 host runtime plus the M9 CUDA candidate, graph compiler, unified executor, memory/time/platform/observability/replay/device controls, and experimental legacy scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |
@@ -211,6 +229,7 @@ The following top-level CMake options are implemented:
 | `SIM_LTO_THIN` | `OFF` | Request ThinLTO where supported |
 | `SIM_PGO` | empty | Experimental `gen`/`use` PGO mode |
 | `SIM_BUILD_FUZZERS` | `OFF` | Build the Clang job-queue and snapshot-parser libFuzzer harnesses |
+| `RTFW_ENABLE_CUDA` | `OFF` | Build the CUDA Driver API adapter and hardware qualification executable; requires CUDAToolkit |
 | `RTFW_BUILD_ID` | `rtfw-<version>` | Stable 1–63 character build identifier included in observability and checkpoint provenance |
 
 Platform and optional dependency behavior is described in the
@@ -239,6 +258,11 @@ CI currently provides:
   mutation and libFuzzer parser gates, plus exchanged GCC/Clang/FMA artifacts;
 - deterministic device saturation/delay/timeout/error/loss/reset/shutdown,
   dependency-release, no-allocation, dynamic C ABI, and sanitizer gates;
+- CPU-only fake-driver CUDA queue, transfer, kernel, timeout-quarantine,
+  recovery, shutdown, runtime-integration, no-allocation, and TSAN gates;
+- an opt-in self-hosted NVIDIA workflow that emits raw per-stage CUDA
+  submission/poll/completion samples without automatically creating a support
+  claim;
 - shared/static C and C++ compiled-graph samples plus dynamic C ABI loading;
 - autotune mapping and synthetic autotune smoke;
 - scaling artifact smoke;
