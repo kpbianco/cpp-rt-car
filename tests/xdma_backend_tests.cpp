@@ -31,7 +31,9 @@ std::atomic<bool> track_allocations{false};
 std::atomic<std::uint64_t> allocations{0};
 
 struct FakeDriver {
-    std::array<std::byte, 1u << 20u> device{};
+    // Keep the deterministic fake below Windows' default 1 MiB thread stack.
+    // The largest stress range is 64 KiB; 128 KiB leaves explicit headroom.
+    std::array<std::byte, 1u << 17u> device{};
     std::atomic<bool> initialized{false};
     std::atomic<bool> blocked{false};
     std::atomic<bool> in_transfer{false};
