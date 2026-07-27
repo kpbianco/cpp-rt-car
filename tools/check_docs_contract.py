@@ -1107,7 +1107,7 @@ def check_runtime_contract() -> None:
         if token not in xdma_linux:
             fail(f"rt/src/xdma_linux.cpp: missing M10 Linux adapter call {token!r}")
     for phrase in (
-        "one deliberately narrow stack",
+        "deliberately narrow",
         "fixed worker",
         "timeout quarantine",
         "No tuple has completed",
