@@ -171,6 +171,12 @@ endif()
 add_test(NAME cabi_dlopen COMMAND test_cabi_dlopen)
 set_tests_properties(cabi_dlopen PROPERTIES TIMEOUT 30)
 
+add_executable(rtfw_host_adapter_tests host_adapter_tests.cpp)
+target_link_libraries(
+    rtfw_host_adapter_tests PRIVATE rtfw_static)
+add_test(NAME host_adapter COMMAND rtfw_host_adapter_tests)
+set_tests_properties(host_adapter PROPERTIES TIMEOUT 60)
+
 add_executable(simcore_thread_violation EXCLUDE_FROM_ALL thread_violation.cpp)
 target_link_libraries(simcore_thread_violation PRIVATE simcore_platform)
 target_compile_definitions(simcore_thread_violation PRIVATE RTFW_ENFORCE_NO_RAW_THREADS=1)

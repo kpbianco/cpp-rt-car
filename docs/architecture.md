@@ -1,19 +1,20 @@
 # Architecture
 
-This page separates the 0.11 implementation from the accepted target
+This page separates the 0.12 implementation from the accepted target
 architecture. The normative target is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.11 implementation
+## Current 0.12 implementation
 
-### M1–M10 host and device runtime
+### M1–M11 host, device, and distribution runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
 compiler, frozen phase/resource topology, a finalized aligned scratch/queue/
 trace memory plan, a runtime-local clock, an explicit numerical helper policy,
-one fixed CPU worker team, optional watchdog/degradation state, and a
+one runtime-owned or borrowed host CPU executor, optional
+watchdog/degradation state, and a
 fixed-capacity platform-preflight report.
 
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
@@ -54,9 +55,17 @@ quarantine, recovery, concurrency, and steady-state allocation freedom. It
 remains unqualified until one declared PCI/driver/bitstream tuple passes the
 published hardware evidence gates.
 
+M11 adds the third `host_adapter` executor policy without creating another task
+representation. The runtime passes immutable graph/range/reduction records,
+aligned scratch, and generation-tagged completion context to a borrowed,
+capacity-matched host job system. It also freezes C ABI v8, hides non-C
+symbols, checks an exact export allowlist, and validates relocated installed
+package consumers. The C++ API remains source-only.
+
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
-run on either a static-assignment or bounded-throughput policy. Finalization
+run on static-assignment, bounded-throughput, or borrowed-host policy.
+Finalization
 rejects invalid/foreign handles, cycles, unordered conflicting resource access,
 an undersized graph queue plan, task-scratch underprovisioning, and a plan over
 the configured memory budget. Nested ranges and deterministic-tree reductions
@@ -70,8 +79,9 @@ the graph returns. Optional strict Linux preflight is read-only and runs before
 runtime threads start. See the
 [time/platform contract](time_platform.md).
 
-The experimental C ABI mirrors this lifecycle with size/version-checked
-structures and encoded graph handles. See the
+Stable C ABI v8 mirrors this lifecycle with size/version-checked structures,
+an explicit compatibility handshake, and encoded graph handles. See the
+[C ABI contract](c_abi.md), the
 [host runtime contract](host_runtime.md) and
 [compiled graph contract](compiled_graph.md), the
 [executor contract](executor.md), and the
@@ -127,7 +137,7 @@ The complete target lifecycle is configure, finalize, start, run, and stop:
 flowchart TD
   A["Configure graph and backends"] --> B["Finalize and validate"]
   B --> C["Allocate bounded plan"]
-  C --> D["Start fixed execution contexts"]
+  C --> D["Start or bind fixed execution contexts"]
   D --> E["Step compiled graph"]
   E --> F["Stop and drain"]
 ```
@@ -152,6 +162,7 @@ M9 adds the optional CUDA candidate without coupling the scheduler to vendor
 headers or changing the portable device contract. M10 adds the optional Linux
 XDMA AXI-MM candidate, likewise behind the unchanged M8 contract and a separate
 support matrix.
+M11 adds the borrowed host job-system policy and stable distribution boundary.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
@@ -168,10 +179,12 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M10 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M11 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
+- M11 host adapter and stable distribution: `rt/src/executor.cpp`,
+  `rt/include/rt/c_api.h`, `docs/c_abi.md`, `tests/package_consumer`
 - M4 memory plan: `rt/src/aligned_storage.hpp`,
   `docs/memory_plan.md`
 - M5 time/platform controls: `rt/src/watchdog_monitor.cpp`,

@@ -2,7 +2,7 @@
 
 Status: accepted target contract for the pre-1.0 development line
 
-Current release: 0.11.0 experimental
+Current release: 0.12.0 experimental product with stable C ABI v8
 
 ## Product definition
 
@@ -12,14 +12,16 @@ before execution, and runs it on a preallocated CPU executor. The target
 runtime supports host-driven and self-paced frames and integrates asynchronous
 device backends through bounded submission and completion interfaces.
 
-The current 0.11 implementation is a research prototype. Its target-path host
+The current 0.12 implementation is a research prototype. Its target-path host
 runtime satisfies the M1 lifecycle/callback, M2 compiled-graph, M3 unified
 CPU-executor, M4 bounded-memory, M5 time/platform, and M6 observability
 contracts at RT0 and the M7 registered-state D1/checkpoint/replay contract,
 plus the M8 bounded device ABI and deterministic mock contract at RT0. M9 adds
-an optional CUDA Driver API backend candidate with CPU-only evidence and a
-hardware evidence procedure, but no qualified CUDA tuple. The product remains
-incomplete against the complete contract in this document.
+an optional CUDA Driver API backend candidate with CPU-only evidence, and M10
+adds the named XDMA candidate, but neither has a qualified hardware tuple. M11
+adds the third host-adapter executor policy, stable C ABI v8, controlled
+exports, and relocated installed-package consumers. The product remains
+pre-1.0 and has no RT2 qualification.
 
 ## Claim policy
 
@@ -61,7 +63,8 @@ The 1.0 lifecycle is:
 compiles dependencies and logical resource access at finalization, and freezes
 the complete graph topology and static assignment metadata. `start()` performs
 an optional fail-closed platform preflight, then creates the configured fixed
-CPU team and optional watchdog service lane. The legacy `SimCore`
+CPU team or borrows an explicitly attached host job system, then starts any
+optional watchdog/device service lane. The legacy `SimCore`
 constructor/run/destructor path remains experimental and does not inherit that
 lifecycle.
 
@@ -74,7 +77,7 @@ Host-driven time is the default embedding contract:
 - A host-driven step does not sleep or advance a hidden wall clock.
 - A separate self-paced mode owns an absolute periodic release schedule.
 
-The 0.11 `rt::Runtime` implements both explicit modes. The host supplies frame
+The 0.12 `rt::Runtime` implements both explicit modes. The host supplies frame
 index, delta, and optional deadline to synchronous `step()` without runtime
 pacing. `run_periodic()` executes a finite caller-thread loop using absolute
 epoch-based releases; late frames never shift that epoch. Per-frame results
@@ -96,12 +99,19 @@ policies may differ:
 | `host_adapter` | Execution through a host job-system contract with explicit scratch and completion contexts |
 | `periodic_rt` | Static execution plus qualified absolute release/deadline control |
 
-Release 0.11 implements `static_deterministic` and `bounded_throughput` in the
-runtime-owned executor. Graph phases, nested ranges, and reductions share that
-team. The current `SimCore` workers, optional `WorkerPool`, `rt::Scheduler`,
+Release 0.12 implements `static_deterministic`, `bounded_throughput`, and
+`host_adapter`. Graph phases, nested ranges, and reductions share one task
+representation; the first two policies own a runtime team while the third
+borrows a capacity-matched host job system with explicit scratch and completion
+tokens. The current `SimCore` workers, optional `WorkerPool`, `rt::Scheduler`,
 and `FiberPool` are separate compatibility experiments, not target policies.
 See [ADR-0001](adr/0001-one-executor-boundary.md) and the
 [executor contract](executor.md).
+
+The C++ runtime remains a source API. C plugins and language/engine bindings
+that need a cross-release binary boundary use stable ABI v8 and the installed
+`c_shared`/`c_static` package components described by the
+[C ABI contract](c_abi.md).
 
 ### Memory and overload
 
@@ -129,7 +139,7 @@ fixed-capacity RT-lane emission, explicit loss accounting, runtime-isolated
 cursors, and version/build/config/workload provenance. Serialization and
 external transport remain non-RT host responsibilities.
 
-Release 0.11 implements observability schema version 2 for `rt::Runtime`.
+Release 0.12 implements observability schema version 2 for `rt::Runtime`.
 Schema 2 preserves IDs 0–21 and adds device events and metrics.
 Metric cursors independently partition monotonic counters into intervals
 without resetting global state; gauges are sampled rather than differenced.
@@ -143,7 +153,7 @@ Devices are optional backends outside the core scheduler. A backend contract
 must define capabilities, buffer registration, bounded submission, completion,
 timeout, cancellation where supported, health, reset, and shutdown.
 
-Release 0.11 retains the size/versioned, poll-only device ABI, registered
+Release 0.12 retains the size/versioned, poll-only device ABI, registered
 buffers, graph-integrated device phases, health/reset/shutdown control, and a
 fixed-capacity deterministic CPU mock. The runtime owns one completion-service
 lane; CPU workers submit without waiting for completion, and the ABI has no
@@ -183,10 +193,10 @@ An RT2 qualification record must include:
 - raw release, wake-up, compute, completion, slack, and miss samples;
 - thresholds chosen before the run and the final pass/fail result.
 
-Release 0.11 has a strict, read-only Linux prerequisite preflight. It fails
+Release 0.12 has a strict, read-only Linux prerequisite preflight. It fails
 closed on missing PREEMPT_RT, lock coverage, isolated affinity, realtime
 scheduling, or absolute clock support, but it does not validate the full
-deployment record or measured deadlines. No RT2 qualification exists in 0.11.
+deployment record or measured deadlines. No RT2 qualification exists in 0.12.
 
 ## Determinism tiers
 
@@ -197,7 +207,7 @@ deployment record or measured deadlines. No RT2 qualification exists in 0.11.
 | D2 — Reproducible build profile | D1 plus pinned compiler, flags, dependencies, and hardware class |
 | D3 — Portable deterministic | Only approved fixed-point or explicitly specified math kernels; arbitrary floating-point code is excluded |
 
-Release 0.11 supports D0 and an explicit D1 contract for registered canonical
+Release 0.12 supports D0 and an explicit D1 contract for registered canonical
 state. D1 tests cover 1, 2, and 4 workers and exchange one integer-only
 checkpoint artifact between GCC/Clang and FMA-on/FMA-off CI jobs. That narrow
 artifact comparison does not establish D2 for arbitrary callbacks or
@@ -208,17 +218,17 @@ callback expressions.
 
 ## Current support matrix
 
-| Surface | 0.11 status | Notes |
+| Surface | 0.12 status | Notes |
 | --- | --- | --- |
 | `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen topology |
 | Compiled graph | Implemented RT0 surface | Deterministic topological order; invalid/foreign handles, cycles, and unordered conflicting resource access fail before start |
 | Host-driven callbacks | Implemented RT0 surface | Synchronous host wait; dependency-ready callbacks may overlap without step-time pacing or worker creation |
-| Unified CPU executor | Implemented RT0 surface | Static assignments and bounded local-queue throughput; graph, range, and reduction work share one fixed team |
+| Unified CPU executor | Implemented RT0 surface | Static assignments, bounded local-queue throughput, and a borrowed host job-system adapter share one graph/range/reduction representation |
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |
-| Versioned observability | Implemented RT0 surface | Schema-v2 fixed trace records and 32 metrics; bounded nonblocking emission, cursor loss/window semantics, provenance, current C ABI v7 access, and non-RT JSON export |
+| Versioned observability | Implemented RT0 surface | Schema-v2 fixed trace records and 32 metrics; bounded nonblocking emission, cursor loss/window semantics, provenance, stable C ABI v8 access, and non-RT JSON export |
 | Determinism/checkpoint/replay | Implemented D0/D1 surface | Frozen canonical state registry, worker-count-independent D1 compatibility identity, transactional schema-v1 checkpoint restore, bounded input logs, and synchronous replay |
 | Device ABI and mock | Implemented RT0 surface | Poll-only backend ABI v1, registered borrowed buffers, graph dependency release, stable failures, health/reset/shutdown, and deterministic fault injection |
 | CUDA Driver API backend | Candidate; unqualified | Optional host-owned context/stream adapter with fixed registries, pinned host spans, async transfer/kernel operations, timeout quarantine, CPU-only tests, and raw-evidence tooling; support matrix has no qualified tuple |
@@ -232,7 +242,7 @@ callback expressions.
 | Legacy binary trace ring | Experimental | `SimCore` retains process-global registration and separate event definitions outside the M6 schema |
 | Metrics JSON | Experimental | Phase histograms are rolling windows, default capacity 120 |
 | Legacy snapshot helpers | Experimental compatibility surface | Bounds checks prevent truncated reads and attacker-sized vector allocation, but native-layout `SimCore` snapshots are outside checkpoint schema v1 |
-| C ABI | Experimental M8 surface | ABI v7 includes lifecycle through replay plus backend, buffer, device-phase, health, and reset calls; ABI freezes at M11 |
+| C ABI and distribution | Stable ABI v8 / M11 complete | Exact symbol allowlist, header/library fingerprint handshake, ABI-numbered SONAME, C/C++ host adapter, package components, and relocated Linux/Windows consumers |
 | JSON profiles/runtime autotune | Planned integration | Generators exist; `rtfw_demo` does not load their output |
 | GPU | CUDA candidate; no qualified tuple | Real Driver API adapter exists behind `RTFW_ENABLE_CUDA`; deterministic mock remains the portable gate and the legacy detached-thread stub is excluded |
 | Xilinx XDMA AXI-MM | Candidate; unqualified | Portable bounded backend and opt-in Linux character-device adapter exist for one named stack; the support matrix has no qualified tuple |

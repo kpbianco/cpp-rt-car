@@ -1,6 +1,6 @@
 # Versioned Observability Contract
 
-Release 0.11 retains the M6 RT0 observability surface for `rt::Runtime` with M8
+Release 0.12 retains the M6 RT0 observability surface for `rt::Runtime` with M8
 device records.
 Emission is bounded and allocation-free on runtime lanes; inspection and
 serialization are explicit non-RT host operations. This is a telemetry
@@ -169,7 +169,7 @@ C++:
 - `write_observability_json()` in
   `<rt/observability_export.hpp>`.
 
-Current C ABI v7:
+Stable C ABI v8:
 
 - `rtfw_get_observability_metadata()`;
 - `rtfw_get_metrics()`;
@@ -192,7 +192,7 @@ host sink.
 - fixed trace schema, loss accounting, metric windows, provenance, runtime
   isolation, JSON, and contended nonblocking emission:
   `tests/test_observability.cpp`;
-- C ABI v7 symbol, structure, cursor, metric, trace, and device coverage:
+- C ABI v8 symbol, structure, cursor, metric, trace, and device coverage:
   `tests/test_cabi_dlopen.c`;
 - complete post-start CPU and mock-device frames with tracing and counters
   under allocation instrumentation: `tests/test_trace_noalloc.cpp`;

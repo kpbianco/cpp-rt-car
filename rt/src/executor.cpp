@@ -4,6 +4,7 @@
 #include <bit>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <utility>
 
 #include <rt/arch.hpp>
@@ -22,6 +23,12 @@ constexpr std::uint8_t kPhaseDispatching = 1;
 constexpr std::uint8_t kPhasePending = 2;
 constexpr std::uint8_t kPhaseExternalReady = 3;
 constexpr std::uint8_t kPhaseFinalized = 4;
+constexpr std::uint64_t kHostSlotStateMask = 3;
+constexpr std::uint64_t kHostSlotFree = 0;
+constexpr std::uint64_t kHostSlotAccepted = 1;
+constexpr std::uint64_t kHostSlotRunning = 2;
+constexpr std::uint64_t kHostTokenIncrement = 4;
+constexpr std::size_t kHostTokenCasAttemptLimit = 64;
 
 } // namespace
 
@@ -153,7 +160,8 @@ Executor::Executor(
     std::size_t task_scratch_slots,
     std::size_t scratch_alignment,
     OverloadPolicy overload_policy,
-    std::span<const GraphDependency> dependencies)
+    std::span<const GraphDependency> dependencies,
+    const HostExecutorAdapter* host_adapter)
     : policy_(policy),
       worker_count_(worker_count),
       queue_capacity_(queue_capacity),
@@ -211,10 +219,19 @@ Executor::Executor(
             std::memory_order_relaxed);
     }
 
-    queues_.reserve(worker_count_);
-    threads_.reserve(worker_count_);
-    for (std::size_t worker = 0; worker < worker_count_; ++worker) {
-        queues_.push_back(std::make_unique<Queue>(queue_capacity_));
+    if (policy_ == ExecutorPolicy::host_adapter) {
+        if (host_adapter == nullptr) {
+            throw std::invalid_argument("host adapter is required");
+        }
+        host_adapter_ = *host_adapter;
+        host_work_slots_ =
+            std::make_unique<HostWorkSlot[]>(task_scratch_slots_);
+    } else {
+        queues_.reserve(worker_count_);
+        threads_.reserve(worker_count_);
+        for (std::size_t worker = 0; worker < worker_count_; ++worker) {
+            queues_.push_back(std::make_unique<Queue>(queue_capacity_));
+        }
     }
 
     for (const auto& dependency : dependencies) {
@@ -248,6 +265,7 @@ Executor::~Executor() {
 }
 
 bool Executor::estimate_control_storage(
+    ExecutorPolicy policy,
     std::size_t worker_count,
     std::size_t queue_capacity,
     std::size_t phase_count,
@@ -268,19 +286,8 @@ bool Executor::estimate_control_storage(
             return true;
         };
 
-    std::size_t queue_slots = 0;
     std::size_t phase_offsets = 0;
-    if (!checked_multiply(
-            worker_count,
-            queue_capacity,
-            queue_slots) ||
-        !checked_add(phase_count, 1, phase_offsets) ||
-        !add_product(
-            worker_count,
-            sizeof(std::unique_ptr<Queue>)) ||
-        !add_product(worker_count, sizeof(std::thread)) ||
-        !add_product(worker_count, sizeof(Queue)) ||
-        !add_product(queue_slots, Queue::cell_size()) ||
+    if (!checked_add(phase_count, 1, phase_offsets) ||
         !add_product(phase_count, sizeof(std::uint32_t)) ||
         !add_product(
             phase_count,
@@ -296,6 +303,28 @@ bool Executor::estimate_control_storage(
         !add_product(phase_count, sizeof(std::size_t))) {
         bytes = 0;
         return false;
+    }
+
+    if (policy == ExecutorPolicy::host_adapter) {
+        if (!add_product(task_scratch_slots, sizeof(HostWorkSlot))) {
+            bytes = 0;
+            return false;
+        }
+    } else {
+        std::size_t queue_slots = 0;
+        if (!checked_multiply(
+                worker_count,
+                queue_capacity,
+                queue_slots) ||
+            !add_product(
+                worker_count,
+                sizeof(std::unique_ptr<Queue>)) ||
+            !add_product(worker_count, sizeof(std::thread)) ||
+            !add_product(worker_count, sizeof(Queue)) ||
+            !add_product(queue_slots, Queue::cell_size())) {
+            bytes = 0;
+            return false;
+        }
     }
 
     const auto scratch_words =
@@ -326,6 +355,17 @@ Status Executor::start() noexcept {
     worker_starts_.store(0, std::memory_order_relaxed);
     started_.store(true, std::memory_order_release);
 
+    if (policy_ == ExecutorPolicy::host_adapter) {
+        for (std::size_t slot = 0;
+             slot < task_scratch_slots_;
+             ++slot) {
+            host_work_slots_[slot].control.store(
+                kHostSlotFree,
+                std::memory_order_relaxed);
+        }
+        return Status::ok;
+    }
+
     try {
         for (std::size_t worker = 0; worker < worker_count_; ++worker) {
             threads_.emplace_back([this, worker] {
@@ -355,6 +395,9 @@ void Executor::stop() noexcept {
         return;
     }
     stopping_.store(true, std::memory_order_release);
+    if (policy_ == ExecutorPolicy::host_adapter) {
+        return;
+    }
     for (auto& thread : threads_) {
         if (thread.joinable()) {
             thread.join();
@@ -444,6 +487,77 @@ Status Executor::submit(
     }
 
     item.group->pending.fetch_add(1, std::memory_order_acq_rel);
+    if (policy_ == ExecutorPolicy::host_adapter) {
+        auto& slot = host_work_slots_[item.scratch_slot];
+        auto completion_token = std::uint64_t{0};
+        auto sequence = host_completion_sequence_.load(
+            std::memory_order_relaxed);
+        for (std::size_t attempt = 0;
+             sequence != 0 && attempt < kHostTokenCasAttemptLimit;
+             ++attempt) {
+            const auto next =
+                sequence == ~kHostSlotStateMask
+                ? std::uint64_t{0}
+                : sequence + kHostTokenIncrement;
+            if (host_completion_sequence_.compare_exchange_weak(
+                    sequence,
+                    next,
+                    std::memory_order_relaxed,
+                    std::memory_order_relaxed)) {
+                completion_token = sequence;
+                break;
+            }
+            rt::cpu_relax();
+        }
+        if (completion_token == 0) {
+            item.group->pending.fetch_sub(1, std::memory_order_acq_rel);
+            release_scratch_slot(item.scratch_slot);
+            return reject_overload(
+                Status::resource_exhausted,
+                item.phase_index);
+        }
+        slot.item = item;
+        const auto accepted_control =
+            completion_token | kHostSlotAccepted;
+        slot.control.store(accepted_control, std::memory_order_release);
+        auto* scratch =
+            task_scratch_bytes_ == 0
+            ? nullptr
+            : task_scratch_storage_.data() +
+                  (item.scratch_slot * task_scratch_stride_);
+        const HostExecutorJob job{
+            &Executor::execute_host_job,
+            this,
+            &slot,
+            completion_token,
+            scratch,
+            task_scratch_bytes_,
+        };
+        const auto status =
+            host_adapter_.submit(host_adapter_.user_data, job);
+        if (status == Status::ok) {
+            submitted_tasks_.fetch_add(1, std::memory_order_relaxed);
+            return Status::ok;
+        }
+
+        auto expected = accepted_control;
+        if (!slot.control.compare_exchange_strong(
+                expected,
+                completion_token | kHostSlotFree,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            return Status::internal_error;
+        }
+        item.group->pending.fetch_sub(1, std::memory_order_acq_rel);
+        release_scratch_slot(item.scratch_slot);
+        if (status == Status::queue_full) {
+            queue_full_rejections_.fetch_add(
+                1,
+                std::memory_order_relaxed);
+        }
+        return reject_overload(status, item.phase_index);
+    }
+
     if (!queues_[target_worker]->try_push(item)) {
         item.group->pending.fetch_sub(1, std::memory_order_acq_rel);
         release_scratch_slot(item.scratch_slot);
@@ -659,6 +773,10 @@ Status Executor::wait(
     TaskGroup& group,
     std::size_t helping_worker) noexcept {
     while (group.pending.load(std::memory_order_acquire) != 0) {
+        if (policy_ == ExecutorPolicy::host_adapter &&
+            host_adapter_.try_execute_one(host_adapter_.user_data)) {
+            continue;
+        }
         if (helping_worker < worker_count_ &&
             execute_one(helping_worker)) {
             continue;
@@ -669,6 +787,9 @@ Status Executor::wait(
 }
 
 bool Executor::execute_one(std::size_t worker_index) noexcept {
+    if (policy_ == ExecutorPolicy::host_adapter) {
+        return false;
+    }
     WorkItem item;
     if (queues_[worker_index]->try_pop(item)) {
         local_executions_.fetch_add(1, std::memory_order_relaxed);
@@ -690,6 +811,56 @@ bool Executor::execute_one(std::size_t worker_index) noexcept {
         }
     }
     return false;
+}
+
+void Executor::execute_host_job(
+    void* execution_context,
+    void* completion_context,
+    std::uint64_t completion_token,
+    std::uint32_t worker_index) noexcept {
+    if (!execution_context || !completion_context) {
+        return;
+    }
+    auto& executor = *static_cast<Executor*>(execution_context);
+    auto& slot = *static_cast<HostWorkSlot*>(completion_context);
+    executor.execute_host_slot(
+        slot,
+        completion_token,
+        static_cast<std::size_t>(worker_index));
+}
+
+void Executor::execute_host_slot(
+    HostWorkSlot& slot,
+    std::uint64_t completion_token,
+    std::size_t worker_index) noexcept {
+    const auto token =
+        completion_token & ~kHostSlotStateMask;
+    auto expected = token | kHostSlotAccepted;
+    if (token == 0 || completion_token != token ||
+        !slot.control.compare_exchange_strong(
+            expected,
+            token | kHostSlotRunning,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        return;
+    }
+
+    const auto item = slot.item;
+    slot.control.store(
+        token | kHostSlotFree,
+        std::memory_order_release);
+    if (worker_index >= worker_count_) {
+        item.group->record(Status::internal_error);
+        if (item.kind == WorkKind::phase) {
+            cancel_graph(Status::internal_error, item.phase_index);
+        }
+        release_scratch_slot(item.scratch_slot);
+        item.group->pending.fetch_sub(1, std::memory_order_acq_rel);
+        return;
+    }
+
+    local_executions_.fetch_add(1, std::memory_order_relaxed);
+    execute(worker_index, item);
 }
 
 void Executor::execute(

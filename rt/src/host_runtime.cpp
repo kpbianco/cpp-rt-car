@@ -430,6 +430,7 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
     switch (config.executor_policy) {
     case rt::ExecutorPolicy::static_deterministic:
     case rt::ExecutorPolicy::bounded_throughput:
+    case rt::ExecutorPolicy::host_adapter:
         break;
     default:
         return rt::Status::invalid_config;
@@ -472,9 +473,9 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
 namespace rt {
 
 Capabilities query_capabilities() noexcept {
-    // M8 adds the bounded poll-only device ABI and deterministic mock backend.
+    // M11 adds the borrowed host job-system executor policy.
     return {
-        true, true, true, true, true,
+        true, true, true, true, true, true,
         true, true, true, true, true};
 }
 
@@ -526,6 +527,8 @@ const char* status_message(Status status) noexcept {
         return "device submission was canceled";
     case Status::device_reset_required:
         return "device reset is required";
+    case Status::incompatible_abi:
+        return "C ABI version or layout is incompatible";
     }
     return "unknown runtime status";
 }
@@ -568,6 +571,9 @@ Status set_runtime_config_value(
         } else if (value == "bounded_throughput") {
             candidate.executor_policy =
                 ExecutorPolicy::bounded_throughput;
+        } else if (value == "host_adapter") {
+            candidate.executor_policy =
+                ExecutorPolicy::host_adapter;
         } else {
             return Status::invalid_config;
         }
@@ -1356,6 +1362,8 @@ struct Runtime::Impl {
     detail::NativePlatformPreflightProbe owned_preflight;
     PlatformPreflightProbe* preflight;
     RuntimeConfig config{};
+    HostExecutorAdapter host_executor{};
+    bool host_executor_set = false;
     RuntimeState state = RuntimeState::configuring;
     NumericalPolicy numerics{};
     std::vector<RegisteredCallback> callbacks;
@@ -1426,6 +1434,33 @@ Status Runtime::configure(const RuntimeConfig& config) noexcept {
         return impl_->fail(Status::invalid_config, nullptr);
     }
     impl_->config = config;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_host_executor(
+    const HostExecutorAdapter& adapter) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "host executor attachment is frozen");
+    }
+    if (adapter.worker_count == 0 ||
+        adapter.worker_count > kMaxWorkers ||
+        adapter.queue_capacity < 2 ||
+        adapter.queue_capacity > kMaxExecutorQueueCapacity ||
+        (adapter.queue_capacity & (adapter.queue_capacity - 1)) != 0 ||
+        adapter.submit == nullptr ||
+        adapter.try_execute_one == nullptr) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "host executor adapter is incomplete or has invalid capacities");
+    }
+    impl_->host_executor = adapter;
+    impl_->host_executor_set = true;
     impl_->clear_error();
     return Status::ok;
 }
@@ -2029,6 +2064,16 @@ Status Runtime::finalize() noexcept {
             impl_->config.device_buffer_capacity) {
         return impl_->fail(Status::invalid_config, nullptr);
     }
+    if (impl_->config.executor_policy == ExecutorPolicy::host_adapter &&
+        (!impl_->host_executor_set ||
+         impl_->host_executor.worker_count !=
+             impl_->config.worker_count ||
+         impl_->host_executor.queue_capacity !=
+             impl_->config.executor_queue_capacity)) {
+        return impl_->fail(
+            Status::invalid_config,
+            "host_adapter requires an attached adapter with matching capacities");
+    }
     std::size_t backend_reported_bytes = 0;
     for (std::size_t backend_index = 0;
          backend_index < impl_->device_backends.size();
@@ -2089,8 +2134,11 @@ Status Runtime::finalize() noexcept {
     const auto minimum_graph_queue_capacity =
         impl_->callbacks.empty()
         ? std::size_t{0}
-        : 1 + ((impl_->callbacks.size() - 1) /
-               impl_->config.worker_count);
+        : impl_->config.executor_policy ==
+                ExecutorPolicy::host_adapter
+            ? impl_->callbacks.size()
+            : 1 + ((impl_->callbacks.size() - 1) /
+                   impl_->config.worker_count);
     if (impl_->config.executor_queue_capacity <
         minimum_graph_queue_capacity) {
         return impl_->fail(
@@ -2198,12 +2246,19 @@ Status Runtime::finalize() noexcept {
         memory_plan.trace_capacity,
         memory_plan.trace_slot_bytes,
         memory_plan.trace_storage_bytes);
-    plan_valid = plan_valid && detail::checked_multiply(
-        impl_->config.worker_count,
-        impl_->config.executor_queue_capacity,
-        memory_plan.queue_slots);
+    if (impl_->config.executor_policy ==
+        ExecutorPolicy::host_adapter) {
+        memory_plan.queue_slots =
+            impl_->config.executor_queue_capacity;
+    } else {
+        plan_valid = plan_valid && detail::checked_multiply(
+            impl_->config.worker_count,
+            impl_->config.executor_queue_capacity,
+            memory_plan.queue_slots);
+    }
     plan_valid = plan_valid &&
         detail::Executor::estimate_control_storage(
+            impl_->config.executor_policy,
             impl_->config.worker_count,
             impl_->config.executor_queue_capacity,
             impl_->callbacks.size(),
@@ -2328,7 +2383,10 @@ Status Runtime::finalize() noexcept {
             impl_->config.task_scratch_slots,
             impl_->config.scratch_alignment,
             impl_->config.overload_policy,
-            impl_->dependencies);
+            impl_->dependencies,
+            impl_->host_executor_set
+                ? &impl_->host_executor
+                : nullptr);
         if (!impl_->device_backends.empty()) {
             devices = std::make_unique<detail::DeviceManager>(
                 impl_->graph_owner,
@@ -2469,7 +2527,7 @@ Status Runtime::start() noexcept {
             impl_->watchdog.stop();
             impl_->watchdog_started = false;
         }
-        return impl_->fail(start_status, "failed to start fixed executor team");
+        return impl_->fail(start_status, "failed to start executor policy");
     }
     if (impl_->devices) {
         const auto device_status = impl_->devices->start(

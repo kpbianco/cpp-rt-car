@@ -1,6 +1,6 @@
 # Time, Watchdog, and Platform Contract
 
-Release 0.6 introduced, and release 0.11 retains, the M5 RT0 time/platform
+Release 0.6 introduced, and release 0.12 retains, the M5 RT0 time/platform
 surface in `rt::Runtime`.
 It adds finite self-paced execution, a one-shot frame watchdog, frame-thread
 degradation state, and a strict reportable Linux platform preflight. These are
@@ -72,7 +72,7 @@ allocation gate runs complete frames with the watchdog armed.
 
 Degradation is a signal, not automatic workload shedding. The host callback
 must select cheaper work when it sees a higher level. There is no recovery or
-level-decrease policy in 0.11.
+level-decrease policy in 0.12.
 
 ## Strict platform preflight
 
@@ -111,7 +111,7 @@ deployment qualification requirements in the
 
 ## C ABI
 
-Current ABI version 7 retains the M5 surface:
+Stable ABI version 8 retains the M5 surface:
 
 - watchdog and preflight fields in `rtfw_config`;
 - `rtfw_run_periodic()` and its initialized config/result records;
@@ -122,7 +122,7 @@ Current ABI version 7 retains the M5 surface:
   `RTFW_STATUS_CLOCK_FAILURE`.
 
 All public structures retain size and reserved-field validation. The ABI remains
-experimental and unfrozen before M11.
+covered by the M11 compatibility and export policy.
 
 ## Evidence and boundaries
 

@@ -104,8 +104,31 @@ cmake --build --preset pgo-use
 
 `VERSION.txt` is the release source of truth. CMake installs shared/static
 libraries, public headers, package config/version files, the license, and the
-version file. A clean external `find_package(rtfw CONFIG)` consumer remains an
-M11 release gate.
+version file. Release 0.12 exports component-checked targets for shared C,
+static C, the C++ runtime, and portable/optional CUDA/XDMA adapters. While the
+package major version is zero, `find_package()` compatibility is limited to the
+same minor release; stable C ABI compatibility is checked independently at
+runtime.
+
+CI installs to one prefix, relocates the complete tree, then configures and
+runs `tests/package_consumer` as an external project on Linux and Windows. The
+consumer requests:
+
+```cmake
+find_package(
+  rtfw 0.12 CONFIG REQUIRED
+  COMPONENTS c_shared c_static cpp_runtime)
+```
+
+and links `rtfw::rtfw`, `rtfw::rtfw_static`, and `rtfw::simcore_rt`. Linux CI
+also compares the built shared-library symbols with the v8 allowlist. Run the
+header/manifest half locally with:
+
+```bash
+python3 tools/check_c_abi.py
+```
+
+See [the stable C ABI contract](c_abi.md) for SONAME and compatibility rules.
 
 ## Code anchors
 

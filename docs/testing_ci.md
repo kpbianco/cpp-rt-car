@@ -122,8 +122,8 @@ predeclared thresholds, and the measurement procedure.
 - Optional fuzz harnesses: `tests/jobqueue_fuzz.cpp`,
   `tests/snapshot_fuzz.cpp`
 - Cross-build artifact producer: `tests/determinism_artifact.cpp`
-- M1–M8 lifecycle, graph, executor, memory, time, platform, observability,
-  replay, and device
+- M1–M11 lifecycle, graph, executor/host adapter, memory, time, platform,
+  observability, replay, and device
   tests:
   `tests/test_host_runtime.cpp`,
   `tests/test_compiled_graph.cpp`, `tests/test_executor.cpp`,
@@ -135,5 +135,9 @@ predeclared thresholds, and the measurement procedure.
   `tests/test_device_runtime.cpp`,
   `tests/test_cuda_backend.cpp`,
   `tests/xdma_backend_tests.cpp`,
+  `tests/host_adapter_tests.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`
+- Stable ABI/export and installed-package gates:
+  `tools/check_c_abi.py`, `abi/rtfw_c_abi_v8.exports`,
+  `tests/package_consumer`

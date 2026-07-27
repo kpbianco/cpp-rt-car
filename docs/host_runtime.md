@@ -3,7 +3,8 @@
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
 extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
 plan, M5 time/platform controls, M6 versioned observability, M7
-determinism/replay, and the M8 bounded device ABI and deterministic mock. It
+determinism/replay, the M8 bounded device ABI and deterministic mock, and the
+M11 stable C ABI plus host job-system adapter. It
 provides explicit host-driven and finite self-paced operation without adopting
 the legacy `SimCore` scheduler or pacing loop.
 
@@ -13,7 +14,9 @@ compiled-graph validation, the unified CPU executor, the target-path bounded
 memory plan, self-paced time, the frame watchdog, and strict platform preflight
 as available. They also report versioned observability and deterministic replay
 as available; the latter means the implemented D0/D1 surface, not D2 or D3.
-They report `bounded_device_backend` for the poll-only M8 runtime path. That capability does not imply CUDA, Vulkan, or XDMA qualification. The
+They report `host_executor_adapter` for the borrowed engine job-system policy
+and `bounded_device_backend` for the poll-only M8 runtime path. Those
+capabilities do not imply engine, CUDA, Vulkan, or XDMA qualification. The
 optional M9 CUDA and M10 XDMA candidates are separately linked backends with
 independent support matrices and evidence gates.
 
@@ -21,9 +24,9 @@ independent support matrices and evidence gates.
 
 | Current state | Allowed operation | Resulting state |
 | --- | --- | --- |
-| `configuring` | typed configuration, graph/state/device registration and declarations | `configuring` |
+| `configuring` | typed configuration, optional host-executor attachment, graph/state/device registration and declarations | `configuring` |
 | `configuring` | `finalize()` | `finalized` |
-| `finalized` | `start()`, preflight, and create configured worker/service lanes | `running` |
+| `finalized` | `start()`, preflight, and create configured runtime-owned lanes or bind the already-running host team | `running` |
 | `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
 | `running` | `run_periodic(config)` | `running` |
 | `finalized` or `running` | `stop()` | `stopped` |
@@ -36,7 +39,7 @@ Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
 
-Control operations are single-host-thread operations in 0.11. `step()`,
+Control operations are single-host-thread operations in 0.12. `step()`,
 `run_periodic()`, checkpoint/restore, input-log export, and replay are
 non-reentrant with execution. A periodic observer cannot recursively step, and
 `stop()` called from inside a callback, periodic loop, or replay is rejected.
@@ -51,9 +54,9 @@ non-reentrant with execution. A periodic observer cannot recursively step, and
 | `scratch_bytes` | nonnegative integer, `65536` | Bytes of distinct phase-local scratch exposed to each callback |
 | `trace_capacity` | nonnegative integer, `1024` | Capacity of the instance-local lifecycle/callback trace ring; zero disables it |
 | `numerical_mode` | `precise` | Selects `precise` or `fused_multiply_add` behavior for the callback numerical helper |
-| `executor_policy` | `static_deterministic` | Selects `static_deterministic` or `bounded_throughput` |
-| `worker_count` | positive integer, `1` | Fixed workers created by `start()`; accepted range is 1–256 |
-| `executor_queue_capacity` | power-of-two integer, `1024` | Fixed capacity of each worker-local queue; accepted range is 2–1,048,576 |
+| `executor_policy` | `static_deterministic` | Selects `static_deterministic`, `bounded_throughput`, or `host_adapter` |
+| `worker_count` | positive integer, `1` | Fixed runtime workers or exact borrowed host-worker count; accepted range is 1–256 |
+| `executor_queue_capacity` | power-of-two integer, `1024` | Fixed capacity of each runtime-local queue, or total accepted-job reservation for `host_adapter`; accepted range is 2–1,048,576 |
 | `scratch_alignment` | power-of-two integer, `64` | Alignment shared by phase/task scratch; accepted range is `alignof(max_align_t)`–4096 |
 | `task_scratch_bytes` | nonnegative integer, `4096` | Callback-local bytes owned by each accepted graph/range/reduction context; accepted maximum is 1,048,576 |
 | `task_scratch_slots` | positive integer, `1024` | Fixed simultaneous task-context reservations; accepted maximum is 1,048,576 |
@@ -63,7 +66,7 @@ non-reentrant with execution. A periodic observer cannot recursively step, and
 | `watchdog_max_degradation_level` | nonnegative integer, `0` | Caps frame-thread degradation increments; accepted range is 0–255 |
 | `platform_preflight_mode` | `disabled` | Selects `disabled` or fail-closed, read-only `strict` prerequisite checks |
 | `workload_id` | identifier, `unspecified` | Labels observability and replay artifacts with 1–63 characters from `A-Za-z0-9._:/@-`; it affects configuration and replay identity |
-| `determinism_tier` | `d0_unspecified` | Selects D0 unspecified behavior or D1 schedule-independent replay; D2 and D3 are rejected in 0.11 |
+| `determinism_tier` | `d0_unspecified` | Selects D0 unspecified behavior or D1 schedule-independent replay; D2 and D3 are rejected in 0.12 |
 | `state_capacity` | nonnegative integer, `64` | Maximum canonical state regions accepted before finalization; zero disables registration |
 | `snapshot_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded checkpoint bytes |
 | `replay_input_capacity` | nonnegative integer, `4096` | Maximum records accepted in one encoded or replayed input log |
@@ -77,6 +80,12 @@ The typed structure can be supplied with `configure()`. Dynamic callers can use
 `configure_key()` or the C `rtfw_config_set()` equivalent. Unknown keys,
 partially parsed values, invalid enum values, and out-of-range capacities fail;
 there is no ignored-key path.
+
+`host_adapter` additionally requires `Runtime::set_host_executor()` or
+`rtfw_set_host_executor()` before finalization. Its copied callback table must
+declare capacities exactly equal to the typed configuration. The detailed
+submission, scratch, completion, helping, and ownership rules are in the
+[executor contract](executor.md).
 
 This schema is distinct from the unattached autotune JSON format. Loading those
 profiles into the demo remains planned.
@@ -198,7 +207,7 @@ numerical helper's control.
 
 ## C ABI
 
-The experimental C ABI mirrors the lifecycle:
+Stable C ABI v8 mirrors the lifecycle:
 
 - `rtfw_config_init` / `rtfw_config_set`;
 - `rtfw_create`;
@@ -227,18 +236,20 @@ The experimental C ABI mirrors the lifecycle:
 - `rtfw_register_device_buffer`;
 - `rtfw_register_device_phase`;
 - `rtfw_get_device_health` / `rtfw_reset_device`;
+- `rtfw_get_abi_info` / `rtfw_check_abi`;
+- `rtfw_set_host_executor`;
 - `rtfw_stop`;
 - `rtfw_destroy`.
 
 Public configuration, frame, callback, result, and memory-plan structures carry
-sizes, and configuration carries `RTFW_C_ABI_VERSION` (experimental version 7
-in release 0.11). Periodic, preflight, observability, checkpoint, input-log,
+sizes, and configuration carries stable `RTFW_C_ABI_VERSION` 8 in release
+0.12. Periodic, preflight, observability, checkpoint, input-log,
 replay, and device structures follow the same initialized-output rule. Call
 the supplied structure initializers and leave reserved fields zero.
 `rtfw_status_message()` provides status text even when no runtime handle was
-created; `rtfw_last_error()` adds handle-specific context. The ABI remains
-unfrozen before M11; incompatible pre-1.0 changes require a repository version
-increment.
+created; `rtfw_last_error()` adds handle-specific context. Export, compatibility,
+ownership, SONAME, and change-policy details are in the
+[stable C ABI contract](c_abi.md).
 
 ## Compiled graph
 

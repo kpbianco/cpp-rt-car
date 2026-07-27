@@ -260,6 +260,7 @@ def check_runtime_contract() -> None:
     device_doc = read("docs/device_backend.md")
     cuda_doc = read("docs/cuda_backend.md")
     xdma_doc = read("docs/xdma_backend.md")
+    c_abi_doc = read("docs/c_abi.md")
     device_abi = read("rt/include/rt/device_abi.h")
     cuda_header = read("rt/include/rt/cuda_backend.hpp")
     xdma_header = read("rt/include/rt/xdma_backend.hpp")
@@ -287,6 +288,8 @@ def check_runtime_contract() -> None:
     device_test = read("tests/test_device_runtime.cpp")
     cuda_test = read("tests/test_cuda_backend.cpp")
     xdma_test = read("tests/xdma_backend_tests.cpp")
+    host_adapter_test = read("tests/host_adapter_tests.cpp")
+    package_consumer = read("tests/package_consumer/CMakeLists.txt")
     snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
     ci_workflow = read(".github/workflows/ci.yml")
@@ -534,6 +537,7 @@ def check_runtime_contract() -> None:
         "compiled_graph",
         "host_driven_time",
         "unified_cpu_executor",
+        "host_executor_adapter",
         "bounded_memory_plan",
         "self_paced_time",
         "frame_watchdog",
@@ -564,17 +568,18 @@ def check_runtime_contract() -> None:
         or "| M8 | Complete |" not in roadmap
         or "| M9 | Candidate |" not in roadmap
         or "| M10 | Candidate |" not in roadmap
+        or "| M11 | Complete |" not in roadmap
     ):
-        fail("docs/roadmap.md: M8/M9/M10 milestone status is not advanced")
+        fail("docs/roadmap.md: M8-M11 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
         r"\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
-        r"\s*true\s*,\s*true\s*\}\s*;",
+        r"\s*true\s*,\s*true\s*,\s*true\s*\}\s*;",
         runtime_source,
     ):
         fail(
-            "rt/src/host_runtime.cpp: M8 capability tuple is not ten true values"
+            "rt/src/host_runtime.cpp: M11 capability tuple is not eleven true values"
         )
 
     for token in (
@@ -734,12 +739,72 @@ def check_runtime_contract() -> None:
             fail(f"tests/test_platform_preflight.cpp: missing M5 gate {test_name!r}")
     if "watchdog_timeout_ns" not in noalloc_test:
         fail("tests/test_trace_noalloc.cpp: missing armed-watchdog allocation gate")
-    if "#define RTFW_C_ABI_VERSION 7u" not in c_header:
-        fail("rt/include/rt/c_api.h: M8 requires experimental ABI version 7")
+    if "#define RTFW_C_ABI_VERSION 8u" not in c_header:
+        fail("rt/include/rt/c_api.h: M11 requires stable ABI version 8")
     if "rtfw_run_periodic(" not in c_sample:
         fail("samples/embed_c/mini_app.c: missing M5 periodic sample")
     if "runtime.run_periodic(" not in cpp_sample:
         fail("samples/embed_cpp/mini_app.cpp: missing M5 periodic sample")
+
+    for token in (
+        "ExecutorPolicy::host_adapter",
+        "HostExecutorAdapter",
+        "HostExecutorJob",
+        "set_host_executor(",
+        "host_completion_sequence_",
+    ):
+        if token not in runtime_header and token not in executor_source:
+            fail(f"M11 host-adapter implementation is missing {token!r}")
+    for token in (
+        "RTFW_EXECUTOR_HOST_ADAPTER",
+        "rtfw_host_executor",
+        "rtfw_set_host_executor(",
+        "RTFW_C_ABI_LAYOUT_FINGERPRINT",
+        "rtfw_check_abi(",
+    ):
+        if token not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M11 ABI token {token!r}")
+    for token in (
+        "cpp_host_adapter_contract",
+        "c_host_adapter_contract",
+        "worker_starts == 0",
+        "allocation_count",
+        "retained.completion_token",
+    ):
+        if token not in host_adapter_test:
+            fail(f"tests/host_adapter_tests.cpp: missing M11 gate {token!r}")
+    for phrase in (
+        "first stable C ABI",
+        "allowlist",
+        "layout fingerprint",
+        "host job system",
+        "same process architecture",
+    ):
+        if phrase.lower() not in c_abi_doc.lower():
+            fail(f"docs/c_abi.md: missing M11 contract phrase {phrase!r}")
+    for token in (
+        "rtfw_c_abi_v8.exports",
+        "CXX_VISIBILITY_PRESET hidden",
+        "SOVERSION \"${RTFW_C_ABI_VERSION}\"",
+        "SameMinorVersion",
+    ):
+        if token not in cmake:
+            fail(f"CMakeLists.txt: missing M11 distribution gate {token!r}")
+    for token in (
+        "COMPONENTS c_shared c_static cpp_runtime",
+        "rtfw::rtfw",
+        "rtfw::rtfw_static",
+        "rtfw::simcore_rt",
+    ):
+        if token not in package_consumer:
+            fail(f"package consumer is missing {token!r}")
+    for token in (
+        "Relocated package consumer",
+        "check_c_abi.py --library",
+        "rtfw-relocated",
+    ):
+        if token not in ci_workflow:
+            fail(f".github/workflows/ci.yml: missing M11 gate {token!r}")
 
     for token in (
         "TelemetryRing::emit(",
@@ -1202,6 +1267,7 @@ def main() -> int:
             "docs/cuda_support_matrix.json",
             "docs/xdma_backend.md",
             "docs/xdma_support_matrix.json",
+            "docs/c_abi.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -1256,8 +1322,15 @@ def main() -> int:
             "tests/test_device_runtime.cpp",
             "tests/test_cuda_backend.cpp",
             "tests/xdma_backend_tests.cpp",
+            "tests/host_adapter_tests.cpp",
+            "tests/package_consumer/CMakeLists.txt",
+            "tests/package_consumer/c_consumer.c",
+            "tests/package_consumer/cpp_consumer.cpp",
             "tests/determinism_artifact.cpp",
             "tests/snapshot_fuzz.cpp",
+            "abi/rtfw_c_abi_v8.exports",
+            "abi/rtfw_c_abi_v8.sha256",
+            "tools/check_c_abi.py",
         )
     )
     check_version()

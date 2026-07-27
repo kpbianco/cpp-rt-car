@@ -20,16 +20,17 @@ must not invent one.
 
 ## ABI policy
 
-The plugin and C surfaces are experimental in 0.11. The M1–M8 C configuration,
+The plugin surface remains experimental in 0.12. C ABI v8 is the first stable
+binary boundary. The M1–M11 C configuration,
 frame, callback, result, graph, task-scratch, memory-plan, periodic, watchdog,
 degradation, preflight, metric-window, trace-cursor, provenance, canonical
 state, checkpoint, input-log, replay, backend, buffer, device-phase,
-health, and reset surfaces carry their current validation metadata,
-and configuration carries
-`RTFW_C_ABI_VERSION` 7; those checks do not yet constitute a stable ABI
-promise.
+health, reset, ABI-handshake, and host-executor surfaces carry their current
+validation metadata, and configuration carries `RTFW_C_ABI_VERSION` 8.
 Milestone M11 freezes exported symbols, ownership, structure sizing,
-capabilities, errors, and compatibility policy.
+capabilities, errors, and compatibility policy as specified in
+[the C ABI contract](c_abi.md). Any incompatible change requires a new ABI
+version/SONAME/manifest; updating the v8 digest silently is prohibited.
 
 ## Thread-creation guard
 

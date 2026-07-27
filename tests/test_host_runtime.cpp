@@ -106,6 +106,7 @@ TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     EXPECT_TRUE(capabilities.compiled_graph);
     EXPECT_TRUE(capabilities.host_driven_time);
     EXPECT_TRUE(capabilities.unified_cpu_executor);
+    EXPECT_TRUE(capabilities.host_executor_adapter);
     EXPECT_TRUE(capabilities.bounded_memory_plan);
     EXPECT_TRUE(capabilities.self_paced_time);
     EXPECT_TRUE(capabilities.frame_watchdog);

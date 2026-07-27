@@ -1,6 +1,6 @@
 # Finalized Memory and Overload Contract
 
-Release 0.11 retains the M4 memory closure for the target-path runtime,
+Release 0.12 retains the M4 memory closure for the target-path runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.
@@ -56,6 +56,15 @@ device plan. `device_control_bytes` includes copied registrations, the
 outstanding/early-completion table, completion batch, counters, and service-lane
 object. `device_backend_reported_bytes` is informational and excluded because
 each backend owns that storage.
+
+With the M11 `host_adapter` executor policy, `queue_slots` equals the declared
+total host reservation rather than `worker_count * executor_queue_capacity`,
+but `executor_control_bytes` includes only runtime-owned
+completion/scratch-slot records and graph state. Host queue storage, worker
+objects, stacks, affinity state, and job-system telemetry remain borrowed
+host-owned memory and are excluded for the same reason as backend-owned
+storage. The adapter must reserve the declared capacities before runtime
+start; the runtime does not allocate or resize a host queue.
 
 ## Configuration
 

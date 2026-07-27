@@ -201,13 +201,18 @@ jobs:
             -DSIM_WERROR=ON
       - name: Build executor ThreadSanitizer gate
         run: |
-          cmake --build build-tsan             --target simcore_tests rtfw_xdma_backend_tests             -- -j2
+          cmake --build build-tsan \
+            --target simcore_tests rtfw_host_adapter_tests \
+                     rtfw_xdma_backend_tests \
+            -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
           GTEST_FILTER: UnifiedExecutor.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*
           TSAN_OPTIONS: halt_on_error=1
         run: |
-          ctest --test-dir build-tsan             --output-on-failure             -R 'simcore_all|xdma_backend'
+          ctest --test-dir build-tsan \
+            --output-on-failure \
+            -R 'simcore_all|host_adapter|xdma_backend'
 
   build-windows:
     runs-on: windows-latest
@@ -273,3 +278,48 @@ jobs:
           ./samples/sample_embed_c
           ./samples/sample_embed_c_static
           ./samples/sample_embed_cpp
+
+  installed-package:
+    name: Relocated package consumer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen C ABI manifest
+        run: python tools/check_c_abi.py
+      - name: Configure package build
+        run: >
+          cmake -S . -B build-package
+          -DCMAKE_BUILD_TYPE=Release
+          -DENABLE_TESTS=OFF
+          -DSIM_WERROR=ON
+      - name: Build package
+        run: cmake --build build-package --config Release --parallel 2
+      - name: Verify shared-library exports
+        if: runner.os == 'Linux'
+        run: python tools/check_c_abi.py --library build-package/librtfw.so
+      - name: Install package
+        run: >
+          cmake --install build-package
+          --config Release
+          --prefix "${{ runner.temp }}/rtfw-original"
+      - name: Relocate install tree
+        run: >
+          cmake -E rename
+          "${{ runner.temp }}/rtfw-original"
+          "${{ runner.temp }}/rtfw-relocated"
+      - name: Configure clean external consumer
+        run: >
+          cmake -S tests/package_consumer -B build-consumer
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ runner.temp }}/rtfw-relocated"
+      - name: Build clean external consumer
+        run: cmake --build build-consumer --config Release --parallel 2
+      - name: Run clean external consumer
+        run: >
+          ctest --test-dir build-consumer
+          -C Release
+          --output-on-failure

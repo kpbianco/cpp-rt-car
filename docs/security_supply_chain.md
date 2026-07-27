@@ -1,6 +1,6 @@
 # Security and Supply-Chain Status
 
-RTFW 0.11 has security-oriented experiments and CI helpers, not a hardened
+RTFW 0.12 has security-oriented experiments and CI helpers, not a hardened
 plugin sandbox or complete supply-chain policy.
 
 ## Process restriction experiment
@@ -42,3 +42,4 @@ release-engineering work.
 - Submodule SBOM check: `tools/sbom.py`
 - Artifact metadata: `tools/store_repro_build.py`
 - Threat boundaries: [threat model](threat_model.md)
+

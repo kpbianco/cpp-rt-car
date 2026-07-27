@@ -36,7 +36,8 @@ public:
         std::size_t task_scratch_slots,
         std::size_t scratch_alignment,
         OverloadPolicy overload_policy,
-        std::span<const GraphDependency> dependencies);
+        std::span<const GraphDependency> dependencies,
+        const HostExecutorAdapter* host_adapter);
     ~Executor();
 
     Executor(const Executor&) = delete;
@@ -77,6 +78,7 @@ public:
         std::size_t phase_index,
         std::size_t& worker_index) const noexcept;
     [[nodiscard]] static bool estimate_control_storage(
+        ExecutorPolicy policy,
         std::size_t worker_count,
         std::size_t queue_capacity,
         std::size_t phase_count,
@@ -115,6 +117,13 @@ private:
         std::size_t scratch_slot = static_cast<std::size_t>(-1);
     };
 
+    struct HostWorkSlot {
+        // The low two bits are state; the remaining bits are the generation.
+        // One CAS therefore validates both before an external callback runs.
+        std::atomic<std::uint64_t> control{0};
+        WorkItem item{};
+    };
+
     class Queue;
 
     [[nodiscard]] Status submit(
@@ -132,6 +141,15 @@ private:
         std::size_t helping_worker) noexcept;
     [[nodiscard]] bool execute_one(std::size_t worker_index) noexcept;
     void execute(std::size_t worker_index, const WorkItem& item) noexcept;
+    static void execute_host_job(
+        void* execution_context,
+        void* completion_context,
+        std::uint64_t completion_token,
+        std::uint32_t worker_index) noexcept;
+    void execute_host_slot(
+        HostWorkSlot& slot,
+        std::uint64_t completion_token,
+        std::size_t worker_index) noexcept;
     void execute_phase(
         std::size_t worker_index,
         const WorkItem& item,
@@ -156,6 +174,8 @@ private:
     OverloadPolicy overload_policy_;
     std::vector<std::unique_ptr<Queue>> queues_;
     std::vector<std::thread> threads_;
+    HostExecutorAdapter host_adapter_{};
+    std::unique_ptr<HostWorkSlot[]> host_work_slots_;
     AlignedStorage task_scratch_storage_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> free_scratch_words_;
     std::size_t free_scratch_word_count_ = 0;
@@ -186,6 +206,7 @@ private:
     std::atomic<std::uint64_t> queue_full_rejections_{0};
     std::atomic<std::uint64_t> scratch_exhaustions_{0};
     std::atomic<std::uint64_t> worker_starts_{0};
+    std::atomic<std::uint64_t> host_completion_sequence_{4};
 };
 
 } // namespace rt::detail

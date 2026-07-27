@@ -1,7 +1,7 @@
 # Real-Time Readiness Gates
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
-0.11 has not completed any end-to-end RT2 qualification.
+0.12 has not completed any end-to-end RT2 qualification.
 
 ## Portable runtime gates
 
@@ -42,7 +42,8 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   identity (M7 functional gate; legacy `SimCore` snapshots remain outside it).
 - [x] The C and C++ embedding APIs can register and execute real host work with
   typed lifecycle/graph/executor/memory/time/platform/observability errors
-  plus device registration/health/reset errors (M1–M8 functional gate; not an
+  plus device and host-adapter/ABI compatibility errors (M1–M11 functional
+  gate; not an
   RT qualification).
 
 ## Deployment qualification gates
