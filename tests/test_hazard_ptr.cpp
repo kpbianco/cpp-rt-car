@@ -59,8 +59,8 @@ static std::size_t exercise_stack(int count) {
   t1.join();
   t2.join();
   std::vector<int> vals1, vals2;
-  vals1.reserve(count);
-  vals2.reserve(count);
+  vals1.reserve(static_cast<std::size_t>(count));
+  vals2.reserve(static_cast<std::size_t>(count));
   std::thread c1([&] {
     int x;
     while (st.pop(x))
