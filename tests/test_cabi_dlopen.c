@@ -4,17 +4,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(RTFW_C_ABI_VERSION == 7u, "unexpected C ABI version");
-_Static_assert(sizeof(rtfw_status) == sizeof(int32_t), "status width changed");
-_Static_assert(
+#if defined(_MSC_VER)
+#    define RTFW_C_STATIC_ASSERT(condition, name) \
+        typedef char rtfw_static_assert_##name[(condition) ? 1 : -1]
+#else
+#    define RTFW_C_STATIC_ASSERT(condition, name) \
+        _Static_assert(condition, #name)
+#endif
+
+RTFW_C_STATIC_ASSERT(RTFW_C_ABI_VERSION == 7u, unexpected_c_abi_version);
+RTFW_C_STATIC_ASSERT(
+    sizeof(rtfw_status) == sizeof(int32_t),
+    status_width_changed);
+RTFW_C_STATIC_ASSERT(
     sizeof(rtfw_overload_policy) == sizeof(uint32_t),
-    "overload policy width changed");
-_Static_assert(
+    overload_policy_width_changed);
+RTFW_C_STATIC_ASSERT(
     sizeof(rtfw_platform_preflight_mode) == sizeof(uint32_t),
-    "platform preflight mode width changed");
-_Static_assert(
+    platform_preflight_mode_width_changed);
+RTFW_C_STATIC_ASSERT(
     sizeof(rtfw_determinism_tier) == sizeof(uint32_t),
-    "determinism tier width changed");
+    determinism_tier_width_changed);
+
+#undef RTFW_C_STATIC_ASSERT
 
 #if defined(_WIN32)
 #    define WIN32_LEAN_AND_MEAN
