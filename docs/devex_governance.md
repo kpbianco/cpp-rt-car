@@ -20,7 +20,7 @@ must not invent one.
 
 ## ABI policy
 
-The plugin and C surfaces are experimental in 0.10. The M1–M8 C configuration,
+The plugin and C surfaces are experimental in 0.11. The M1–M8 C configuration,
 frame, callback, result, graph, task-scratch, memory-plan, periodic, watchdog,
 degradation, preflight, metric-window, trace-cursor, provenance, canonical
 state, checkpoint, input-log, replay, backend, buffer, device-phase,

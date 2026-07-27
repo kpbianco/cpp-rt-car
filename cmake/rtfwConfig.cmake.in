@@ -3,9 +3,11 @@
 set_and_check(RTFW_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set(RTFW_INCLUDE_DIRS "${RTFW_INCLUDE_DIR}")
 set(RTFW_WITH_CUDA_DRIVER "@RTFW_ENABLE_CUDA@")
+set(RTFW_WITH_XDMA_LINUX "@RTFW_ENABLE_XDMA@")
 
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
 if (RTFW_WITH_CUDA_DRIVER)
-    include(CMakeFindDependencyMacro)
     find_dependency(CUDAToolkit)
 endif()
 

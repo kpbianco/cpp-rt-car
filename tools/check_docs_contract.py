@@ -76,6 +76,17 @@ def check_version() -> str:
                 "match VERSION.txt"
             )
 
+    try:
+        xdma_matrix = json.loads(read("docs/xdma_support_matrix.json"))
+    except json.JSONDecodeError as exc:
+        fail(f"docs/xdma_support_matrix.json: invalid JSON: {exc}")
+    else:
+        if xdma_matrix.get("runtime_version") != version:
+            fail(
+                "docs/xdma_support_matrix.json: runtime_version does not "
+                "match VERSION.txt"
+            )
+
     cmake = read("CMakeLists.txt")
     required_cmake = (
         'file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/VERSION.txt"',
@@ -222,7 +233,7 @@ def check_claims() -> None:
         "no hard-real-time",
         "No RT2 record exists yet.",
         "Legacy GPU stub | Experimental compatibility path",
-        "XDMA | Planned",
+        "Xilinx XDMA AXI-MM backend | Candidate; not hardware-qualified",
     )
     for text in required_qualifiers:
         if text not in readme:
@@ -248,12 +259,17 @@ def check_runtime_contract() -> None:
     determinism_doc = read("docs/determinism_replay.md")
     device_doc = read("docs/device_backend.md")
     cuda_doc = read("docs/cuda_backend.md")
+    xdma_doc = read("docs/xdma_backend.md")
     device_abi = read("rt/include/rt/device_abi.h")
     cuda_header = read("rt/include/rt/cuda_backend.hpp")
+    xdma_header = read("rt/include/rt/xdma_backend.hpp")
+    xdma_linux_header = read("rt/include/rt/xdma_linux.hpp")
     device_manager = read("rt/src/device_manager.cpp")
     mock_device = read("rt/src/mock_device.cpp")
     cuda_backend = read("rt/src/cuda_backend.cpp")
     cuda_driver = read("rt/src/cuda_driver.cpp")
+    xdma_backend = read("rt/src/xdma_backend.cpp")
+    xdma_linux = read("rt/src/xdma_linux.cpp")
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
@@ -270,6 +286,7 @@ def check_runtime_contract() -> None:
     determinism_test = read("tests/test_determinism_replay.cpp")
     device_test = read("tests/test_device_runtime.cpp")
     cuda_test = read("tests/test_cuda_backend.cpp")
+    xdma_test = read("tests/xdma_backend_tests.cpp")
     snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
     ci_workflow = read(".github/workflows/ci.yml")
@@ -277,7 +294,9 @@ def check_runtime_contract() -> None:
     cpp_sample = read("samples/embed_cpp/mini_app.cpp")
     device_sample = read("samples/device_mock.cpp")
     cuda_sample = read("samples/cuda_qualification.cpp")
+    xdma_sample = read("samples/xdma_qualification.cpp")
     cuda_workflow = read(".github/workflows/cuda-qualification.yml")
+    xdma_workflow = read(".github/workflows/xdma-qualification.yml")
 
     for method in (
         "Status configure(",
@@ -544,8 +563,9 @@ def check_runtime_contract() -> None:
         or "| M7 | Complete |" not in roadmap
         or "| M8 | Complete |" not in roadmap
         or "| M9 | Candidate |" not in roadmap
+        or "| M10 | Candidate |" not in roadmap
     ):
-        fail("docs/roadmap.md: M8/M9 milestone status is not advanced")
+        fail("docs/roadmap.md: M8/M9/M10 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
@@ -1053,6 +1073,115 @@ def check_runtime_contract() -> None:
                 "schema 1 with no qualified tuples"
             )
 
+    for token in (
+        "struct XdmaDriverApi",
+        "class XdmaDeviceBackend",
+        "xdma_device_opcode_host_to_card",
+        "xdma_device_opcode_card_to_host",
+        "struct XdmaTransfer",
+    ):
+        if token not in xdma_header:
+            fail(f"rt/include/rt/xdma_backend.hpp: missing M10 evidence {token!r}")
+    if "class LinuxXdmaDriver" not in xdma_linux_header:
+        fail("rt/include/rt/xdma_linux.hpp: missing production adapter surface")
+    for token in (
+        "kSlotQueued",
+        "driver.transfer(",
+        "work_epoch.notify_one(",
+        "timed_out",
+        "RTFW_DEVICE_STATUS_TIMEOUT",
+        "std::thread",
+    ):
+        if token not in xdma_backend:
+            fail(f"rt/src/xdma_backend.cpp: missing M10 evidence {token!r}")
+    for forbidden in (".detach(", "std::async", "std::condition_variable"):
+        if forbidden in xdma_backend:
+            fail(f"M10 XDMA state machine contains forbidden primitive {forbidden!r}")
+    for token in (
+        "O_CLOEXEC",
+        "::pread(",
+        "::pwrite(",
+        "EINTR",
+        "close_all(",
+    ):
+        if token not in xdma_linux:
+            fail(f"rt/src/xdma_linux.cpp: missing M10 Linux adapter call {token!r}")
+    for phrase in (
+        "deliberately narrow",
+        "fixed worker",
+        "timeout quarantine",
+        "No tuple has completed",
+        "not a PCIe function-level reset",
+    ):
+        if phrase.lower() not in xdma_doc.lower():
+            fail(f"docs/xdma_backend.md: missing M10 contract phrase {phrase!r}")
+    for test_name in (
+        "basic_round_trip",
+        "saturation_and_timeout_quarantine",
+        "validation_rejects_malformed_work",
+        "recovery_and_no_allocation",
+        "concurrent_submit_poll",
+    ):
+        if test_name not in xdma_test:
+            fail(f"tests/xdma_backend_tests.cpp: missing M10 gate {test_name!r}")
+    for token in (
+        "rt/src/xdma_backend.cpp",
+        "rt/src/xdma_linux.cpp",
+        "xdma_backend_tests.cpp",
+        "xdma_qualification.cpp",
+        "RTFW_ENABLE_XDMA",
+        "target_compile_features(rtfw_xdma_backend PUBLIC cxx_std_20)",
+    ):
+        if (
+            token not in cmake
+            and token not in tests_cmake
+            and token not in samples_cmake
+        ):
+            fail(f"CMake M10 integration is missing {token!r}")
+    for token in (
+        "rtfw_xdma_backend_tests",
+        "xdma_backend",
+    ):
+        if token not in ci_workflow:
+            fail(f".github/workflows/ci.yml: M10 is missing TSAN evidence {token!r}")
+    for token in (
+        "sample_xdma_qualification",
+        "xdma-qualification.json",
+        "workflow_dispatch",
+        "self-hosted",
+        "bitstream_id",
+        "--warmup",
+    ):
+        if token not in xdma_workflow:
+            fail(f"XDMA qualification workflow is missing {token!r}")
+    for token in (
+        "LinuxXdmaDriver",
+        "set_xdma_transfer(",
+        "bitstream_id",
+        "warmup_iterations",
+        "measurement_iterations",
+    ):
+        if token not in xdma_sample:
+            fail(f"samples/xdma_qualification.cpp: missing M10 evidence {token!r}")
+
+    try:
+        xdma_support = json.loads(read("docs/xdma_support_matrix.json"))
+    except json.JSONDecodeError as exc:
+        fail(f"docs/xdma_support_matrix.json: invalid JSON: {exc}")
+    else:
+        named_stack = xdma_support.get("named_stack", {})
+        if (
+            xdma_support.get("schema_version") != 1
+            or xdma_support.get("status") != "candidate"
+            or xdma_support.get("qualified_tuples") != []
+            or named_stack.get("driver_repository") != "Xilinx/dma_ip_drivers"
+            or not named_stack.get("driver_revision")
+        ):
+            fail(
+                "docs/xdma_support_matrix.json: candidate matrix must name "
+                "the Xilinx driver revision and contain no qualified tuple"
+            )
+
 
 def main() -> int:
     require_files(
@@ -1071,11 +1200,15 @@ def main() -> int:
             "docs/device_backend.md",
             "docs/cuda_backend.md",
             "docs/cuda_support_matrix.json",
+            "docs/xdma_backend.md",
+            "docs/xdma_support_matrix.json",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
             "docs/adr/0003-device-backend-boundary.md",
             ".github/workflows/docs-contract.yml",
+            ".github/workflows/cuda-qualification.yml",
+            ".github/workflows/xdma-qualification.yml",
             "rt/include/rt/runtime.hpp",
             "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
@@ -1084,6 +1217,8 @@ def main() -> int:
             "rt/include/rt/mock_device.hpp",
             "rt/include/rt/cuda_backend.hpp",
             "rt/include/rt/cuda_driver.hpp",
+            "rt/include/rt/xdma_backend.hpp",
+            "rt/include/rt/xdma_linux.hpp",
             "rt/src/compiled_graph.cpp",
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
@@ -1101,12 +1236,15 @@ def main() -> int:
             "rt/src/mock_device.cpp",
             "rt/src/cuda_backend.cpp",
             "rt/src/cuda_driver.cpp",
+            "rt/src/xdma_backend.cpp",
+            "rt/src/xdma_linux.cpp",
             "rt/include/rt/observability_export.hpp",
             "rt/src/observability_export.cpp",
             "samples/embed_c/mini_app.c",
             "samples/embed_cpp/mini_app.cpp",
             "samples/device_mock.cpp",
             "samples/cuda_qualification.cpp",
+            "samples/xdma_qualification.cpp",
             "tests/test_host_runtime.cpp",
             "tests/test_compiled_graph.cpp",
             "tests/test_executor.cpp",
@@ -1117,6 +1255,7 @@ def main() -> int:
             "tests/test_determinism_replay.cpp",
             "tests/test_device_runtime.cpp",
             "tests/test_cuda_backend.cpp",
+            "tests/xdma_backend_tests.cpp",
             "tests/determinism_artifact.cpp",
             "tests/snapshot_fuzz.cpp",
         )

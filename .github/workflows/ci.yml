@@ -200,12 +200,14 @@ jobs:
             -DSIM_SANITIZERS=thread \
             -DSIM_WERROR=ON
       - name: Build executor ThreadSanitizer gate
-        run: cmake --build build-tsan --target simcore_tests -- -j2
+        run: |
+          cmake --build build-tsan             --target simcore_tests rtfw_xdma_backend_tests             -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
           GTEST_FILTER: UnifiedExecutor.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*
           TSAN_OPTIONS: halt_on_error=1
-        run: ctest --test-dir build-tsan --output-on-failure -R simcore_all
+        run: |
+          ctest --test-dir build-tsan             --output-on-failure             -R 'simcore_all|xdma_backend'
 
   build-windows:
     runs-on: windows-latest

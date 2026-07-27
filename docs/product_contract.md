@@ -2,7 +2,7 @@
 
 Status: accepted target contract for the pre-1.0 development line
 
-Current release: 0.10.0 experimental
+Current release: 0.11.0 experimental
 
 ## Product definition
 
@@ -12,7 +12,7 @@ before execution, and runs it on a preallocated CPU executor. The target
 runtime supports host-driven and self-paced frames and integrates asynchronous
 device backends through bounded submission and completion interfaces.
 
-The current 0.10 implementation is a research prototype. Its target-path host
+The current 0.11 implementation is a research prototype. Its target-path host
 runtime satisfies the M1 lifecycle/callback, M2 compiled-graph, M3 unified
 CPU-executor, M4 bounded-memory, M5 time/platform, and M6 observability
 contracts at RT0 and the M7 registered-state D1/checkpoint/replay contract,
@@ -74,7 +74,7 @@ Host-driven time is the default embedding contract:
 - A host-driven step does not sleep or advance a hidden wall clock.
 - A separate self-paced mode owns an absolute periodic release schedule.
 
-The 0.10 `rt::Runtime` implements both explicit modes. The host supplies frame
+The 0.11 `rt::Runtime` implements both explicit modes. The host supplies frame
 index, delta, and optional deadline to synchronous `step()` without runtime
 pacing. `run_periodic()` executes a finite caller-thread loop using absolute
 epoch-based releases; late frames never shift that epoch. Per-frame results
@@ -96,7 +96,7 @@ policies may differ:
 | `host_adapter` | Execution through a host job-system contract with explicit scratch and completion contexts |
 | `periodic_rt` | Static execution plus qualified absolute release/deadline control |
 
-Release 0.10 implements `static_deterministic` and `bounded_throughput` in the
+Release 0.11 implements `static_deterministic` and `bounded_throughput` in the
 runtime-owned executor. Graph phases, nested ranges, and reductions share that
 team. The current `SimCore` workers, optional `WorkerPool`, `rt::Scheduler`,
 and `FiberPool` are separate compatibility experiments, not target policies.
@@ -129,7 +129,7 @@ fixed-capacity RT-lane emission, explicit loss accounting, runtime-isolated
 cursors, and version/build/config/workload provenance. Serialization and
 external transport remain non-RT host responsibilities.
 
-Release 0.10 implements observability schema version 2 for `rt::Runtime`.
+Release 0.11 implements observability schema version 2 for `rt::Runtime`.
 Schema 2 preserves IDs 0–21 and adds device events and metrics.
 Metric cursors independently partition monotonic counters into intervals
 without resetting global state; gauges are sampled rather than differenced.
@@ -143,7 +143,7 @@ Devices are optional backends outside the core scheduler. A backend contract
 must define capabilities, buffer registration, bounded submission, completion,
 timeout, cancellation where supported, health, reset, and shutdown.
 
-Release 0.10 retains the size/versioned, poll-only device ABI, registered
+Release 0.11 retains the size/versioned, poll-only device ABI, registered
 buffers, graph-integrated device phases, health/reset/shutdown control, and a
 fixed-capacity deterministic CPU mock. The runtime owns one completion-service
 lane; CPU workers submit without waiting for completion, and the ABI has no
@@ -151,10 +151,14 @@ backend-to-runtime callback. The legacy detached-thread GPU stub remains
 outside `rt::Runtime`. M9 adds a separate, optional CUDA Driver API backend
 candidate around host-owned contexts/streams, pinned registered host spans,
 device mirrors or external allocations, fixed kernel tokens, async operations,
-event-query completion, and drain-before-release recovery. No CUDA hardware
-tuple, Vulkan backend, or XDMA backend is qualified. See
-[the device contract](device_backend.md),
-[the CUDA contract](cuda_backend.md), and
+event-query completion, and drain-before-release recovery. M10 adds a
+fixed-capacity XDMA state machine plus an opt-in Linux character-device adapter
+for one named Xilinx AXI-MM stack. Its blocking transfers run only on fixed
+backend I/O workers, and timed-out work remains quarantined until the driver
+call physically returns. No CUDA or XDMA hardware tuple and no Vulkan backend
+is qualified. See [the device contract](device_backend.md),
+[the CUDA contract](cuda_backend.md),
+[the XDMA contract](xdma_backend.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
 
 ## Real-time tiers
@@ -179,10 +183,10 @@ An RT2 qualification record must include:
 - raw release, wake-up, compute, completion, slack, and miss samples;
 - thresholds chosen before the run and the final pass/fail result.
 
-Release 0.10 has a strict, read-only Linux prerequisite preflight. It fails
+Release 0.11 has a strict, read-only Linux prerequisite preflight. It fails
 closed on missing PREEMPT_RT, lock coverage, isolated affinity, realtime
 scheduling, or absolute clock support, but it does not validate the full
-deployment record or measured deadlines. No RT2 qualification exists in 0.10.
+deployment record or measured deadlines. No RT2 qualification exists in 0.11.
 
 ## Determinism tiers
 
@@ -193,7 +197,7 @@ deployment record or measured deadlines. No RT2 qualification exists in 0.10.
 | D2 — Reproducible build profile | D1 plus pinned compiler, flags, dependencies, and hardware class |
 | D3 — Portable deterministic | Only approved fixed-point or explicitly specified math kernels; arbitrary floating-point code is excluded |
 
-Release 0.10 supports D0 and an explicit D1 contract for registered canonical
+Release 0.11 supports D0 and an explicit D1 contract for registered canonical
 state. D1 tests cover 1, 2, and 4 workers and exchange one integer-only
 checkpoint artifact between GCC/Clang and FMA-on/FMA-off CI jobs. That narrow
 artifact comparison does not establish D2 for arbitrary callbacks or
@@ -204,7 +208,7 @@ callback expressions.
 
 ## Current support matrix
 
-| Surface | 0.10 status | Notes |
+| Surface | 0.11 status | Notes |
 | --- | --- | --- |
 | `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen topology |
 | Compiled graph | Implemented RT0 surface | Deterministic topological order; invalid/foreign handles, cycles, and unordered conflicting resource access fail before start |
@@ -231,7 +235,7 @@ callback expressions.
 | C ABI | Experimental M8 surface | ABI v7 includes lifecycle through replay plus backend, buffer, device-phase, health, and reset calls; ABI freezes at M11 |
 | JSON profiles/runtime autotune | Planned integration | Generators exist; `rtfw_demo` does not load their output |
 | GPU | CUDA candidate; no qualified tuple | Real Driver API adapter exists behind `RTFW_ENABLE_CUDA`; deterministic mock remains the portable gate and the legacy detached-thread stub is excluded |
-| XDMA | Planned | No implementation |
+| Xilinx XDMA AXI-MM | Candidate; unqualified | Portable bounded backend and opt-in Linux character-device adapter exist for one named stack; the support matrix has no qualified tuple |
 | Portable hard real time | Non-goal | Only a named RT2 deployment can be qualified |
 
 ## Non-goals

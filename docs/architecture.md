@@ -1,13 +1,13 @@
 # Architecture
 
-This page separates the 0.10 implementation from the accepted target
+This page separates the 0.11 implementation from the accepted target
 architecture. The normative target is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.10 implementation
+## Current 0.11 implementation
 
-### M1–M8 host runtime
+### M1–M10 host and device runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -45,6 +45,14 @@ copies and fixed-payload kernel launch, integrates through the unchanged M8
 ABI, and has a CPU-only injected-driver test suite. It remains a candidate
 because no versioned hardware support tuple has passed the required resource,
 failure/recovery, and latency gates.
+
+M10 adds a separate Xilinx XDMA AXI-MM character-device candidate for the
+named upstream Linux driver stack. Blocking character-device I/O is confined
+to a fixed initialization-time worker team; the M8-facing submit and poll
+paths remain bounded. Its injected-driver tests cover saturation, timeout
+quarantine, recovery, concurrency, and steady-state allocation freedom. It
+remains unqualified until one declared PCI/driver/bitstream tuple passes the
+published hardware evidence gates.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
@@ -141,10 +149,13 @@ checkpoint/input-log codecs, transactional restore, and synchronous replay.
 M8 adds the poll-only device ABI, graph-held device completion tokens,
 preallocated device-manager storage, and deterministic mock.
 M9 adds the optional CUDA candidate without coupling the scheduler to vendor
-headers or changing the portable device contract.
+headers or changing the portable device contract. M10 adds the optional Linux
+XDMA AXI-MM candidate, likewise behind the unchanged M8 contract and a separate
+support matrix.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
+[XDMA backend contract](xdma_backend.md),
 [ADR-0001](adr/0001-one-executor-boundary.md),
 [ADR-0002](adr/0002-host-driven-time.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
@@ -157,7 +168,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M8 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M10 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
@@ -175,6 +186,9 @@ that arbitrary host data is automatically optimized.
 - M9 CUDA candidate: `rt/include/rt/cuda_backend.hpp`,
   `rt/src/cuda_backend.cpp`, `rt/src/cuda_driver.cpp`,
   `docs/cuda_backend.md`
+- M10 XDMA candidate: `rt/include/rt/xdma_backend.hpp`,
+  `rt/include/rt/xdma_linux.hpp`, `rt/src/xdma_backend.cpp`,
+  `rt/src/xdma_linux.cpp`, `docs/xdma_backend.md`
 - Experimental C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - Phase registration and graph: `SimCore::addPhase`,
   `SimCore::addDependency`, `SimCore::buildTopoLevels`;

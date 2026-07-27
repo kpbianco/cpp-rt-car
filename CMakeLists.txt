@@ -10,6 +10,8 @@ project(rtfw VERSION "${RTFW_VERSION}" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
+find_package(Threads REQUIRED)
+
 set(
   RTFW_BUILD_ID
   "rtfw-${PROJECT_VERSION}"
@@ -33,6 +35,10 @@ option(SIM_WARN_ODR "Enable -Wodr to detect ODR violations" OFF)
 option(
   RTFW_ENABLE_CUDA
   "Build the optional CUDA Driver API adapter and hardware qualification tool"
+  OFF)
+option(
+  RTFW_ENABLE_XDMA
+  "Build the Linux Xilinx XDMA character-device adapter and qualification tool"
   OFF)
 
 # Sanitizer toggles (semicolons to enable multiple: address;thread;leak;memory;hwaddress;safe-stack;cfi)
@@ -603,6 +609,50 @@ if (RTFW_ENABLE_CUDA)
     add_library(rtfw::cuda_driver ALIAS rtfw_cuda_driver)
 endif()
 
+# XDMA backend state machine. Blocking driver transfers execute only on its
+# fixed initialization-time I/O workers, keeping submit/poll bounded and
+# portable for ordinary CI.
+add_library(rtfw_xdma_backend STATIC rt/src/xdma_backend.cpp)
+target_compile_features(rtfw_xdma_backend PUBLIC cxx_std_20)
+target_include_directories(rtfw_xdma_backend PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(
+    rtfw_xdma_backend PUBLIC simcore_core Threads::Threads)
+set_target_properties(rtfw_xdma_backend PROPERTIES
+    EXPORT_NAME xdma_backend
+    OUTPUT_NAME rtfw_xdma_backend
+    POSITION_INDEPENDENT_CODE ON
+)
+add_library(rtfw::xdma_backend ALIAS rtfw_xdma_backend)
+
+if (RTFW_ENABLE_XDMA)
+    if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "RTFW_ENABLE_XDMA supports only the named Linux XDMA stack")
+    endif()
+    add_library(rtfw_xdma_linux STATIC rt/src/xdma_linux.cpp)
+    target_compile_features(rtfw_xdma_linux PUBLIC cxx_std_20)
+    target_include_directories(rtfw_xdma_linux PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_compile_definitions(
+        rtfw_xdma_linux
+        PUBLIC RTFW_XDMA_LINUX_AVAILABLE=1)
+    target_link_libraries(
+        rtfw_xdma_linux PUBLIC rtfw_xdma_backend)
+    set_target_properties(rtfw_xdma_linux PROPERTIES
+        EXPORT_NAME xdma_linux
+        OUTPUT_NAME rtfw_xdma_linux
+        POSITION_INDEPENDENT_CODE ON
+    )
+    add_library(rtfw::xdma_linux ALIAS rtfw_xdma_linux)
+endif()
+
 set(RTFW_SOURCES src/c_abi.cpp)
 
 add_library(rtfw_shared SHARED ${RTFW_SOURCES})
@@ -703,6 +753,7 @@ install(
         simcore_platform
         simcore_rt
         rtfw_cuda_backend
+        rtfw_xdma_backend
     EXPORT rtfwTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -713,6 +764,17 @@ install(
 if (RTFW_ENABLE_CUDA)
     install(
         TARGETS rtfw_cuda_driver
+        EXPORT rtfwTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
+
+if (RTFW_ENABLE_XDMA)
+    install(
+        TARGETS rtfw_xdma_linux
         EXPORT rtfwTargets
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

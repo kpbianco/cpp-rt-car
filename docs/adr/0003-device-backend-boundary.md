@@ -2,14 +2,16 @@
 
 - Status: Accepted
 - Date: 2026-07-23
-- Implementation milestone: M8 complete; M9 CUDA candidate awaiting hardware
-  qualification; M10 XDMA remains
+- Implementation milestone: M8 complete; M9 CUDA and M10 Xilinx Linux XDMA
+  candidates await separate hardware qualification
 
 ## Context
 
-The current HAL wraps standard allocation, threads, futures, and clocks. Its
-`pinned` and `hugepage` flags are no-ops. The GPU mock creates a detached CPU
-thread per submission, and there is no XDMA implementation.
+The legacy HAL wraps standard allocation, threads, futures, and clocks. Its
+`pinned` and `hugepage` flags are no-ops, and the legacy GPU mock creates a
+detached CPU thread per submission. The M8 target device ABI, M9 CUDA
+candidate, and M10 XDMA candidate supersede those experiments without changing
+their compatibility behavior.
 
 Embedding environments may already own a GPU context, command queue, or device
 service. Device code also has failure and lifetime rules that do not belong in
@@ -41,7 +43,9 @@ resource, or submission can reference them.
 - A deterministic fault-injectable mock backend is implemented before CUDA or
   XDMA.
 - CUDA accepts an explicit host-owned context/stream set or clearly owns one.
-- XDMA support names one concrete driver/device contract and FPGA test image.
+- XDMA support names the official Xilinx Linux XDMA AXI-MM character driver
+  and an example-design-compatible FPGA memory-map contract. Blocking
+  character-device calls execute only on a fixed backend worker team.
 - API boundedness and hardware completion qualification are documented
   separately.
 - The target runtime creates no detached submission thread. The legacy GPU
@@ -49,6 +53,9 @@ resource, or submission can reference them.
 - The M9 implementation uses the host-owned option: the host retains its CUDA
   context, streams, modules, functions, and any externally bound allocations.
   A versioned support tuple remains separate from implementation presence.
+- The M10 implementation uses fixed setup-time workers around `pread()` and
+  `pwrite()`. Timeout quarantine preserves buffer lifetime but cannot bound or
+  cancel a hung kernel driver call. Its support matrix remains empty.
 
 ## Rejected alternatives
 

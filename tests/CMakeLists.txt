@@ -195,3 +195,11 @@ if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
+
+# Portable M10 XDMA state-machine tests do not require GoogleTest, vendor
+# headers, a kernel driver, or hardware.
+add_executable(rtfw_xdma_backend_tests xdma_backend_tests.cpp)
+target_link_libraries(
+    rtfw_xdma_backend_tests PRIVATE rtfw_xdma_backend)
+add_test(NAME xdma_backend COMMAND rtfw_xdma_backend_tests)
+set_tests_properties(xdma_backend PROPERTIES TIMEOUT 60)

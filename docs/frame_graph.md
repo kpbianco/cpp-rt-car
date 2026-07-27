@@ -23,8 +23,9 @@ implicit ownership all violate the target device contract.
 Milestone M8 supersedes this experiment for `rt::Runtime` with the bounded,
 fault-injectable path in the
 [device backend contract](device_backend.md). This legacy experiment remains
-for compatibility; CUDA and XDMA backends come only after the target contract
-is tested.
+for compatibility. The separately linked M9 CUDA and M10 XDMA candidates
+implement the target contract, but neither makes this legacy experiment a
+hardware backend or establishes a qualified hardware tuple.
 
 ## Code anchors
 
