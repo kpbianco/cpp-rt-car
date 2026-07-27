@@ -349,13 +349,13 @@ TEST(Observability, JsonExportIncludesSchemaAndIdentifiers) {
         rt::Status::ok);
     const auto json = output.str();
     EXPECT_NE(
-        json.find("\"schema_version\":1"),
+        json.find("\"schema_version\":2"),
         std::string::npos);
     EXPECT_NE(
         json.find("\"trace_event_size\":64"),
         std::string::npos);
     EXPECT_NE(
-        json.find("\"metric_count\":22"),
+        json.find("\"metric_count\":32"),
         std::string::npos);
     EXPECT_NE(json.find("\"build_id\":"), std::string::npos);
     EXPECT_NE(json.find("\"config_id\":"), std::string::npos);

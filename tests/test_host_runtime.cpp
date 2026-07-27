@@ -112,6 +112,7 @@ TEST(HostRuntime, ReportsOnlyCompletedTargetPathCapabilities) {
     EXPECT_TRUE(capabilities.strict_platform_preflight);
     EXPECT_TRUE(capabilities.versioned_observability);
     EXPECT_TRUE(capabilities.deterministic_replay);
+    EXPECT_TRUE(capabilities.bounded_device_backend);
 }
 
 TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
@@ -170,7 +171,7 @@ TEST(HostRuntime, EnforcesLifecycleAndExecutesHostContext) {
 }
 
 TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
-    EXPECT_EQ(rt::runtime_config_schema_version, 6u);
+    EXPECT_EQ(rt::runtime_config_schema_version, 7u);
 
     rt::RuntimeConfig standalone;
     const auto unchanged = standalone;
@@ -269,6 +270,18 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
         runtime.configure_key("input_log_max_bytes", "1024"),
         rt::Status::ok);
     ASSERT_EQ(
+        runtime.configure_key("device_backend_capacity", "2"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("device_buffer_capacity", "3"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("device_completion_batch", "2"),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.configure_key("device_outstanding_capacity", "4"),
+        rt::Status::ok);
+    ASSERT_EQ(
         runtime.configure_key(
             "workload_id",
             "host-runtime.test"),
@@ -311,6 +324,10 @@ TEST(HostRuntime, StrictConfigurationKeysMapToBehavior) {
     EXPECT_EQ(runtime.config().snapshot_max_bytes, 1024u);
     EXPECT_EQ(runtime.config().replay_input_capacity, 4u);
     EXPECT_EQ(runtime.config().input_log_max_bytes, 1024u);
+    EXPECT_EQ(runtime.config().device_backend_capacity, 2u);
+    EXPECT_EQ(runtime.config().device_buffer_capacity, 3u);
+    EXPECT_EQ(runtime.config().device_outstanding_capacity, 4u);
+    EXPECT_EQ(runtime.config().device_completion_batch, 2u);
     EXPECT_EQ(runtime.trace_event_count(), 3u);
     EXPECT_NE(first.multiply_add, 0.0);
 

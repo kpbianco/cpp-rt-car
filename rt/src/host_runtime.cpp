@@ -2,6 +2,7 @@
 
 #include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
+#include "device_manager.hpp"
 #include "executor.hpp"
 #include "native_platform_preflight.hpp"
 #include "snapshot_codec.hpp"
@@ -49,6 +50,10 @@ constexpr std::size_t kMaxArtifactBytes =
     rt::detail::artifact_absolute_max_bytes;
 constexpr std::size_t kMaxReplayInputs =
     rt::detail::artifact_absolute_max_records;
+constexpr std::size_t kMaxDeviceBackends = 256;
+constexpr std::size_t kMaxDeviceBuffers = 65'536;
+constexpr std::size_t kMaxDeviceOutstanding = std::size_t{1} << 20;
+constexpr std::size_t kMaxDeviceCompletionBatch = std::size_t{1} << 16;
 constexpr std::size_t kNoCallback = std::numeric_limits<std::size_t>::max();
 constexpr std::size_t kNoWorker = std::numeric_limits<std::size_t>::max();
 constexpr std::uint64_t kFnvOffset = 14'695'981'039'346'656'037ull;
@@ -235,6 +240,33 @@ bool valid_identifier(
     return length != 0 && length < identifier.size();
 }
 
+template <std::size_t Capacity>
+bool valid_identifier(
+    const char (&identifier)[Capacity]) noexcept {
+    std::size_t length = 0;
+    while (length < Capacity && identifier[length] != '\0') {
+        if (!identifier_character(identifier[length])) {
+            return false;
+        }
+        ++length;
+    }
+    if (length == 0 || length == Capacity) {
+        return false;
+    }
+    return std::all_of(
+        identifier + length + 1,
+        identifier + Capacity,
+        [](char value) { return value == '\0'; });
+}
+
+template <std::size_t Capacity>
+bool reserved_zero(const std::uint64_t (&values)[Capacity]) noexcept {
+    return std::all_of(
+        std::begin(values),
+        std::end(values),
+        [](std::uint64_t value) { return value == 0; });
+}
+
 bool set_identifier(
     std::array<
         char,
@@ -331,6 +363,10 @@ std::uint64_t config_identifier(
     hash_u64(hash, config.snapshot_max_bytes);
     hash_u64(hash, config.replay_input_capacity);
     hash_u64(hash, config.input_log_max_bytes);
+    hash_u64(hash, config.device_backend_capacity);
+    hash_u64(hash, config.device_buffer_capacity);
+    hash_u64(hash, config.device_outstanding_capacity);
+    hash_u64(hash, config.device_completion_batch);
     hash_string(hash, identifier_view(config.workload_id));
     return hash;
 }
@@ -372,6 +408,15 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
         config.input_log_max_bytes <
             rt::detail::input_log_header_size ||
         config.input_log_max_bytes > kMaxArtifactBytes ||
+        config.device_backend_capacity == 0 ||
+        config.device_backend_capacity > kMaxDeviceBackends ||
+        config.device_buffer_capacity > kMaxDeviceBuffers ||
+        config.device_outstanding_capacity == 0 ||
+        config.device_outstanding_capacity > kMaxDeviceOutstanding ||
+        config.device_completion_batch == 0 ||
+        config.device_completion_batch > kMaxDeviceCompletionBatch ||
+        config.device_completion_batch >
+            config.device_outstanding_capacity ||
         !valid_identifier(config.workload_id)) {
         return rt::Status::invalid_config;
     }
@@ -427,9 +472,10 @@ rt::Status validate_config(const rt::RuntimeConfig& config) noexcept {
 namespace rt {
 
 Capabilities query_capabilities() noexcept {
-    // M7 adds bounded canonical state checkpoints and input-log replay with an
-    // explicit D1 application contract.
-    return {true, true, true, true, true, true, true, true, true};
+    // M8 adds the bounded poll-only device ABI and deterministic mock backend.
+    return {
+        true, true, true, true, true,
+        true, true, true, true, true};
 }
 
 const char* status_message(Status status) noexcept {
@@ -468,6 +514,18 @@ const char* status_message(Status status) noexcept {
         return "checkpoint or input-log artifact is invalid";
     case Status::incompatible_artifact:
         return "checkpoint or input-log artifact is incompatible";
+    case Status::device_queue_full:
+        return "device submission queue is full";
+    case Status::device_timeout:
+        return "device submission timed out";
+    case Status::device_error:
+        return "device backend error";
+    case Status::device_lost:
+        return "device was lost";
+    case Status::device_canceled:
+        return "device submission was canceled";
+    case Status::device_reset_required:
+        return "device reset is required";
     }
     return "unknown runtime status";
 }
@@ -607,6 +665,26 @@ Status set_runtime_config_value(
             return Status::invalid_config;
         }
         candidate.input_log_max_bytes = parsed;
+    } else if (key == "device_backend_capacity") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.device_backend_capacity = parsed;
+    } else if (key == "device_buffer_capacity") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.device_buffer_capacity = parsed;
+    } else if (key == "device_outstanding_capacity") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.device_outstanding_capacity = parsed;
+    } else if (key == "device_completion_batch") {
+        if (!parse_size(value, parsed)) {
+            return Status::invalid_config;
+        }
+        candidate.device_completion_batch = parsed;
     } else if (key == "workload_id") {
         if (!set_identifier(candidate.workload_id, value)) {
             return Status::invalid_config;
@@ -655,10 +733,18 @@ struct Runtime::Impl {
         std::atomic_flag& lock_;
     };
 
+    enum class PhaseKind : std::uint8_t {
+        cpu,
+        device,
+    };
+
     struct RegisteredCallback {
         std::string name;
+        PhaseKind kind = PhaseKind::cpu;
         FrameCallback callback = nullptr;
+        DeviceCommandCallback device_callback = nullptr;
         void* user_data = nullptr;
+        std::uint32_t device_backend_index = 0;
     };
 
     struct RegisteredResource {
@@ -681,6 +767,16 @@ struct Runtime::Impl {
                   ? injected_preflight
                   : &owned_preflight) {
         error[0] = '\0';
+    }
+
+    ~Impl() {
+        if (devices) {
+            devices->stop();
+        }
+        if (executor) {
+            executor->stop();
+        }
+        watchdog.stop();
     }
 
     void clear_error() noexcept {
@@ -723,12 +819,54 @@ struct Runtime::Impl {
                resource.index() < resources.size();
     }
 
+    [[nodiscard]] bool valid_device_backend(
+        DeviceBackendHandle backend) const noexcept {
+        return backend.valid() &&
+               backend.owner() == graph_owner &&
+               backend.index() < device_backends.size();
+    }
+
+    [[nodiscard]] bool valid_device_buffer(
+        DeviceBufferHandle buffer) const noexcept {
+        return buffer.valid() &&
+               buffer.owner() == graph_owner &&
+               buffer.index() < device_buffers.size();
+    }
+
     [[nodiscard]] std::uint64_t compute_graph_id() const noexcept {
         std::uint64_t hash = kFnvOffset;
         hash_u64(hash, 1);
         hash_u64(hash, callbacks.size());
         for (const auto& callback : callbacks) {
             hash_string(hash, callback.name);
+            hash_u64(
+                hash,
+                static_cast<std::uint64_t>(callback.kind));
+            if (callback.kind == PhaseKind::device) {
+                hash_u64(hash, callback.device_backend_index);
+            }
+        }
+        hash_u64(hash, device_backends.size());
+        for (const auto& backend : device_backends) {
+            hash_string(hash, backend.name);
+            hash_string(
+                hash,
+                std::string_view(
+                    backend.capabilities.backend_id,
+                    std::char_traits<char>::length(
+                        backend.capabilities.backend_id)));
+        }
+        hash_u64(hash, device_buffers.size());
+        for (const auto& buffer : device_buffers) {
+            hash_string(
+                hash,
+                std::string_view(
+                    buffer.name.data(),
+                    std::char_traits<char>::length(
+                        buffer.name.data())));
+            hash_u64(hash, buffer.backend_index);
+            hash_u64(hash, buffer.storage.size());
+            hash_u64(hash, buffer.flags);
         }
         hash_u64(hash, resources.size());
         for (const auto& resource : resources) {
@@ -986,6 +1124,9 @@ struct Runtime::Impl {
         case RuntimeTraceEventType::finalized:
         case RuntimeTraceEventType::started:
         case RuntimeTraceEventType::stopped:
+        case RuntimeTraceEventType::device_submitted:
+        case RuntimeTraceEventType::device_completed:
+        case RuntimeTraceEventType::device_reset:
             break;
         }
 
@@ -1062,20 +1203,69 @@ struct Runtime::Impl {
                 RuntimeMetricId::executor_worker_starts,
                 stats.worker_starts);
         }
+        if (devices) {
+            const auto stats = devices->stats();
+            set(RuntimeMetricId::device_submissions, stats.submissions);
+            set(RuntimeMetricId::device_completions, stats.completions);
+            set(RuntimeMetricId::device_failures, stats.failures);
+            set(
+                RuntimeMetricId::device_queue_rejections,
+                stats.queue_rejections);
+            set(RuntimeMetricId::device_timeouts, stats.timeouts);
+            set(RuntimeMetricId::device_losses, stats.losses);
+            set(RuntimeMetricId::device_resets, stats.resets);
+            set(
+                RuntimeMetricId::device_service_polls,
+                stats.service_polls);
+            set(RuntimeMetricId::device_outstanding, stats.outstanding);
+            set(
+                RuntimeMetricId::device_service_starts,
+                stats.service_starts);
+        }
         set(
             RuntimeMetricId::degradation_level,
             degradation_level.load(std::memory_order_acquire));
         return values;
     }
 
-    static CallbackResult run_phase(
+    static void observe_device_event(
+        void* opaque,
+        const detail::DeviceEvent& event) noexcept {
+        auto& self = *static_cast<Impl*>(opaque);
+        RuntimeTraceEventType type =
+            RuntimeTraceEventType::device_completed;
+        switch (event.kind) {
+        case detail::DeviceEventKind::submitted:
+            type = RuntimeTraceEventType::device_submitted;
+            break;
+        case detail::DeviceEventKind::completed:
+            type = RuntimeTraceEventType::device_completed;
+            break;
+        case detail::DeviceEventKind::reset:
+            type = RuntimeTraceEventType::device_reset;
+            break;
+        }
+        self.record(
+            type,
+            event.status,
+            self.clock_now(),
+            event.frame_index,
+            event.phase_index,
+            event.producer,
+            event.worker_index,
+            event.kind == detail::DeviceEventKind::reset
+                ? event.backend_index
+                : event.submission_id);
+    }
+
+    static detail::PhaseTaskDispatch run_phase(
         void* opaque,
         std::uint32_t phase_index,
         const TaskContext& task_context) {
         auto& self = *static_cast<Impl*>(opaque);
         const auto index = static_cast<std::size_t>(phase_index);
         if (index >= self.callbacks.size() || self.active_frame == nullptr) {
-            return CallbackResult::error;
+            return {Status::callback_failed, false};
         }
 
         auto& callback = self.callbacks[index];
@@ -1097,35 +1287,67 @@ struct Runtime::Impl {
                      self.finalized_memory_plan.phase_scratch_stride),
                 self.config.scratch_bytes);
         }
-        CallbackContext callback_context{
-            *self.active_frame,
-            phase_scratch,
-            self.numerics,
-            task_context,
-            self.degradation_level.load(std::memory_order_acquire),
-        };
-
         CallbackResult result = CallbackResult::error;
-        try {
-            result = callback.callback(
-                callback.user_data,
-                callback_context);
-        } catch (...) {
-            result = CallbackResult::error;
+        Status status = Status::callback_failed;
+        bool pending = false;
+        if (callback.kind == PhaseKind::cpu) {
+            CallbackContext callback_context{
+                *self.active_frame,
+                phase_scratch,
+                self.numerics,
+                task_context,
+                self.degradation_level.load(std::memory_order_acquire),
+            };
+            try {
+                result = callback.callback(
+                    callback.user_data,
+                    callback_context);
+            } catch (...) {
+                result = CallbackResult::error;
+            }
+            status = result == CallbackResult::ok
+                ? Status::ok
+                : Status::callback_failed;
+        } else {
+            DeviceCallbackContext callback_context{
+                *self.active_frame,
+                phase_scratch,
+                self.numerics,
+                task_context,
+                self.degradation_level.load(std::memory_order_acquire),
+            };
+            auto submission = make_device_submission();
+            try {
+                result = callback.device_callback(
+                    callback.user_data,
+                    callback_context,
+                    submission);
+            } catch (...) {
+                result = CallbackResult::error;
+            }
+            if (result == CallbackResult::ok && self.devices) {
+                std::uint64_t submission_id = 0;
+                status = self.devices->submit(
+                    callback.device_backend_index,
+                    index,
+                    task_context.worker_index(),
+                    self.active_frame->frame_index,
+                    submission,
+                    submission_id);
+                pending = status == Status::ok;
+            }
         }
 
         self.record(
             RuntimeTraceEventType::callback_end,
-            result == CallbackResult::ok
-                ? Status::ok
-                : Status::callback_failed,
+            status,
             self.clock_now(),
             self.active_frame->frame_index,
             index,
             RuntimeTraceProducer::worker,
             task_context.worker_index(),
             task_context.task_index());
-        return result;
+        return {status, pending};
     }
 
     std::uint32_t graph_owner;
@@ -1137,6 +1359,8 @@ struct Runtime::Impl {
     RuntimeState state = RuntimeState::configuring;
     NumericalPolicy numerics{};
     std::vector<RegisteredCallback> callbacks;
+    std::vector<detail::DeviceBackendSpec> device_backends;
+    std::vector<detail::DeviceBufferSpec> device_buffers;
     std::vector<RegisteredResource> resources;
     std::vector<RegisteredState> states;
     std::vector<detail::GraphDependency> dependencies;
@@ -1152,6 +1376,7 @@ struct Runtime::Impl {
     std::uint64_t telemetry_epoch_ns = 0;
     std::uint64_t metric_snapshot_sequence = 0;
     std::unique_ptr<detail::Executor> executor;
+    std::unique_ptr<detail::DeviceManager> devices;
     detail::WatchdogMonitor watchdog;
     MemoryPlan finalized_memory_plan{};
     PlatformPreflightReport preflight_report{};
@@ -1193,7 +1418,11 @@ Status Runtime::configure(const RuntimeConfig& config) noexcept {
     }
     if (validate_config(config) != Status::ok ||
         config.callback_capacity < impl_->callbacks.size() ||
-        config.state_capacity < impl_->states.size()) {
+        config.state_capacity < impl_->states.size() ||
+        config.device_backend_capacity <
+            impl_->device_backends.size() ||
+        config.device_buffer_capacity <
+            impl_->device_buffers.size()) {
         return impl_->fail(Status::invalid_config, nullptr);
     }
     impl_->config = config;
@@ -1215,7 +1444,11 @@ Status Runtime::configure_key(
     const auto status = set_runtime_config_value(candidate, key, value);
     if (status != Status::ok ||
         candidate.callback_capacity < impl_->callbacks.size() ||
-        candidate.state_capacity < impl_->states.size()) {
+        candidate.state_capacity < impl_->states.size() ||
+        candidate.device_backend_capacity <
+            impl_->device_backends.size() ||
+        candidate.device_buffer_capacity <
+            impl_->device_buffers.size()) {
         return impl_->fail(Status::invalid_config, "unknown or invalid configuration key/value");
     }
     impl_->config = candidate;
@@ -1259,8 +1492,11 @@ Status Runtime::register_callback(
         const auto index = static_cast<std::uint32_t>(impl_->callbacks.size());
         impl_->callbacks.push_back(Impl::RegisteredCallback{
             std::string(registration.name),
+            Impl::PhaseKind::cpu,
             registration.callback,
+            nullptr,
             registration.user_data,
+            0,
         });
         out_phase = PhaseHandle{impl_->graph_owner, index};
     } catch (const std::bad_alloc&) {
@@ -1269,6 +1505,276 @@ Status Runtime::register_callback(
         return impl_->fail(Status::internal_error, nullptr);
     }
 
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_device_backend(
+    const DeviceBackendRegistration& registration,
+    DeviceBackendHandle& out_backend) noexcept {
+    out_backend = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device backend registration is frozen");
+    }
+    std::array<char, RTFW_DEVICE_IDENTIFIER_CAPACITY> name{};
+    if (!set_identifier(name, registration.name)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device backend name must be a stable identifier");
+    }
+    if (impl_->device_backends.size() >=
+        impl_->config.device_backend_capacity) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "configured device backend capacity exceeded");
+    }
+    const auto& api = registration.api;
+    if (api.struct_size < sizeof(api) ||
+        api.abi_version != RTFW_DEVICE_ABI_VERSION ||
+        !api.instance ||
+        !api.get_capabilities ||
+        !api.initialize ||
+        !api.register_buffer ||
+        !api.unregister_buffer ||
+        !api.submit ||
+        !api.poll ||
+        !api.cancel ||
+        !api.get_health ||
+        !api.reset ||
+        !api.shutdown ||
+        !reserved_zero(api.reserved)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device backend function table is malformed or incompatible");
+    }
+    const auto duplicate = std::find_if(
+        impl_->device_backends.begin(),
+        impl_->device_backends.end(),
+        [&](const detail::DeviceBackendSpec& backend) {
+            return backend.name == registration.name;
+        });
+    if (duplicate != impl_->device_backends.end()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device backend names must be unique");
+    }
+
+    rtfw_device_capabilities capabilities{};
+    capabilities.struct_size = sizeof(capabilities);
+    capabilities.abi_version = RTFW_DEVICE_ABI_VERSION;
+    rtfw_device_status device_status =
+        RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+    try {
+        device_status = api.get_capabilities(
+            api.instance,
+            &capabilities);
+    } catch (...) {
+        device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+    }
+    const auto status =
+        detail::device_status_to_runtime(device_status);
+    if (status != Status::ok) {
+        return impl_->fail(
+            status,
+            "device backend capability query failed");
+    }
+    if (capabilities.struct_size < sizeof(capabilities) ||
+        capabilities.abi_version != RTFW_DEVICE_ABI_VERSION ||
+        capabilities.max_in_flight == 0 ||
+        capabilities.max_registered_buffers == 0 ||
+        capabilities.max_buffer_bytes == 0 ||
+        capabilities.inline_payload_capacity <
+            RTFW_DEVICE_INLINE_PAYLOAD_CAPACITY ||
+        capabilities.buffer_ref_capacity <
+            RTFW_DEVICE_BUFFER_REF_CAPACITY ||
+        capabilities.supports_cancel > 1 ||
+        capabilities.supports_reset > 1 ||
+        capabilities.deterministic_mock > 1 ||
+        capabilities.reserved0 != 0 ||
+        !valid_identifier(capabilities.backend_id) ||
+        !reserved_zero(capabilities.reserved) ||
+        capabilities.control_storage_bytes >
+            std::numeric_limits<std::size_t>::max()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device backend reported malformed capabilities");
+    }
+
+    try {
+        const auto index = static_cast<std::uint32_t>(
+            impl_->device_backends.size());
+        impl_->device_backends.push_back(
+            detail::DeviceBackendSpec{
+                std::string(registration.name),
+                api,
+                capabilities,
+            });
+        out_backend =
+            DeviceBackendHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_device_buffer(
+    const DeviceBufferRegistration& registration,
+    DeviceBufferHandle& out_buffer) noexcept {
+    out_buffer = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device buffer registration is frozen");
+    }
+    if (!impl_->valid_device_backend(registration.backend)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "device buffer references an invalid or foreign backend");
+    }
+    std::array<char, RTFW_DEVICE_IDENTIFIER_CAPACITY> name{};
+    if (!set_identifier(name, registration.name) ||
+        registration.storage.empty()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device buffer requires a stable name and non-empty storage");
+    }
+    constexpr auto allowed_flags =
+        RTFW_DEVICE_BUFFER_HOST_READ |
+        RTFW_DEVICE_BUFFER_HOST_WRITE |
+        RTFW_DEVICE_BUFFER_DEVICE_READ |
+        RTFW_DEVICE_BUFFER_DEVICE_WRITE;
+    if (registration.flags == 0 ||
+        (registration.flags & ~allowed_flags) != 0) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device buffer flags are invalid");
+    }
+    if (impl_->device_buffers.size() >=
+        impl_->config.device_buffer_capacity) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "configured device buffer capacity exceeded");
+    }
+    const auto backend_index = static_cast<std::size_t>(
+        registration.backend.index());
+    const auto& backend = impl_->device_backends[backend_index];
+    if (registration.storage.size() >
+        backend.capabilities.max_buffer_bytes) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "device buffer exceeds backend byte capacity");
+    }
+    std::size_t backend_buffer_count = 0;
+    for (const auto& buffer : impl_->device_buffers) {
+        if (buffer.backend_index == backend_index) {
+            ++backend_buffer_count;
+        }
+        if (buffer.name == name) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "device buffer names must be unique");
+        }
+        if (byte_spans_overlap(
+                std::as_bytes(buffer.storage),
+                std::as_bytes(registration.storage))) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "registered device buffer regions must not overlap");
+        }
+    }
+    if (backend_buffer_count >=
+        backend.capabilities.max_registered_buffers) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "backend registered-buffer capacity exceeded");
+    }
+
+    try {
+        const auto index = static_cast<std::uint32_t>(
+            impl_->device_buffers.size());
+        impl_->device_buffers.push_back(detail::DeviceBufferSpec{
+            name,
+            static_cast<std::uint32_t>(backend_index),
+            registration.storage,
+            registration.flags,
+        });
+        out_buffer = DeviceBufferHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_device_phase(
+    const DevicePhaseRegistration& registration,
+    PhaseHandle& out_phase) noexcept {
+    out_phase = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device phase registration is frozen");
+    }
+    if (registration.name.empty() ||
+        !registration.callback) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device phase name and command provider are required");
+    }
+    if (!impl_->valid_device_backend(registration.backend)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "device phase references an invalid or foreign backend");
+    }
+    if (impl_->callbacks.size() >=
+        impl_->config.callback_capacity) {
+        return impl_->fail(Status::capacity_exceeded, nullptr);
+    }
+    const auto duplicate = std::find_if(
+        impl_->callbacks.begin(),
+        impl_->callbacks.end(),
+        [&](const Impl::RegisteredCallback& callback) {
+            return callback.name == registration.name;
+        });
+    if (duplicate != impl_->callbacks.end()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "phase names must be unique");
+    }
+
+    try {
+        const auto index = static_cast<std::uint32_t>(
+            impl_->callbacks.size());
+        impl_->callbacks.push_back(Impl::RegisteredCallback{
+            std::string(registration.name),
+            Impl::PhaseKind::device,
+            nullptr,
+            registration.callback,
+            registration.user_data,
+            registration.backend.index(),
+        });
+        out_phase = PhaseHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
     impl_->clear_error();
     return Status::ok;
 }
@@ -1516,8 +2022,54 @@ Status Runtime::finalize() noexcept {
     }
     if (validate_config(impl_->config) != Status::ok ||
         impl_->callbacks.size() > impl_->config.callback_capacity ||
-        impl_->states.size() > impl_->config.state_capacity) {
+        impl_->states.size() > impl_->config.state_capacity ||
+        impl_->device_backends.size() >
+            impl_->config.device_backend_capacity ||
+        impl_->device_buffers.size() >
+            impl_->config.device_buffer_capacity) {
         return impl_->fail(Status::invalid_config, nullptr);
+    }
+    std::size_t backend_reported_bytes = 0;
+    for (std::size_t backend_index = 0;
+         backend_index < impl_->device_backends.size();
+         ++backend_index) {
+        const auto& backend =
+            impl_->device_backends[backend_index];
+        if (impl_->config.device_outstanding_capacity >
+            backend.capabilities.max_in_flight) {
+            return impl_->fail(
+                Status::invalid_config,
+                "device_outstanding_capacity exceeds a backend limit");
+        }
+        if (impl_->config.determinism_tier ==
+                DeterminismTier::schedule_independent &&
+            backend.capabilities.deterministic_mock == 0) {
+            return impl_->fail(
+                Status::invalid_config,
+                "D1 requires every device backend to declare deterministic_mock");
+        }
+        std::size_t buffer_count = 0;
+        for (const auto& buffer : impl_->device_buffers) {
+            buffer_count +=
+                buffer.backend_index == backend_index ? 1u : 0u;
+        }
+        if (buffer_count >
+            backend.capabilities.max_registered_buffers) {
+            return impl_->fail(
+                Status::invalid_config,
+                "registered buffers exceed a backend limit");
+        }
+        std::size_t total = 0;
+        if (!detail::checked_add(
+                backend_reported_bytes,
+                static_cast<std::size_t>(
+                    backend.capabilities.control_storage_bytes),
+                total)) {
+            return impl_->fail(
+                Status::invalid_config,
+                "backend-reported control storage overflows");
+        }
+        backend_reported_bytes = total;
     }
 
     std::vector<PhaseHandle> compiled_order;
@@ -1607,6 +2159,20 @@ Status Runtime::finalize() noexcept {
         impl_->config.replay_input_capacity;
     memory_plan.input_log_max_bytes =
         impl_->config.input_log_max_bytes;
+    memory_plan.device_backend_count =
+        impl_->device_backends.size();
+    memory_plan.device_buffer_count =
+        impl_->device_buffers.size();
+    memory_plan.device_outstanding_capacity =
+        impl_->device_backends.empty()
+        ? 0
+        : impl_->config.device_outstanding_capacity;
+    memory_plan.device_completion_batch =
+        impl_->device_backends.empty()
+        ? 0
+        : impl_->config.device_completion_batch;
+    memory_plan.device_backend_reported_bytes =
+        backend_reported_bytes;
     memory_plan.scratch_alignment =
         impl_->config.scratch_alignment;
     memory_plan.overload_policy =
@@ -1644,6 +2210,15 @@ Status Runtime::finalize() noexcept {
             impl_->dependencies.size(),
             impl_->config.task_scratch_slots,
             memory_plan.executor_control_bytes);
+    if (!impl_->device_backends.empty()) {
+        plan_valid = plan_valid &&
+            detail::DeviceManager::estimate_control_storage(
+                impl_->device_backends.size(),
+                impl_->device_buffers.size(),
+                impl_->config.device_outstanding_capacity,
+                impl_->config.device_completion_batch,
+                memory_plan.device_control_bytes);
+    }
 
     memory_plan.runtime_control_bytes = sizeof(Impl);
     const auto add_runtime_bytes =
@@ -1675,6 +2250,16 @@ Status Runtime::finalize() noexcept {
         plan_valid = plan_valid &&
             add_runtime_bytes(callback.name.capacity() + 1);
     }
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->device_backends.capacity(),
+        sizeof(detail::DeviceBackendSpec));
+    for (const auto& backend : impl_->device_backends) {
+        plan_valid = plan_valid &&
+            add_runtime_bytes(backend.name.capacity() + 1);
+    }
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->device_buffers.capacity(),
+        sizeof(detail::DeviceBufferSpec));
     plan_valid = plan_valid && add_runtime_array(
         impl_->resources.capacity(),
         sizeof(Impl::RegisteredResource));
@@ -1713,6 +2298,7 @@ Status Runtime::finalize() noexcept {
         };
     plan_valid = plan_valid &&
         add_planned_bytes(memory_plan.executor_control_bytes) &&
+        add_planned_bytes(memory_plan.device_control_bytes) &&
         add_planned_bytes(memory_plan.phase_scratch_total_bytes) &&
         add_planned_bytes(memory_plan.task_scratch_total_bytes) &&
         add_planned_bytes(memory_plan.trace_storage_bytes);
@@ -1729,6 +2315,7 @@ Status Runtime::finalize() noexcept {
     }
 
     std::unique_ptr<detail::Executor> executor;
+    std::unique_ptr<detail::DeviceManager> devices;
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::AlignedStorage phase_scratch;
     try {
@@ -1742,6 +2329,14 @@ Status Runtime::finalize() noexcept {
             impl_->config.scratch_alignment,
             impl_->config.overload_policy,
             impl_->dependencies);
+        if (!impl_->device_backends.empty()) {
+            devices = std::make_unique<detail::DeviceManager>(
+                impl_->graph_owner,
+                impl_->device_backends,
+                impl_->device_buffers,
+                impl_->config.device_outstanding_capacity,
+                impl_->config.device_completion_batch);
+        }
         phase_scratch.allocate(
             memory_plan.phase_scratch_total_bytes,
             memory_plan.scratch_alignment);
@@ -1759,6 +2354,7 @@ Status Runtime::finalize() noexcept {
     impl_->phase_scratch = std::move(phase_scratch);
     impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
+    impl_->devices = std::move(devices);
     impl_->finalized_memory_plan = memory_plan;
     impl_->telemetry_counters.reset();
     impl_->metric_snapshot_sequence = 0;
@@ -1874,6 +2470,22 @@ Status Runtime::start() noexcept {
             impl_->watchdog_started = false;
         }
         return impl_->fail(start_status, "failed to start fixed executor team");
+    }
+    if (impl_->devices) {
+        const auto device_status = impl_->devices->start(
+            *impl_->executor,
+            &Impl::observe_device_event,
+            impl_.get());
+        if (device_status != Status::ok) {
+            impl_->executor->stop();
+            if (impl_->watchdog_started) {
+                impl_->watchdog.stop();
+                impl_->watchdog_started = false;
+            }
+            return impl_->fail(
+                device_status,
+                "failed to start device service lane");
+        }
     }
     impl_->state = RuntimeState::running;
     impl_->clear_error();
@@ -2280,6 +2892,9 @@ Status Runtime::stop() noexcept {
         Status::ok,
         impl_->clock_now(),
         0);
+    if (impl_->devices) {
+        impl_->devices->stop();
+    }
     if (impl_->executor) {
         impl_->executor->stop();
     }
@@ -2288,6 +2903,72 @@ Status Runtime::stop() noexcept {
         impl_->watchdog_started = false;
     }
     impl_->state = RuntimeState::stopped;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::device_health(
+    DeviceBackendHandle backend,
+    DeviceHealth& health) noexcept {
+    health = make_device_health();
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::running ||
+        !impl_->devices) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device health requires a running device service");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device health cannot run during a frame or replay");
+    }
+    if (!impl_->valid_device_backend(backend)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "device health received an invalid or foreign backend");
+    }
+    const auto status = impl_->devices->health(
+        backend.index(),
+        health);
+    if (status != Status::ok) {
+        return impl_->fail(status, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::reset_device(
+    DeviceBackendHandle backend) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::running ||
+        !impl_->devices) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device reset requires a running device service");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device reset cannot run during a frame or replay");
+    }
+    if (!impl_->valid_device_backend(backend)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "device reset received an invalid or foreign backend");
+    }
+    const auto status = impl_->devices->reset(backend.index());
+    if (status != Status::ok) {
+        return impl_->fail(status, nullptr);
+    }
     impl_->clear_error();
     return Status::ok;
 }
@@ -2303,6 +2984,26 @@ const RuntimeConfig& Runtime::config() const noexcept {
 
 std::size_t Runtime::callback_count() const noexcept {
     return impl_ ? impl_->callbacks.size() : 0;
+}
+
+std::size_t Runtime::device_backend_count() const noexcept {
+    return impl_ ? impl_->device_backends.size() : 0;
+}
+
+std::size_t Runtime::device_buffer_count() const noexcept {
+    return impl_ ? impl_->device_buffers.size() : 0;
+}
+
+std::size_t Runtime::device_phase_count() const noexcept {
+    if (!impl_) {
+        return 0;
+    }
+    return static_cast<std::size_t>(std::count_if(
+        impl_->callbacks.begin(),
+        impl_->callbacks.end(),
+        [](const Impl::RegisteredCallback& callback) {
+            return callback.kind == Impl::PhaseKind::device;
+        }));
 }
 
 std::size_t Runtime::resource_count() const noexcept {

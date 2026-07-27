@@ -223,7 +223,10 @@ Status write_observability_json(
                 event.producer ==
                         RuntimeTraceProducer::worker
                     ? "worker"
-                    : "host");
+                    : event.producer ==
+                            RuntimeTraceProducer::device_service
+                        ? "device_service"
+                        : "host");
             output << ",\"callback_index\":"
                    << event.callback_index
                    << ",\"worker_index\":"

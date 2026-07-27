@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-23
-- Implementation milestone: M8-M10
+- Implementation milestone: M8 complete; M9-M10 hardware backends remain
 
 ## Context
 
@@ -43,7 +43,8 @@ resource, or submission can reference them.
 - XDMA support names one concrete driver/device contract and FPGA test image.
 - API boundedness and hardware completion qualification are documented
   separately.
-- Detached submission threads are removed.
+- The target runtime creates no detached submission thread. The legacy GPU
+  stub remains an explicitly excluded compatibility experiment.
 
 ## Rejected alternatives
 

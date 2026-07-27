@@ -210,7 +210,7 @@ def check_claims() -> None:
         "not production-ready",
         "no hard-real-time",
         "No RT2 record exists yet.",
-        "GPU | CPU mock only",
+        "Legacy GPU stub | Experimental compatibility path",
         "XDMA | Planned",
     )
     for text in required_qualifiers:
@@ -235,6 +235,10 @@ def check_runtime_contract() -> None:
     time_doc = read("docs/time_platform.md")
     observability_doc = read("docs/observability.md")
     determinism_doc = read("docs/determinism_replay.md")
+    device_doc = read("docs/device_backend.md")
+    device_abi = read("rt/include/rt/device_abi.h")
+    device_manager = read("rt/src/device_manager.cpp")
+    mock_device = read("rt/src/mock_device.cpp")
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
@@ -249,11 +253,13 @@ def check_runtime_contract() -> None:
     preflight_test = read("tests/test_platform_preflight.cpp")
     observability_test = read("tests/test_observability.cpp")
     determinism_test = read("tests/test_determinism_replay.cpp")
+    device_test = read("tests/test_device_runtime.cpp")
     snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
     ci_workflow = read(".github/workflows/ci.yml")
     c_sample = read("samples/embed_c/mini_app.c")
     cpp_sample = read("samples/embed_cpp/mini_app.cpp")
+    device_sample = read("samples/device_mock.cpp")
 
     for method in (
         "Status configure(",
@@ -295,6 +301,10 @@ def check_runtime_contract() -> None:
         "snapshot_max_bytes",
         "replay_input_capacity",
         "input_log_max_bytes",
+        "device_backend_capacity",
+        "device_buffer_capacity",
+        "device_outstanding_capacity",
+        "device_completion_batch",
     }
     implemented_keys = set(
         re.findall(r'key\s*==\s*"([a-z0-9_]+)"', runtime_source)
@@ -436,6 +446,26 @@ def check_runtime_contract() -> None:
         if function not in c_header:
             fail(f"rt/include/rt/c_api.h: missing M7 C ABI function {function!r}")
 
+    for method in (
+        "Status register_device_backend(",
+        "Status register_device_buffer(",
+        "Status register_device_phase(",
+        "Status device_health(",
+        "Status reset_device(",
+    ):
+        if method not in runtime_header:
+            fail(f"rt/include/rt/runtime.hpp: missing M8 method {method!r}")
+
+    for function in (
+        "rtfw_register_device_backend(",
+        "rtfw_register_device_buffer(",
+        "rtfw_register_device_phase(",
+        "rtfw_get_device_health(",
+        "rtfw_reset_device(",
+    ):
+        if function not in c_header:
+            fail(f"rt/include/rt/c_api.h: missing M8 C ABI function {function!r}")
+
     for status in (
         "invalid_handle",
         "graph_cycle",
@@ -452,6 +482,17 @@ def check_runtime_contract() -> None:
         if status not in runtime_header:
             fail(f"rt/include/rt/runtime.hpp: missing M7 status {status!r}")
 
+    for status in (
+        "device_queue_full",
+        "device_timeout",
+        "device_error",
+        "device_lost",
+        "device_canceled",
+        "device_reset_required",
+    ):
+        if status not in runtime_header or status.upper() not in c_header:
+            fail(f"M8 status contract is missing {status!r}")
+
     for capability in (
         "compiled_graph",
         "host_driven_time",
@@ -462,6 +503,7 @@ def check_runtime_contract() -> None:
         "strict_platform_preflight",
         "versioned_observability",
         "deterministic_replay",
+        "bounded_device_backend",
     ):
         if capability not in runtime_header or capability not in c_header:
             fail(f"M1 capability contract is missing {capability!r}")
@@ -482,18 +524,19 @@ def check_runtime_contract() -> None:
         or "| M5 | Complete |" not in roadmap
         or "| M6 | Complete |" not in roadmap
         or "| M7 | Complete |" not in roadmap
-        or "| M8 | Next |" not in roadmap
+        or "| M8 | Complete |" not in roadmap
+        or "| M9 | Next |" not in roadmap
     ):
-        fail("docs/roadmap.md: M7/M8 milestone status is not advanced")
+        fail("docs/roadmap.md: M8/M9 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
         r"\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
-        r"\s*true\s*\}\s*;",
+        r"\s*true\s*,\s*true\s*\}\s*;",
         runtime_source,
     ):
         fail(
-            "rt/src/host_runtime.cpp: M7 capability tuple is not nine true values"
+            "rt/src/host_runtime.cpp: M8 capability tuple is not ten true values"
         )
 
     for token in (
@@ -653,8 +696,8 @@ def check_runtime_contract() -> None:
             fail(f"tests/test_platform_preflight.cpp: missing M5 gate {test_name!r}")
     if "watchdog_timeout_ns" not in noalloc_test:
         fail("tests/test_trace_noalloc.cpp: missing armed-watchdog allocation gate")
-    if "#define RTFW_C_ABI_VERSION 6u" not in c_header:
-        fail("rt/include/rt/c_api.h: M7 requires experimental ABI version 6")
+    if "#define RTFW_C_ABI_VERSION 7u" not in c_header:
+        fail("rt/include/rt/c_api.h: M8 requires experimental ABI version 7")
     if "rtfw_run_periodic(" not in c_sample:
         fail("samples/embed_c/mini_app.c: missing M5 periodic sample")
     if "runtime.run_periodic(" not in cpp_sample:
@@ -816,6 +859,71 @@ def check_runtime_contract() -> None:
         if token not in surface:
             fail(f"embedding samples are missing M7 usage {token!r}")
 
+    for token in (
+        "#define RTFW_DEVICE_ABI_VERSION 1u",
+        "rtfw_device_backend_api",
+        "rtfw_device_submission",
+        "rtfw_device_completion",
+        "rtfw_device_health",
+    ):
+        if token not in device_abi:
+            fail(f"rt/include/rt/device_abi.h: missing M8 ABI evidence {token!r}")
+    for token in (
+        "kOutstandingEarlyReady",
+        "wake_sequence_.wait(",
+        "api.submit(",
+        "api.poll(",
+        "complete_external(",
+    ):
+        if token not in device_manager:
+            fail(f"rt/src/device_manager.cpp: missing M8 manager evidence {token!r}")
+    for forbidden in (".detach(", "std::async", "std::condition_variable"):
+        if forbidden in device_manager or forbidden in mock_device:
+            fail(f"M8 target device path contains forbidden primitive {forbidden!r}")
+    for phrase in (
+        "CPU compute workers never wait",
+        "callback exists in the ABI",
+        "device_queue_full",
+        "deterministic fault-injectable",
+        "early-ready",
+    ):
+        if phrase not in device_doc:
+            fail(f"docs/device_backend.md: missing M8 contract phrase {phrase!r}")
+    for test_name in (
+        "BoundedQueueSaturatesWithoutBlocking",
+        "DelayedCompletionReleasesOnlyDependentSuccessors",
+        "ConcurrentSubmissionsPreserveCausalPublication",
+        "FaultsMapToStableRuntimeStatuses",
+        "RejectsMalformedTablesAndAccountsMemory",
+        "D1RejectsUndeclaredDeterministicBackend",
+        "DestructionShutsBackendDown",
+    ):
+        if test_name not in device_test:
+            fail(f"tests/test_device_runtime.cpp: missing M8 gate {test_name!r}")
+    if "CompleteDeviceFramesDoNotAllocate" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing M8 allocation gate")
+    for token in (
+        "rt/src/device_manager.cpp",
+        "rt/src/mock_device.cpp",
+        "test_device_runtime.cpp",
+        "device_mock.cpp",
+    ):
+        if (
+            token not in cmake
+            and token not in tests_cmake
+            and token not in samples_cmake
+        ):
+            fail(f"CMake M8 integration is missing {token!r}")
+    if "DeviceRuntime.*:DeviceMock.*" not in ci_workflow:
+        fail(".github/workflows/ci.yml: M8 is missing from the TSAN filter")
+    for token in (
+        "runtime.register_device_backend(",
+        "runtime.register_device_buffer(",
+        "runtime.register_device_phase(",
+    ):
+        if token not in device_sample:
+            fail(f"samples/device_mock.cpp: missing M8 usage {token!r}")
+
 
 def main() -> int:
     require_files(
@@ -831,6 +939,7 @@ def main() -> int:
             "docs/time_platform.md",
             "docs/observability.md",
             "docs/determinism_replay.md",
+            "docs/device_backend.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
@@ -839,6 +948,9 @@ def main() -> int:
             "rt/include/rt/runtime.hpp",
             "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
+            "rt/include/rt/device_abi.h",
+            "rt/include/rt/device.hpp",
+            "rt/include/rt/mock_device.hpp",
             "rt/src/compiled_graph.cpp",
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
@@ -851,10 +963,14 @@ def main() -> int:
             "rt/src/telemetry.cpp",
             "rt/src/snapshot_codec.hpp",
             "rt/src/snapshot_codec.cpp",
+            "rt/src/device_manager.hpp",
+            "rt/src/device_manager.cpp",
+            "rt/src/mock_device.cpp",
             "rt/include/rt/observability_export.hpp",
             "rt/src/observability_export.cpp",
             "samples/embed_c/mini_app.c",
             "samples/embed_cpp/mini_app.cpp",
+            "samples/device_mock.cpp",
             "tests/test_host_runtime.cpp",
             "tests/test_compiled_graph.cpp",
             "tests/test_executor.cpp",
@@ -863,6 +979,7 @@ def main() -> int:
             "tests/test_platform_preflight.cpp",
             "tests/test_observability.cpp",
             "tests/test_determinism_replay.cpp",
+            "tests/test_device_runtime.cpp",
             "tests/determinism_artifact.cpp",
             "tests/snapshot_fuzz.cpp",
         )

@@ -23,8 +23,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M5 | Complete | Self-paced absolute cadence, watchdog, and platform preflight |
 | M6 | Complete | RT-safe, versioned observability |
 | M7 | Complete | Determinism tiers, safe snapshots, and replay |
-| M8 | Next | Device ABI and deterministic fault-injectable mock |
-| M9 | Planned | Real CUDA backend |
+| M8 | Complete | Device ABI and deterministic fault-injectable mock |
+| M9 | Next | Real CUDA backend |
 | M10 | Planned | Real XDMA backend for one named host/FPGA stack |
 | M11 | Planned | Stable ABI, package/export cleanup, and engine adapters |
 | M12 | Qualified separately | Portable 1.0, PREEMPT_RT, CUDA, and XDMA evidence |
@@ -220,12 +220,28 @@ legacy exclusions are in
 
 ## M8 — Device ABI and mock
 
+Delivered in 0.9:
+
+- C-compatible size/versioned backend ABI for capabilities, initialization,
+  registered buffers, bounded submit/poll, cancel, health, reset, and shutdown;
+- compiled device phases whose providers return without waiting while a
+  runtime-owned completion lane retains and releases graph dependency tokens;
+- preallocated outstanding/completion storage in the finalized memory plan;
+- stable device statuses, schema-v2 trace/metrics, and experimental C ABI v7;
+- deterministic fixed-capacity CPU mock with scripted delay, timeout, error,
+  loss, saturation, reset, and shutdown behavior;
+- C++ sample, dynamic C ABI backend test, steady-frame allocation gate, and
+  sanitizer-focused device coverage.
+
 Exit gates:
 
 - bounded queue saturation, delay, timeout, error, loss, reset, and shutdown
   pass through the mock;
 - CPU compute workers never block on a device;
 - backend callbacks cannot outlive runtime/plugin ownership.
+
+The exact ABI, ownership, scheduling, fault, and qualification boundaries are
+in [the device backend contract](device_backend.md).
 
 ## M9/M10 — CUDA and XDMA
 

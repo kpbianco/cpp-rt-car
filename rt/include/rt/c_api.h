@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <rt/device_abi.h>
 #include <rtfw/version.h>
 
 #if defined _WIN32 || defined __CYGWIN__
@@ -24,7 +25,7 @@ extern "C" {
 #define RT_VERSION_MAJOR RTFW_VERSION_MAJOR
 #define RT_VERSION_MINOR RTFW_VERSION_MINOR
 #define RT_VERSION_PATCH RTFW_VERSION_PATCH
-#define RTFW_C_ABI_VERSION 6u
+#define RTFW_C_ABI_VERSION 7u
 
 typedef struct {
     uint8_t compiled_graph;
@@ -36,6 +37,7 @@ typedef struct {
     uint8_t strict_platform_preflight;
     uint8_t versioned_observability;
     uint8_t deterministic_replay;
+    uint8_t bounded_device_backend;
 } rt_capabilities_c;
 
 typedef struct rtfw_handle rtfw_handle;
@@ -60,6 +62,12 @@ typedef int32_t rtfw_status;
 #define RTFW_STATUS_CLOCK_FAILURE ((rtfw_status)-14)
 #define RTFW_STATUS_INVALID_ARTIFACT ((rtfw_status)-15)
 #define RTFW_STATUS_INCOMPATIBLE_ARTIFACT ((rtfw_status)-16)
+#define RTFW_STATUS_DEVICE_QUEUE_FULL ((rtfw_status)-17)
+#define RTFW_STATUS_DEVICE_TIMEOUT ((rtfw_status)-18)
+#define RTFW_STATUS_DEVICE_ERROR ((rtfw_status)-19)
+#define RTFW_STATUS_DEVICE_LOST ((rtfw_status)-20)
+#define RTFW_STATUS_DEVICE_CANCELED ((rtfw_status)-21)
+#define RTFW_STATUS_DEVICE_RESET_REQUIRED ((rtfw_status)-22)
 
 typedef uint32_t rtfw_runtime_state;
 #define RTFW_STATE_CONFIGURING ((rtfw_runtime_state)0u)
@@ -113,12 +121,12 @@ typedef uint32_t rtfw_platform_check_status;
 
 #define RTFW_PLATFORM_CHECK_CAPACITY 6u
 #define RTFW_PLATFORM_CHECK_MESSAGE_CAPACITY 96u
-#define RTFW_OBSERVABILITY_SCHEMA_VERSION 1u
+#define RTFW_OBSERVABILITY_SCHEMA_VERSION 2u
 #define RTFW_OBSERVABILITY_IDENTIFIER_CAPACITY 64u
 #define RTFW_CHECKPOINT_SCHEMA_VERSION 1u
 #define RTFW_INPUT_LOG_SCHEMA_VERSION 1u
 #define RTFW_REPLAY_IDENTIFIER_CAPACITY 64u
-#define RTFW_RUNTIME_METRIC_COUNT 22u
+#define RTFW_RUNTIME_METRIC_COUNT 32u
 #define RTFW_INVALID_TRACE_INDEX UINT32_MAX
 
 typedef struct rtfw_config {
@@ -144,6 +152,10 @@ typedef struct rtfw_config {
     uint64_t snapshot_max_bytes;
     uint64_t replay_input_capacity;
     uint64_t input_log_max_bytes;
+    uint64_t device_backend_capacity;
+    uint64_t device_buffer_capacity;
+    uint64_t device_outstanding_capacity;
+    uint64_t device_completion_batch;
     char workload_id[RTFW_OBSERVABILITY_IDENTIFIER_CAPACITY];
     uint64_t reserved[2];
 } rtfw_config;
@@ -250,6 +262,12 @@ typedef struct rtfw_memory_plan {
     uint64_t snapshot_max_bytes;
     uint64_t replay_input_capacity;
     uint64_t input_log_max_bytes;
+    uint64_t device_backend_count;
+    uint64_t device_buffer_count;
+    uint64_t device_outstanding_capacity;
+    uint64_t device_completion_batch;
+    uint64_t device_control_bytes;
+    uint64_t device_backend_reported_bytes;
     uint64_t queue_slots;
     uint64_t scratch_alignment;
     uint64_t reserved[4];
@@ -285,10 +303,14 @@ typedef uint16_t rtfw_trace_event_type;
 #define RTFW_TRACE_DEGRADATION_APPLIED ((rtfw_trace_event_type)9u)
 #define RTFW_TRACE_STEP_END ((rtfw_trace_event_type)10u)
 #define RTFW_TRACE_STOPPED ((rtfw_trace_event_type)11u)
+#define RTFW_TRACE_DEVICE_SUBMITTED ((rtfw_trace_event_type)12u)
+#define RTFW_TRACE_DEVICE_COMPLETED ((rtfw_trace_event_type)13u)
+#define RTFW_TRACE_DEVICE_RESET ((rtfw_trace_event_type)14u)
 
 typedef uint16_t rtfw_trace_producer;
 #define RTFW_TRACE_PRODUCER_HOST ((rtfw_trace_producer)0u)
 #define RTFW_TRACE_PRODUCER_WORKER ((rtfw_trace_producer)1u)
+#define RTFW_TRACE_PRODUCER_DEVICE_SERVICE ((rtfw_trace_producer)2u)
 
 typedef struct rtfw_trace_event {
     uint32_t schema_version;
@@ -337,6 +359,16 @@ typedef uint16_t rtfw_metric_id;
 #define RTFW_METRIC_EXECUTOR_SCRATCH_EXHAUSTIONS ((rtfw_metric_id)19u)
 #define RTFW_METRIC_EXECUTOR_WORKER_STARTS ((rtfw_metric_id)20u)
 #define RTFW_METRIC_DEGRADATION_LEVEL ((rtfw_metric_id)21u)
+#define RTFW_METRIC_DEVICE_SUBMISSIONS ((rtfw_metric_id)22u)
+#define RTFW_METRIC_DEVICE_COMPLETIONS ((rtfw_metric_id)23u)
+#define RTFW_METRIC_DEVICE_FAILURES ((rtfw_metric_id)24u)
+#define RTFW_METRIC_DEVICE_QUEUE_REJECTIONS ((rtfw_metric_id)25u)
+#define RTFW_METRIC_DEVICE_TIMEOUTS ((rtfw_metric_id)26u)
+#define RTFW_METRIC_DEVICE_LOSSES ((rtfw_metric_id)27u)
+#define RTFW_METRIC_DEVICE_RESETS ((rtfw_metric_id)28u)
+#define RTFW_METRIC_DEVICE_SERVICE_POLLS ((rtfw_metric_id)29u)
+#define RTFW_METRIC_DEVICE_OUTSTANDING ((rtfw_metric_id)30u)
+#define RTFW_METRIC_DEVICE_SERVICE_STARTS ((rtfw_metric_id)31u)
 
 typedef struct rtfw_observability_metadata {
     uint32_t struct_size;
@@ -499,9 +531,13 @@ typedef uint32_t rtfw_callback_result;
 /* Opaque process-local values: do not persist, decode, or mix their kinds. */
 typedef uint64_t rtfw_phase_id;
 typedef uint64_t rtfw_resource_id;
+typedef uint64_t rtfw_device_backend_id;
+typedef uint64_t rtfw_device_buffer_id;
 
 #define RTFW_INVALID_PHASE_ID UINT64_MAX
 #define RTFW_INVALID_RESOURCE_ID UINT64_MAX
+#define RTFW_INVALID_DEVICE_BACKEND_ID UINT64_MAX
+#define RTFW_INVALID_DEVICE_BUFFER_ID UINT64_MAX
 
 /*
  * Fixed-width rather than an enum so the C boundary can validate malformed
@@ -514,6 +550,11 @@ typedef uint32_t rtfw_resource_access;
 typedef rtfw_callback_result (*rtfw_frame_callback)(
     void* user_data,
     const rtfw_callback_context* context);
+
+typedef rtfw_callback_result (*rtfw_device_command_callback)(
+    void* user_data,
+    const rtfw_callback_context* context,
+    rtfw_device_submission* submission);
 
 typedef rtfw_callback_result (*rtfw_range_callback)(
     void* user_data,
@@ -580,13 +621,16 @@ RTFW_API void rtfw_replay_input_record_init(
     rtfw_replay_input_record* record);
 RTFW_API void rtfw_replay_result_init(
     rtfw_replay_result* result);
+RTFW_API void rtfw_device_health_init(
+    rtfw_device_health* health);
 
 /*
  * The runtime copies configuration and callback names. Callback user_data is
  * borrowed until the runtime is stopped/destroyed. Callback context and
  * scratch pointers are valid only for that synchronous callback invocation.
  * Lifecycle and graph functions are single-host-thread operations in ABI
- * version 6.
+ * version 7. Device backend tables, instances, and registered buffer storage
+ * are borrowed until rtfw_stop or rtfw_destroy has completed shutdown.
  */
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
@@ -601,6 +645,26 @@ RTFW_API rtfw_status rtfw_register_phase(
     rtfw_handle* handle,
     const char* name,
     rtfw_frame_callback callback,
+    void* user_data,
+    rtfw_phase_id* out_phase);
+RTFW_API rtfw_status rtfw_register_device_backend(
+    rtfw_handle* handle,
+    const char* name,
+    const rtfw_device_backend_api* backend,
+    rtfw_device_backend_id* out_backend);
+RTFW_API rtfw_status rtfw_register_device_buffer(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_device_backend_id backend,
+    void* storage,
+    uint64_t storage_bytes,
+    rtfw_device_buffer_flags flags,
+    rtfw_device_buffer_id* out_buffer);
+RTFW_API rtfw_status rtfw_register_device_phase(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_device_backend_id backend,
+    rtfw_device_command_callback callback,
     void* user_data,
     rtfw_phase_id* out_phase);
 RTFW_API rtfw_status rtfw_register_resource(
@@ -670,6 +734,13 @@ RTFW_API rtfw_status rtfw_run_periodic(
     void* observer_data,
     rtfw_periodic_run_result* result);
 RTFW_API rtfw_status rtfw_stop(rtfw_handle* handle);
+RTFW_API rtfw_status rtfw_get_device_health(
+    rtfw_handle* handle,
+    rtfw_device_backend_id backend,
+    rtfw_device_health* out_health);
+RTFW_API rtfw_status rtfw_reset_device(
+    rtfw_handle* handle,
+    rtfw_device_backend_id backend);
 RTFW_API rtfw_status rtfw_get_state(
     const rtfw_handle* handle,
     rtfw_runtime_state* out_state);

@@ -77,6 +77,36 @@ constexpr std::array<Definition, rt::runtime_metric_count>
         {rt::RuntimeMetricId::degradation_level,
          rt::RuntimeMetricKind::gauge,
          "runtime.degradation_level"},
+        {rt::RuntimeMetricId::device_submissions,
+         rt::RuntimeMetricKind::counter,
+         "device.submissions"},
+        {rt::RuntimeMetricId::device_completions,
+         rt::RuntimeMetricKind::counter,
+         "device.completions"},
+        {rt::RuntimeMetricId::device_failures,
+         rt::RuntimeMetricKind::counter,
+         "device.failures"},
+        {rt::RuntimeMetricId::device_queue_rejections,
+         rt::RuntimeMetricKind::counter,
+         "device.queue_rejections"},
+        {rt::RuntimeMetricId::device_timeouts,
+         rt::RuntimeMetricKind::counter,
+         "device.timeouts"},
+        {rt::RuntimeMetricId::device_losses,
+         rt::RuntimeMetricKind::counter,
+         "device.losses"},
+        {rt::RuntimeMetricId::device_resets,
+         rt::RuntimeMetricKind::counter,
+         "device.resets"},
+        {rt::RuntimeMetricId::device_service_polls,
+         rt::RuntimeMetricKind::counter,
+         "device.service_polls"},
+        {rt::RuntimeMetricId::device_outstanding,
+         rt::RuntimeMetricKind::gauge,
+         "device.outstanding"},
+        {rt::RuntimeMetricId::device_service_starts,
+         rt::RuntimeMetricKind::counter,
+         "device.service_starts"},
     }};
 
 static_assert(
@@ -138,6 +168,12 @@ const char* runtime_trace_event_name(
         return "frame.end";
     case RuntimeTraceEventType::stopped:
         return "runtime.stopped";
+    case RuntimeTraceEventType::device_submitted:
+        return "device.submitted";
+    case RuntimeTraceEventType::device_completed:
+        return "device.completed";
+    case RuntimeTraceEventType::device_reset:
+        return "device.reset";
     }
     return "unknown";
 }

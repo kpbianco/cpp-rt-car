@@ -1,6 +1,7 @@
 # Versioned Observability Contract
 
-Release 0.8 retains the M6 RT0 observability surface for `rt::Runtime`.
+Release 0.9 extends the M6 RT0 observability surface for `rt::Runtime` with M8
+device records.
 Emission is bounded and allocation-free on runtime lanes; inspection and
 serialization are explicit non-RT host operations. This is a telemetry
 contract, not a latency qualification or a native OpenTelemetry, ETW, or eBPF
@@ -11,7 +12,8 @@ experimental and do not inherit this contract.
 
 ## Schema and provenance
 
-Observability schema version 1 has fixed numeric trace-event and metric IDs.
+Observability schema version 2 has fixed numeric trace-event and metric IDs.
+It preserves every schema-v1 ID and appends device definitions.
 The version/build/config/workload identifiers make each exported stream
 self-describing and correlatable.
 Every metadata record, metric snapshot, and trace read reports:
@@ -30,7 +32,7 @@ with `-DRTFW_BUILD_ID=<token>`. Build and workload identifiers are restricted
 to 1–63 characters from `A-Za-z0-9._:/@-`; the runtime rejects malformed or
 unterminated workload IDs.
 
-`config_id` is a 64-bit FNV-1a fingerprint of configuration schema version 6,
+`config_id` is a 64-bit FNV-1a fingerprint of configuration schema version 7,
 every behavioral `RuntimeConfig` field, and `workload_id`. The identifier is
 useful for correlation and exact configuration equality checks; it is not a
 cryptographic digest. M7's separate `replay_id` applies its documented D0/D1
@@ -70,6 +72,14 @@ level.
 | 9 | `degradation.applied` |
 | 10 | `frame.end` |
 | 11 | `runtime.stopped` |
+| 12 | `device.submitted` |
+| 13 | `device.completed` |
+| 14 | `device.reset` |
+
+Device events carry the graph phase index in `callback_index`, the submission
+ID in `value`, and the originating frame. Reset has no callback index and
+carries the backend index in `value`. Submission records identify their CPU
+worker, completions use producer `device_service`, and reset uses `host`.
 
 Trace slots are cache-line aligned. The implementation fails compilation on a
 target whose 16-, 32-, or 64-bit standard atomics are not always lock-free,
@@ -89,7 +99,7 @@ interface.
 
 ## Metric schema
 
-Schema version 1 publishes these ordered samples:
+Schema version 2 publishes these ordered samples:
 
 | ID | Name | Kind |
 | ---: | --- | --- |
@@ -115,6 +125,16 @@ Schema version 1 publishes these ordered samples:
 | 19 | `executor.scratch_exhaustions` | Counter |
 | 20 | `executor.worker_starts` | Counter |
 | 21 | `runtime.degradation_level` | Gauge |
+| 22 | `device.submissions` | Counter |
+| 23 | `device.completions` | Counter |
+| 24 | `device.failures` | Counter |
+| 25 | `device.queue_rejections` | Counter |
+| 26 | `device.timeouts` | Counter |
+| 27 | `device.losses` | Counter |
+| 28 | `device.resets` | Counter |
+| 29 | `device.service_polls` | Counter |
+| 30 | `device.outstanding` | Gauge |
+| 31 | `device.service_starts` | Counter |
 
 Counter values are monotonic from finalization. A completed frame includes a
 failed frame; `frames_failed` identifies the failed subset. Callback and
@@ -149,7 +169,7 @@ C++:
 - `write_observability_json()` in
   `<rt/observability_export.hpp>`.
 
-Current C ABI v6:
+Current C ABI v7:
 
 - `rtfw_get_observability_metadata()`;
 - `rtfw_get_metrics()`;
@@ -172,10 +192,11 @@ host sink.
 - fixed trace schema, loss accounting, metric windows, provenance, runtime
   isolation, JSON, and contended nonblocking emission:
   `tests/test_observability.cpp`;
-- C ABI v6 symbol, structure, cursor, metric, and trace coverage:
+- C ABI v7 symbol, structure, cursor, metric, trace, and device coverage:
   `tests/test_cabi_dlopen.c`;
-- complete post-start CPU frames with tracing and counters under allocation
-  instrumentation: `tests/test_trace_noalloc.cpp`;
+- complete post-start CPU and mock-device frames with tracing and counters
+  under allocation instrumentation: `tests/test_trace_noalloc.cpp`;
+- device event ordering and counters: `tests/test_device_runtime.cpp`;
 - ThreadSanitizer coverage includes `Observability.*`;
 - implementation: `rt/src/telemetry.cpp`,
   `rt/src/host_runtime.cpp`, and
@@ -183,7 +204,7 @@ host sink.
 
 ## Explicit boundaries
 
-- Schema version 1 applies only to the target `rt::Runtime` path.
+- Schema version 2 applies only to the target `rt::Runtime` path.
 - The legacy per-thread binary trace, rolling histograms, and demo JSON retain
   their existing experimental semantics.
 - A trace capacity can overwrite unread events; the cursor reports loss rather

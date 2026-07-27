@@ -1,13 +1,13 @@
 # Architecture
 
-This page separates the 0.8 implementation from the accepted target
+This page separates the 0.9 implementation from the accepted target
 architecture. The normative target is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.8 implementation
+## Current 0.9 implementation
 
-### M1–M7 host runtime
+### M1–M8 host runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -28,6 +28,16 @@ transactional restore, and synchronous replay. Artifact parsing and runtime
 identity checks allocate nothing. D2 reproducible-build and D3 portable
 determinism remain unsupported and fail configuration rather than silently
 weakening the requested tier.
+
+M8 adds a C-compatible backend ABI, borrowed registered buffers, graph device
+phases, a preallocated outstanding table, and one runtime-owned completion
+service lane. A command provider runs on the CPU team and returns after bounded
+submission. Its graph token remains pending until the poll lane publishes a
+completion, so dependent phases are released without parking a compute worker.
+The ABI has no completion callback, and stop joins the service lane before
+unregistering buffers and shutting down backends. The included deterministic
+CPU mock injects saturation, delay, timeout, error, and loss/reset behavior;
+it is not a hardware backend.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
@@ -52,7 +62,8 @@ structures and encoded graph handles. See the
 [executor contract](executor.md), and the
 [memory-plan contract](memory_plan.md), the
 [observability contract](observability.md), and the
-[determinism/replay contract](determinism_replay.md).
+[determinism/replay contract](determinism_replay.md), and the
+[device backend contract](device_backend.md).
 
 ### Legacy simulation path
 
@@ -87,8 +98,8 @@ dependent constraint, integration, and telemetry phases.
   create threads. The frame arena can use heap fallback after Release overflow.
 - legacy global trace and floating-point state prevent clean isolation of
   multiple `SimCore` instances. The M1 `rt::Runtime` does not use those globals.
-- the HAL memory flags are no-ops, and the GPU path is a detached CPU-thread
-  mock.
+- the legacy HAL memory flags are no-ops, and its GPU path is a detached
+  CPU-thread mock outside `rt::Runtime`.
 
 These are tracked in the [roadmap](roadmap.md), not hidden behind feature
 claims.
@@ -120,7 +131,10 @@ frame-thread degradation, and fail-closed prerequisite reporting. M6 adds
 bounded schema-v1 trace/counter emission and isolated non-RT export cursors.
 M7 adds D1 schedule-independent identity, canonical registered state, bounded
 checkpoint/input-log codecs, transactional restore, and synchronous replay.
+M8 adds the poll-only device ABI, graph-held device completion tokens,
+preallocated device-manager storage, and deterministic mock.
 See the [determinism/replay contract](determinism_replay.md),
+[device backend contract](device_backend.md),
 [ADR-0001](adr/0001-one-executor-boundary.md),
 [ADR-0002](adr/0002-host-driven-time.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
@@ -133,7 +147,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M7 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M8 host runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
@@ -145,6 +159,9 @@ that arbitrary host data is automatically optimized.
   `rt/src/observability_export.cpp`, `docs/observability.md`
 - M7 determinism/replay: `rt/src/snapshot_codec.cpp`,
   `docs/determinism_replay.md`
+- M8 device ABI/manager/mock: `rt/include/rt/device_abi.h`,
+  `rt/src/device_manager.cpp`, `rt/src/mock_device.cpp`,
+  `docs/device_backend.md`
 - Experimental C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - Phase registration and graph: `SimCore::addPhase`,
   `SimCore::addDependency`, `SimCore::buildTopoLevels`;

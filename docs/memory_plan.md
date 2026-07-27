@@ -1,15 +1,16 @@
 # Finalized Memory and Overload Contract
 
-Release 0.8 retains the M4 memory closure for the target-path CPU runtime,
+Release 0.9 extends the M4 memory closure for the target-path runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.
 
 The legacy `SimCore`, frame arenas, `WorkerPool`, `rt::Scheduler`, `FiberPool`,
-GPU mock, plugins, legacy snapshots, and device experiments are outside this
-contract. M7 target-path checkpoint and replay registry metadata is included;
-caller-owned canonical state and artifact buffers are explicitly reported or
-bounded but not allocated by the runtime.
+detached-thread GPU stub, plugins, and legacy snapshots are outside this
+contract. M7 target-path checkpoint/replay registry metadata and M8
+device-manager storage are included; caller-owned canonical state, artifacts,
+device buffers, and backend-private storage are explicitly reported or bounded
+but not allocated by the runtime.
 
 ## Finalization-time plan
 
@@ -28,6 +29,7 @@ The accounting equation is:
 planned_bytes =
     runtime_control_bytes +
     executor_control_bytes +
+    device_control_bytes +
     phase_scratch_total_bytes +
     task_scratch_total_bytes +
     trace_storage_bytes
@@ -37,8 +39,9 @@ The plan reports requested payload/control bytes, not a process resident-set
 size. It excludes allocator metadata and rounding internal to the C++ runtime,
 OS thread stacks and implementation-owned thread state, executable and shared
 library pages, host-owned callback/resource data and registered canonical state
-bytes, caller-owned checkpoint/input-log buffers, the small C ABI adapter
-handle, and every legacy or device subsystem outside `rt::Runtime`.
+bytes, caller-owned checkpoint/input-log buffers, registered device-buffer
+payload bytes, backend-reported private storage, the small C ABI adapter
+handle, and every legacy subsystem outside `rt::Runtime`.
 Configuration/finalization temporaries are also excluded because they are
 released before the running state.
 
@@ -46,6 +49,13 @@ released before the running state.
 `snapshot_max_bytes`, `replay_input_capacity`, and `input_log_max_bytes` expose
 the enforced artifact bounds. State-registry entries themselves are included
 in `runtime_control_bytes`.
+
+`device_backend_count`, `device_buffer_count`,
+`device_outstanding_capacity`, and `device_completion_batch` report the frozen
+device plan. `device_control_bytes` includes copied registrations, the
+outstanding/early-completion table, completion batch, counters, and service-lane
+object. `device_backend_reported_bytes` is informational and excluded because
+each backend owns that storage.
 
 ## Configuration
 
@@ -60,6 +70,10 @@ in `runtime_control_bytes`.
 | `snapshot_max_bytes` | 1048576 | Maximum encoded checkpoint size; output storage is caller-owned |
 | `replay_input_capacity` | 4096 | Maximum input records accepted by input-log write/replay |
 | `input_log_max_bytes` | 1048576 | Maximum encoded input-log size; output storage is caller-owned |
+| `device_backend_capacity` | 1 | Maximum backend registrations; copied table/control metadata is budgeted |
+| `device_buffer_capacity` | 64 | Maximum borrowed buffer registrations; payload bytes are excluded |
+| `device_outstanding_capacity` | 64 | Fixed runtime-wide outstanding-slot count and backend minimum |
+| `device_completion_batch` | 16 | Fixed poll-result batch; cannot exceed outstanding capacity |
 
 `scratch_bytes`, `trace_capacity`, `worker_count`, and
 `executor_queue_capacity` also contribute directly to the plan. Queue slots
@@ -100,6 +114,7 @@ executes rejected work inline, or creates a helper thread.
 | --- | --- |
 | Worker queue cannot accept the item | `queue_full` / `RTFW_STATUS_QUEUE_FULL` |
 | No task-scratch slot can be reserved within the attempt bound | `scratch_exhausted` / `RTFW_STATUS_SCRATCH_EXHAUSTED` |
+| No outstanding device slot or backend queue space | `device_queue_full` / `RTFW_STATUS_DEVICE_QUEUE_FULL` |
 
 With `reject_submission`, a nested call returns the status to its caller. Any
 accepted prefix completes before that call returns; the caller decides whether
@@ -133,14 +148,15 @@ leave all registered bytes unchanged.
 
 ## Running-state boundary
 
-`start()` creates the configured fixed worker team and, only when enabled, one
-M5 watchdog service lane. After it returns, the target CPU frame path uses
-preallocated graph, queue, scratch, and trace storage. It contains no file I/O,
-condition-variable wait, blocking mutex, hidden thread creation, heap fallback,
-or intentional heap allocation. M6 trace producers make one atomic slot-claim
-attempt and drop on contention rather than waiting. Watchdog arm/disarm uses
-atomics and a notification; its condition-variable wait is confined to the
-non-RT service lane.
+`start()` creates the configured fixed worker team, an optional M5 watchdog
+lane, and one M8 device service lane when backends exist. After it returns, the
+target CPU/device frame path uses preallocated graph, queue, scratch, trace,
+outstanding, and completion storage. It contains no file I/O, blocking mutex,
+hidden per-frame thread creation, heap fallback, or intentional heap
+allocation. M6 trace producers make one atomic slot-claim attempt and drop on
+contention rather than waiting. Watchdog waiting and device polling are
+confined to runtime-owned service lanes. CPU device submission and completion
+publication use fixed-capacity backend/manager state without waiting.
 Workers use bounded queue operations and yield when idle or waiting for nested
 work.
 
@@ -153,8 +169,8 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
 - plan, alignment, nested ownership, budget, and overload tests:
   `tests/test_memory_plan.cpp`;
 - 64 complete frames under each executor policy with concurrent phases, range
-  work, fixed-tree reductions, tracing, an armed watchdog, and allocation
-  instrumentation:
+  work, fixed-tree reductions, tracing, an armed watchdog, plus 64
+  mock-device frames, under allocation instrumentation:
   `tests/test_trace_noalloc.cpp`;
 - C ABI plan, scratch, malformed discriminator, and reserved-field checks:
   `tests/test_cabi_dlopen.c`;
@@ -165,4 +181,5 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
 - allocation/deallocation pairing:
   `rt/src/aligned_storage.hpp`;
 - implementation:
-  `rt/src/host_runtime.cpp`, `rt/src/executor.cpp`.
+  `rt/src/host_runtime.cpp`, `rt/src/executor.cpp`,
+  `rt/src/device_manager.cpp`.

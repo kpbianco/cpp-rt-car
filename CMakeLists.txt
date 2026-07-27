@@ -521,8 +521,10 @@ target_include_directories(simcore_core INTERFACE
 # Runtime module providing C API surface
 set(RT_SOURCES
     rt/src/compiled_graph.cpp
+    rt/src/device_manager.cpp
     rt/src/executor.cpp
     rt/src/host_runtime.cpp
+    rt/src/mock_device.cpp
     rt/src/native_platform_preflight.cpp
     rt/src/observability_export.cpp
     rt/src/runtime.cpp

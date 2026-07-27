@@ -35,12 +35,21 @@ latency qualification and does not prove the complete product contract.
   and foreign artifacts; and exercise 5,000 deterministic parser mutations.
 - Allocation instrumentation also covers checkpoint sizing/writing,
   inspection, restore, and input-log writing against caller-owned buffers.
+- Device-runtime tests cover bounded queue/outstanding saturation,
+  cancellation, delayed dependency release while independent CPU work
+  proceeds, timeout, error, loss,
+  health/reset, shutdown ownership, malformed backend tables, memory
+  accounting, trace ordering, and all 32 metrics.
+- Allocation instrumentation covers 64 post-warmup mock-device frames, and the
+  dynamic C ABI test defines and drives a backend solely through loaded v7
+  symbols.
 - Unified-executor tests stress independent phases with nested ranges and
   fixed-tree reductions under both policies, verify stable static assignment
   metadata, force deterministic queue saturation, and require real local
   execution and successful cross-worker steals.
 - A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
-  M5 time/platform, M6 observability, and M7 determinism/replay suites.
+  M5 time/platform, M6 observability, M7 determinism/replay, and M8 device
+  suites.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -67,7 +76,8 @@ latency qualification and does not prove the complete product contract.
 - Cross-compiler artifact equality currently covers one canonical integer
   workload on Linux, not arbitrary callback code, floating-point behavior,
   architectures, standard libraries, or D2/D3 determinism.
-- Passing mock-GPU tests do not exercise a hardware device.
+- Passing deterministic mock-device tests do not exercise a hardware device,
+  driver, DMA path, or completion-latency bound.
 - Best-effort host-hardening steps on shared runners are not RT evidence.
 
 ## Adding evidence
@@ -87,8 +97,8 @@ predeclared thresholds, and the measurement procedure.
 - Optional fuzz harnesses: `tests/jobqueue_fuzz.cpp`,
   `tests/snapshot_fuzz.cpp`
 - Cross-build artifact producer: `tests/determinism_artifact.cpp`
-- M1–M7 lifecycle, graph, executor, memory, time, platform, observability, and
-  replay
+- M1–M8 lifecycle, graph, executor, memory, time, platform, observability,
+  replay, and device
   tests:
   `tests/test_host_runtime.cpp`,
   `tests/test_compiled_graph.cpp`, `tests/test_executor.cpp`,
@@ -97,5 +107,6 @@ predeclared thresholds, and the measurement procedure.
   `tests/test_platform_preflight.cpp`,
   `tests/test_observability.cpp`,
   `tests/test_determinism_replay.cpp`,
+  `tests/test_device_runtime.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`
