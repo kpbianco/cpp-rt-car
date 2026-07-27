@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "runtime_version": "0.11.0",
+  "backend_id": "rtfw.xdma.xilinx_linux_aximm.v1",
+  "status": "candidate",
+  "named_stack": {
+    "host": "x86_64 Linux",
+    "driver_repository": "Xilinx/dma_ip_drivers",
+    "driver_revision": "8721136e74a66500b02d16cb41922d966139cd46",
+    "driver_interface": "XDMA AXI-MM character devices",
+    "default_h2c": "/dev/xdma0_h2c_0",
+    "default_c2h": "/dev/xdma0_c2h_0",
+    "fpga_contract": "PG195 XDMA AXI-MM example-design-compatible memory map"
+  },
+  "claim": "No XDMA hardware, latency, RT1, or RT2 tuple is qualified.",
+  "required_tuple_fields": [
+    "cpu_and_numa",
+    "pci_device_and_bdf",
+    "pci_link",
+    "iommu_policy",
+    "operating_system",
+    "kernel_and_preempt_rt",
+    "xdma_driver_revision",
+    "xdma_module_parameters",
+    "fpga_part",
+    "xdma_ip_configuration",
+    "bitstream_sha256",
+    "clock_configuration",
+    "memory_map",
+    "compiler",
+    "runtime_build",
+    "host_memory_policy",
+    "worker_affinity_and_priority",
+    "workload",
+    "warmup",
+    "measurement",
+    "thresholds",
+    "failure_recovery_evidence",
+    "raw_evidence_sha256",
+    "result"
+  ],
+  "qualified_tuples": []
+}

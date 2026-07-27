@@ -27,7 +27,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M7 | Complete | Determinism tiers, safe snapshots, and replay |
 | M8 | Complete | Device ABI and deterministic fault-injectable mock |
 | M9 | Candidate | Real CUDA backend; hardware qualification pending |
-| M10 | Planned | Real XDMA backend for one named host/FPGA stack |
+| M10 | Candidate | Xilinx Linux XDMA AXI-MM backend; hardware qualification pending |
 | M11 | Planned | Stable ABI, package/export cleanup, and engine adapters |
 | M12 | Qualified separately | Portable 1.0, PREEMPT_RT, CUDA, and XDMA evidence |
 
@@ -279,12 +279,43 @@ M9 remains Candidate until those hardware gates pass. The exact ownership,
 timeout, evidence, and claim boundaries are in
 [the CUDA contract](cuda_backend.md).
 
-## M10 — XDMA
+## M10 — XDMA backend candidate
 
-The XDMA backend still requires one named driver/device/bitstream contract,
-functional hardware tests, steady-state resource tests, failure/recovery
-tests, latency decomposition, and a versioned support matrix. It does not
-inherit an RT2 claim from the portable core or CUDA candidate.
+Delivered in 0.11:
+
+- a portable, injectable XDMA state machine implementing device ABI version 1;
+- bounded registered-buffer and transfer-slot tables with fixed initialization-
+  time I/O workers;
+- nonblocking, allocation-free submit/poll paths that never invoke a character-
+  device transfer on runtime CPU or completion lanes;
+- validated H2C/C2H buffer access, channel, range, device offset, transfer
+  limit, and power-of-two alignment;
+- timeout quarantine until a running blocking driver transfer physically
+  returns, plus stable health, soft reset, device-loss, and retryable shutdown
+  behavior;
+- an opt-in Linux adapter for official Xilinx XDMA AXI-MM character devices,
+  anchored to one named upstream driver and example-design-compatible
+  bitstream contract;
+- portable fake-driver functional, saturation, concurrency, timeout, recovery,
+  no-allocation, sanitizer, and ThreadSanitizer evidence;
+- an opt-in destructive H2C/C2H integrity and raw-latency evidence executable,
+  self-hosted workflow, and schema-v1 empty support matrix.
+
+Remaining exit gates:
+
+- compile and run against a declared x86-64 Linux, XDMA driver, PCI function,
+  FPGA part, XDMA IP configuration, and bitstream tuple;
+- publish repeated integrity, steady-state resource, saturation, timeout,
+  device-loss, reset/rebind, and shutdown evidence;
+- select latency thresholds before measurement and retain raw submit, poll, and
+  completion-wait samples;
+- review the evidence and add only a passing tuple to the versioned support
+  matrix.
+
+M10 remains Candidate until those hardware gates pass. Character-device
+blocking and kernel page-pin/allocation behavior prevent any inherited RT1 or
+RT2 claim. The exact contract is in
+[the XDMA backend contract](xdma_backend.md).
 
 ## M11/M12 — Distribution and qualification
 

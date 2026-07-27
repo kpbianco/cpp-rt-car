@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "runtime_version": "0.10.0",
+  "runtime_version": "0.11.0",
   "backend_id": "rtfw.cuda.driver.v1",
   "status": "candidate",
   "claim": "No CUDA hardware, latency, RT1, or RT2 tuple is qualified.",

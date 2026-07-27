@@ -8,7 +8,7 @@ simulation execution. The repository explores phase graphs, parallel range
 work, fixed-capacity queues, frame arenas, numerical controls, tracing, and
 asynchronous device patterns.
 
-> **Status: 0.10.0 experimental.** This release is not production-ready and has
+> **Status: 0.11.0 experimental.** This release is not production-ready and has
 > no hard-real-time, worst-case-latency, cross-platform bitwise-determinism,
 > CUDA-hardware, or XDMA qualification. See the
 > [product contract](docs/product_contract.md)
@@ -42,7 +42,7 @@ asynchronous device patterns.
 | Runtime configuration | Implemented M1–M8 schema | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, and artifact limits; unknown keys fail |
 | Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
 | Legacy GPU stub | Experimental compatibility path | Detached CPU-thread stub outside `rt::Runtime`; superseded for new CUDA work by the separate M9 candidate |
-| XDMA | Planned | No backend exists |
+| Xilinx XDMA AXI-MM backend | Candidate; not hardware-qualified | Portable fixed-capacity state machine plus an opt-in Linux character-device adapter, timeout quarantine, fake-driver stress tests, and raw-evidence tooling for one named stack |
 
 `rt::Runtime` does not use the legacy `WorkerPool`, `rt::Scheduler`, or
 `FiberPool`. Those compatibility experiments retain different lifetime and
@@ -81,6 +81,23 @@ That command produces raw functional and latency-decomposition evidence. It
 does not by itself add a tuple to the versioned support matrix or establish
 real-time qualification.
 
+The M10 XDMA candidate is separately opt-in on Linux and targets the official
+Xilinx XDMA AXI-MM character devices:
+
+```bash
+cmake -S . -B build-xdma -DRTFW_ENABLE_XDMA=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build-xdma --target sample_xdma_qualification --parallel 2
+./build-xdma/samples/sample_xdma_qualification \
+  --pci-bdf 0000:01:00.0 \
+  --driver-id <driver-revision-and-build> \
+  --bitstream-id <bitstream-sha256> \
+  --warmup 1000 --iterations 10000 > xdma-evidence.json
+```
+
+The transfer is destructive to the selected AXI-MM range and must run only
+against the declared qualification bitstream. It does not qualify hardware by
+itself; see the [XDMA contract](docs/xdma_backend.md).
+
 ## Demo command line
 
 These are the options implemented by `src/main.cpp`. Unknown options are
@@ -110,7 +127,7 @@ embedding runtime; demo/profile integration remains planned.
 
 ## Embedding lifecycle
 
-Release 0.10 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
+Release 0.11 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
 memory closure, M5 time/platform controls, M6 observability, and M7
 checkpoint/replay plus the M8 device ABI/mock in
 `<rt/runtime.hpp>` and `<rt/c_api.h>`:
@@ -147,8 +164,9 @@ uses local queues and bounded steals. Both use the same team for nested
 [device backend contract](docs/device_backend.md), and the working
 [C](samples/embed_c/mini_app.c) and
 [C++](samples/embed_cpp/mini_app.cpp) examples plus the
-[mock-device sample](samples/device_mock.cpp). The optional M9 CUDA candidate
-has a separate [backend and qualification contract](docs/cuda_backend.md).
+[mock-device sample](samples/device_mock.cpp). The optional M9 CUDA and M10 XDMA candidates have separate
+[CUDA](docs/cuda_backend.md) and [XDMA](docs/xdma_backend.md) backend and
+qualification contracts.
 
 ## Architecture direction
 
@@ -174,8 +192,9 @@ The M1–M8 host runtime now implements lifecycle, both explicit time modes,
 compiled graph validation, the first two CPU policies, the bounded target-path
 memory plan, watchdog/degradation, platform preflight, versioned
 observability, bounded registered-state replay, and the bounded poll-only
-device path. M9 adds an optional CUDA Driver API backend candidate without
-changing the core device ABI or claiming a qualified deployment. The existing
+device path. M9 adds an optional CUDA Driver API backend candidate and M10 adds the bounded
+Xilinx Linux XDMA AXI-MM candidate without changing the core device ABI or
+claiming a qualified deployment. The existing
 `SimCore` demo and legacy scheduler components remain outside that target
 path. The [architecture guide](docs/architecture.md) distinguishes current
 and target paths.
@@ -192,7 +211,7 @@ RTFW separates portable functionality from deployment qualification:
 No RT2 record exists yet.
 
 Determinism is tiered from D0 (unspecified) through D3 (portable approved
-fixed-point/specified math). Release 0.10 supports D0 and an explicit D1
+fixed-point/specified math). Release 0.11 supports D0 and an explicit D1
 contract for registered canonical state. Its worker-count and compiler-artifact
 fixtures do not prove D2, arbitrary floating-point identity, or cross-machine
 D3 behavior. Definitions and evidence requirements are in the
@@ -230,6 +249,7 @@ The following top-level CMake options are implemented:
 | `SIM_PGO` | empty | Experimental `gen`/`use` PGO mode |
 | `SIM_BUILD_FUZZERS` | `OFF` | Build the Clang job-queue and snapshot-parser libFuzzer harnesses |
 | `RTFW_ENABLE_CUDA` | `OFF` | Build the CUDA Driver API adapter and hardware qualification executable; requires CUDAToolkit |
+| `RTFW_ENABLE_XDMA` | `OFF` | Linux only: build the official Xilinx XDMA character-device adapter and destructive AXI-MM qualification executable |
 | `RTFW_BUILD_ID` | `rtfw-<version>` | Stable 1–63 character build identifier included in observability and checkpoint provenance |
 
 Platform and optional dependency behavior is described in the
@@ -263,6 +283,11 @@ CI currently provides:
 - an opt-in self-hosted NVIDIA workflow that emits raw per-stage CUDA
   submission/poll/completion samples without automatically creating a support
   claim;
+- portable XDMA validation, saturation, timeout-quarantine, reset, retryable
+  shutdown, no-allocation, ASan/UBSan, and ThreadSanitizer gates;
+- an opt-in self-hosted XDMA workflow that records deployment identity,
+  validates H2C/C2H AXI-MM integrity, and uploads raw per-direction timing
+  without automatically creating a support claim;
 - shared/static C and C++ compiled-graph samples plus dynamic C ABI loading;
 - autotune mapping and synthetic autotune smoke;
 - scaling artifact smoke;

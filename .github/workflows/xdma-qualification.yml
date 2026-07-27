@@ -1,0 +1,119 @@
+name: XDMA qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      pci_bdf:
+        description: PCI BDF for the declared XDMA function
+        required: true
+        type: string
+      driver_id:
+        description: Exact dma_ip_drivers revision and module build identifier
+        required: true
+        type: string
+      bitstream_id:
+        description: Immutable bitstream identifier or SHA-256
+        required: true
+        type: string
+      h2c_path:
+        description: H2C AXI-MM character device
+        required: true
+        default: /dev/xdma0_h2c_0
+        type: string
+      c2h_path:
+        description: C2H AXI-MM character device
+        required: true
+        default: /dev/xdma0_c2h_0
+        type: string
+      device_offset:
+        description: Decimal AXI-MM byte address
+        required: true
+        default: "0"
+        type: string
+      bytes:
+        description: Page-multiple transfer size
+        required: true
+        default: "4096"
+        type: string
+      warmup:
+        description: Round trips discarded before measurement
+        required: true
+        default: "1000"
+        type: string
+      iterations:
+        description: Measured round trips
+        required: true
+        default: "10000"
+        type: string
+
+jobs:
+  xdma-linux:
+    name: XDMA hardware evidence
+    runs-on: [self-hosted, linux, x64, xdma]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure XDMA candidate
+        run: |
+          cmake -S . -B build-xdma \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_TESTS=ON \
+            -DRTFW_ENABLE_XDMA=ON \
+            -DSIM_WERROR=ON
+      - name: Build portable gate and qualification tool
+        run: |
+          cmake --build build-xdma \
+            --config RelWithDebInfo \
+            --target rtfw_xdma_backend_tests sample_xdma_qualification \
+            --parallel 2
+      - name: Run portable XDMA state-machine gate
+        run: |
+          ctest --test-dir build-xdma \
+            -C RelWithDebInfo \
+            --output-on-failure \
+            -R xdma_backend
+      - name: Capture deployment identity
+        env:
+          RTFW_XDMA_PCI_BDF: ${{ inputs.pci_bdf }}
+          RTFW_XDMA_H2C_PATH: ${{ inputs.h2c_path }}
+          RTFW_XDMA_C2H_PATH: ${{ inputs.c2h_path }}
+        run: |
+          mkdir -p xdma-evidence
+          {
+            uname -a
+            "${CXX:-c++}" --version
+            modinfo xdma
+            lspci -s "$RTFW_XDMA_PCI_BDF" -vv
+            stat "$RTFW_XDMA_H2C_PATH" "$RTFW_XDMA_C2H_PATH"
+          } > xdma-evidence/system.txt 2>&1
+      - name: Capture raw functional and latency evidence
+        env:
+          RTFW_XDMA_PCI_BDF: ${{ inputs.pci_bdf }}
+          RTFW_XDMA_DRIVER_ID: ${{ inputs.driver_id }}
+          RTFW_XDMA_BITSTREAM_ID: ${{ inputs.bitstream_id }}
+          RTFW_XDMA_H2C_PATH: ${{ inputs.h2c_path }}
+          RTFW_XDMA_C2H_PATH: ${{ inputs.c2h_path }}
+          RTFW_XDMA_DEVICE_OFFSET: ${{ inputs.device_offset }}
+          RTFW_XDMA_BYTES: ${{ inputs.bytes }}
+          RTFW_XDMA_WARMUP: ${{ inputs.warmup }}
+          RTFW_XDMA_ITERATIONS: ${{ inputs.iterations }}
+        run: |
+          ./build-xdma/samples/sample_xdma_qualification \
+            --pci-bdf "$RTFW_XDMA_PCI_BDF" \
+            --driver-id "$RTFW_XDMA_DRIVER_ID" \
+            --bitstream-id "$RTFW_XDMA_BITSTREAM_ID" \
+            --h2c "$RTFW_XDMA_H2C_PATH" \
+            --c2h "$RTFW_XDMA_C2H_PATH" \
+            --device-offset "$RTFW_XDMA_DEVICE_OFFSET" \
+            --bytes "$RTFW_XDMA_BYTES" \
+            --warmup "$RTFW_XDMA_WARMUP" \
+            --iterations "$RTFW_XDMA_ITERATIONS" \
+            > xdma-evidence/xdma-qualification.json
+      - name: Upload raw evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: xdma-qualification-${{ github.sha }}
+          path: xdma-evidence/
+          if-no-files-found: error

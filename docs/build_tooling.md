@@ -37,6 +37,28 @@ Packages built with the default `RTFW_ENABLE_CUDA=OFF` still export
 `rtfw::cuda_backend` for injection/testing but do not expose the production
 adapter symbol. See [the CUDA contract](cuda_backend.md).
 
+## Optional Xilinx XDMA Linux adapter
+
+The portable fixed-capacity state machine is always available as
+`rtfw::xdma_backend`. On Linux, enable the production adapter and destructive
+AXI-MM qualification tool explicitly:
+
+```bash
+cmake -S . -B build-xdma \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DENABLE_TESTS=ON \
+  -DRTFW_ENABLE_XDMA=ON
+cmake --build build-xdma \
+  --target rtfw_xdma_backend_tests sample_xdma_qualification \
+  --parallel 2
+ctest --test-dir build-xdma --output-on-failure -R xdma_backend
+```
+
+The host must separately install/load the official Xilinx XDMA Linux driver
+and program the declared AXI-MM-compatible bitstream. The library does not
+install a kernel module, mutate driver policy, or discover a safe device range.
+See [the XDMA contract](xdma_backend.md) before running the qualification tool.
+
 ## Presets
 
 The Ninja presets write under `build/`:

@@ -1,13 +1,16 @@
 # Bounded Device Backend Contract
 
-RTFW 0.10 retains the M8 target `rt::Runtime` device contract introduced in
+RTFW 0.11 retains the M8 target `rt::Runtime` device contract introduced in
 0.9. The base contract adds a
 size/versioned C backend ABI, device phases in the compiled graph, one
 runtime-owned completion-service lane, and a deterministic fault-injectable
 CPU mock. This base is portable RT0 functional behavior. It is not itself
 CUDA, Vulkan, XDMA, driver, latency, or RT2 qualification. The optional M9
 CUDA implementation and its separate hardware-evidence boundary are in
-[the CUDA backend contract](cuda_backend.md).
+[the CUDA backend contract](cuda_backend.md). The M10 Xilinx Linux XDMA AXI-MM
+candidate uses the same device ABI while isolating blocking character-device
+calls on fixed backend workers; its separate boundary is in
+[the XDMA backend contract](xdma_backend.md).
 
 The legacy `hal/gpu_stub.hpp` detached-thread experiment is unchanged and
 outside this contract. `rt::Runtime` does not invoke it.
@@ -170,7 +173,7 @@ loading, memory-plan accounting, steady-state allocation, and sanitizer
 execution in `tests/test_device_runtime.cpp`, `tests/test_trace_noalloc.cpp`, and
 `tests/test_cabi_dlopen.c`. `samples/device_mock.cpp` is the minimal C++ flow.
 
-M9 remains separately gated even though 0.10 contains a real CUDA Driver API
+M9 remains separately gated even though 0.11 contains a real CUDA Driver API
 adapter candidate. It still needs a named driver, toolkit, hardware, OS, and
 workload support tuple plus functional, recovery, resource, and
 latency-decomposition evidence before its support matrix can contain a

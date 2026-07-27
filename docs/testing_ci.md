@@ -50,6 +50,11 @@ latency qualification and does not prove the complete product contract.
   enqueue/query-failure drain/reset, context loss, retryable drain-before-free
   shutdown, runtime graph integration, and steady-state submit/poll
   allocation.
+- XDMA candidate tests use an injected CPU-only blocking driver to cover H2C
+  and C2H integrity, malformed registration/submission rejection, bounded
+  saturation, timeout quarantine until physical worker return, reset-required
+  health and soft recovery, retryable shutdown, concurrent submit/poll, and
+  steady-state no-allocation behavior.
 - Unified-executor tests stress independent phases with nested ranges and
   fixed-tree reductions under both policies, verify stable static assignment
   metadata, force deterministic queue saturation, and require real local
@@ -89,6 +94,11 @@ latency qualification and does not prove the complete product contract.
   CUDA toolkit build, physical GPU behavior, resource stability, recovery
   behavior, or completion-latency bound. The opt-in self-hosted CUDA workflow
   emits raw evidence but does not automatically qualify a tuple.
+- Passing fake-driver XDMA tests establish queue and lifetime behavior, not an
+  XDMA kernel-module build, PCIe/FPGA integrity, kernel page-pin/resource
+  stability, failure recovery, or completion-latency bound. The destructive
+  opt-in self-hosted XDMA workflow emits raw evidence but does not
+  automatically qualify a tuple.
 - Best-effort host-hardening steps on shared runners are not RT evidence.
 
 ## Adding evidence
@@ -103,6 +113,8 @@ predeclared thresholds, and the measurement procedure.
 - Main workflows: `.github/workflows/ci.yml`
 - Opt-in CUDA hardware evidence:
   `.github/workflows/cuda-qualification.yml`
+- Opt-in XDMA hardware evidence:
+  `.github/workflows/xdma-qualification.yml`
 - Documentation contract: `.github/workflows/docs-contract.yml`
 - Differential test: `tests/test_differential_output.cpp`
 - Fault injection: `tests/test_fault_injection.cpp`
@@ -122,5 +134,6 @@ predeclared thresholds, and the measurement procedure.
   `tests/test_determinism_replay.cpp`,
   `tests/test_device_runtime.cpp`,
   `tests/test_cuda_backend.cpp`,
+  `tests/xdma_backend_tests.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`

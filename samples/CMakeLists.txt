@@ -36,6 +36,13 @@ if (RTFW_ENABLE_CUDA)
         PRIVATE rtfw_cuda_driver)
 endif()
 
+if (RTFW_ENABLE_XDMA)
+    add_executable(sample_xdma_qualification xdma_qualification.cpp)
+    target_link_libraries(
+        sample_xdma_qualification
+        PRIVATE rtfw_xdma_linux)
+endif()
+
 if (ENABLE_TESTS)
     add_test(NAME sample_particles COMMAND sample_particles)
     add_test(NAME sample_tyre_belt COMMAND sample_tyre_belt)
