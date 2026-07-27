@@ -1,6 +1,6 @@
 # Unified CPU Executor
 
-Release 0.9 carries the M3 CPU-execution surface in `rt::Runtime` through the
+Release 0.10 carries the M3 CPU-execution surface in `rt::Runtime` through the
 M8 release. The M4 memory contract still governs executor storage. The
 compiled graph, independent phase callbacks, nested range work, and nested
 reductions all use one runtime-owned worker team and one internal immutable work

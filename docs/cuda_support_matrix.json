@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "runtime_version": "0.10.0",
+  "backend_id": "rtfw.cuda.driver.v1",
+  "status": "candidate",
+  "claim": "No CUDA hardware, latency, RT1, or RT2 tuple is qualified.",
+  "required_tuple_fields": [
+    "gpu",
+    "pci_topology",
+    "operating_system",
+    "kernel",
+    "cuda_driver",
+    "cuda_toolkit",
+    "compiler",
+    "runtime_build",
+    "power_and_clock_policy",
+    "workload",
+    "warmup",
+    "measurement",
+    "thresholds",
+    "raw_evidence_sha256",
+    "result"
+  ],
+  "qualified_tuples": []
+}

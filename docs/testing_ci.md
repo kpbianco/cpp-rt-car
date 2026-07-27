@@ -43,13 +43,20 @@ latency qualification and does not prove the complete product contract.
 - Allocation instrumentation covers 64 post-warmup mock-device frames, and the
   dynamic C ABI test defines and drives a backend solely through loaded v7
   symbols.
+- CUDA candidate tests use an injected CPU-only driver to cover fixed queue
+  saturation, concurrent submitters, host/device and device/device copies,
+  byte fills and range rejection, external allocation ownership, failed
+  registration cleanup ownership, fixed kernel payloads, timeout quarantine,
+  enqueue/query-failure drain/reset, context loss, retryable drain-before-free
+  shutdown, runtime graph integration, and steady-state submit/poll
+  allocation.
 - Unified-executor tests stress independent phases with nested ranges and
   fixed-tree reductions under both policies, verify stable static assignment
   metadata, force deterministic queue saturation, and require real local
   execution and successful cross-worker steals.
 - A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
   M5 time/platform, M6 observability, M7 determinism/replay, and M8 device
-  suites.
+  suites plus the CPU-only M9 CUDA state machine.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -78,6 +85,10 @@ latency qualification and does not prove the complete product contract.
   architectures, standard libraries, or D2/D3 determinism.
 - Passing deterministic mock-device tests do not exercise a hardware device,
   driver, DMA path, or completion-latency bound.
+- Passing fake-driver CUDA tests establish the backend state machine, not a
+  CUDA toolkit build, physical GPU behavior, resource stability, recovery
+  behavior, or completion-latency bound. The opt-in self-hosted CUDA workflow
+  emits raw evidence but does not automatically qualify a tuple.
 - Best-effort host-hardening steps on shared runners are not RT evidence.
 
 ## Adding evidence
@@ -90,6 +101,8 @@ predeclared thresholds, and the measurement procedure.
 ## Code anchors
 
 - Main workflows: `.github/workflows/ci.yml`
+- Opt-in CUDA hardware evidence:
+  `.github/workflows/cuda-qualification.yml`
 - Documentation contract: `.github/workflows/docs-contract.yml`
 - Differential test: `tests/test_differential_output.cpp`
 - Fault injection: `tests/test_fault_injection.cpp`
@@ -108,5 +121,6 @@ predeclared thresholds, and the measurement procedure.
   `tests/test_observability.cpp`,
   `tests/test_determinism_replay.cpp`,
   `tests/test_device_runtime.cpp`,
+  `tests/test_cuda_backend.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`

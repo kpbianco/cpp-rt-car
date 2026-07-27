@@ -7,6 +7,8 @@ pass; file presence or a passing smoke test is not sufficient.
 ## Status legend
 
 - **Complete** — deliverables and exit gates are represented in the repository.
+- **Candidate** — implementation and portable tests exist, but a milestone
+  requiring external hardware evidence has not passed its qualification gates.
 - **Next** — next dependency-ordered implementation batch.
 - **Planned** — blocked on earlier milestones.
 - **Qualified separately** — not part of portable 1.0.
@@ -24,7 +26,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M6 | Complete | RT-safe, versioned observability |
 | M7 | Complete | Determinism tiers, safe snapshots, and replay |
 | M8 | Complete | Device ABI and deterministic fault-injectable mock |
-| M9 | Next | Real CUDA backend |
+| M9 | Candidate | Real CUDA backend; hardware qualification pending |
 | M10 | Planned | Real XDMA backend for one named host/FPGA stack |
 | M11 | Planned | Stable ABI, package/export cleanup, and engine adapters |
 | M12 | Qualified separately | Portable 1.0, PREEMPT_RT, CUDA, and XDMA evidence |
@@ -243,11 +245,46 @@ Exit gates:
 The exact ABI, ownership, scheduling, fault, and qualification boundaries are
 in [the device backend contract](device_backend.md).
 
-## M9/M10 — CUDA and XDMA
+## M9 — CUDA backend candidate
 
-Each backend requires functional hardware tests, steady-state resource tests,
-failure/recovery tests, latency decomposition, and a versioned support matrix.
-Neither backend inherits an RT2 claim from the portable core.
+Delivered in 0.10:
+
+- an optional CUDA Driver API adapter around a caller-owned context and fixed
+  caller-owned stream set;
+- fixed-capacity event, submission, registered-buffer, external-device-buffer,
+  and kernel registries;
+- setup-time host pinning and device-mirror allocation with explicit external
+  ownership alternatives;
+- async host/device and device/device copies, byte fill, and fixed-payload
+  kernel launch;
+- nonblocking event-query completion, timeout quarantine until physical
+  completion, enqueue-failure quarantine, soft reset, context-loss mapping,
+  and drain-before-release shutdown;
+- CPU-only fake-driver functional, concurrency, runtime-integration,
+  no-allocation, sanitizer, and recovery tests;
+- an opt-in real-GPU functional/latency evidence executable and self-hosted
+  workflow;
+- a schema-v1 support matrix with no qualified tuple.
+
+Remaining exit gates:
+
+- compile and run the adapter against a named CUDA toolkit/driver/GPU/OS
+  tuple;
+- publish repeated functional, steady-state resource, failure/recovery, and
+  raw latency-decomposition evidence;
+- select thresholds before the run and review the result;
+- add the passing tuple to the versioned support matrix.
+
+M9 remains Candidate until those hardware gates pass. The exact ownership,
+timeout, evidence, and claim boundaries are in
+[the CUDA contract](cuda_backend.md).
+
+## M10 — XDMA
+
+The XDMA backend still requires one named driver/device/bitstream contract,
+functional hardware tests, steady-state resource tests, failure/recovery
+tests, latency decomposition, and a versioned support matrix. It does not
+inherit an RT2 claim from the portable core or CUDA candidate.
 
 ## M11/M12 — Distribution and qualification
 

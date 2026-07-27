@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <rt/cuda_backend.hpp>
 #include <rt/runtime.hpp>
 #include <rt/mock_device.hpp>
 #include <simcore/bintrace.hpp>
@@ -738,4 +739,239 @@ TEST(TraceNoAlloc, CompleteDeviceFramesDoNotAllocate) {
     EXPECT_EQ(status, rt::Status::ok);
     EXPECT_EQ(allocation_count(), 0u);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+namespace {
+
+struct NoAllocCudaDriver {
+    static constexpr rt::CudaContext context = 0xc001u;
+
+    rt::CudaDriverApi api() noexcept {
+        rt::CudaDriverApi result{};
+        result.user_data = this;
+        result.push_context = &push_context;
+        result.pop_context = &pop_context;
+        result.event_create = &event_create;
+        result.event_destroy = &event_operation;
+        result.event_record = &event_record;
+        result.event_query = &event_operation;
+        result.event_synchronize = &event_operation;
+        result.stream_synchronize = &stream_operation;
+        result.mem_alloc = &mem_alloc;
+        result.mem_free = &mem_free;
+        result.host_register = &host_register;
+        result.host_unregister = &host_unregister;
+        result.memcpy_host_to_device_async = &copy_h2d;
+        result.memcpy_device_to_host_async = &copy_d2h;
+        result.memcpy_device_to_device_async = &copy_d2d;
+        result.memset_d8_async = &memset_d8;
+        result.launch_kernel = &launch_kernel;
+        result.monotonic_time_ns = &now;
+        return result;
+    }
+
+    static rt::CudaDriverResult push_context(
+        void* user_data,
+        rt::CudaContext requested) noexcept {
+        return user_data && requested == context
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::context_lost;
+    }
+
+    static rt::CudaDriverResult pop_context(
+        void* user_data,
+        rt::CudaContext* output) noexcept {
+        if (!user_data || !output) {
+            return rt::CudaDriverResult::invalid_value;
+        }
+        *output = context;
+        return rt::CudaDriverResult::success;
+    }
+
+    static rt::CudaDriverResult event_create(
+        void* user_data,
+        rt::CudaEvent* output) noexcept {
+        auto* driver = static_cast<NoAllocCudaDriver*>(user_data);
+        if (!driver || !output) {
+            return rt::CudaDriverResult::invalid_value;
+        }
+        *output = driver->next_event++;
+        return rt::CudaDriverResult::success;
+    }
+
+    static rt::CudaDriverResult event_operation(
+        void* user_data,
+        rt::CudaEvent) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult event_record(
+        void* user_data,
+        rt::CudaEvent,
+        rt::CudaStream) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult stream_operation(
+        void* user_data,
+        rt::CudaStream) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult mem_alloc(
+        void* user_data,
+        std::uint64_t,
+        rt::CudaDeviceAddress* output) noexcept {
+        if (!user_data || !output) {
+            return rt::CudaDriverResult::invalid_value;
+        }
+        *output = 1;
+        return rt::CudaDriverResult::success;
+    }
+
+    static rt::CudaDriverResult mem_free(
+        void* user_data,
+        rt::CudaDeviceAddress) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult host_register(
+        void* user_data,
+        void*,
+        std::uint64_t) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult host_unregister(
+        void* user_data,
+        void*) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult copy_h2d(
+        void* user_data,
+        rt::CudaDeviceAddress,
+        const void*,
+        std::uint64_t,
+        rt::CudaStream) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult copy_d2h(
+        void* user_data,
+        void*,
+        rt::CudaDeviceAddress,
+        std::uint64_t,
+        rt::CudaStream) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult copy_d2d(
+        void* user_data,
+        rt::CudaDeviceAddress,
+        rt::CudaDeviceAddress,
+        std::uint64_t,
+        rt::CudaStream) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult memset_d8(
+        void* user_data,
+        rt::CudaDeviceAddress,
+        std::uint8_t,
+        std::uint64_t,
+        rt::CudaStream) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static rt::CudaDriverResult launch_kernel(
+        void* user_data,
+        rt::CudaFunction,
+        std::uint32_t,
+        std::uint32_t,
+        std::uint32_t,
+        std::uint32_t,
+        std::uint32_t,
+        std::uint32_t,
+        std::uint32_t,
+        rt::CudaStream,
+        void* const*) noexcept {
+        return user_data
+            ? rt::CudaDriverResult::success
+            : rt::CudaDriverResult::invalid_value;
+    }
+
+    static std::uint64_t now(void*) noexcept {
+        return 1;
+    }
+
+    rt::CudaEvent next_event = 1;
+};
+
+} // namespace
+
+TEST(TraceNoAlloc, CudaSubmitAndPollDoNotAllocateAfterInitialization) {
+    NoAllocCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaBackendConfig config{};
+    config.queue_capacity = 8;
+    config.buffer_capacity = 1;
+    config.kernel_capacity = 1;
+    config.context = NoAllocCudaDriver::context;
+    config.streams = streams;
+    rt::CudaDeviceBackend backend(driver.api(), config);
+    auto api = backend.api();
+    rtfw_device_init_config initialize{};
+    initialize.struct_size = sizeof(initialize);
+    initialize.abi_version = RTFW_DEVICE_ABI_VERSION;
+    initialize.requested_in_flight = 8;
+    ASSERT_EQ(
+        api.initialize(api.instance, &initialize),
+        RTFW_DEVICE_STATUS_OK);
+
+    auto requested = rt::make_device_submission();
+    requested.timeout_ns = 1'000;
+    requested.opcode = rt::cuda_device_opcode_noop;
+    rtfw_device_completion completion{};
+    std::uint64_t completion_count = 0;
+    {
+        AllocationGuard guard;
+        for (std::uint64_t index = 1; index <= 64; ++index) {
+            requested.submission_id = index;
+            ASSERT_EQ(
+                api.submit(api.instance, &requested),
+                RTFW_DEVICE_STATUS_OK);
+            completion_count = 0;
+            ASSERT_EQ(
+                api.poll(
+                    api.instance,
+                    &completion,
+                    1,
+                    &completion_count),
+                RTFW_DEVICE_STATUS_OK);
+            ASSERT_EQ(completion_count, 1u);
+        }
+    }
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
 }

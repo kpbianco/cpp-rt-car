@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-23
-- Implementation milestone: M8 complete; M9-M10 hardware backends remain
+- Implementation milestone: M8 complete; M9 CUDA candidate awaiting hardware
+  qualification; M10 XDMA remains
 
 ## Context
 
@@ -45,6 +46,9 @@ resource, or submission can reference them.
   separately.
 - The target runtime creates no detached submission thread. The legacy GPU
   stub remains an explicitly excluded compatibility experiment.
+- The M9 implementation uses the host-owned option: the host retains its CUDA
+  context, streams, modules, functions, and any externally bound allocations.
+  A versioned support tuple remains separate from implementation presence.
 
 ## Rejected alternatives
 

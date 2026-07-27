@@ -1,7 +1,7 @@
 # Real-Time Readiness Gates
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
-0.9 has not completed any end-to-end RT2 qualification.
+0.10 has not completed any end-to-end RT2 qualification.
 
 ## Portable runtime gates
 

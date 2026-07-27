@@ -1,6 +1,6 @@
 # Finalized Memory and Overload Contract
 
-Release 0.9 extends the M4 memory closure for the target-path runtime,
+Release 0.10 retains the M4 memory closure for the target-path runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.

@@ -27,37 +27,40 @@ public:
 
   bool pop(int &out) {
     HazardGuard guard;
-    Node *h = head.load(std::memory_order_acquire);
+    Node *h = nullptr;
+    Node *next = nullptr;
+    h = guard.protect(head);
     while (h) {
-      guard.protect(head);
-      if (head.compare_exchange_weak(h, h->next.load(std::memory_order_relaxed),
-                                     std::memory_order_acquire,
-                                     std::memory_order_relaxed)) {
+      next = h->next.load(std::memory_order_relaxed);
+      if (head.compare_exchange_weak(h, next,
+                                     std::memory_order_seq_cst,
+                                     std::memory_order_seq_cst)) {
         out = h->value;
+        guard.clear();
         retire(h, [](void *p) { delete static_cast<Node *>(p); });
         return true;
       }
+      h = guard.protect(head);
     }
     return false;
   }
 };
 
-TEST(HazardPointer, StackCorrectness) {
+static std::size_t exercise_stack(int count) {
   LockFreeStack st;
-  const int N = 1000;
   std::thread t1([&] {
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i < count; ++i)
       st.push(i);
   });
   std::thread t2([&] {
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i < count; ++i)
       st.push(i);
   });
   t1.join();
   t2.join();
   std::vector<int> vals1, vals2;
-  vals1.reserve(N);
-  vals2.reserve(N);
+  vals1.reserve(static_cast<std::size_t>(count));
+  vals2.reserve(static_cast<std::size_t>(count));
   std::thread c1([&] {
     int x;
     while (st.pop(x))
@@ -71,5 +74,12 @@ TEST(HazardPointer, StackCorrectness) {
   c1.join();
   c2.join();
   scan(); // reclaim any remaining
-  EXPECT_EQ(vals1.size() + vals2.size(), 2u * N);
+  return vals1.size() + vals2.size();
+}
+
+TEST(HazardPointer, StackCorrectness) {
+  constexpr int N = 1000;
+  for (int iteration = 0; iteration < 32; ++iteration) {
+    EXPECT_EQ(exercise_stack(N), 2u * N);
+  }
 }

@@ -13,6 +13,30 @@ ctest --test-dir build --output-on-failure
 Tests use the checked-in GoogleTest submodule by default. Clone submodules
 recursively or initialize them before configuring with tests.
 
+## Optional CUDA Driver API adapter
+
+The bounded CUDA state machine (`rtfw::cuda_backend`) is built without a
+toolkit dependency so CPU-only CI can test it. Enable the production adapter
+only when CUDAToolkit and a compatible driver environment are available:
+
+```bash
+cmake -S . -B build-cuda \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DENABLE_TESTS=ON \
+  -DRTFW_ENABLE_CUDA=ON
+cmake --build build-cuda \
+  --target simcore_tests sample_cuda_qualification \
+  --parallel 2
+GTEST_FILTER='CudaBackend.*' \
+  ctest --test-dir build-cuda --output-on-failure -R simcore_all
+```
+
+Installed CUDA-enabled packages export `rtfw::cuda_driver`, propagate the
+`RTFW_CUDA_DRIVER_AVAILABLE` definition, and resolve `CUDA::cuda_driver`.
+Packages built with the default `RTFW_ENABLE_CUDA=OFF` still export
+`rtfw::cuda_backend` for injection/testing but do not expose the production
+adapter symbol. See [the CUDA contract](cuda_backend.md).
+
 ## Presets
 
 The Ninja presets write under `build/`:

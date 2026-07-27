@@ -31,7 +31,7 @@ These commands validate tooling and schemas. They do not validate that
 `tools/autotune/spec.yaml` describes the intended runtime integration. The
 orchestrator launches an application with generated `--config` input,
 `--run`-bounded warm-up/measurement windows, and optional `--rt` arguments.
-RTFW 0.9's demo implements none of those three options and does not read
+RTFW 0.10's demo implements none of those three options and does not read
 `RTFW_PROFILE`.
 
 The current profile schema also contains settings that are not mapped into
