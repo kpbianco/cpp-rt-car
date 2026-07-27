@@ -26,6 +26,9 @@ target_link_libraries(sample_embed_c_static PRIVATE rtfw_static)
 add_executable(sample_embed_cpp embed_cpp/mini_app.cpp)
 target_link_libraries(sample_embed_cpp PRIVATE simcore_rt)
 
+add_executable(sample_device_mock device_mock.cpp)
+target_link_libraries(sample_device_mock PRIVATE simcore_rt)
+
 if (ENABLE_TESTS)
     add_test(NAME sample_particles COMMAND sample_particles)
     add_test(NAME sample_tyre_belt COMMAND sample_tyre_belt)
@@ -33,6 +36,7 @@ if (ENABLE_TESTS)
     add_test(NAME sample_embed_c COMMAND sample_embed_c)
     add_test(NAME sample_embed_c_static COMMAND sample_embed_c_static)
     add_test(NAME sample_embed_cpp COMMAND sample_embed_cpp)
+    add_test(NAME sample_device_mock COMMAND sample_device_mock)
     set_tests_properties(
         sample_particles
         sample_tyre_belt
@@ -40,5 +44,6 @@ if (ENABLE_TESTS)
         sample_embed_c
         sample_embed_c_static
         sample_embed_cpp
+        sample_device_mock
         PROPERTIES TIMEOUT 30)
 endif()

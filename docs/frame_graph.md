@@ -20,9 +20,11 @@ This mock is useful only for API experiments and unit tests. Detached thread
 creation, future allocation, busy waits, unchecked resource indices, and
 implicit ownership all violate the target device contract.
 
-Milestone M8 replaces this path with the bounded, fault-injectable mock defined
-by [ADR-0003](adr/0003-device-backend-boundary.md). CUDA and XDMA backends come
-only after that contract is tested.
+Milestone M8 supersedes this experiment for `rt::Runtime` with the bounded,
+fault-injectable path in the
+[device backend contract](device_backend.md). This legacy experiment remains
+for compatibility; CUDA and XDMA backends come only after the target contract
+is tested.
 
 ## Code anchors
 
@@ -30,4 +32,5 @@ only after that contract is tested.
   `gpu/frame_graph.hpp`
 - CPU submission mock: `simcore::hal::gpu::submit`; `hal/gpu_stub.hpp`
 - Allocation flags: `simcore::hal::MemFlags`; `hal/hal.hpp`
-- Target boundary: [ADR-0003](adr/0003-device-backend-boundary.md)
+- Target boundary: [ADR-0003](adr/0003-device-backend-boundary.md),
+  [device backend contract](device_backend.md)

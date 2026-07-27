@@ -17,6 +17,11 @@ constexpr std::size_t kInvalidScratchSlot =
 constexpr std::size_t kQueueCasAttemptLimit = 64;
 constexpr std::size_t kScratchCasAttemptLimit = 64;
 constexpr std::size_t kScratchWordBits = 64;
+constexpr std::uint8_t kPhaseIdle = 0;
+constexpr std::uint8_t kPhaseDispatching = 1;
+constexpr std::uint8_t kPhasePending = 2;
+constexpr std::uint8_t kPhaseExternalReady = 3;
+constexpr std::uint8_t kPhaseFinalized = 4;
 
 } // namespace
 
@@ -162,6 +167,14 @@ Executor::Executor(
           phase_count == 0
               ? nullptr
               : std::make_unique<std::atomic<std::uint32_t>[]>(phase_count)),
+      phase_states_(
+          phase_count == 0
+              ? nullptr
+              : std::make_unique<std::atomic<std::uint8_t>[]>(phase_count)),
+      phase_statuses_(
+          phase_count == 0
+              ? nullptr
+              : std::make_unique<std::atomic<std::int32_t>[]>(phase_count)),
       successor_offsets_(phase_count + 1, 0),
       static_assignments_(phase_count, 0) {
     std::size_t task_scratch_total = 0;
@@ -272,6 +285,12 @@ bool Executor::estimate_control_storage(
         !add_product(
             phase_count,
             sizeof(std::atomic<std::uint32_t>)) ||
+        !add_product(
+            phase_count,
+            sizeof(std::atomic<std::uint8_t>)) ||
+        !add_product(
+            phase_count,
+            sizeof(std::atomic<std::int32_t>)) ||
         !add_product(phase_offsets, sizeof(std::size_t)) ||
         !add_product(dependency_count, sizeof(std::uint32_t)) ||
         !add_product(phase_count, sizeof(std::size_t))) {
@@ -484,6 +503,12 @@ Status Executor::run(
     for (std::size_t phase = 0; phase < phase_count_; ++phase) {
         current_indegree_[phase].store(
             initial_indegree_[phase],
+            std::memory_order_relaxed);
+        phase_states_[phase].store(
+            kPhaseIdle,
+            std::memory_order_relaxed);
+        phase_statuses_[phase].store(
+            static_cast<std::int32_t>(Status::ok),
             std::memory_order_relaxed);
     }
 
@@ -728,27 +753,114 @@ void Executor::execute_phase(
         return;
     }
 
-    CallbackResult result = CallbackResult::error;
+    graph_group_.pending.fetch_add(1, std::memory_order_acq_rel);
+    auto expected_state = kPhaseIdle;
+    if (!phase_states_[item.phase_index].compare_exchange_strong(
+            expected_state,
+            kPhaseDispatching,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        graph_group_.pending.fetch_sub(1, std::memory_order_acq_rel);
+        cancel_graph(Status::internal_error, item.phase_index);
+        return;
+    }
+
+    PhaseTaskDispatch dispatch{
+        Status::callback_failed,
+        false,
+    };
     try {
-        result = phase_callback_(
+        dispatch = phase_callback_(
             phase_user_data_,
             item.phase_index,
             context);
     } catch (...) {
-        result = CallbackResult::error;
+        dispatch = {
+            Status::callback_failed,
+            false,
+        };
     }
     graph_callbacks_executed_.fetch_add(1, std::memory_order_relaxed);
 
-    if (result != CallbackResult::ok) {
-        cancel_graph(Status::callback_failed, item.phase_index);
-        return;
-    }
-    if (graph_cancelled_.load(std::memory_order_acquire)) {
+    if (!dispatch.pending) {
+        expected_state = kPhaseDispatching;
+        if (!phase_states_[item.phase_index].compare_exchange_strong(
+                expected_state,
+                kPhaseFinalized,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            cancel_graph(Status::internal_error, item.phase_index);
+            graph_group_.pending.fetch_sub(
+                1,
+                std::memory_order_acq_rel);
+            return;
+        }
+        finish_phase(item.phase_index, dispatch.status);
         return;
     }
 
-    const auto begin = successor_offsets_[item.phase_index];
-    const auto end = successor_offsets_[item.phase_index + 1];
+    if (dispatch.status != Status::ok) {
+        expected_state = kPhaseDispatching;
+        if (phase_states_[item.phase_index].compare_exchange_strong(
+                expected_state,
+                kPhaseFinalized,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            finish_phase(item.phase_index, dispatch.status);
+        } else {
+            cancel_graph(Status::internal_error, item.phase_index);
+            graph_group_.pending.fetch_sub(
+                1,
+                std::memory_order_acq_rel);
+        }
+        return;
+    }
+
+    expected_state = kPhaseDispatching;
+    if (phase_states_[item.phase_index].compare_exchange_strong(
+            expected_state,
+            kPhasePending,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        return;
+    }
+    if (expected_state != kPhaseExternalReady) {
+        cancel_graph(Status::internal_error, item.phase_index);
+        graph_group_.pending.fetch_sub(1, std::memory_order_acq_rel);
+        return;
+    }
+    expected_state = kPhaseExternalReady;
+    if (!phase_states_[item.phase_index].compare_exchange_strong(
+            expected_state,
+            kPhaseFinalized,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        cancel_graph(Status::internal_error, item.phase_index);
+        graph_group_.pending.fetch_sub(1, std::memory_order_acq_rel);
+        return;
+    }
+    finish_phase(
+        item.phase_index,
+        static_cast<Status>(
+            phase_statuses_[item.phase_index].load(
+                std::memory_order_acquire)));
+}
+
+void Executor::finish_phase(
+    std::size_t phase_index,
+    Status status) noexcept {
+    if (status != Status::ok) {
+        cancel_graph(status, phase_index);
+        graph_group_.pending.fetch_sub(1, std::memory_order_acq_rel);
+        return;
+    }
+    if (graph_cancelled_.load(std::memory_order_acquire)) {
+        graph_group_.pending.fetch_sub(1, std::memory_order_acq_rel);
+        return;
+    }
+
+    const auto begin = successor_offsets_[phase_index];
+    const auto end = successor_offsets_[phase_index + 1];
     for (std::size_t cursor = begin; cursor < end; ++cursor) {
         const auto successor = successors_[cursor];
         if (current_indegree_[successor].fetch_sub(
@@ -756,12 +868,57 @@ void Executor::execute_phase(
                 std::memory_order_acq_rel) != 1) {
             continue;
         }
-        const auto status = submit_phase(successor);
-        if (status != Status::ok) {
-            cancel_graph(status, phase_count_);
-            return;
+        const auto submit_status = submit_phase(successor);
+        if (submit_status != Status::ok) {
+            cancel_graph(submit_status, phase_count_);
+            break;
         }
     }
+    graph_group_.pending.fetch_sub(1, std::memory_order_acq_rel);
+}
+
+Status Executor::complete_external(
+    std::size_t phase_index,
+    Status status) noexcept {
+    if (!started_.load(std::memory_order_acquire) ||
+        phase_index >= phase_count_) {
+        return Status::invalid_argument;
+    }
+    phase_statuses_[phase_index].store(
+        static_cast<std::int32_t>(status),
+        std::memory_order_release);
+    auto expected = kPhasePending;
+    if (phase_states_[phase_index].compare_exchange_strong(
+            expected,
+            kPhaseFinalized,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        finish_phase(phase_index, status);
+        return Status::ok;
+    }
+    if (expected != kPhaseDispatching) {
+        return Status::invalid_state;
+    }
+    expected = kPhaseDispatching;
+    if (phase_states_[phase_index].compare_exchange_strong(
+            expected,
+            kPhaseExternalReady,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed)) {
+        return Status::ok;
+    }
+    if (expected == kPhasePending) {
+        expected = kPhasePending;
+        if (phase_states_[phase_index].compare_exchange_strong(
+                expected,
+                kPhaseFinalized,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            finish_phase(phase_index, status);
+            return Status::ok;
+        }
+    }
+    return Status::invalid_state;
 }
 
 void Executor::worker_loop(std::size_t worker_index) noexcept {

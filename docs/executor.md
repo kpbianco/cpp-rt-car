@@ -1,7 +1,7 @@
 # Unified CPU Executor
 
-Release 0.8 carries the M3 CPU-execution surface in `rt::Runtime` through the
-M7 release. The M4 memory contract still governs executor storage. The
+Release 0.9 carries the M3 CPU-execution surface in `rt::Runtime` through the
+M8 release. The M4 memory contract still governs executor storage. The
 compiled graph, independent phase callbacks, nested range work, and nested
 reductions all use one runtime-owned worker team and one internal immutable work
 record. The legacy `SimCore`, `WorkerPool`, `rt::Scheduler`, and `FiberPool`
@@ -41,7 +41,7 @@ configured worker and queue counts, accepted submissions, local executions,
 steal attempts, successful steals, queue rejections, scratch exhaustions, and
 worker starts. These
 counters are functional M3 evidence, not the versioned production
-schema-v1 observability counters completed in M6.
+versioned observability counters completed in M6.
 
 The graph compiler's registration-index topological order remains the canonical
 introspection order returned by `compiled_phase_at()`. Runtime callback

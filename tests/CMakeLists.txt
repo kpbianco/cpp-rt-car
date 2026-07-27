@@ -82,6 +82,7 @@ if (SIM_GTEST_AVAILABLE)
         test_memory_plan.cpp
         test_observability.cpp
         test_determinism_replay.cpp
+        test_device_runtime.cpp
         test_rt_pipeline.cpp
         test_platform_gate.cpp
         integration/test_determinism.cpp

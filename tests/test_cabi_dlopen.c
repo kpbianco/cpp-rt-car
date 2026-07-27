@@ -4,17 +4,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(RTFW_C_ABI_VERSION == 6u, "unexpected C ABI version");
-_Static_assert(sizeof(rtfw_status) == sizeof(int32_t), "status width changed");
-_Static_assert(
+#if defined(_MSC_VER)
+#    define RTFW_C_STATIC_ASSERT(condition, name) \
+        typedef char rtfw_static_assert_##name[(condition) ? 1 : -1]
+#else
+#    define RTFW_C_STATIC_ASSERT(condition, name) \
+        _Static_assert(condition, #name)
+#endif
+
+RTFW_C_STATIC_ASSERT(RTFW_C_ABI_VERSION == 7u, unexpected_c_abi_version);
+RTFW_C_STATIC_ASSERT(
+    sizeof(rtfw_status) == sizeof(int32_t),
+    status_width_changed);
+RTFW_C_STATIC_ASSERT(
     sizeof(rtfw_overload_policy) == sizeof(uint32_t),
-    "overload policy width changed");
-_Static_assert(
+    overload_policy_width_changed);
+RTFW_C_STATIC_ASSERT(
     sizeof(rtfw_platform_preflight_mode) == sizeof(uint32_t),
-    "platform preflight mode width changed");
-_Static_assert(
+    platform_preflight_mode_width_changed);
+RTFW_C_STATIC_ASSERT(
     sizeof(rtfw_determinism_tier) == sizeof(uint32_t),
-    "determinism tier width changed");
+    determinism_tier_width_changed);
+
+#undef RTFW_C_STATIC_ASSERT
 
 #if defined(_WIN32)
 #    define WIN32_LEAN_AND_MEAN
@@ -113,11 +125,32 @@ typedef void (*rtfw_input_log_metadata_init_fn)(
 typedef void (*rtfw_replay_input_record_init_fn)(
     rtfw_replay_input_record *);
 typedef void (*rtfw_replay_result_init_fn)(rtfw_replay_result *);
+typedef void (*rtfw_device_health_init_fn)(rtfw_device_health *);
 typedef rtfw_status (*rtfw_create_fn)(const rtfw_config *, rtfw_handle **);
 typedef rtfw_status (*rtfw_register_callback_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *);
 typedef rtfw_status (*rtfw_register_phase_fn)(
     rtfw_handle *, const char *, rtfw_frame_callback, void *, rtfw_phase_id *);
+typedef rtfw_status (*rtfw_register_device_backend_fn)(
+    rtfw_handle *,
+    const char *,
+    const rtfw_device_backend_api *,
+    rtfw_device_backend_id *);
+typedef rtfw_status (*rtfw_register_device_buffer_fn)(
+    rtfw_handle *,
+    const char *,
+    rtfw_device_backend_id,
+    void *,
+    uint64_t,
+    rtfw_device_buffer_flags,
+    rtfw_device_buffer_id *);
+typedef rtfw_status (*rtfw_register_device_phase_fn)(
+    rtfw_handle *,
+    const char *,
+    rtfw_device_backend_id,
+    rtfw_device_command_callback,
+    void *,
+    rtfw_phase_id *);
 typedef rtfw_status (*rtfw_register_resource_fn)(
     rtfw_handle *, const char *, rtfw_resource_id *);
 typedef rtfw_status (*rtfw_register_state_fn)(
@@ -166,6 +199,13 @@ typedef rtfw_status (*rtfw_get_platform_preflight_report_fn)(
     const rtfw_handle *, rtfw_platform_preflight_report *);
 typedef rtfw_status (*rtfw_get_degradation_level_fn)(
     const rtfw_handle *, uint32_t *);
+typedef rtfw_status (*rtfw_get_device_health_fn)(
+    rtfw_handle *,
+    rtfw_device_backend_id,
+    rtfw_device_health *);
+typedef rtfw_status (*rtfw_reset_device_fn)(
+    rtfw_handle *,
+    rtfw_device_backend_id);
 typedef rtfw_status (*rtfw_get_observability_metadata_fn)(
     rtfw_handle *, rtfw_observability_metadata *);
 typedef rtfw_status (*rtfw_get_metrics_fn)(
@@ -424,6 +464,224 @@ static rtfw_callback_result replay_input(
     return RTFW_CALLBACK_OK;
 }
 
+typedef struct cabi_device_backend {
+    int initialized;
+    unsigned char *buffer;
+    uint64_t buffer_bytes;
+    uint64_t pending_submission;
+    rtfw_device_submission submission;
+    uint64_t submissions;
+    uint64_t completions;
+    uint64_t resets;
+    uint64_t shutdowns;
+} cabi_device_backend;
+
+static rtfw_device_status cabi_device_capabilities(
+    void *instance,
+    rtfw_device_capabilities *capabilities) {
+    if (!instance || !capabilities ||
+        capabilities->struct_size < sizeof(*capabilities)) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    memset(capabilities, 0, sizeof(*capabilities));
+    capabilities->struct_size = sizeof(*capabilities);
+    capabilities->abi_version = RTFW_DEVICE_ABI_VERSION;
+    capabilities->max_in_flight = 64u;
+    capabilities->max_registered_buffers = 64u;
+    capabilities->max_buffer_bytes = 4096u;
+    capabilities->inline_payload_capacity =
+        RTFW_DEVICE_INLINE_PAYLOAD_CAPACITY;
+    capabilities->buffer_ref_capacity =
+        RTFW_DEVICE_BUFFER_REF_CAPACITY;
+    capabilities->supports_cancel = 1u;
+    capabilities->supports_reset = 1u;
+    capabilities->deterministic_mock = 1u;
+    memcpy(
+        capabilities->backend_id,
+        "cabi.mock.v1",
+        sizeof("cabi.mock.v1"));
+    capabilities->control_storage_bytes =
+        sizeof(cabi_device_backend);
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_initialize(
+    void *instance,
+    const rtfw_device_init_config *config) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !config ||
+        config->struct_size < sizeof(*config) ||
+        config->abi_version != RTFW_DEVICE_ABI_VERSION ||
+        backend->initialized) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    backend->initialized = 1;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_register_buffer(
+    void *instance,
+    const rtfw_device_buffer_registration *registration,
+    uint64_t *out_token) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized || !registration ||
+        !out_token || !registration->data ||
+        registration->bytes == 0u || backend->buffer) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    backend->buffer = (unsigned char *)registration->data;
+    backend->buffer_bytes = registration->bytes;
+    *out_token = 1u;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_unregister_buffer(
+    void *instance,
+    uint64_t token) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized || token != 1u ||
+        backend->pending_submission != 0u) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    backend->buffer = NULL;
+    backend->buffer_bytes = 0u;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_submit(
+    void *instance,
+    const rtfw_device_submission *submission) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized || !submission ||
+        backend->pending_submission != 0u) {
+        return backend && backend->pending_submission != 0u
+            ? RTFW_DEVICE_STATUS_QUEUE_FULL
+            : RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    backend->submission = *submission;
+    backend->pending_submission = submission->submission_id;
+    ++backend->submissions;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_poll(
+    void *instance,
+    rtfw_device_completion *completions,
+    uint64_t completion_capacity,
+    uint64_t *out_count) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized || !out_count ||
+        (completion_capacity != 0u && !completions)) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    *out_count = 0u;
+    if (backend->pending_submission == 0u ||
+        completion_capacity == 0u) {
+        return RTFW_DEVICE_STATUS_OK;
+    }
+    if (backend->submission.opcode == 1u &&
+        backend->submission.buffer_count == 1u &&
+        backend->submission.payload_size == 1u &&
+        backend->submission.buffers[0].buffer_token == 1u &&
+        backend->submission.buffers[0].bytes <=
+            backend->buffer_bytes) {
+        memset(
+            backend->buffer +
+                backend->submission.buffers[0].offset,
+            backend->submission.payload[0],
+            (size_t)backend->submission.buffers[0].bytes);
+    }
+    memset(completions, 0, sizeof(*completions));
+    completions->struct_size = sizeof(*completions);
+    completions->status = RTFW_DEVICE_STATUS_OK;
+    completions->submission_id = backend->pending_submission;
+    completions->value = backend->submissions;
+    backend->pending_submission = 0u;
+    ++backend->completions;
+    *out_count = 1u;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_cancel(
+    void *instance,
+    uint64_t submission_id) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized ||
+        backend->pending_submission != submission_id) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    backend->pending_submission = 0u;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_health(
+    void *instance,
+    rtfw_device_health *health) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized || !health ||
+        health->struct_size < sizeof(*health)) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    memset(health, 0, sizeof(*health));
+    health->struct_size = sizeof(*health);
+    health->state = RTFW_DEVICE_HEALTH_HEALTHY;
+    health->last_status = RTFW_DEVICE_STATUS_OK;
+    health->generation = backend->resets + 1u;
+    health->submissions = backend->submissions;
+    health->completions = backend->completions;
+    health->resets = backend->resets;
+    health->outstanding =
+        backend->pending_submission != 0u ? 1u : 0u;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_reset(void *instance) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized ||
+        backend->pending_submission != 0u) {
+        return RTFW_DEVICE_STATUS_INVALID_STATE;
+    }
+    ++backend->resets;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+static rtfw_device_status cabi_device_shutdown(void *instance) {
+    cabi_device_backend *backend = (cabi_device_backend *)instance;
+    if (!backend || !backend->initialized) {
+        return RTFW_DEVICE_STATUS_INVALID_STATE;
+    }
+    backend->initialized = 0;
+    backend->pending_submission = 0u;
+    ++backend->shutdowns;
+    return RTFW_DEVICE_STATUS_OK;
+}
+
+typedef struct cabi_device_command {
+    rtfw_device_buffer_id buffer;
+    uint64_t bytes;
+} cabi_device_command;
+
+static rtfw_callback_result cabi_device_command_callback(
+    void *user_data,
+    const rtfw_callback_context *context,
+    rtfw_device_submission *submission) {
+    cabi_device_command *command = (cabi_device_command *)user_data;
+    if (!command || !context || !submission ||
+        submission->struct_size < sizeof(*submission) ||
+        submission->abi_version != RTFW_DEVICE_ABI_VERSION) {
+        return RTFW_CALLBACK_ERROR;
+    }
+    submission->timeout_ns = 1000000u;
+    submission->opcode = 1u;
+    submission->payload_size = 1u;
+    submission->payload[0] = 0x6bu;
+    submission->buffer_count = 1u;
+    submission->buffers[0].buffer_token = command->buffer;
+    submission->buffers[0].access = RTFW_DEVICE_ACCESS_WRITE;
+    submission->buffers[0].bytes = command->bytes;
+    return RTFW_CALLBACK_OK;
+}
+
 int main(void) {
 #ifndef RTFW_LIB_PATH
 #error "RTFW_LIB_PATH must be defined with the runtime library path"
@@ -458,9 +716,13 @@ int main(void) {
     rtfw_input_log_metadata_init_fn input_log_metadata_init_fn;
     rtfw_replay_input_record_init_fn replay_record_init_fn;
     rtfw_replay_result_init_fn replay_result_init_fn;
+    rtfw_device_health_init_fn device_health_init_fn;
     rtfw_create_fn create_fn;
     rtfw_register_callback_fn register_fn;
     rtfw_register_phase_fn register_phase_fn;
+    rtfw_register_device_backend_fn register_device_backend_fn;
+    rtfw_register_device_buffer_fn register_device_buffer_fn;
+    rtfw_register_device_phase_fn register_device_phase_fn;
     rtfw_register_resource_fn register_resource_fn;
     rtfw_register_state_fn register_state_fn;
     rtfw_add_dependency_fn add_dependency_fn;
@@ -478,6 +740,8 @@ int main(void) {
     rtfw_get_memory_plan_fn get_memory_plan_fn;
     rtfw_get_platform_preflight_report_fn get_preflight_report_fn;
     rtfw_get_degradation_level_fn get_degradation_level_fn;
+    rtfw_get_device_health_fn get_device_health_fn;
+    rtfw_reset_device_fn reset_device_fn;
     rtfw_get_observability_metadata_fn get_observability_metadata_fn;
     rtfw_get_metrics_fn get_metrics_fn;
     rtfw_read_trace_fn read_trace_fn;
@@ -530,9 +794,21 @@ int main(void) {
     LOAD_FUNCTION(
         replay_result_init_fn,
         "rtfw_replay_result_init");
+    LOAD_FUNCTION(
+        device_health_init_fn,
+        "rtfw_device_health_init");
     LOAD_FUNCTION(create_fn, "rtfw_create");
     LOAD_FUNCTION(register_fn, "rtfw_register_callback");
     LOAD_FUNCTION(register_phase_fn, "rtfw_register_phase");
+    LOAD_FUNCTION(
+        register_device_backend_fn,
+        "rtfw_register_device_backend");
+    LOAD_FUNCTION(
+        register_device_buffer_fn,
+        "rtfw_register_device_buffer");
+    LOAD_FUNCTION(
+        register_device_phase_fn,
+        "rtfw_register_device_phase");
     LOAD_FUNCTION(register_resource_fn, "rtfw_register_resource");
     LOAD_FUNCTION(register_state_fn, "rtfw_register_state");
     LOAD_FUNCTION(add_dependency_fn, "rtfw_add_dependency");
@@ -554,6 +830,10 @@ int main(void) {
     LOAD_FUNCTION(
         get_degradation_level_fn,
         "rtfw_get_degradation_level");
+    LOAD_FUNCTION(
+        get_device_health_fn,
+        "rtfw_get_device_health");
+    LOAD_FUNCTION(reset_device_fn, "rtfw_reset_device");
     LOAD_FUNCTION(
         get_observability_metadata_fn,
         "rtfw_get_observability_metadata");
@@ -587,12 +867,19 @@ int main(void) {
             capabilities.strict_platform_preflight != 1 ||
             capabilities.versioned_observability != 1 ||
             capabilities.deterministic_replay != 1 ||
+            capabilities.bounded_device_backend != 1 ||
             strcmp(
                 metric_name_fn(RTFW_METRIC_FRAMES_COMPLETED),
                 "runtime.frames_completed") != 0 ||
             strcmp(
                 trace_event_name_fn(RTFW_TRACE_STEP_END),
                 "frame.end") != 0 ||
+            strcmp(
+                metric_name_fn(RTFW_METRIC_DEVICE_COMPLETIONS),
+                "device.completions") != 0 ||
+            strcmp(
+                trace_event_name_fn(RTFW_TRACE_DEVICE_COMPLETED),
+                "device.completed") != 0 ||
             strcmp(
                 status_message_fn(RTFW_STATUS_INVALID_CONFIG),
                 "invalid runtime configuration") != 0 ||
@@ -605,6 +892,9 @@ int main(void) {
             strcmp(
                 status_message_fn(RTFW_STATUS_SCRATCH_EXHAUSTED),
                 "task scratch plan is exhausted") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_DEVICE_TIMEOUT),
+                "device submission timed out") != 0 ||
             strcmp(
                 status_message_fn(
                     RTFW_STATUS_PLATFORM_PREFLIGHT_FAILED),
@@ -902,6 +1192,7 @@ int main(void) {
         }
         summed_bytes = plan.runtime_control_bytes +
             plan.executor_control_bytes +
+            plan.device_control_bytes +
             plan.phase_scratch_total_bytes +
             plan.task_scratch_total_bytes +
             plan.trace_storage_bytes;
@@ -1409,6 +1700,194 @@ int main(void) {
             return EXIT_FAILURE;
         }
         destroy_fn(replay_instance);
+    }
+
+    {
+        rtfw_handle *device_instance = NULL;
+        rtfw_device_backend_id device_backend =
+            RTFW_INVALID_DEVICE_BACKEND_ID;
+        rtfw_device_buffer_id device_buffer =
+            RTFW_INVALID_DEVICE_BUFFER_ID;
+        rtfw_phase_id device_phase = RTFW_INVALID_PHASE_ID;
+        rtfw_device_backend_api backend_api;
+        cabi_device_backend backend_state;
+        cabi_device_command command;
+        unsigned char device_bytes[16];
+        rtfw_frame_context device_frame;
+        rtfw_step_result device_result;
+        rtfw_device_health device_health;
+        rtfw_memory_plan device_plan;
+        rtfw_metric_snapshot device_metrics;
+        rtfw_config device_config = config;
+
+        memset(&backend_api, 0, sizeof(backend_api));
+        memset(&backend_state, 0, sizeof(backend_state));
+        memset(device_bytes, 0, sizeof(device_bytes));
+        backend_api.struct_size = sizeof(backend_api);
+        backend_api.abi_version = RTFW_DEVICE_ABI_VERSION;
+        backend_api.instance = &backend_state;
+        backend_api.get_capabilities = cabi_device_capabilities;
+        backend_api.initialize = cabi_device_initialize;
+        backend_api.register_buffer = cabi_device_register_buffer;
+        backend_api.unregister_buffer = cabi_device_unregister_buffer;
+        backend_api.submit = cabi_device_submit;
+        backend_api.poll = cabi_device_poll;
+        backend_api.cancel = cabi_device_cancel;
+        backend_api.get_health = cabi_device_health;
+        backend_api.reset = cabi_device_reset;
+        backend_api.shutdown = cabi_device_shutdown;
+
+        if (create_fn(&device_config, &device_instance) !=
+                RTFW_STATUS_OK) {
+            fprintf(stderr, "C ABI device runtime creation failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        --backend_api.struct_size;
+        if (register_device_backend_fn(
+                device_instance,
+                "cabi.device.short",
+                &backend_api,
+                &device_backend) != RTFW_STATUS_INVALID_ARGUMENT ||
+            device_backend != RTFW_INVALID_DEVICE_BACKEND_ID) {
+            fprintf(stderr, "C ABI device backend accepted a short table\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        backend_api.struct_size = sizeof(backend_api);
+        if (register_device_backend_fn(
+                device_instance,
+                "cabi.device",
+                &backend_api,
+                &device_backend) != RTFW_STATUS_OK ||
+            device_backend == RTFW_INVALID_DEVICE_BACKEND_ID ||
+            register_device_buffer_fn(
+                device_instance,
+                "cabi.buffer",
+                device_backend,
+                device_bytes,
+                sizeof(device_bytes),
+                RTFW_DEVICE_BUFFER_HOST_READ |
+                    RTFW_DEVICE_BUFFER_HOST_WRITE |
+                    RTFW_DEVICE_BUFFER_DEVICE_READ |
+                    RTFW_DEVICE_BUFFER_DEVICE_WRITE,
+                &device_buffer) != RTFW_STATUS_OK ||
+            device_buffer == RTFW_INVALID_DEVICE_BUFFER_ID) {
+            fprintf(stderr, "C ABI device registration failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        command.buffer = device_buffer;
+        command.bytes = sizeof(device_bytes);
+        if (register_device_phase_fn(
+                device_instance,
+                "cabi.device.fill",
+                device_backend,
+                cabi_device_command_callback,
+                &command,
+                &device_phase) != RTFW_STATUS_OK ||
+            device_phase == RTFW_INVALID_PHASE_ID ||
+            finalize_fn(device_instance) != RTFW_STATUS_OK) {
+            fprintf(stderr, "C ABI device phase setup failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        memory_plan_init_fn(&device_plan);
+        if (get_memory_plan_fn(device_instance, &device_plan) !=
+                RTFW_STATUS_OK ||
+            device_plan.device_backend_count != 1u ||
+            device_plan.device_buffer_count != 1u ||
+            device_plan.device_control_bytes == 0u ||
+            device_plan.device_backend_reported_bytes == 0u ||
+            start_fn(device_instance) != RTFW_STATUS_OK) {
+            fprintf(stderr, "C ABI device memory/start contract failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+
+        frame_init_fn(&device_frame);
+        result_init_fn(&device_result);
+        device_frame.frame_index = 9u;
+        device_frame.delta_ns = 1000000;
+        if (step_fn(
+                device_instance,
+                &device_frame,
+                &device_result) != RTFW_STATUS_OK ||
+            device_result.callbacks_executed != 1u) {
+            fprintf(stderr, "C ABI device step failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        {
+            size_t index;
+            for (index = 0; index < sizeof(device_bytes); ++index) {
+                if (device_bytes[index] != 0x6bu) {
+                    fprintf(stderr, "C ABI device buffer was not updated\n");
+                    destroy_fn(device_instance);
+                    lib_close(handle);
+                    return EXIT_FAILURE;
+                }
+            }
+        }
+
+        device_health_init_fn(&device_health);
+        device_health.reserved[0] = 1u;
+        if (get_device_health_fn(
+                device_instance,
+                device_backend,
+                &device_health) != RTFW_STATUS_INVALID_ARGUMENT) {
+            fprintf(stderr, "C ABI device health accepted reserved data\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        device_health_init_fn(&device_health);
+        if (get_device_health_fn(
+                device_instance,
+                (rtfw_device_backend_id)device_buffer,
+                &device_health) != RTFW_STATUS_INVALID_HANDLE) {
+            fprintf(stderr, "C ABI device handle kinds were not isolated\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        device_health_init_fn(&device_health);
+        metric_snapshot_init_fn(&device_metrics);
+        if (get_device_health_fn(
+                device_instance,
+                device_backend,
+                &device_health) != RTFW_STATUS_OK ||
+            device_health.state != RTFW_DEVICE_HEALTH_HEALTHY ||
+            device_health.submissions != 1u ||
+            device_health.completions != 1u ||
+            reset_device_fn(
+                device_instance,
+                device_backend) != RTFW_STATUS_OK ||
+            get_metrics_fn(
+                device_instance,
+                RTFW_METRIC_CUMULATIVE,
+                NULL,
+                &device_metrics) != RTFW_STATUS_OK ||
+            device_metrics.samples[
+                RTFW_METRIC_DEVICE_SUBMISSIONS].value != 1u ||
+            device_metrics.samples[
+                RTFW_METRIC_DEVICE_COMPLETIONS].value != 1u ||
+            device_metrics.samples[
+                RTFW_METRIC_DEVICE_RESETS].value != 1u ||
+            stop_fn(device_instance) != RTFW_STATUS_OK ||
+            backend_state.shutdowns != 1u) {
+            fprintf(stderr, "C ABI device health/reset/shutdown failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        destroy_fn(device_instance);
     }
 
     {

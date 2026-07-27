@@ -81,7 +81,7 @@ static_assert(
         rt::DeterminismTier::portable_deterministic) ==
         RTFW_DETERMINISM_D3_PORTABLE);
 
-constexpr std::array<std::uint16_t, 11> kCppTraceIds{{
+constexpr std::array<std::uint16_t, 14> kCppTraceIds{{
     static_cast<std::uint16_t>(
         rt::RuntimeTraceEventType::finalized),
     static_cast<std::uint16_t>(
@@ -104,8 +104,14 @@ constexpr std::array<std::uint16_t, 11> kCppTraceIds{{
         rt::RuntimeTraceEventType::step_end),
     static_cast<std::uint16_t>(
         rt::RuntimeTraceEventType::stopped),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::device_submitted),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::device_completed),
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceEventType::device_reset),
 }};
-constexpr std::array<std::uint16_t, 11> kCTraceIds{{
+constexpr std::array<std::uint16_t, 14> kCTraceIds{{
     RTFW_TRACE_FINALIZED,
     RTFW_TRACE_STARTED,
     RTFW_TRACE_PERIODIC_RELEASE,
@@ -117,13 +123,19 @@ constexpr std::array<std::uint16_t, 11> kCTraceIds{{
     RTFW_TRACE_DEGRADATION_APPLIED,
     RTFW_TRACE_STEP_END,
     RTFW_TRACE_STOPPED,
+    RTFW_TRACE_DEVICE_SUBMITTED,
+    RTFW_TRACE_DEVICE_COMPLETED,
+    RTFW_TRACE_DEVICE_RESET,
 }};
 static_assert(kCppTraceIds == kCTraceIds);
 static_assert(
     static_cast<std::uint16_t>(rt::RuntimeTraceProducer::host) ==
         RTFW_TRACE_PRODUCER_HOST &&
     static_cast<std::uint16_t>(rt::RuntimeTraceProducer::worker) ==
-        RTFW_TRACE_PRODUCER_WORKER);
+        RTFW_TRACE_PRODUCER_WORKER &&
+    static_cast<std::uint16_t>(
+        rt::RuntimeTraceProducer::device_service) ==
+        RTFW_TRACE_PRODUCER_DEVICE_SERVICE);
 
 constexpr std::array<std::uint16_t, RTFW_RUNTIME_METRIC_COUNT>
     kCppMetricIds{{
@@ -171,6 +183,26 @@ constexpr std::array<std::uint16_t, RTFW_RUNTIME_METRIC_COUNT>
             rt::RuntimeMetricId::executor_worker_starts),
         static_cast<std::uint16_t>(
             rt::RuntimeMetricId::degradation_level),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_submissions),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_completions),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_failures),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_queue_rejections),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_timeouts),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_losses),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_resets),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_service_polls),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_outstanding),
+        static_cast<std::uint16_t>(
+            rt::RuntimeMetricId::device_service_starts),
     }};
 constexpr std::array<std::uint16_t, RTFW_RUNTIME_METRIC_COUNT>
     kCMetricIds{{
@@ -196,6 +228,16 @@ constexpr std::array<std::uint16_t, RTFW_RUNTIME_METRIC_COUNT>
         RTFW_METRIC_EXECUTOR_SCRATCH_EXHAUSTIONS,
         RTFW_METRIC_EXECUTOR_WORKER_STARTS,
         RTFW_METRIC_DEGRADATION_LEVEL,
+        RTFW_METRIC_DEVICE_SUBMISSIONS,
+        RTFW_METRIC_DEVICE_COMPLETIONS,
+        RTFW_METRIC_DEVICE_FAILURES,
+        RTFW_METRIC_DEVICE_QUEUE_REJECTIONS,
+        RTFW_METRIC_DEVICE_TIMEOUTS,
+        RTFW_METRIC_DEVICE_LOSSES,
+        RTFW_METRIC_DEVICE_RESETS,
+        RTFW_METRIC_DEVICE_SERVICE_POLLS,
+        RTFW_METRIC_DEVICE_OUTSTANDING,
+        RTFW_METRIC_DEVICE_SERVICE_STARTS,
     }};
 static_assert(kCppMetricIds == kCMetricIds);
 static_assert(
@@ -245,6 +287,18 @@ rtfw_status to_c_status(rt::Status status) noexcept {
         return RTFW_STATUS_INVALID_ARTIFACT;
     case rt::Status::incompatible_artifact:
         return RTFW_STATUS_INCOMPATIBLE_ARTIFACT;
+    case rt::Status::device_queue_full:
+        return RTFW_STATUS_DEVICE_QUEUE_FULL;
+    case rt::Status::device_timeout:
+        return RTFW_STATUS_DEVICE_TIMEOUT;
+    case rt::Status::device_error:
+        return RTFW_STATUS_DEVICE_ERROR;
+    case rt::Status::device_lost:
+        return RTFW_STATUS_DEVICE_LOST;
+    case rt::Status::device_canceled:
+        return RTFW_STATUS_DEVICE_CANCELED;
+    case rt::Status::device_reset_required:
+        return RTFW_STATUS_DEVICE_RESET_REQUIRED;
     }
     return RTFW_STATUS_INTERNAL_ERROR;
 }
@@ -303,6 +357,15 @@ bool memory_plan_header_valid(
            bytes_are_zero(
                reinterpret_cast<const uint8_t*>(plan.reserved),
                sizeof(plan.reserved));
+}
+
+bool device_health_header_valid(
+    const rtfw_device_health& health) noexcept {
+    return health.struct_size >= sizeof(health) &&
+           health.reserved0 == 0u &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(health.reserved),
+               sizeof(health.reserved));
 }
 
 bool periodic_config_header_valid(
@@ -470,6 +533,14 @@ bool to_cpp_config(
         source.replay_input_capacity >
             std::numeric_limits<std::size_t>::max() ||
         source.input_log_max_bytes >
+            std::numeric_limits<std::size_t>::max() ||
+        source.device_backend_capacity >
+            std::numeric_limits<std::size_t>::max() ||
+        source.device_buffer_capacity >
+            std::numeric_limits<std::size_t>::max() ||
+        source.device_outstanding_capacity >
+            std::numeric_limits<std::size_t>::max() ||
+        source.device_completion_batch >
             std::numeric_limits<std::size_t>::max()) {
         return false;
     }
@@ -569,6 +640,18 @@ bool to_cpp_config(
     target.input_log_max_bytes =
         static_cast<std::size_t>(
             source.input_log_max_bytes);
+    target.device_backend_capacity =
+        static_cast<std::size_t>(
+            source.device_backend_capacity);
+    target.device_buffer_capacity =
+        static_cast<std::size_t>(
+            source.device_buffer_capacity);
+    target.device_outstanding_capacity =
+        static_cast<std::size_t>(
+            source.device_outstanding_capacity);
+    target.device_completion_batch =
+        static_cast<std::size_t>(
+            source.device_completion_batch);
     std::copy(
         std::begin(source.workload_id),
         std::end(source.workload_id),
@@ -620,6 +703,14 @@ void from_cpp_config(
         source.replay_input_capacity;
     target.input_log_max_bytes =
         source.input_log_max_bytes;
+    target.device_backend_capacity =
+        source.device_backend_capacity;
+    target.device_buffer_capacity =
+        source.device_buffer_capacity;
+    target.device_outstanding_capacity =
+        source.device_outstanding_capacity;
+    target.device_completion_batch =
+        source.device_completion_batch;
     std::copy(
         source.workload_id.begin(),
         source.workload_id.end(),
@@ -673,6 +764,18 @@ void from_cpp_memory_plan(
         source.replay_input_capacity;
     target.input_log_max_bytes =
         source.input_log_max_bytes;
+    target.device_backend_count =
+        source.device_backend_count;
+    target.device_buffer_count =
+        source.device_buffer_count;
+    target.device_outstanding_capacity =
+        source.device_outstanding_capacity;
+    target.device_completion_batch =
+        source.device_completion_batch;
+    target.device_control_bytes =
+        source.device_control_bytes;
+    target.device_backend_reported_bytes =
+        source.device_backend_reported_bytes;
     target.queue_slots = source.queue_slots;
     target.scratch_alignment = source.scratch_alignment;
 }
@@ -956,6 +1059,11 @@ struct CCallback {
     void* user_data = nullptr;
 };
 
+struct CDeviceCallback {
+    rtfw_device_command_callback callback = nullptr;
+    void* user_data = nullptr;
+};
+
 [[nodiscard]] const rtfw_task_context* to_c_task_context(
     const rt::TaskContext& context) noexcept {
     return reinterpret_cast<const rtfw_task_context*>(&context);
@@ -1042,6 +1150,36 @@ rt::CallbackResult invoke_c_callback(
         : rt::CallbackResult::error;
 }
 
+rt::CallbackResult invoke_c_device_callback(
+    void* opaque,
+    const rt::DeviceCallbackContext& context,
+    rt::DeviceSubmission& submission) {
+    auto* registration = static_cast<CDeviceCallback*>(opaque);
+    rtfw_callback_context c_context{};
+    c_context.struct_size = sizeof(c_context);
+    c_context.numerical_mode =
+        context.numerics.mode() ==
+                rt::NumericalMode::fused_multiply_add
+        ? RTFW_NUMERICAL_FUSED_MULTIPLY_ADD
+        : RTFW_NUMERICAL_PRECISE;
+    c_context.degradation_level = context.degradation_level;
+    c_context.frame_index = context.frame.frame_index;
+    c_context.delta_ns = context.frame.delta.count();
+    c_context.has_deadline =
+        context.frame.deadline_ns ? 1u : 0u;
+    c_context.deadline_ns =
+        context.frame.deadline_ns.value_or(0);
+    c_context.scratch = context.scratch.data();
+    c_context.scratch_bytes = context.scratch.size();
+    c_context.tasks = to_c_task_context(context.tasks);
+    return registration->callback(
+               registration->user_data,
+               &c_context,
+               &submission) == RTFW_CALLBACK_OK
+        ? rt::CallbackResult::ok
+        : rt::CallbackResult::error;
+}
+
 struct CPeriodicInvocation {
     rtfw_periodic_frame_callback callback = nullptr;
     void* user_data = nullptr;
@@ -1094,6 +1232,7 @@ rt::CallbackResult invoke_c_replay_input(
 struct rtfw_handle {
     rt::Runtime runtime;
     std::vector<std::unique_ptr<CCallback>> callbacks;
+    std::vector<std::unique_ptr<CDeviceCallback>> device_callbacks;
     std::array<char, 256> boundary_error{};
 
     void clear_boundary_error() noexcept {
@@ -1138,6 +1277,8 @@ RTFW_API rt_capabilities_c rt_query_capabilities(void) {
             capabilities.versioned_observability),
         static_cast<uint8_t>(
             capabilities.deterministic_replay),
+        static_cast<uint8_t>(
+            capabilities.bounded_device_backend),
     };
 }
 
@@ -1180,6 +1321,20 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
     case RTFW_STATUS_INCOMPATIBLE_ARTIFACT:
         return rt::status_message(
             rt::Status::incompatible_artifact);
+    case RTFW_STATUS_DEVICE_QUEUE_FULL:
+        return rt::status_message(
+            rt::Status::device_queue_full);
+    case RTFW_STATUS_DEVICE_TIMEOUT:
+        return rt::status_message(rt::Status::device_timeout);
+    case RTFW_STATUS_DEVICE_ERROR:
+        return rt::status_message(rt::Status::device_error);
+    case RTFW_STATUS_DEVICE_LOST:
+        return rt::status_message(rt::Status::device_lost);
+    case RTFW_STATUS_DEVICE_CANCELED:
+        return rt::status_message(rt::Status::device_canceled);
+    case RTFW_STATUS_DEVICE_RESET_REQUIRED:
+        return rt::status_message(
+            rt::Status::device_reset_required);
     }
     return "unknown runtime status";
 }
@@ -1393,6 +1548,15 @@ RTFW_API void rtfw_replay_result_init(
     result->struct_size = sizeof(*result);
 }
 
+RTFW_API void rtfw_device_health_init(
+    rtfw_device_health* health) {
+    if (!health) {
+        return;
+    }
+    std::memset(health, 0, sizeof(*health));
+    health->struct_size = sizeof(*health);
+}
+
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
     rtfw_handle** out_handle) {
@@ -1413,6 +1577,8 @@ RTFW_API rtfw_status rtfw_create(
             return to_c_status(status);
         }
         handle->callbacks.reserve(typed.callback_capacity);
+        handle->device_callbacks.reserve(
+            typed.callback_capacity);
         *out_handle = handle.release();
         return RTFW_STATUS_OK;
     } catch (const std::bad_alloc&) {
@@ -1498,6 +1664,122 @@ RTFW_API rtfw_status rtfw_register_callback(
         callback,
         user_data,
         &ignored);
+}
+
+RTFW_API rtfw_status rtfw_register_device_backend(
+    rtfw_handle* handle,
+    const char* name,
+    const rtfw_device_backend_api* backend,
+    rtfw_device_backend_id* out_backend) {
+    if (!out_backend) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_backend = RTFW_INVALID_DEVICE_BACKEND_ID;
+    if (!handle || !name || !backend ||
+        backend->struct_size < sizeof(*backend)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    rt::DeviceBackendHandle registered;
+    const auto status =
+        handle->runtime.register_device_backend(
+            rt::DeviceBackendRegistration{
+                std::string_view(name),
+                *backend,
+            },
+            registered);
+    if (status == rt::Status::ok) {
+        *out_backend = registered.value;
+    }
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_register_device_buffer(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_device_backend_id backend,
+    void* storage,
+    uint64_t storage_bytes,
+    rtfw_device_buffer_flags flags,
+    rtfw_device_buffer_id* out_buffer) {
+    if (!out_buffer) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_buffer = RTFW_INVALID_DEVICE_BUFFER_ID;
+    if (!handle || !name || !storage ||
+        storage_bytes == 0 ||
+        storage_bytes >
+            std::numeric_limits<std::size_t>::max()) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    rt::DeviceBufferHandle registered;
+    const auto status =
+        handle->runtime.register_device_buffer(
+            rt::DeviceBufferRegistration{
+                std::string_view(name),
+                rt::DeviceBackendHandle{backend},
+                std::span<std::byte>(
+                    static_cast<std::byte*>(storage),
+                    static_cast<std::size_t>(storage_bytes)),
+                flags,
+            },
+            registered);
+    if (status == rt::Status::ok) {
+        *out_buffer = registered.value;
+    }
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_register_device_phase(
+    rtfw_handle* handle,
+    const char* name,
+    rtfw_device_backend_id backend,
+    rtfw_device_command_callback callback,
+    void* user_data,
+    rtfw_phase_id* out_phase) {
+    if (!out_phase) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    *out_phase = RTFW_INVALID_PHASE_ID;
+    if (!handle || !name || !callback) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    try {
+        auto registration =
+            std::make_unique<CDeviceCallback>();
+        registration->callback = callback;
+        registration->user_data = user_data;
+        auto* stable_registration = registration.get();
+        handle->device_callbacks.push_back(
+            std::move(registration));
+
+        rt::PhaseHandle phase;
+        const auto status =
+            handle->runtime.register_device_phase(
+                rt::DevicePhaseRegistration{
+                    std::string_view(name),
+                    rt::DeviceBackendHandle{backend},
+                    &invoke_c_device_callback,
+                    stable_registration,
+                },
+                phase);
+        if (status != rt::Status::ok) {
+            handle->device_callbacks.pop_back();
+            return to_c_status(status);
+        }
+        *out_phase = phase.value;
+        return RTFW_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return handle->fail(
+            RTFW_STATUS_RESOURCE_EXHAUSTED,
+            "device phase registration allocation failed");
+    } catch (...) {
+        return handle->fail(
+            RTFW_STATUS_INTERNAL_ERROR,
+            "unexpected device phase registration failure");
+    }
 }
 
 RTFW_API rtfw_status rtfw_register_resource(
@@ -1819,6 +2101,37 @@ RTFW_API rtfw_status rtfw_stop(rtfw_handle* handle) {
     }
     handle->clear_boundary_error();
     return to_c_status(handle->runtime.stop());
+}
+
+RTFW_API rtfw_status rtfw_get_device_health(
+    rtfw_handle* handle,
+    rtfw_device_backend_id backend,
+    rtfw_device_health* out_health) {
+    if (!handle || !out_health ||
+        !device_health_header_valid(*out_health)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    const auto requested_size = out_health->struct_size;
+    rt::DeviceHealth health = rt::make_device_health();
+    handle->clear_boundary_error();
+    const auto status = handle->runtime.device_health(
+        rt::DeviceBackendHandle{backend},
+        health);
+    std::memset(out_health, 0, sizeof(*out_health));
+    *out_health = health;
+    out_health->struct_size = requested_size;
+    return to_c_status(status);
+}
+
+RTFW_API rtfw_status rtfw_reset_device(
+    rtfw_handle* handle,
+    rtfw_device_backend_id backend) {
+    if (!handle) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    handle->clear_boundary_error();
+    return to_c_status(handle->runtime.reset_device(
+        rt::DeviceBackendHandle{backend}));
 }
 
 RTFW_API rtfw_status rtfw_get_state(

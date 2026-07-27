@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "core/units.hpp"
+#include "rt/device.hpp"
 #include "rt/graph.hpp"
 #include "rt/version.hpp"
 
@@ -32,6 +33,7 @@ struct Capabilities {
     bool strict_platform_preflight;
     bool versioned_observability;
     bool deterministic_replay;
+    bool bounded_device_backend;
 };
 
 // Query runtime capabilities
@@ -40,8 +42,8 @@ Capabilities query_capabilities() noexcept;
 // Example function using strong types
 core::seconds tick_duration(core::seconds dt) noexcept;
 
-inline constexpr std::uint32_t runtime_config_schema_version = 6;
-inline constexpr std::uint32_t observability_schema_version = 1;
+inline constexpr std::uint32_t runtime_config_schema_version = 7;
+inline constexpr std::uint32_t observability_schema_version = 2;
 inline constexpr std::size_t observability_identifier_capacity = 64;
 inline constexpr std::uint32_t observability_metadata_size = 184;
 inline constexpr std::uint32_t checkpoint_schema_version = 1;
@@ -74,6 +76,12 @@ enum class Status : std::int32_t {
     clock_failure = -14,
     invalid_artifact = -15,
     incompatible_artifact = -16,
+    device_queue_full = -17,
+    device_timeout = -18,
+    device_error = -19,
+    device_lost = -20,
+    device_canceled = -21,
+    device_reset_required = -22,
 };
 
 [[nodiscard]] const char* status_message(Status status) noexcept;
@@ -244,6 +252,10 @@ struct RuntimeConfig {
     std::size_t snapshot_max_bytes = 1024 * 1024;
     std::size_t replay_input_capacity = 4096;
     std::size_t input_log_max_bytes = 1024 * 1024;
+    std::size_t device_backend_capacity = 1;
+    std::size_t device_buffer_capacity = 64;
+    std::size_t device_outstanding_capacity = 64;
+    std::size_t device_completion_batch = 16;
     // Stable caller-supplied provenance copied into every observability
     // snapshot. IDs use [A-Za-z0-9._:/@-] and must be NUL terminated.
     std::array<char, observability_identifier_capacity> workload_id{
@@ -256,8 +268,10 @@ struct RuntimeConfig {
 // task_scratch_bytes, task_scratch_slots, memory_budget_bytes,
 // overload_policy, watchdog_timeout_ns, watchdog_max_degradation_level,
 // platform_preflight_mode, determinism_tier, state_capacity,
-// snapshot_max_bytes, replay_input_capacity, input_log_max_bytes, and
-// workload_id. Unknown keys and partially parsed values are rejected.
+// snapshot_max_bytes, replay_input_capacity, input_log_max_bytes,
+// device_backend_capacity, device_buffer_capacity,
+// device_outstanding_capacity, device_completion_batch, and workload_id.
+// Unknown keys and partially parsed values are rejected.
 [[nodiscard]] Status set_runtime_config_value(
     RuntimeConfig& config,
     std::string_view key,
@@ -430,6 +444,29 @@ struct CallbackRegistration {
     void* user_data = nullptr;
 };
 
+struct DeviceCallbackContext {
+    const HostFrameContext& frame;
+    std::span<std::byte> scratch;
+    const NumericalPolicy& numerics;
+    const TaskContext& tasks;
+    std::uint32_t degradation_level = 0;
+};
+
+using DeviceCommandCallback = CallbackResult (*)(
+    void* user_data,
+    const DeviceCallbackContext& context,
+    DeviceSubmission& submission);
+
+struct DevicePhaseRegistration {
+    // Runtime copies name and borrows user_data until no future step can
+    // invoke the command provider. The provider prepares one fixed-size
+    // submission and must return without waiting for device completion.
+    std::string_view name;
+    DeviceBackendHandle backend{};
+    DeviceCommandCallback callback = nullptr;
+    void* user_data = nullptr;
+};
+
 struct StepResult {
     std::size_t callbacks_executed = 0;
     std::uint64_t start_ns = 0;
@@ -493,7 +530,7 @@ struct StaticPhaseAssignment {
 };
 
 struct MemoryPlan {
-    // planned_bytes is the sum of both control fields and the three
+    // planned_bytes is the sum of the three control fields and the three
     // *_total/storage fields. It describes requested runtime storage, not RSS.
     std::size_t memory_budget_bytes = 0;
     std::size_t planned_bytes = 0;
@@ -517,6 +554,14 @@ struct MemoryPlan {
     std::size_t snapshot_max_bytes = 0;
     std::size_t replay_input_capacity = 0;
     std::size_t input_log_max_bytes = 0;
+    std::size_t device_backend_count = 0;
+    std::size_t device_buffer_count = 0;
+    std::size_t device_outstanding_capacity = 0;
+    std::size_t device_completion_batch = 0;
+    std::size_t device_control_bytes = 0;
+    // Backend-reported private control storage is informational and excluded
+    // from planned_bytes because the backend owns it.
+    std::size_t device_backend_reported_bytes = 0;
     std::size_t queue_slots = 0;
     std::size_t scratch_alignment = 0;
     OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
@@ -534,11 +579,15 @@ enum class RuntimeTraceEventType : std::uint16_t {
     degradation_applied = 9,
     step_end = 10,
     stopped = 11,
+    device_submitted = 12,
+    device_completed = 13,
+    device_reset = 14,
 };
 
 enum class RuntimeTraceProducer : std::uint16_t {
     host = 0,
     worker = 1,
+    device_service = 2,
 };
 
 struct RuntimeTraceEvent {
@@ -576,7 +625,7 @@ enum class RuntimeMetricWindow : std::uint8_t {
 };
 
 // Numeric values are schema identifiers and remain stable for observability
-// schema version 1.
+// schema version 2. IDs 0-21 retain their schema version 1 meanings.
 enum class RuntimeMetricId : std::uint16_t {
     frames_started = 0,
     frames_completed = 1,
@@ -600,7 +649,17 @@ enum class RuntimeMetricId : std::uint16_t {
     executor_scratch_exhaustions = 19,
     executor_worker_starts = 20,
     degradation_level = 21,
-    count = 22,
+    device_submissions = 22,
+    device_completions = 23,
+    device_failures = 24,
+    device_queue_rejections = 25,
+    device_timeouts = 26,
+    device_losses = 27,
+    device_resets = 28,
+    device_service_polls = 29,
+    device_outstanding = 30,
+    device_service_starts = 31,
+    count = 32,
 };
 
 inline constexpr std::size_t runtime_metric_count =
@@ -709,6 +768,15 @@ public:
     [[nodiscard]] Status register_callback(
         const CallbackRegistration& registration,
         PhaseHandle& out_phase) noexcept;
+    [[nodiscard]] Status register_device_backend(
+        const DeviceBackendRegistration& registration,
+        DeviceBackendHandle& out_backend) noexcept;
+    [[nodiscard]] Status register_device_buffer(
+        const DeviceBufferRegistration& registration,
+        DeviceBufferHandle& out_buffer) noexcept;
+    [[nodiscard]] Status register_device_phase(
+        const DevicePhaseRegistration& registration,
+        PhaseHandle& out_phase) noexcept;
     [[nodiscard]] Status register_resource(
         std::string_view name,
         ResourceHandle& out_resource) noexcept;
@@ -734,10 +802,18 @@ public:
         void* observer_data = nullptr,
         PeriodicRunResult* result = nullptr) noexcept;
     [[nodiscard]] Status stop() noexcept;
+    [[nodiscard]] Status device_health(
+        DeviceBackendHandle backend,
+        DeviceHealth& health) noexcept;
+    [[nodiscard]] Status reset_device(
+        DeviceBackendHandle backend) noexcept;
 
     [[nodiscard]] RuntimeState state() const noexcept;
     [[nodiscard]] const RuntimeConfig& config() const noexcept;
     [[nodiscard]] std::size_t callback_count() const noexcept;
+    [[nodiscard]] std::size_t device_backend_count() const noexcept;
+    [[nodiscard]] std::size_t device_buffer_count() const noexcept;
+    [[nodiscard]] std::size_t device_phase_count() const noexcept;
     [[nodiscard]] std::size_t resource_count() const noexcept;
     [[nodiscard]] std::size_t dependency_count() const noexcept;
     [[nodiscard]] std::size_t resource_access_count() const noexcept;

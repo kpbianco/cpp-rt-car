@@ -18,6 +18,14 @@ static_assert(
         std::atomic<std::uint64_t>::is_always_lock_free,
     "versioned observability requires lock-free fixed-width atomics");
 
+#if defined(_MSC_VER)
+// The counter separation is intentional. MSVC reports C4324 whenever an
+// alignment specifier introduces padding, even when that padding is the
+// cache-line isolation required by this ring.
+#    pragma warning(push)
+#    pragma warning(disable : 4324)
+#endif
+
 class TelemetryRing final {
 public:
     explicit TelemetryRing(std::size_t capacity);
@@ -88,6 +96,10 @@ private:
     alignas(64) std::atomic<std::uint64_t> overwritten_{0};
     alignas(64) std::atomic<std::uint64_t> dropped_{0};
 };
+
+#if defined(_MSC_VER)
+#    pragma warning(pop)
+#endif
 
 constexpr std::size_t TelemetryRing::slot_size() noexcept {
     return sizeof(Slot);

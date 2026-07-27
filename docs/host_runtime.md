@@ -2,10 +2,10 @@
 
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
 extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
-plan, M5 time/platform controls, M6 versioned observability, and M7
-determinism/replay surface. It provides explicit host-driven and finite
-self-paced operation without adopting the legacy `SimCore` scheduler or
-pacing loop.
+plan, M5 time/platform controls, M6 versioned observability, M7
+determinism/replay, and the M8 bounded device ABI and deterministic mock. It
+provides explicit host-driven and finite self-paced operation without adopting
+the legacy `SimCore` scheduler or pacing loop.
 
 The surface is RT0 functional behavior, not qualified latency.
 `query_capabilities()` and `rt_query_capabilities()` report host-driven time,
@@ -13,12 +13,14 @@ compiled-graph validation, the unified CPU executor, the target-path bounded
 memory plan, self-paced time, the frame watchdog, and strict platform preflight
 as available. They also report versioned observability and deterministic replay
 as available; the latter means the implemented D0/D1 surface, not D2 or D3.
+They report `bounded_device_backend` for the poll-only M8 runtime path, not a
+CUDA, Vulkan, or XDMA implementation.
 
 ## Lifecycle
 
 | Current state | Allowed operation | Resulting state |
 | --- | --- | --- |
-| `configuring` | typed configuration, graph/state registration and declarations | `configuring` |
+| `configuring` | typed configuration, graph/state/device registration and declarations | `configuring` |
 | `configuring` | `finalize()` | `finalized` |
 | `finalized` | `start()`, preflight, and create configured worker/service lanes | `running` |
 | `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
@@ -33,14 +35,14 @@ Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
 
-Control operations are single-host-thread operations in 0.8. `step()`,
+Control operations are single-host-thread operations in 0.9. `step()`,
 `run_periodic()`, checkpoint/restore, input-log export, and replay are
 non-reentrant with execution. A periodic observer cannot recursively step, and
 `stop()` called from inside a callback, periodic loop, or replay is rejected.
 
 ## Typed configuration
 
-`rt::RuntimeConfig` has twenty-one schema keys:
+`rt::RuntimeConfig` has twenty-five schema keys:
 
 | Key | Type/default | Runtime behavior |
 | --- | --- | --- |
@@ -60,11 +62,15 @@ non-reentrant with execution. A periodic observer cannot recursively step, and
 | `watchdog_max_degradation_level` | nonnegative integer, `0` | Caps frame-thread degradation increments; accepted range is 0–255 |
 | `platform_preflight_mode` | `disabled` | Selects `disabled` or fail-closed, read-only `strict` prerequisite checks |
 | `workload_id` | identifier, `unspecified` | Labels observability and replay artifacts with 1–63 characters from `A-Za-z0-9._:/@-`; it affects configuration and replay identity |
-| `determinism_tier` | `d0_unspecified` | Selects D0 unspecified behavior or D1 schedule-independent replay; D2 and D3 are rejected in 0.8 |
+| `determinism_tier` | `d0_unspecified` | Selects D0 unspecified behavior or D1 schedule-independent replay; D2 and D3 are rejected in 0.9 |
 | `state_capacity` | nonnegative integer, `64` | Maximum canonical state regions accepted before finalization; zero disables registration |
 | `snapshot_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded checkpoint bytes |
 | `replay_input_capacity` | nonnegative integer, `4096` | Maximum records accepted in one encoded or replayed input log |
 | `input_log_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded input-log bytes |
+| `device_backend_capacity` | positive integer, `1` | Maximum backend tables accepted before finalization; accepted range is 1–256 |
+| `device_buffer_capacity` | nonnegative integer, `64` | Maximum borrowed device buffers accepted before finalization; accepted maximum is 65,536 |
+| `device_outstanding_capacity` | positive integer, `64` | Runtime-wide preallocated outstanding submission slots; every backend must report at least this capacity |
+| `device_completion_batch` | positive integer, `16` | Preallocated completion records supplied to each bounded poll; it cannot exceed outstanding capacity |
 
 The typed structure can be supplied with `configure()`. Dynamic callers can use
 `configure_key()` or the C `rtfw_config_set()` equivalent. Unknown keys,
@@ -89,6 +95,13 @@ topological order remains available for introspection, but independent
 callback completion is not a total order. `StepResult` reports callback count,
 start/finish timestamps, deadline miss, watchdog event, and committed
 degradation level.
+
+A device command provider is scheduled like a CPU callback but does not finish
+its graph phase when it returns. An accepted submission retains the phase
+token until the runtime-owned service lane polls its completion. Independent
+CPU phases remain runnable; dependent phases are released only by completion.
+Submission saturation or a device failure becomes the typed step result. See
+the [device backend contract](device_backend.md).
 
 Use `Runtime::now_ns()` or `rtfw_now_ns()` to form a deadline in the correct
 clock domain. The default clock epoch is local to the runtime instance. C++ tests
@@ -159,8 +172,10 @@ Each runtime owns:
 - its numerical-helper policy;
 - its clock object or explicitly borrowed C++ clock;
 - its watchdog state and degradation level;
-- its fixed-capacity platform-preflight report.
+- its fixed-capacity platform-preflight report;
 - its copied canonical-state registry metadata and replay identities.
+- its copied backend tables, device registration metadata, outstanding slots,
+  completion batch, service lane, and device telemetry counters.
 
 Callback user data remains host-owned and must outlive every step that can use
 it. A phase's scratch contents may persist across frames, but no phase sees
@@ -170,6 +185,9 @@ application state.
 Registered canonical state storage also remains host-owned and must remain
 stable for the runtime lifetime. Checkpoint and input-log buffers are
 caller-owned and need exist only for the duration of the relevant call.
+Backend instances, registered device-buffer bytes, and device command
+`user_data` are borrowed through backend shutdown. The service lane is joined
+before buffers are unregistered and backend shutdown returns.
 
 The new surface does not modify the legacy process-global `HighResClock`,
 `bintrace` registration, or `rt::set_use_fma` flag used by `SimCore`. This is
@@ -204,14 +222,18 @@ The experimental C ABI mirrors the lifecycle:
   `rtfw_checkpoint_inspect` / `rtfw_checkpoint_restore`;
 - `rtfw_input_log_write` / `rtfw_input_log_inspect`;
 - `rtfw_replay` / `rtfw_registered_state_hash`;
+- `rtfw_register_device_backend`;
+- `rtfw_register_device_buffer`;
+- `rtfw_register_device_phase`;
+- `rtfw_get_device_health` / `rtfw_reset_device`;
 - `rtfw_stop`;
 - `rtfw_destroy`.
 
 Public configuration, frame, callback, result, and memory-plan structures carry
-sizes, and configuration carries `RTFW_C_ABI_VERSION` (experimental version 6
-in release 0.8). Periodic, preflight, observability, checkpoint, input-log, and
-replay structures follow the same initialized-output rule. Call the supplied
-structure initializers and leave reserved fields zero.
+sizes, and configuration carries `RTFW_C_ABI_VERSION` (experimental version 7
+in release 0.9). Periodic, preflight, observability, checkpoint, input-log,
+replay, and device structures follow the same initialized-output rule. Call
+the supplied structure initializers and leave reserved fields zero.
 `rtfw_status_message()` provides status text even when no runtime handle was
 created; `rtfw_last_error()` adds handle-specific context. The ABI remains
 unfrozen before M11; incompatible pre-1.0 changes require a repository version
@@ -239,11 +261,14 @@ and exclusions are specified in the
 in the [executor contract](executor.md). M5 adds absolute cadence, one-shot
 watchdog/degradation, and fail-closed prerequisite reporting. It does not
 preempt callbacks or qualify a deployment; see the
-[time/platform contract](time_platform.md). M6 adds bounded schema-v1
+[time/platform contract](time_platform.md). M6 adds bounded versioned
 trace/counter emission and non-RT cursor/export APIs; see the
 [observability contract](observability.md). M7 adds bounded canonical-state
 checkpoint and replay control operations; see the
-[determinism/replay contract](determinism_replay.md).
+[determinism/replay contract](determinism_replay.md). M8 adds bounded
+submission/poll, graph-held completions, health/reset/shutdown, and a
+fault-injectable mock; see the
+[device backend contract](device_backend.md).
 
 ## Code and evidence
 
@@ -260,7 +285,9 @@ checkpoint and replay control operations; see the
 - Platform-preflight tests: `tests/test_platform_preflight.cpp`
 - Observability tests: `tests/test_observability.cpp`
 - Determinism/replay tests: `tests/test_determinism_replay.cpp`
+- Device ABI/runtime tests: `tests/test_device_runtime.cpp`
 - Artifact parser fuzz target: `tests/snapshot_fuzz.cpp`
 - Dynamic C ABI test: `tests/test_cabi_dlopen.c`
 - C sample: `samples/embed_c/mini_app.c`
 - C++ sample: `samples/embed_cpp/mini_app.cpp`
+- Device sample: `samples/device_mock.cpp`

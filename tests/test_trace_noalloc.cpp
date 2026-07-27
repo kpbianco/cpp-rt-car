@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <rt/runtime.hpp>
+#include <rt/mock_device.hpp>
 #include <simcore/bintrace.hpp>
 
 #include <algorithm>
@@ -663,4 +664,78 @@ TEST(TraceNoAlloc, CompleteCpuFramesDoNotAllocate) {
 TEST(TraceNoAlloc, StaticCompleteCpuFramesDoNotAllocate) {
     run_complete_cpu_frames_noalloc(
         rt::ExecutorPolicy::static_deterministic);
+}
+
+namespace {
+
+rt::CallbackResult submit_noalloc_device_command(
+    void*,
+    const rt::DeviceCallbackContext&,
+    rt::DeviceSubmission& submission) {
+    submission.timeout_ns = 1'000'000;
+    submission.opcode = rt::mock_device_opcode_noop;
+    return rt::CallbackResult::ok;
+}
+
+} // namespace
+
+TEST(TraceNoAlloc, CompleteDeviceFramesDoNotAllocate) {
+    rt::MockDeviceBackend backend({
+        8,
+        1,
+        1,
+        1'000,
+    });
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 1;
+    config.trace_capacity = 256;
+    config.executor_queue_capacity = 8;
+    config.task_scratch_slots = 8;
+    config.device_backend_capacity = 1;
+    config.device_buffer_capacity = 1;
+    config.device_outstanding_capacity = 8;
+    config.device_completion_batch = 4;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+
+    rt::DeviceBackendHandle backend_handle;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"mock", backend.api()},
+            backend_handle),
+        rt::Status::ok);
+    rt::PhaseHandle phase;
+    ASSERT_EQ(
+        runtime.register_device_phase(
+            {
+                "device.noalloc",
+                backend_handle,
+                &submit_noalloc_device_command,
+                nullptr,
+            },
+            phase),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.step({0, std::chrono::nanoseconds(1), std::nullopt}),
+        rt::Status::ok);
+
+    rt::Status status = rt::Status::ok;
+    {
+        AllocationGuard guard;
+        for (std::uint64_t frame = 1; frame <= 64; ++frame) {
+            status = runtime.step({
+                frame,
+                std::chrono::nanoseconds(1),
+                std::nullopt,
+            });
+            if (status != rt::Status::ok) {
+                break;
+            }
+        }
+    }
+    EXPECT_EQ(status, rt::Status::ok);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }

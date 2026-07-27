@@ -1,14 +1,17 @@
 # Apply best-effort real-time settings for CI environments on Windows runners.
 Write-Host "[rt_harden] Configuring Windows settings"
 
-# Helper class for MMCSS activation
-Add-Type -Namespace mmcss -Name EnableMMCSS -MemberDefinition @'
-  [DllImport("avrt.dll", CharSet = CharSet.Unicode)]
-  public static extern IntPtr AvSetMmThreadCharacteristics(string TaskName, out uint TaskIndex);
-  public static IntPtr EnableMMCSS(string profile) {
-    uint idx; return AvSetMmThreadCharacteristics(profile, out idx);
-  }
+# Native binding for best-effort MMCSS activation on this PowerShell thread.
+$mmcssBindingAvailable = $false
+try {
+  Add-Type -Namespace Rtfw -Name MmcssNative -ErrorAction Stop -MemberDefinition @'
+    [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr AvSetMmThreadCharacteristics(string taskName, out uint taskIndex);
 '@
+  $mmcssBindingAvailable = $true
+} catch {
+  Write-Host "[rt_harden] MMCSS binding unavailable"
+}
 
 # Set High Performance power plan and attempt to disable core parking
 $scheme = powercfg -getactivescheme | Select-String -Pattern '(?<=\:)\s*(.*)' | ForEach-Object { $_.Matches[0].Value.Trim() }
@@ -21,11 +24,19 @@ if ($scheme) {
 }
 
 # Request MMCSS priority for current PowerShell process
-try {
-  $null = mmcss::EnableMMCSS("Pro Audio")
-  Write-Host "[rt_harden] MMCSS Pro Audio class enabled"
-} catch {
-  Write-Host "[rt_harden] MMCSS not available"
+if ($mmcssBindingAvailable) {
+  try {
+    [uint32]$taskIndex = 0
+    $mmcssHandle = [Rtfw.MmcssNative]::AvSetMmThreadCharacteristics(
+      "Pro Audio",
+      [ref]$taskIndex)
+    if ($mmcssHandle -eq [IntPtr]::Zero) {
+      throw "AvSetMmThreadCharacteristics failed"
+    }
+    Write-Host "[rt_harden] MMCSS Pro Audio class enabled"
+  } catch {
+    Write-Host "[rt_harden] MMCSS not available"
+  }
 }
 
 # Reduce system timer to 0.5 ms if possible

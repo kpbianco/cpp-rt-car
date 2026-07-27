@@ -15,7 +15,12 @@
 
 namespace rt::detail {
 
-using PhaseTaskCallback = CallbackResult (*)(
+struct PhaseTaskDispatch {
+    Status status = Status::callback_failed;
+    bool pending = false;
+};
+
+using PhaseTaskCallback = PhaseTaskDispatch (*)(
     void* user_data,
     std::uint32_t phase_index,
     const TaskContext& task_context);
@@ -45,6 +50,12 @@ public:
         void* user_data,
         std::size_t& callbacks_executed,
         std::size_t& failed_phase) noexcept;
+    // Called only by the runtime-owned device completion lane. It never
+    // executes host code and releases graph successors only after the phase's
+    // submission callback has returned.
+    [[nodiscard]] Status complete_external(
+        std::size_t phase_index,
+        Status status) noexcept;
 
     [[nodiscard]] Status parallel_for(
         const TaskContext& parent,
@@ -125,6 +136,9 @@ private:
         std::size_t worker_index,
         const WorkItem& item,
         const TaskContext& context) noexcept;
+    void finish_phase(
+        std::size_t phase_index,
+        Status status) noexcept;
     void worker_loop(std::size_t worker_index) noexcept;
     void cancel_graph(Status status, std::size_t failed_phase) noexcept;
     [[nodiscard]] std::size_t static_worker(
@@ -149,6 +163,8 @@ private:
 
     std::vector<std::uint32_t> initial_indegree_;
     std::unique_ptr<std::atomic<std::uint32_t>[]> current_indegree_;
+    std::unique_ptr<std::atomic<std::uint8_t>[]> phase_states_;
+    std::unique_ptr<std::atomic<std::int32_t>[]> phase_statuses_;
     std::vector<std::size_t> successor_offsets_;
     std::vector<std::uint32_t> successors_;
     std::vector<std::size_t> static_assignments_;
