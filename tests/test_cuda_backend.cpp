@@ -86,11 +86,20 @@ private:
         std::atomic<bool> ready{false};
     };
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// The fake device storage intentionally follows max_align_t. MSVC reports
+// the resulting, deliberate test-only padding as C4324 under /W4.
+#pragma warning(disable : 4324)
+#endif
     struct Allocation {
         bool allocated = false;
         alignas(std::max_align_t)
             std::array<std::byte, allocation_bytes> bytes{};
     };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
     static FakeCudaDriver* self(void* user_data) noexcept {
         return static_cast<FakeCudaDriver*>(user_data);

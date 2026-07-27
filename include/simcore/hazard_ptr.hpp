@@ -36,17 +36,18 @@ public:
   HazardGuard() : rec_(acquire_hazard()) {}
   ~HazardGuard() { clear(); }
 
-  template <typename T> void protect(std::atomic<T *> &src) {
-    void *p = src.load(std::memory_order_acquire);
-    rec_->pointer.store(p, std::memory_order_release);
-    // Ensure pointer is still current
-    while (p != src.load(std::memory_order_acquire)) {
-      p = src.load(std::memory_order_acquire);
-      rec_->pointer.store(p, std::memory_order_release);
-    }
+  template <typename T> T *protect(std::atomic<T *> &src) noexcept {
+    T *p = nullptr;
+    do {
+      // Source removal, publication, and validation form one sequentially
+      // consistent protocol with the reclaimer's hazard scan.
+      p = src.load(std::memory_order_seq_cst);
+      rec_->pointer.store(p, std::memory_order_seq_cst);
+    } while (p != src.load(std::memory_order_seq_cst));
+    return p;
   }
 
-  void clear() { rec_->pointer.store(nullptr, std::memory_order_release); }
+  void clear() { rec_->pointer.store(nullptr, std::memory_order_seq_cst); }
 
 private:
   HazardRecord *rec_;
@@ -69,7 +70,7 @@ inline void scan() {
   std::vector<void *> hazards;
   for (HazardRecord *r = global_hazard_head.load(std::memory_order_acquire); r;
        r = r->next) {
-    hazards.push_back(r->pointer.load(std::memory_order_acquire));
+    hazards.push_back(r->pointer.load(std::memory_order_seq_cst));
   }
   auto &list = retired_list();
   auto it = list.begin();
