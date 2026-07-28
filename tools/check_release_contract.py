@@ -67,17 +67,39 @@ HASHED_CONTRACT_PATHS = {
     "abi/rtfw_c_abi_v8.exports",
     "abi/rtfw_c_abi_v8.sha256",
     "cmake/rtfwConfig.cmake.in",
+    "configs/default.json",
+    "configs/default_fast.json",
+    "configs/default_safe.json",
+    "docs/DOE_AUTOTUNE.md",
     "docs/cuda_support_matrix.json",
     "docs/portable_support_matrix.json",
     "docs/product_contract.md",
     "docs/real_time_readiness_checklist.md",
     "docs/release_policy.md",
+    "docs/runtime_profiles.md",
     "docs/xdma_support_matrix.json",
     "include/rtfw/version.h",
+    "profiles/example-linux.json",
     "rt/include/rt/c_api.h",
     "rt/include/rt/device_abi.h",
+    "rt/include/rt/profile.hpp",
     "rt/include/rt/runtime.hpp",
+    "rt/src/runtime_profile.cpp",
+    "src/runtime_profile_demo.cpp",
     "tests/package_consumer/CMakeLists.txt",
+    "tests/package_consumer/profile_consumer.cpp",
+    "tests/runtime_profile_tests.cpp",
+    "tools/autotune/config.schema.json",
+    "tools/autotune/install_profile.py",
+    "tools/autotune/make_config.py",
+    "tools/autotune/mapping_smoke.py",
+    "tools/autotune/optimize.py",
+    "tools/autotune/report.py",
+    "tools/autotune/run_experiments.py",
+    "tools/autotune/run_one.py",
+    "tools/autotune/spec.yaml",
+    "tools/autotune/spec_smoke.yaml",
+    "tools/autotune/validate_config_mapping.py",
     "tools/check_c_abi.py",
     "tools/check_hardware_evidence.py",
     "tools/check_release_contract.py",
@@ -172,7 +194,7 @@ def validate_support_matrix(
     if set(by_id) != set(EXPECTED_TUPLES):
         errors.append(
             "portable support matrix: supported tuple set differs from the "
-            f"reviewed 1.0 set: {sorted(by_id)}"
+            f"reviewed portable set: {sorted(by_id)}"
         )
 
     for tuple_id, expected_identity in EXPECTED_TUPLES.items():
@@ -226,6 +248,7 @@ def validate_support_matrix(
             "c_shared",
             "c_static",
             "cpp_runtime",
+            "runtime_profiles",
             "relocated_install",
             "host_adapter",
             "portable_cuda_state_machine",
@@ -300,7 +323,7 @@ def validate_hardware_matrix(
     if matrix.get("status") != "candidate":
         errors.append(f"{name}: status must remain candidate without a record")
     if matrix.get("qualified_tuples") != []:
-        errors.append(f"{name}: 1.0 contains no reviewed qualified tuple")
+        errors.append(f"{name}: release contains no reviewed qualified tuple")
     claim = str(matrix.get("claim", "")).lower()
     if "no " not in claim or "qualified" not in claim:
         errors.append(f"{name}: empty-matrix claim must reject qualification")
@@ -348,7 +371,10 @@ def validate_release_contract(
         errors.append("release contract: C++ binary ABI must be explicitly false")
     elif (
         cpp_api.get("compatibility") != "source_within_1.x"
-        or cpp_api.get("entrypoint") != "rt/include/rt/runtime.hpp"
+        or cpp_api.get("entrypoints") != [
+            "rt/include/rt/runtime.hpp",
+            "rt/include/rt/profile.hpp",
+        ]
     ):
         errors.append("release contract: C++ source compatibility mismatch")
 
@@ -695,12 +721,16 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "tests/package_consumer/CMakeLists.txt",
         errors,
     )
-    if "rtfw 1.0 CONFIG REQUIRED" not in package_consumer:
-        errors.append("package consumer: does not request the 1.0 contract")
+    requested_version = ".".join(version.split(".")[:2])
+    if f"rtfw {requested_version} CONFIG REQUIRED" not in package_consumer:
+        errors.append(
+            "package consumer: does not request the current release contract"
+        )
     for token in (
         "c_shared",
         "c_static",
         "cpp_runtime",
+        "rtfw_consumer_profile",
         "cuda_backend",
         "xdma_backend",
         "rtfw::rtfw",

@@ -258,6 +258,16 @@ def check_runtime_contract() -> None:
     tests_cmake = read("tests/CMakeLists.txt")
     runtime_header = read("rt/include/rt/runtime.hpp")
     runtime_source = read("rt/src/host_runtime.cpp")
+    profile_header = read("rt/include/rt/profile.hpp")
+    profile_source = read("rt/src/runtime_profile.cpp")
+    profile_test = read("tests/runtime_profile_tests.cpp")
+    profile_consumer = read("tests/package_consumer/profile_consumer.cpp")
+    runtime_demo = read("src/runtime_profile_demo.cpp")
+    profile_doc = read("docs/runtime_profiles.md")
+    profile_schema = read("tools/autotune/config.schema.json")
+    autotune_spec = read("tools/autotune/spec.yaml")
+    mapping_smoke = read("tools/autotune/mapping_smoke.py")
+    mapping_workflow = read(".github/workflows/autotune-mapping.yml")
     c_header = read("rt/include/rt/c_api.h")
     roadmap = read("docs/roadmap.md")
     host_doc = read("docs/host_runtime.md")
@@ -592,8 +602,9 @@ def check_runtime_contract() -> None:
         or "| M10 | Candidate |" not in roadmap
         or "| M11 | Complete |" not in roadmap
         or "| M12 | Complete |" not in roadmap
+        or "| M13 | Complete |" not in roadmap
     ):
-        fail("docs/roadmap.md: M8-M12 milestone status is not advanced")
+        fail("docs/roadmap.md: M8-M13 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
@@ -862,6 +873,147 @@ def check_runtime_contract() -> None:
     ):
         if token not in surface:
             fail(f"M12 portable release gate is missing {token!r}")
+
+    for token in (
+        "runtime_profile_schema_version = 1",
+        "runtime_profile_max_bytes = 64 * 1024",
+        "parse_runtime_profile(",
+        "RuntimeProfileMetadata",
+        "RuntimeProfileErrorCode",
+    ):
+        if token not in profile_header:
+            fail(f"rt/include/rt/profile.hpp: missing M13 token {token!r}")
+    for token in (
+        "valid_utf8(",
+        "kMaximumNesting = 16",
+        "class Parser",
+        "set_runtime_config_value(",
+        "Status::incompatible_artifact",
+    ):
+        if token not in profile_source:
+            fail(f"rt/src/runtime_profile.cpp: missing M13 evidence {token!r}")
+    for forbidden in (
+        "std::vector<",
+        "std::map<",
+        "std::unordered_map<",
+        "std::basic_string<",
+        "operator new",
+    ):
+        if forbidden in profile_source:
+            fail(
+                "rt/src/runtime_profile.cpp: profile parser contains "
+                f"allocating surface {forbidden!r}"
+            )
+    for token in (
+        "valid_profile_is_transactional_and_allocation_free",
+        "malformed_profiles_fail_without_mutation",
+        "compatibility_and_diagnostics_are_explicit",
+        "mutation_corpus_stays_bounded_and_transactional",
+        "input_too_large",
+        "allocation_count",
+    ):
+        if token not in profile_test:
+            fail(f"tests/runtime_profile_tests.cpp: missing M13 gate {token!r}")
+    for token in (
+        "parse_runtime_profile(",
+        "run_periodic_frames(",
+        "parallel_for(",
+        "declare_resource_access(",
+        "profile_id",
+        "p99_frame_ms",
+        "queue_rejections",
+        "trace_events_dropped",
+        "RuntimeMetricId::trace_events_dropped",
+    ):
+        if token not in runtime_demo:
+            fail(f"src/runtime_profile_demo.cpp: missing M13 evidence {token!r}")
+    for phrase in (
+        "complete configurations, not overlays",
+        "allocation-free",
+        "transactional",
+        "64 KiB",
+        "not authentication",
+        "C ABI v8",
+    ):
+        if phrase.lower() not in profile_doc.lower():
+            fail(f"docs/runtime_profiles.md: missing M13 phrase {phrase!r}")
+    try:
+        profile_schema_json = json.loads(profile_schema)
+    except json.JSONDecodeError as exc:
+        fail(f"tools/autotune/config.schema.json: invalid JSON: {exc}")
+    else:
+        profile_properties = profile_schema_json.get("properties", {})
+        runtime_schema = (
+            profile_properties.get("runtime", {})
+            if isinstance(profile_schema_json, dict)
+            else {}
+        )
+        required_runtime_fields = (
+            set(runtime_schema.get("required", []))
+            if isinstance(runtime_schema, dict)
+            else set()
+        )
+        if required_runtime_fields != schema_keys:
+            fail(
+                "tools/autotune/config.schema.json: runtime required fields "
+                "differ from RuntimeConfig schema"
+            )
+        if (
+            profile_schema_json.get("additionalProperties") is not False
+            or runtime_schema.get("additionalProperties") is not False
+        ):
+            fail("tools/autotune/config.schema.json: profile schema is not closed")
+        version_parts = read("VERSION.txt").strip().split(".")
+        compatibility_schema = profile_properties.get(
+            "runtime_compatibility",
+            {},
+        )
+        compatibility_properties = compatibility_schema.get(
+            "properties",
+            {},
+        )
+        if (
+            len(version_parts) != 3
+            or profile_properties.get("schema_version", {}).get("const") != 1
+            or compatibility_properties.get("major", {}).get("const")
+            != int(version_parts[0])
+            or compatibility_properties.get("minimum_minor", {}).get("maximum")
+            != int(version_parts[1])
+            or profile_properties.get("runtime_config_schema", {}).get("const")
+            != 7
+        ):
+            fail(
+                "tools/autotune/config.schema.json: version/schema "
+                "compatibility differs from the runtime contract"
+            )
+    for token in (
+        'path: "../../build/rtfw_runtime_demo"',
+        "worker_count:",
+        "executor_policy:",
+        "executor_queue_capacity:",
+        'seed_arg: "--seed"',
+    ):
+        if token not in autotune_spec:
+            fail(f"tools/autotune/spec.yaml: missing M13 token {token!r}")
+    for token in (
+        "run_round_trip(",
+        '"rtfw_runtime_demo profile round trip"',
+        "check_mapping_coverage",
+        "profile_id",
+    ):
+        if token not in mapping_smoke:
+            fail(f"tools/autotune/mapping_smoke.py: missing M13 gate {token!r}")
+    for token in (
+        "--target rtfw_runtime_demo",
+        "mapping_smoke.py --demo build/rtfw_runtime_demo",
+    ):
+        if token not in mapping_workflow:
+            fail(
+                ".github/workflows/autotune-mapping.yml: missing M13 "
+                f"round-trip gate {token!r}"
+            )
+    if "rt::parse_runtime_profile(" not in profile_consumer:
+        fail("installed package consumer is missing M13 profile parsing")
 
     for token in (
         "TelemetryRing::emit(",
@@ -1328,6 +1480,7 @@ def main() -> int:
             "docs/xdma_support_matrix.json",
             "docs/portable_support_matrix.json",
             "docs/release_policy.md",
+            "docs/runtime_profiles.md",
             "docs/c_abi.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
@@ -1338,6 +1491,7 @@ def main() -> int:
             ".github/workflows/cuda-qualification.yml",
             ".github/workflows/xdma-qualification.yml",
             "rt/include/rt/runtime.hpp",
+            "rt/include/rt/profile.hpp",
             "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
             "rt/include/rt/device_abi.h",
@@ -1351,6 +1505,7 @@ def main() -> int:
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
             "rt/src/host_runtime.cpp",
+            "rt/src/runtime_profile.cpp",
             "rt/src/watchdog_monitor.hpp",
             "rt/src/watchdog_monitor.cpp",
             "rt/src/native_platform_preflight.hpp",
@@ -1386,20 +1541,27 @@ def main() -> int:
             "tests/test_cuda_backend.cpp",
             "tests/xdma_backend_tests.cpp",
             "tests/host_adapter_tests.cpp",
+            "tests/runtime_profile_tests.cpp",
             "tests/package_consumer/CMakeLists.txt",
             "tests/package_consumer/c_consumer.c",
             "tests/package_consumer/cpp_consumer.cpp",
+            "tests/package_consumer/profile_consumer.cpp",
             "tests/determinism_artifact.cpp",
             "tests/snapshot_fuzz.cpp",
             "abi/rtfw_c_abi_v8.exports",
             "abi/rtfw_c_abi_v8.sha256",
             "tools/check_c_abi.py",
+            "tools/autotune/config.schema.json",
+            "tools/autotune/make_config.py",
+            "tools/autotune/mapping_smoke.py",
+            "tools/autotune/spec.yaml",
             "tools/check_release_contract.py",
             "tools/check_hardware_evidence.py",
             "tools/release_manifest.py",
             "tools/extract_release_archive.py",
             "tools/stage_release_artifacts.py",
             "release/rtfw-release-contract.json",
+            "src/runtime_profile_demo.cpp",
         )
     )
     check_version()

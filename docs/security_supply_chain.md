@@ -1,6 +1,6 @@
 # Security and Supply-Chain Status
 
-RTFW 1.0 has a portable release-integrity contract and security-oriented CI
+RTFW 1.1 has a portable release-integrity contract and security-oriented CI
 helpers. It is not a hardened plugin sandbox and does not claim signed
 provenance or reproducible builds.
 

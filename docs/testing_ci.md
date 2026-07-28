@@ -10,6 +10,10 @@ latency qualification and does not prove the complete product contract.
 - Host-runtime tests cover lifecycle transitions, strict configuration,
   no-pacing host steps, callback failure containment, bounded traces, and
   isolation of two runtime instances.
+- Runtime-profile tests cover complete schema-v7 application, allocation-free
+  parsing, transactional failure, exact compatibility, bounded size/nesting,
+  malformed UTF-8/JSON, wrong types, unknown/duplicate/missing keys, invalid
+  cross-field values, and bounded error paths.
 - Compiled-graph tests cover deterministic order, cycles, invalid and
   foreign-runtime handles, direct/transitive resource ordering, immutable
   topology, and randomized DAG agreement with an independent reference
@@ -75,11 +79,12 @@ latency qualification and does not prove the complete product contract.
   inspectors for 20,000 generated inputs.
 - Linux and Windows jobs exercise selected Debug/RelWithDebInfo builds.
 - Executable shared/static C and C++ compiled-graph samples, dynamic C ABI
-  loading, autotune-tooling, scaling-artifact, and documentation-contract jobs
+  loading, real generated-profile runtime round trips, autotune-tooling,
+  scaling-artifact, and documentation-contract jobs
   provide focused smoke coverage.
 - The named Ubuntu GCC/Clang and Windows MSVC support tuples build and run
   relocated consumers from the exact extracted CPack archives. Pull-request
-  CI also checks the 1.0 support/compatibility contract and creates then
+  CI also checks the 1.1 support/compatibility contract and creates then
   verifies each archive manifest.
 - A tag release waits for all three supported-tuple archive consumers, requires
   exactly nine uniquely named assets, verifies the existing tag, and creates
@@ -101,6 +106,8 @@ latency qualification and does not prove the complete product contract.
 - Sanitizer jobs do not cover every sanitizer, platform, or code path.
 - The libFuzzer smoke target is not a continuous fuzzing service and cannot
   establish parser safety for every input.
+- The profile parser has deterministic negative/mutation-style cases but is
+  not yet attached to a continuous libFuzzer service.
 - M7 artifact checksums detect accidental corruption; they are not
   authentication and do not protect against maliciously rewritten artifacts.
 - Cross-compiler artifact equality currently covers one canonical integer

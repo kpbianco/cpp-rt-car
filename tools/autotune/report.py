@@ -493,9 +493,10 @@ def main() -> None:
     )
     lines.append("")
     lines.append(
-        "> **Integration status:** if this report uses `tools/autotune/spec.yaml`, "
-        "it is illustrative only. The current `rtfw_demo` does not implement "
-        "that spec's config, run-window, or RT command-line contract."
+        "> **Interpretation boundary:** `tools/autotune/spec.yaml` drives "
+        "`rtfw_runtime_demo` through the strict profile contract. Results "
+        "apply only to the recorded binary, workload, and host; they are not "
+        "portable latency or hardware-qualification claims."
     )
 
     lines.append("")
@@ -542,8 +543,8 @@ def main() -> None:
     lines.append("## Use this profile")
     lines.append("")
     lines.append("```bash")
-    lines.append("# Planned interface; not implemented by the current rtfw_demo")
-    lines.append("./build/rtfw_demo --config profiles/<cpu>-<os>.json --rt --metrics-json")
+    lines.append("# Validate the profile with the same pinned build and workload")
+    lines.append("./build/rtfw_runtime_demo --config profiles/<cpu>-<os>.json --rt --run 5s --metrics-json-interval")
     lines.append("```")
     if best_key_metrics:
         lines.append("")

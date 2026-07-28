@@ -545,6 +545,7 @@ set(RT_SOURCES
     rt/src/native_platform_preflight.cpp
     rt/src/observability_export.cpp
     rt/src/runtime.cpp
+    rt/src/runtime_profile.cpp
     rt/src/snapshot_codec.cpp
     rt/src/plugin_manager.cpp
     rt/src/scheduler.cpp
@@ -767,6 +768,10 @@ target_link_libraries(simcore_app PRIVATE simcore_platform)
 set_target_properties(simcore_app PROPERTIES OUTPUT_NAME rtfw_demo)
 add_executable(rtfw_demo ALIAS simcore_app)
 
+# Profile-driven target-runtime demo and autotune workload.
+add_executable(rtfw_runtime_demo src/runtime_profile_demo.cpp)
+target_link_libraries(rtfw_runtime_demo PRIVATE simcore_rt)
+
 # Sample trace dump utility
 add_executable(trace_dump src/trace_dump.cpp)
 target_link_libraries(trace_dump PRIVATE simcore_platform)
@@ -821,6 +826,11 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(
+    TARGETS rtfw_runtime_demo
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 if (RTFW_ENABLE_CUDA)
@@ -953,7 +963,17 @@ install(
         VERSION.txt
         CHANGELOG.md
         SECURITY.md
+        docs/runtime_profiles.md
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw
+)
+
+install(
+    FILES
+        tools/autotune/config.schema.json
+        configs/default.json
+        configs/default_fast.json
+        configs/default_safe.json
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw/profiles
 )
 
 install(

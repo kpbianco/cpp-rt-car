@@ -105,7 +105,7 @@ cmake --build --preset pgo-use
 `VERSION.txt` is the release source of truth. CMake installs shared/static
 libraries, public headers, package config/version files, the license, and the
 version, changelog, security, support-matrix, and release-contract files.
-Release 1.0 exports component-checked targets for shared C, static C, the C++
+Release 1.1 exports component-checked targets for shared C, static C, the C++
 runtime, and portable/optional CUDA/XDMA adapters. `find_package()`
 compatibility is same-major for 1.x. Stable C ABI compatibility is checked
 independently at runtime; target C++ compatibility is source-only and requires
@@ -119,7 +119,7 @@ CUDA/XDMA state-machine components:
 
 ```cmake
 find_package(
-  rtfw 1.0 CONFIG REQUIRED
+  rtfw 1.1 CONFIG REQUIRED
   COMPONENTS
     c_shared c_static cpp_runtime
     cuda_backend xdma_backend)

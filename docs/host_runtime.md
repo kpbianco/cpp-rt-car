@@ -4,7 +4,8 @@
 extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
 plan, M5 time/platform controls, M6 versioned observability, M7
 determinism/replay, the M8 bounded device ABI and deterministic mock, and the
-M11 stable C ABI plus host job-system adapter. It
+M11 stable C ABI plus host job-system adapter, M12 portable distribution, and
+the M13 complete runtime-profile loader. It
 provides explicit host-driven and finite self-paced operation without adopting
 the legacy `SimCore` scheduler or pacing loop.
 
@@ -39,7 +40,7 @@ Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
 
-Control operations are single-host-thread operations in 1.0. `step()`,
+Control operations are single-host-thread operations in 1.1. `step()`,
 `run_periodic()`, checkpoint/restore, input-log export, and replay are
 non-reentrant with execution. A periodic observer cannot recursively step, and
 `stop()` called from inside a callback, periodic loop, or replay is rejected.
@@ -66,7 +67,7 @@ non-reentrant with execution. A periodic observer cannot recursively step, and
 | `watchdog_max_degradation_level` | nonnegative integer, `0` | Caps frame-thread degradation increments; accepted range is 0–255 |
 | `platform_preflight_mode` | `disabled` | Selects `disabled` or fail-closed, read-only `strict` prerequisite checks |
 | `workload_id` | identifier, `unspecified` | Labels observability and replay artifacts with 1–63 characters from `A-Za-z0-9._:/@-`; it affects configuration and replay identity |
-| `determinism_tier` | `d0_unspecified` | Selects D0 unspecified behavior or D1 schedule-independent replay; D2 and D3 are rejected in 1.0 |
+| `determinism_tier` | `d0_unspecified` | Selects D0 unspecified behavior or D1 schedule-independent replay; D2 and D3 are rejected in 1.1 |
 | `state_capacity` | nonnegative integer, `64` | Maximum canonical state regions accepted before finalization; zero disables registration |
 | `snapshot_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded checkpoint bytes |
 | `replay_input_capacity` | nonnegative integer, `4096` | Maximum records accepted in one encoded or replayed input log |
@@ -87,8 +88,11 @@ declare capacities exactly equal to the typed configuration. The detailed
 submission, scratch, completion, helping, and ownership rules are in the
 [executor contract](executor.md).
 
-This schema is distinct from the unattached autotune JSON format. Loading those
-profiles into the demo remains planned.
+`<rt/profile.hpp>` maps the complete schema into `RuntimeConfig` through a
+bounded, allocation-free, transactional JSON parser. It rejects missing,
+unknown, duplicate, incompatible, and invalid contract fields before
+`Runtime::configure()`. Profile file I/O remains a non-RT host responsibility.
+See [runtime profiles](runtime_profiles.md).
 
 ## Host-driven steps
 
@@ -243,7 +247,7 @@ Stable C ABI v8 mirrors the lifecycle:
 
 Public configuration, frame, callback, result, and memory-plan structures carry
 sizes, and configuration carries stable `RTFW_C_ABI_VERSION` 8 in release
-1.0. Periodic, preflight, observability, checkpoint, input-log,
+1.1. Periodic, preflight, observability, checkpoint, input-log,
 replay, and device structures follow the same initialized-output rule. Call
 the supplied structure initializers and leave reserved fields zero.
 `rtfw_status_message()` provides status text even when no runtime handle was

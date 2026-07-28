@@ -11,7 +11,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
@@ -82,6 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iters", required=True, type=int)
     parser.add_argument("--replicates", required=True, type=int)
     parser.add_argument("--out", required=True, type=pathlib.Path)
+    parser.add_argument("--warmup-sec", type=float)
+    parser.add_argument("--run-sec", type=float)
     return parser.parse_args()
 
 
@@ -471,6 +473,17 @@ def main() -> None:
 
     spec_data = load_simple_yaml(args.spec)
     app_spec = parse_app_spec(spec_data, args.spec.parent)
+    app_overrides: Dict[str, float] = {}
+    if args.warmup_sec is not None:
+        if args.warmup_sec < 0:
+            raise SystemExit("--warmup-sec must be non-negative")
+        app_overrides["warmup"] = args.warmup_sec
+    if args.run_sec is not None:
+        if args.run_sec <= 0:
+            raise SystemExit("--run-sec must be positive")
+        app_overrides["run"] = args.run_sec
+    if app_overrides:
+        app_spec = replace(app_spec, **app_overrides)
     objective_spec = parse_objective_spec(spec_data)
 
     param_specs = load_params_payload(args.spec)

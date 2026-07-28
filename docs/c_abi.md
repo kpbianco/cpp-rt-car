@@ -1,7 +1,7 @@
 # Stable C ABI
 
 Release 0.12 introduced ABI version 8, the first stable C ABI for RTFW;
-release 1.0 retains it. The stability promise applies to the symbols and C
+release 1.1 retains it. The stability promise applies to the symbols and C
 declarations represented by
 `abi/rtfw_c_abi_v8.exports`, `rt/include/rt/c_api.h`, and
 `rt/include/rt/device_abi.h`. It does not turn the C++ API into a binary ABI,

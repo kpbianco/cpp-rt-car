@@ -4,6 +4,11 @@ app:
   run_sec: 2
   frame_budget_ms: 5.0
 
+profile_defaults:
+  mode: "balanced"
+  threads: 1
+  prefetch_distance: 0
+
 metrics:
   hard_constraints:
     missed_frames: "== 0"

@@ -1,125 +1,232 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Autotune runtime configuration",
+  "title": "RTFW resolved runtime profile",
+  "description": "Authoring schema for the allocation-free rt::Runtime profile loader in RTFW 1.1.",
   "type": "object",
   "required": [
-    "threads",
-    "chunking",
-    "layout",
-    "prefetch",
-    "scheduler",
-    "governor",
-    "numerics",
-    "memory",
-    "tracing"
+    "schema_version",
+    "profile_id",
+    "runtime_compatibility",
+    "runtime_config_schema",
+    "runtime"
   ],
   "properties": {
-    "threads": {
-      "type": ["string", "integer"]
+    "schema_version": {
+      "type": "integer",
+      "const": 1
     },
-    "chunking": {
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[A-Za-z0-9._:/@-]+$"
+    },
+    "runtime_compatibility": {
       "type": "object",
       "required": [
-        "target_p90_us",
-        "min_items",
-        "max_items"
+        "major",
+        "minimum_minor"
       ],
       "properties": {
-        "target_p90_us": {"type": "integer"},
-        "min_items": {"type": "integer"},
-        "max_items": {"type": "integer"}
+        "major": {
+          "type": "integer",
+          "const": 1
+        },
+        "minimum_minor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
-    "layout": {
+    "runtime_config_schema": {
+      "type": "integer",
+      "const": 7
+    },
+    "runtime": {
       "type": "object",
       "required": [
-        "aosoa_block",
-        "align_bytes",
-        "pad_to_simd"
+        "callback_capacity",
+        "scratch_bytes",
+        "trace_capacity",
+        "numerical_mode",
+        "executor_policy",
+        "worker_count",
+        "executor_queue_capacity",
+        "scratch_alignment",
+        "task_scratch_bytes",
+        "task_scratch_slots",
+        "memory_budget_bytes",
+        "overload_policy",
+        "watchdog_timeout_ns",
+        "watchdog_max_degradation_level",
+        "platform_preflight_mode",
+        "determinism_tier",
+        "state_capacity",
+        "snapshot_max_bytes",
+        "replay_input_capacity",
+        "input_log_max_bytes",
+        "device_backend_capacity",
+        "device_buffer_capacity",
+        "device_outstanding_capacity",
+        "device_completion_batch",
+        "workload_id"
       ],
       "properties": {
-        "aosoa_block": {"type": "integer"},
-        "align_bytes": {"type": "integer"},
-        "pad_to_simd": {"type": "boolean"}
+        "callback_capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "scratch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "trace_capacity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "numerical_mode": {
+          "type": "string",
+          "enum": [
+            "precise",
+            "fused_multiply_add"
+          ]
+        },
+        "executor_policy": {
+          "type": "string",
+          "enum": [
+            "static_deterministic",
+            "bounded_throughput",
+            "host_adapter"
+          ]
+        },
+        "worker_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "executor_queue_capacity": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 1048576
+        },
+        "scratch_alignment": {
+          "type": "integer",
+          "enum": [
+            16,
+            32,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            2048,
+            4096
+          ]
+        },
+        "task_scratch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "task_scratch_slots": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "memory_budget_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1099511627776
+        },
+        "overload_policy": {
+          "type": "string",
+          "enum": [
+            "reject_submission",
+            "fail_frame"
+          ]
+        },
+        "watchdog_timeout_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000000000
+        },
+        "watchdog_max_degradation_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "platform_preflight_mode": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "strict"
+          ]
+        },
+        "determinism_tier": {
+          "type": "string",
+          "enum": [
+            "d0",
+            "d1"
+          ]
+        },
+        "state_capacity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "snapshot_max_bytes": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 1073741824
+        },
+        "replay_input_capacity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "input_log_max_bytes": {
+          "type": "integer",
+          "minimum": 192,
+          "maximum": 1073741824
+        },
+        "device_backend_capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "device_buffer_capacity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "device_outstanding_capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "device_completion_batch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "workload_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[A-Za-z0-9._:/@-]+$"
+        }
       },
-      "additionalProperties": true
-    },
-    "prefetch": {
-      "type": "object",
-      "required": [
-        "enabled",
-        "distance_bytes"
-      ],
-      "properties": {
-        "enabled": {"type": "boolean"},
-        "distance_bytes": {"type": "integer"}
-      },
-      "additionalProperties": true
-    },
-    "scheduler": {
-      "type": "object",
-      "required": [
-        "steal_threshold",
-        "emergency_spawn"
-      ],
-      "properties": {
-        "steal_threshold": {"type": "integer"},
-        "emergency_spawn": {"type": "boolean"}
-      },
-      "additionalProperties": true
-    },
-    "governor": {
-      "type": "object",
-      "required": [
-        "target_util",
-        "hysteresis"
-      ],
-      "properties": {
-        "target_util": {"type": "number"},
-        "hysteresis": {"type": "number"}
-      },
-      "additionalProperties": true
-    },
-    "numerics": {
-      "type": "object",
-      "required": [
-        "ftz_daz",
-        "fma"
-      ],
-      "properties": {
-        "ftz_daz": {"type": "boolean"},
-        "fma": {"type": "string"}
-      },
-      "additionalProperties": true
-    },
-    "memory": {
-      "type": "object",
-      "required": [
-        "huge_pages",
-        "arena_per_thread_mb",
-        "numa",
-        "pretouch"
-      ],
-      "properties": {
-        "huge_pages": {"type": "boolean"},
-        "arena_per_thread_mb": {"type": "integer"},
-        "numa": {"type": "string"},
-        "pretouch": {"type": "boolean"}
-      },
-      "additionalProperties": true
-    },
-    "tracing": {
-      "type": "object",
-      "required": ["bintrace"],
-      "properties": {
-        "bintrace": {"type": "boolean"}
-      },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "params": {
+      "description": "Opaque experiment provenance; ignored by the runtime after bounded JSON validation.",
       "type": "object"
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

@@ -1,69 +1,94 @@
 # DOE and Autotune Status
 
-The repository contains a working design-of-experiments and analysis pipeline,
-plus a synthetic application used to test that pipeline. It is not yet
-integrated with the real `rtfw_demo`.
+RTFW 1.1 connects the design-of-experiments pipeline to the supported
+`rt::Runtime` path. The default production spec generates complete runtime
+profiles and drives `rtfw_runtime_demo`; the separate synthetic target remains
+the fast end-to-end tooling test.
 
-## What is verified
+This is operational measurement tooling, not automatic optimization of an
+embedding application. Results apply only to the tested binary, workload,
+host, operating-system state, and measurement procedure. They do not establish
+a portable latency limit, RT1 result, RT2 qualification, or CUDA/XDMA
+qualification.
 
-The synthetic workflow generates parameter mappings, runs candidates, evaluates
-constraints/objectives, performs a small search, and writes profiles, JSONL
-results, summaries, and reports.
+## Verified paths
 
-Run its CI-sized smoke:
+The synthetic CI-sized workflow exercises candidate generation, constraints,
+objectives, search, validation, JSONL persistence, analysis, and reporting:
 
 ```bash
 tools/autotune/run_smoke.sh
 ```
 
-Run mapping/schema checks:
+The production mapping checks exercise the exact profile schema and can drive
+the real C++ loader:
 
 ```bash
 python3 tools/autotune/make_config.py --self-test
 python3 tools/autotune/mapping_smoke.py
+python3 tools/autotune/mapping_smoke.py --demo build/rtfw_runtime_demo
 ```
 
-These commands validate tooling and schemas. They do not validate that
-`rtfw_demo` consumes a generated profile.
+CI builds `rtfw_runtime_demo` before the final command, so a generated profile
+must pass the bounded parser, configure/finalize/start the target runtime,
+execute its concurrent physics graph, and emit a metrics object with the same
+profile identity.
 
-## Why the default runtime spec is blocked
+## Production factor space
 
-`tools/autotune/spec.yaml` describes the intended runtime integration. The
-orchestrator launches an application with generated `--config` input,
-`--run`-bounded warm-up/measurement windows, and optional `--rt` arguments.
-RTFW 1.0's demo implements none of those three options and does not read
-`RTFW_PROFILE`.
+[`tools/autotune/spec.yaml`](../tools/autotune/spec.yaml) exposes only public,
+consumed `RuntimeConfig` fields:
 
-The current profile schema also contains settings that are not mapped into
-`SimCore::Settings`, including scheduler-steal policy, huge pages, and AoSoA
-layout selection. Consequently:
+- `worker_count`;
+- `executor_policy` (`static_deterministic` or `bounded_throughput`);
+- `executor_queue_capacity`.
 
-- do not run `spec.yaml` against `rtfw_demo` and interpret the result as a
-  runtime tuning result;
-- tracked files under `results/`, `profiles/`, and `reports/` are illustrative
-  fixtures unless their provenance explicitly names another executable;
-- generated recommendations are not production profiles.
+Every candidate becomes a complete schema-v1 profile with runtime-config
+schema 7 and package compatibility `1.1+`. The generator resolves all other
+runtime values, retains the sampled factors under `params`, and derives
+`profile_id` from the complete resolved payload. Unknown factors fail mapping
+coverage instead of appearing as inert optimization knobs.
 
-M1 supplies the embedding runtime's typed configuration contract, M3 adds
-executor policy, worker count, and queue capacity, M4 adds the memory and
-overload fields, M5 adds direct finite cadence/deadline results, M6 adds
-cursor-based metric windows plus versioned provenance, and M7 adds
-determinism/replay configuration. The demo/profile mapper still does not
-configure or consume the M1–M12 runtime surface, so runtime autotuning remains
-invalid.
+The removed pre-1.1 factor set—huge pages, scheduler steal thresholds,
+emergency helpers, AoSoA layout, prefetch distance, and governor settings—did
+not configure the supported target runtime and is not part of the production
+spec.
 
-## Intended workflow after integration
+## Measurement path
 
-After those milestones, a valid experiment will:
+`run_one.py` launches a separate warm-up process, then a measured process with
+`--metrics-json-interval`. In `--rt` mode, `rtfw_runtime_demo` uses the
+runtime-owned absolute periodic loop at a 1 ms period. It records
+start-to-finish frame samples, deadline misses, watchdog events, trace-event
+drops, and executor queue rejections. It reads drops from the runtime metric
+schema rather than synthesizing a zero (`log_drops` remains a compatibility
+alias in the result record). The output also binds runtime version,
+runtime-config schema, effective config identity, profile identity, executor
+policy, worker count, and seed.
 
-1. build a pinned Release artifact;
-2. validate the target host and resolved runtime configuration;
-3. warm up without contaminating the measurement interval;
-4. collect direct end-to-end frame/deadline samples and required counters;
-5. retain raw samples and environment provenance;
-6. reject invalid or dropped-data trials;
-7. validate finalists across seeds, scenarios, and repeated runs;
-8. emit a profile tied to runtime schema and hardware identifiers.
+The default hard constraints reject any deadline miss, watchdog event, or
+trace-event drop. A trial can still be unrepresentative because of host
+contention, frequency scaling, thermal behavior, virtualisation, interrupts,
+or an unrepresentative demo workload.
 
-The factor-to-config mapping and constraint language are documented in
-[`tools/autotune/README.md`](../tools/autotune/README.md).
+## Valid use
+
+A deployment-quality experiment should:
+
+1. build a pinned optimized artifact;
+2. record the exact source, compiler, runtime profile, host, kernel, power, and
+   affinity state;
+3. use a workload representative of the embedding application;
+4. warm up outside the measurement interval;
+5. retain raw frame samples and all rejection/loss counters;
+6. repeat across declared seeds, scenarios, and environmental conditions;
+7. reject invalid or dropped-data trials;
+8. validate finalists independently before installation.
+
+The checked `configs/`, `profiles/example-linux.json`, `results/`, and
+`reports/` files are examples or archived fixtures unless their own provenance
+states otherwise. They are not recommendations.
+
+Schema, result-record, and command details are in
+[`tools/autotune/README.md`](../tools/autotune/README.md), and the loader
+contract is in [runtime profiles](runtime_profiles.md).

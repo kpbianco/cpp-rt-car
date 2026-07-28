@@ -1,6 +1,6 @@
 # Time, Watchdog, and Platform Contract
 
-Release 0.6 introduced, and release 1.0 retains, the M5 RT0 time/platform
+Release 0.6 introduced, and release 1.1 retains, the M5 RT0 time/platform
 surface in `rt::Runtime`.
 It adds finite self-paced execution, a one-shot frame watchdog, frame-thread
 degradation state, and a strict reportable Linux platform preflight. These are
@@ -72,7 +72,7 @@ allocation gate runs complete frames with the watchdog armed.
 
 Degradation is a signal, not automatic workload shedding. The host callback
 must select cheaper work when it sees a higher level. There is no recovery or
-level-decrease policy in 1.0.
+level-decrease policy in 1.1.
 
 ## Strict platform preflight
 

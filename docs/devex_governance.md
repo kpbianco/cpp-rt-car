@@ -20,7 +20,7 @@ must not invent one.
 
 ## ABI policy
 
-The plugin surface remains experimental in 1.0. C ABI v8 is the stable binary
+The plugin surface remains experimental in 1.1. C ABI v8 is the stable binary
 boundary. The M1–M11 C configuration,
 frame, callback, result, graph, task-scratch, memory-plan, periodic, watchdog,
 degradation, preflight, metric-window, trace-cursor, provenance, canonical
