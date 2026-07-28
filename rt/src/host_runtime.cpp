@@ -24,7 +24,7 @@
 #include <vector>
 
 #include <rt/arch.hpp>
-#include <rt/snapshot.hpp>
+#include <rt/canonical_bytes.hpp>
 
 namespace {
 

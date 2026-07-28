@@ -28,7 +28,7 @@ jobs:
 
       - name: Build profile-driven runtime demo
         run: |
-          cmake -S . -B build -DENABLE_TESTS=OFF -DSIM_WERROR=ON
+          cmake -S . -B build -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DSIM_WERROR=ON
           cmake --build build --parallel 2 --target rtfw_runtime_demo
 
       - name: Exercise generated profile through the C++ loader

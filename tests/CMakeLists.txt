@@ -89,11 +89,27 @@ if (SIM_GTEST_AVAILABLE)
         integration/test_determinism.cpp
     )
 
-    if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
+    if (NOT RTFW_BUILD_EXPERIMENTAL)
+        set(TEST_SOURCES
+            test_host_runtime.cpp
+            test_periodic_runtime.cpp
+            test_platform_preflight.cpp
+            test_compiled_graph.cpp
+            test_executor.cpp
+            test_memory_plan.cpp
+            test_observability.cpp
+            test_determinism_replay.cpp
+            test_device_runtime.cpp
+            test_cuda_backend.cpp
+        )
+    endif()
+
+    if (RTFW_BUILD_EXPERIMENTAL AND
+        ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
         list(APPEND TEST_SOURCES test_jobqueue_property.cpp)
     endif()
 
-    if (UNIX AND NOT APPLE)   # linux
+    if (RTFW_BUILD_EXPERIMENTAL AND UNIX AND NOT APPLE)   # linux
         list(APPEND TEST_SOURCES
             test_affinity.cpp
             test_numa_pool.cpp
@@ -105,38 +121,57 @@ if (SIM_GTEST_AVAILABLE)
     target_link_libraries(
         simcore_tests
         PRIVATE
-            simcore_platform
-            simcore_rt
+            rtfw_runtime
             rtfw_cuda_backend
             ${SIM_GTEST_LIBRARIES})
-    if (ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
+    if (RTFW_BUILD_EXPERIMENTAL)
+        target_link_libraries(
+            simcore_tests
+            PRIVATE
+                simcore_platform
+                simcore_rt
+                rtfw_experimental)
+    endif()
+    if (RTFW_BUILD_EXPERIMENTAL AND
+        ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
         target_link_libraries(simcore_tests PRIVATE rapidcheck rapidcheck_gtest)
     endif()
     target_include_directories(simcore_tests PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/tests
-        ${CMAKE_SOURCE_DIR}
+        ${RTFW_PROJECT_SOURCE_DIR}/include
+        ${RTFW_PROJECT_SOURCE_DIR}/tests
+        ${RTFW_PROJECT_SOURCE_DIR}
     )
-    target_compile_definitions(simcore_tests PRIVATE
-        PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-        RTFW_DEMO_PATH="$<TARGET_FILE:simcore_app>"
-    )
+    target_compile_definitions(
+        simcore_tests
+        PRIVATE PROJECT_SOURCE_DIR="${RTFW_PROJECT_SOURCE_DIR}")
 
-    add_dependencies(simcore_tests simcore_app)
+    if (RTFW_BUILD_EXPERIMENTAL)
+        target_compile_definitions(
+            simcore_tests
+            PRIVATE RTFW_DEMO_PATH="$<TARGET_FILE:simcore_app>")
+        add_dependencies(simcore_tests simcore_app)
 
-    add_library(test_sample_plugin SHARED sample_plugin.c)
-    target_include_directories(test_sample_plugin PRIVATE ${CMAKE_SOURCE_DIR}/rt/include)
-    set_target_properties(test_sample_plugin PROPERTIES OUTPUT_NAME sample_plugin)
+        add_library(test_sample_plugin SHARED sample_plugin.c)
+        target_include_directories(
+            test_sample_plugin
+            PRIVATE ${RTFW_PROJECT_SOURCE_DIR}/rt/include)
+        set_target_properties(
+            test_sample_plugin PROPERTIES OUTPUT_NAME sample_plugin)
 
-    add_library(test_incompatible_plugin SHARED sample_plugin_bad.c)
-    target_include_directories(test_incompatible_plugin PRIVATE ${CMAKE_SOURCE_DIR}/rt/include)
-    set_target_properties(test_incompatible_plugin PROPERTIES OUTPUT_NAME bad_plugin)
+        add_library(test_incompatible_plugin SHARED sample_plugin_bad.c)
+        target_include_directories(
+            test_incompatible_plugin
+            PRIVATE ${RTFW_PROJECT_SOURCE_DIR}/rt/include)
+        set_target_properties(
+            test_incompatible_plugin PROPERTIES OUTPUT_NAME bad_plugin)
 
-    add_dependencies(simcore_tests test_sample_plugin test_incompatible_plugin)
-    target_compile_definitions(simcore_tests PRIVATE
-        PLUGIN_PATH="$<TARGET_FILE:test_sample_plugin>"
-        BAD_PLUGIN_PATH="$<TARGET_FILE:test_incompatible_plugin>"
-    )
+        add_dependencies(
+            simcore_tests test_sample_plugin test_incompatible_plugin)
+        target_compile_definitions(simcore_tests PRIVATE
+            PLUGIN_PATH="$<TARGET_FILE:test_sample_plugin>"
+            BAD_PLUGIN_PATH="$<TARGET_FILE:test_incompatible_plugin>")
+    endif()
+    rtfw_enable_project_warnings(simcore_tests)
 
     add_test(NAME simcore_all COMMAND simcore_tests)
     set_tests_properties(simcore_all PROPERTIES TIMEOUT 180)
@@ -145,7 +180,7 @@ if (SIM_GTEST_AVAILABLE)
       add_compile_options(-mavx2 -mfma)
     endif()
 
-    if (UNIX AND NOT APPLE)
+    if (RTFW_BUILD_EXPERIMENTAL AND UNIX AND NOT APPLE)
         find_library(LIBNUMA numa)
         find_path(NUMA_INCLUDE_DIR numa.h)
         if (LIBNUMA AND NUMA_INCLUDE_DIR)
@@ -157,14 +192,15 @@ if (SIM_GTEST_AVAILABLE)
 endif()
 
 add_executable(rtfw_determinism_artifact determinism_artifact.cpp)
-target_link_libraries(rtfw_determinism_artifact PRIVATE simcore_rt)
+target_link_libraries(rtfw_determinism_artifact PRIVATE rtfw_runtime)
 
 add_executable(test_cabi_dlopen test_cabi_dlopen.c)
 target_include_directories(test_cabi_dlopen PRIVATE
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/rt/include)
+    ${RTFW_PROJECT_SOURCE_DIR}
+    ${RTFW_PROJECT_SOURCE_DIR}/include
+    ${RTFW_PROJECT_SOURCE_DIR}/rt/include)
 target_compile_definitions(test_cabi_dlopen PRIVATE RTFW_LIB_PATH="$<TARGET_FILE:rtfw>")
+add_dependencies(test_cabi_dlopen rtfw_shared)
 if (UNIX)
     target_link_libraries(test_cabi_dlopen PRIVATE dl)
 endif()
@@ -173,37 +209,54 @@ set_tests_properties(cabi_dlopen PROPERTIES TIMEOUT 30)
 
 add_executable(rtfw_host_adapter_tests host_adapter_tests.cpp)
 target_link_libraries(
-    rtfw_host_adapter_tests PRIVATE rtfw_static)
+    rtfw_host_adapter_tests PRIVATE rtfw_static rtfw_runtime)
 add_test(NAME host_adapter COMMAND rtfw_host_adapter_tests)
 set_tests_properties(host_adapter PROPERTIES TIMEOUT 60)
 
 add_executable(rtfw_runtime_profile_tests runtime_profile_tests.cpp)
 target_link_libraries(
-    rtfw_runtime_profile_tests PRIVATE simcore_rt)
+    rtfw_runtime_profile_tests PRIVATE rtfw_runtime)
 add_test(NAME runtime_profile COMMAND rtfw_runtime_profile_tests)
 set_tests_properties(runtime_profile PROPERTIES TIMEOUT 30)
 
-add_executable(simcore_thread_violation EXCLUDE_FROM_ALL thread_violation.cpp)
-target_link_libraries(simcore_thread_violation PRIVATE simcore_platform)
-target_compile_definitions(simcore_thread_violation PRIVATE RTFW_ENFORCE_NO_RAW_THREADS=1)
-add_test(NAME simcore_thread_violation_build
-         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target simcore_thread_violation --config $<CONFIG>)
-set_tests_properties(simcore_thread_violation_build PROPERTIES
-    TIMEOUT 120
-    WILL_FAIL TRUE)
+if (RTFW_BUILD_EXPERIMENTAL)
+    add_executable(
+        simcore_thread_violation EXCLUDE_FROM_ALL thread_violation.cpp)
+    target_link_libraries(
+        simcore_thread_violation PRIVATE simcore_platform)
+    target_compile_definitions(
+        simcore_thread_violation PRIVATE RTFW_ENFORCE_NO_RAW_THREADS=1)
+    add_test(
+        NAME simcore_thread_violation_build
+        COMMAND
+            ${CMAKE_COMMAND} --build ${RTFW_PROJECT_BINARY_DIR}
+            --target simcore_thread_violation --config $<CONFIG>)
+    set_tests_properties(simcore_thread_violation_build PROPERTIES
+        TIMEOUT 120
+        WILL_FAIL TRUE)
+endif()
 
 if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    add_executable(jobqueue_fuzz jobqueue_fuzz.cpp)
-    target_link_libraries(jobqueue_fuzz PRIVATE simcore_platform)
-    target_compile_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
-    target_link_options(jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+    if (RTFW_BUILD_EXPERIMENTAL)
+        add_executable(jobqueue_fuzz jobqueue_fuzz.cpp)
+        target_link_libraries(jobqueue_fuzz PRIVATE simcore_platform)
+        target_compile_options(
+            jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+        target_link_options(
+            jobqueue_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+    endif()
 
     # Compile the codec into the fuzz binary so ASan/UBSan instrument the
     # parser itself rather than only the libFuzzer entry point.
     add_executable(snapshot_fuzz
         snapshot_fuzz.cpp
-        ${CMAKE_SOURCE_DIR}/rt/src/snapshot_codec.cpp)
-    target_link_libraries(snapshot_fuzz PRIVATE simcore simcore_core)
+        ${RTFW_PROJECT_SOURCE_DIR}/rt/src/snapshot_codec.cpp)
+    target_include_directories(
+        snapshot_fuzz
+        PRIVATE
+            ${RTFW_PROJECT_SOURCE_DIR}/rt/include
+            ${RTFW_PROJECT_SOURCE_DIR}/core/include
+            ${RTFW_PROJECT_SOURCE_DIR}/include)
     target_compile_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()

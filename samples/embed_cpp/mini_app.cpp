@@ -5,8 +5,8 @@
 #include <iostream>
 #include <string_view>
 
+#include <rt/canonical_bytes.hpp>
 #include <rt/runtime.hpp>
-#include <rt/snapshot.hpp>
 
 namespace {
 

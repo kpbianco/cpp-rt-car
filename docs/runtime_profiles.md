@@ -1,6 +1,6 @@
 # Runtime Profiles
 
-RTFW 1.1 adds a bounded host-side loader for complete `rt::RuntimeConfig`
+RTFW 1.1+ provides a bounded host-side loader for complete `rt::RuntimeConfig`
 profiles. This is an implemented RT0 control-plane surface. It does not make
 profile file I/O an RT-lane operation, discover hardware automatically, or
 turn an autotune result into a latency qualification.
@@ -25,7 +25,7 @@ and JSON with at most 16 nested levels, and is transactional: `config` and
 contract path identify the rejection.
 
 This is a C++ source API. Stable C ABI v8 and the device ABI are unchanged in
-1.1.
+1.2.
 
 ## Schema and compatibility
 

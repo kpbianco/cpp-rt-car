@@ -1,6 +1,6 @@
 # Checked Runtime Profiles
 
-These complete RTFW 1.1 profiles are functional examples:
+These complete RTFW 1.1+ profiles are functional examples:
 
 - `default.json`: two-worker bounded-throughput executor;
 - `default_fast.json`: four-worker bounded-throughput executor;

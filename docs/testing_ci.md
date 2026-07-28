@@ -84,7 +84,7 @@ latency qualification and does not prove the complete product contract.
   provide focused smoke coverage.
 - The named Ubuntu GCC/Clang and Windows MSVC support tuples build and run
   relocated consumers from the exact extracted CPack archives. Pull-request
-  CI also checks the 1.1 support/compatibility contract and creates then
+  CI also checks the 1.2 support/compatibility contract and creates then
   verifies each archive manifest.
 - A tag release waits for all three supported-tuple archive consumers, requires
   exactly nine uniquely named assets, verifies the existing tag, and creates

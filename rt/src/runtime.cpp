@@ -24,10 +24,6 @@ void busy_spin(double milliseconds) {
 
 namespace rt {
 
-core::seconds tick_duration(core::seconds dt) noexcept {
-    return dt; // placeholder passthrough demonstrating strong typing
-}
-
 DemoPipeline build_demo_pipeline(SimCore& sim) {
     auto state = std::make_shared<DemoPipeline::State>();
 

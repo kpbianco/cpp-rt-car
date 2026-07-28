@@ -28,3 +28,7 @@ simcore_app
 # Local analysis artefacts
 results/scaling/
 /reports/characterize/
+
+# Python tooling caches
+__pycache__/
+*.py[cod]

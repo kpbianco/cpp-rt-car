@@ -50,6 +50,7 @@ PINNED_ACTIONS = {
 
 HASHED_CONTRACT_PATHS = {
     ".gitattributes",
+    ".gitignore",
     ".github/workflows/autotune-mapping.yml",
     ".github/workflows/autotune-smoke.yml",
     ".github/workflows/ci.yml",
@@ -60,34 +61,99 @@ HASHED_CONTRACT_PATHS = {
     ".github/workflows/xdma-qualification.yml",
     "CHANGELOG.md",
     "CMakeLists.txt",
+    "CMakePresets.json",
     "LICENSE",
     "README.md",
     "SECURITY.md",
     "VERSION.txt",
     "abi/rtfw_c_abi_v8.exports",
     "abi/rtfw_c_abi_v8.sha256",
+    "cmake/DeterminismTargets.cmake",
     "cmake/rtfwConfig.cmake.in",
+    "configs/README.md",
     "configs/default.json",
     "configs/default_fast.json",
     "configs/default_safe.json",
+    "core/include/core/units.hpp",
     "docs/DOE_AUTOTUNE.md",
+    "docs/architecture.md",
+    "docs/build_tooling.md",
+    "docs/c_abi.md",
+    "docs/compiled_graph.md",
+    "docs/cuda_backend.md",
     "docs/cuda_support_matrix.json",
+    "docs/determinism_replay.md",
+    "docs/devex_governance.md",
+    "docs/device_backend.md",
+    "docs/executor.md",
+    "docs/host_runtime.md",
+    "docs/limp_mode.md",
+    "docs/memory_plan.md",
+    "docs/observability.md",
     "docs/portable_support_matrix.json",
     "docs/product_contract.md",
+    "docs/real_time_hardening.md",
     "docs/real_time_readiness_checklist.md",
     "docs/release_policy.md",
+    "docs/roadmap.md",
     "docs/runtime_profiles.md",
+    "docs/scheduler.md",
+    "docs/security_supply_chain.md",
+    "docs/testing_ci.md",
+    "docs/threat_model.md",
+    "docs/time_platform.md",
+    "docs/xdma_backend.md",
     "docs/xdma_support_matrix.json",
     "include/rtfw/version.h",
+    "include/simcore/SimCore.hpp",
+    "profiles/README.md",
     "profiles/example-linux.json",
     "rt/include/rt/c_api.h",
+    "rt/include/rt/canonical_bytes.hpp",
+    "rt/include/rt/config.hpp",
+    "rt/include/rt/cuda_backend.hpp",
+    "rt/include/rt/cuda_driver.hpp",
+    "rt/include/rt/device.hpp",
     "rt/include/rt/device_abi.h",
+    "rt/include/rt/graph.hpp",
+    "rt/include/rt/mock_device.hpp",
+    "rt/include/rt/observability_export.hpp",
     "rt/include/rt/profile.hpp",
     "rt/include/rt/runtime.hpp",
+    "rt/include/rt/snapshot.hpp",
+    "rt/include/rt/status.hpp",
+    "rt/include/rt/version.hpp",
+    "rt/include/rt/xdma_backend.hpp",
+    "rt/include/rt/xdma_linux.hpp",
+    "rt/src/host_runtime.cpp",
+    "rt/src/runtime.cpp",
+    "rt/src/runtime_compat.cpp",
     "rt/src/runtime_profile.cpp",
+    "rt/src/snapshot_codec.cpp",
+    "samples/CMakeLists.txt",
+    "samples/embed_cpp/mini_app.cpp",
     "src/runtime_profile_demo.cpp",
+    "tests/CMakeLists.txt",
+    "tests/add_subdirectory_consumer/CMakeLists.txt",
+    "tests/add_subdirectory_consumer/main.cpp",
     "tests/package_consumer/CMakeLists.txt",
+    "tests/package_consumer/c_consumer.c",
+    "tests/package_consumer/compat_consumer.cpp",
+    "tests/package_consumer/cpp_consumer.cpp",
+    "tests/package_consumer/cuda_consumer.cpp",
+    "tests/package_consumer/cuda_driver_consumer.cpp",
+    "tests/package_consumer/package_contract.cmake",
     "tests/package_consumer/profile_consumer.cpp",
+    "tests/package_consumer/pure_c/CMakeLists.txt",
+    "tests/package_consumer/pure_c/main.c",
+    "tests/package_consumer/run_pure_c.cmake",
+    "tests/package_consumer/warning_consumer.cpp",
+    "tests/package_consumer/xdma_consumer.cpp",
+    "tests/package_consumer/xdma_linux_consumer.cpp",
+    "tests/determinism_artifact.cpp",
+    "tests/test_release_tools.py",
+    "tests/test_determinism_replay.cpp",
+    "tests/test_rt_pipeline.cpp",
     "tests/runtime_profile_tests.cpp",
     "tools/autotune/config.schema.json",
     "tools/autotune/install_profile.py",
@@ -101,6 +167,7 @@ HASHED_CONTRACT_PATHS = {
     "tools/autotune/spec_smoke.yaml",
     "tools/autotune/validate_config_mapping.py",
     "tools/check_c_abi.py",
+    "tools/check_docs_contract.py",
     "tools/check_hardware_evidence.py",
     "tools/check_release_contract.py",
     "tools/extract_release_archive.py",
@@ -247,6 +314,7 @@ def validate_support_matrix(
         required_surfaces = {
             "c_shared",
             "c_static",
+            "runtime",
             "cpp_runtime",
             "runtime_profiles",
             "relocated_install",
@@ -342,8 +410,8 @@ def validate_release_contract(
     version: str,
     errors: list[str],
 ) -> None:
-    if contract.get("schema_version") != 1:
-        errors.append("release contract: schema_version must be 1")
+    if contract.get("schema_version") != 2:
+        errors.append("release contract: schema_version must be 2")
     if contract.get("project") != "rtfw":
         errors.append("release contract: project must be rtfw")
     if contract.get("release_version") != version:
@@ -369,13 +437,16 @@ def validate_release_contract(
     cpp_api = contract.get("cpp_api")
     if not isinstance(cpp_api, dict) or cpp_api.get("binary_abi") is not False:
         errors.append("release contract: C++ binary ABI must be explicitly false")
-    elif (
-        cpp_api.get("compatibility") != "source_within_1.x"
-        or cpp_api.get("entrypoints") != [
+    elif cpp_api != {
+        "compatibility": "source_within_1.x",
+        "entrypoints": [
             "rt/include/rt/runtime.hpp",
             "rt/include/rt/profile.hpp",
-        ]
-    ):
+        ],
+        "preferred_target": "rtfw::runtime",
+        "compatibility_target": "rtfw::simcore_rt",
+        "binary_abi": False,
+    }:
         errors.append("release contract: C++ source compatibility mismatch")
 
     package = contract.get("cmake_package")
@@ -392,6 +463,7 @@ def validate_release_contract(
     required_always_components = {
         "c_shared",
         "c_static",
+        "runtime",
         "cpp_runtime",
         "cuda_backend",
         "xdma_backend",
@@ -400,9 +472,59 @@ def validate_release_contract(
         "cuda_driver",
         "xdma_linux",
     }
+    required_headers = {
+        "core/units.hpp",
+        "rt/c_api.h",
+        "rt/canonical_bytes.hpp",
+        "rt/config.hpp",
+        "rt/cuda_backend.hpp",
+        "rt/device.hpp",
+        "rt/device_abi.h",
+        "rt/graph.hpp",
+        "rt/mock_device.hpp",
+        "rt/observability_export.hpp",
+        "rt/profile.hpp",
+        "rt/runtime.hpp",
+        "rt/status.hpp",
+        "rt/version.hpp",
+        "rt/xdma_backend.hpp",
+        "rtfw/version.h",
+    }
+    required_conditional_headers = {
+        "cuda_driver": ["rt/cuda_driver.hpp"],
+        "xdma_linux": ["rt/xdma_linux.hpp"],
+    }
+    required_forbidden_targets = {
+        "rtfw::experimental",
+        "rtfw::simcore",
+        "rtfw::simcore_core",
+        "rtfw::simcore_platform",
+    }
+    required_forbidden_prefixes = {
+        "api/",
+        "gpu/",
+        "hal/",
+        "simcore/",
+        "rt/arch.hpp",
+        "rt/crashdump.hpp",
+        "rt/fiber_pool.hpp",
+        "rt/fixed_point.hpp",
+        "rt/numa.hpp",
+        "rt/numerics.hpp",
+        "rt/plugin_api.h",
+        "rt/plugin_manager.hpp",
+        "rt/prng.hpp",
+        "rt/scheduler.hpp",
+        "rt/snapshot.hpp",
+        "rt/watchdog.hpp",
+    }
     if (
         not isinstance(package, dict)
         or package.get("compatibility") != "same_major"
+        or package.get("preferred_component") != "runtime"
+        or package.get("preferred_target") != "rtfw::runtime"
+        or package.get("compatibility_component") != "cpp_runtime"
+        or package.get("compatibility_target") != "rtfw::simcore_rt"
         or not isinstance(always_components, list)
         or not all(
             isinstance(value, str)
@@ -415,6 +537,15 @@ def validate_release_contract(
             for value in optional_components
         )
         or set(optional_components) != required_optional_components
+        or set(package.get("default_headers", [])) != required_headers
+        or package.get("conditional_headers") != required_conditional_headers
+        or set(package.get("forbidden_default_targets", []))
+        != required_forbidden_targets
+        or set(package.get("forbidden_default_header_prefixes", []))
+        != required_forbidden_prefixes
+        or package.get("experimental_built_by_default") is not False
+        or package.get("experimental_installed_by_default") is not False
+        or package.get("install_optional_components") != ["experimental"]
     ):
         errors.append("release contract: CMake component contract mismatch")
 
@@ -457,6 +588,14 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         errors.append("VERSION.txt: expected canonical MAJOR.MINOR.PATCH")
     elif parsed[0] < 1:
         errors.append("VERSION.txt: portable release contract requires major >= 1")
+
+    license_path = root / "LICENSE"
+    if (
+        not license_path.is_file()
+        or sha256(license_path)
+        != "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    ):
+        errors.append("LICENSE: canonical Apache-2.0 digest mismatch")
 
     contract = load_json(
         root,
@@ -557,9 +696,27 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "docs/portable_support_matrix.json",
         "docs/release_policy.md",
         "release/rtfw-release-contract.json",
+        "add_library(rtfw::runtime ALIAS rtfw_runtime)",
+        "add_library(rtfw::rtfw ALIAS rtfw_shared)",
+        "add_library(rtfw::rtfw_static ALIAS rtfw_static)",
+        "add_library(rtfw::simcore_rt ALIAS simcore_rt)",
+        "EXPORT_NAME runtime",
+        "RTFW_BUILD_TESTS",
+        "RTFW_BUILD_EXPERIMENTAL",
+        "RTFW_INSTALL_EXPERIMENTAL",
+        "RTFW_CXX_RUNTIME_LIBRARIES",
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>",
+        "if (RTFW_TOP_LEVEL)",
+        "rtfwCudaTargets",
+        "rtfwXdmaTargets",
     ):
         if token not in cmake:
             errors.append(f"CMakeLists.txt: missing release token {token!r}")
+    if "$<INSTALL_INTERFACE:include>" in cmake:
+        errors.append(
+            "CMakeLists.txt: hard-coded installed include directory escaped "
+            "the configurable package layout"
+        )
 
     ci = load_text(root, ".github/workflows/ci.yml", errors)
     if "windows-latest" in ci:
@@ -584,6 +741,10 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "Extract verified archive to relocated prefix",
         "tools/extract_release_archive.py",
         "CrossInstanceDeviceStateIsIsolated",
+        "tests/add_subdirectory_consumer",
+        "RTFW_EXPECT_TESTS=ON",
+        "CMAKE_INSTALL_INCLUDEDIR=sdk/include",
+        "CMAKE_INSTALL_DATADIR=sdk/data",
     ):
         if token not in ci:
             errors.append(f"CI: missing portable release gate {token!r}")
@@ -710,6 +871,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
             "tools/release_manifest.py verify",
             "evidence-manifest.json",
             "${{ github.sha }}",
+            f"RTFW_TEST_{'CUDA_DRIVER' if backend == 'cuda' else 'XDMA_LINUX'}=ON",
         ):
             if token not in workflow:
                 errors.append(
@@ -729,18 +891,100 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     for token in (
         "c_shared",
         "c_static",
+        "runtime",
         "cpp_runtime",
         "rtfw_consumer_profile",
         "cuda_backend",
         "xdma_backend",
+        "rtfw::c_shared",
+        "rtfw::c_static",
+        "rtfw::runtime",
         "rtfw::rtfw",
         "rtfw::rtfw_static",
         "rtfw::simcore_rt",
         "rtfw::cuda_backend",
         "rtfw::xdma_backend",
+        "installed_pure_c_project",
+        "RTFW_TEST_CUDA_DRIVER",
+        "RTFW_TEST_XDMA_LINUX",
+        "rtfw::cuda_driver",
+        "rtfw::xdma_linux",
     ):
         if token not in package_consumer:
             errors.append(f"package consumer: missing {token!r}")
+
+    package_config = load_text(
+        root,
+        "cmake/rtfwConfig.cmake.in",
+        errors,
+    )
+    for token in (
+        "rtfw_FIND_REQUIRED_cuda_driver",
+        "find_dependency(CUDAToolkit)",
+        "find_package(CUDAToolkit QUIET)",
+        "if (CUDAToolkit_FOUND AND TARGET CUDA::cuda_driver)",
+        "RTFW_DATA_DIR",
+    ):
+        if token not in package_config:
+            errors.append(
+                f"package config: missing optional-dependency gate {token!r}"
+            )
+
+    package_contract = load_text(
+        root,
+        "tests/package_consumer/package_contract.cmake",
+        errors,
+    )
+    for token in (
+        "expected_headers",
+        "INTERFACE_COMPILE_OPTIONS",
+        "INTERFACE_COMPILE_DEFINITIONS",
+        "cxx_std_20",
+        "rtfw::experimental",
+        "RTFW_DATA_DIR",
+        "rtfw::cuda_driver",
+        "rtfw::xdma_linux",
+        "Installed Apache-2.0 license digest changed",
+        "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    ):
+        if token not in package_contract:
+            errors.append(f"package contract: missing {token!r}")
+
+    compatibility_consumer = load_text(
+        root,
+        "tests/package_consumer/compat_consumer.cpp",
+        errors,
+    )
+    if (
+        "&rt::build_demo_pipeline" not in compatibility_consumer
+        or "&rt::tick_duration" not in compatibility_consumer
+        or "volatile legacy_pipeline_factory" not in compatibility_consumer
+    ):
+        errors.append(
+            "package compatibility consumer: legacy facade is not "
+            "optimization-resistant link-probed"
+        )
+
+    add_subdirectory_consumer = load_text(
+        root,
+        "tests/add_subdirectory_consumer/CMakeLists.txt",
+        errors,
+    )
+    for token in (
+        "set(ENABLE_TESTS ON",
+        "rtfw::runtime",
+        "rtfw::rtfw",
+        "rtfw::rtfw_static",
+        "rtfw::simcore_rt",
+        "RTFW_EXPECT_TESTS",
+        "test_cabi_dlopen",
+        "package_source",
+        "simcore_tests",
+    ):
+        if token not in add_subdirectory_consumer:
+            errors.append(
+                f"add_subdirectory consumer: missing isolation gate {token!r}"
+            )
 
     changelog = load_text(root, "CHANGELOG.md", errors)
     if f"## {version}" not in changelog:

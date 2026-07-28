@@ -396,7 +396,7 @@ public:
     template<typename... Args>
     void log(Level l, std::string_view fmt, Args&&... args) {
 #ifndef LOG_ENABLED
-        (void)l; (void)fmt; (void)sizeof...(Args);
+        (void)l; (void)fmt; ((void)args, ...);
 #else
         if (!willLog(l)) return;
         writeRecord(l, format(fmt, std::forward<Args>(args)...));

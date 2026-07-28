@@ -1,6 +1,6 @@
 # Versioned Observability Contract
 
-Release 1.1 retains the M6 RT0 observability surface for `rt::Runtime` with M8
+Release 1.2 retains the M6 RT0 observability surface for `rt::Runtime` with M8
 device records.
 Emission is bounded and allocation-free on runtime lanes; inspection and
 serialization are explicit non-RT host operations. This is a telemetry

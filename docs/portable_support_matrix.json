@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "runtime_version": "1.1.0",
+  "runtime_version": "1.2.0",
   "contract": "Portable RT0 functionality only; no latency or hard-real-time claim.",
   "support_policy": "docs/release_policy.md",
   "supported_tuples": [
@@ -18,6 +18,7 @@
       "validated_surfaces": [
         "c_shared",
         "c_static",
+        "runtime",
         "cpp_runtime",
         "runtime_profiles",
         "relocated_install",
@@ -40,6 +41,7 @@
       "validated_surfaces": [
         "c_shared",
         "c_static",
+        "runtime",
         "cpp_runtime",
         "runtime_profiles",
         "relocated_install",
@@ -62,6 +64,7 @@
       "validated_surfaces": [
         "c_shared",
         "c_static",
+        "runtime",
         "cpp_runtime",
         "runtime_profiles",
         "relocated_install",
@@ -82,7 +85,7 @@
     },
     {
       "platform": "macOS",
-      "reason": "Export-list support exists, but no continuous build/test tuple is declared for 1.1."
+      "reason": "Export-list support exists, but no continuous build/test tuple is declared for 1.2."
     }
   ],
   "separate_qualification": {

@@ -63,6 +63,7 @@ jobs:
           cmake -S . -B build-xdma \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DENABLE_TESTS=ON \
+            -DRTFW_BUILD_EXPERIMENTAL=OFF \
             -DRTFW_ENABLE_XDMA=ON \
             -DSIM_WERROR=ON
       - name: Build portable gate and qualification tool
@@ -77,6 +78,27 @@ jobs:
             -C RelWithDebInfo \
             --output-on-failure \
             -R xdma_backend
+      - name: Install and consume the XDMA package component
+        run: |
+          cmake --build build-xdma \
+            --config RelWithDebInfo \
+            --parallel 2
+          cmake --install build-xdma \
+            --config RelWithDebInfo \
+            --prefix "${RUNNER_TEMP}/rtfw-xdma"
+          cmake \
+            -S tests/package_consumer \
+            -B build-xdma-consumer \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/rtfw-xdma" \
+            -DRTFW_TEST_XDMA_LINUX=ON
+          cmake --build build-xdma-consumer \
+            --config RelWithDebInfo \
+            --parallel 2
+          ctest --test-dir build-xdma-consumer \
+            -C RelWithDebInfo \
+            --output-on-failure \
+            -R installed_xdma_linux
       - name: Capture deployment identity
         env:
           RTFW_XDMA_PCI_BDF: ${{ inputs.pci_bdf }}

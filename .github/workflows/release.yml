@@ -59,6 +59,7 @@ jobs:
           cmake -S . -B build-release
           -DCMAKE_BUILD_TYPE=Release
           -DENABLE_TESTS=OFF
+          -DRTFW_BUILD_EXPERIMENTAL=OFF
           -DSIM_WERROR=ON
           ${{ matrix.cmake_args }}
       - name: Build release package

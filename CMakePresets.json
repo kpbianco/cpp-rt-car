@@ -14,6 +14,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_TESTS": "ON",
+        "RTFW_BUILD_EXPERIMENTAL": "ON",
         "SIM_DOWNLOAD_GTEST": "OFF"
       }
     },
@@ -24,6 +25,7 @@
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "RTFW_BUILD_EXPERIMENTAL": "OFF",
         "SIM_ENABLE_LTO": "ON",
         "SIM_LTO_THIN": "ON"
       }

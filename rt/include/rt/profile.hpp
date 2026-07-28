@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <string_view>
 
+#include "rt/config.hpp"
+// Retain the 1.x transitive umbrella contract. New code that only needs
+// configuration types should include <rt/config.hpp> directly.
 #include "rt/runtime.hpp"
 
 namespace rt {

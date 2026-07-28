@@ -16,6 +16,29 @@ namespace {
 
 constexpr std::size_t kFrameCount = 300;
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+rt::DemoPipeline build_legacy_pipeline(SimCore& sim) {
+  return rt::build_demo_pipeline(sim);
+}
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 } // namespace
 
 TEST(RTPipeline, EndToEndSmokeTest) {
@@ -38,7 +61,7 @@ TEST(RTPipeline, EndToEndSmokeTest) {
   metrics::Registry registry;
   sim.setMetrics(&registry);
 
-  auto pipeline = rt::build_demo_pipeline(sim);
+  auto pipeline = build_legacy_pipeline(sim);
   ASSERT_TRUE(pipeline.valid());
 
   const auto workerThreads = pool.thread_count();

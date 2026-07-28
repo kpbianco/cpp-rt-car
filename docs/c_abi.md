@@ -1,7 +1,7 @@
 # Stable C ABI
 
 Release 0.12 introduced ABI version 8, the first stable C ABI for RTFW;
-release 1.1 retains it. The stability promise applies to the symbols and C
+release 1.2 retains it. The stability promise applies to the symbols and C
 declarations represented by
 `abi/rtfw_c_abi_v8.exports`, `rt/include/rt/c_api.h`, and
 `rt/include/rt/device_abi.h`. It does not turn the C++ API into a binary ABI,
@@ -47,9 +47,10 @@ The installed CMake package provides these components and imported targets:
 
 | Component | Imported target | Contract |
 | --- | --- | --- |
-| `c_shared` | `rtfw::rtfw` | Stable C ABI in the shared library |
-| `c_static` | `rtfw::rtfw_static` | Same C source API, statically linked |
-| `cpp_runtime` | `rtfw::simcore_rt` | C++20 source API; no cross-version C++ ABI promise |
+| `c_shared` | `rtfw::c_shared` | Stable C ABI in the shared library; `rtfw::rtfw` is the 1.x compatibility name |
+| `c_static` | `rtfw::c_static` | Same C source API, statically linked; `rtfw::rtfw_static` is the compatibility name |
+| `runtime` | `rtfw::runtime` | Preferred C++20 source API; no cross-version C++ ABI promise |
+| `cpp_runtime` | `rtfw::simcore_rt` | 1.x compatibility component/target for the supported C++ API and deprecated legacy façade |
 | `cuda_backend` | `rtfw::cuda_backend` | Portable CUDA state machine |
 | `cuda_driver` | `rtfw::cuda_driver` | Optional toolkit-dependent adapter |
 | `xdma_backend` | `rtfw::xdma_backend` | Portable XDMA state machine |
@@ -60,8 +61,10 @@ the C++ source package therefore have deliberately separate compatibility
 policies: C ABI v8 is the binary boundary, while target C++ declarations are
 source-compatible and require recompilation.
 `tests/package_consumer` is configured outside the source build against a
-relocated install tree on Linux and Windows and runs shared C, static C, and
-C++ consumers.
+relocated install tree on Linux and Windows. It runs preferred and compatibility
+C/C++ targets, independently consumes portable backends, compiles every
+installed header alone, rejects research headers/targets and producer policy,
+and verifies the installed Apache-2.0 digest.
 
 ## Structure, ownership, and errors
 

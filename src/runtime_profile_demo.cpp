@@ -159,6 +159,24 @@ bool parse_duration(
     return true;
 }
 
+std::string environment_profile_path() {
+#if defined(_MSC_VER)
+    char* value = nullptr;
+    std::size_t size = 0;
+    if (_dupenv_s(&value, &size, "RTFW_PROFILE") != 0 ||
+        value == nullptr) {
+        std::free(value);
+        return {};
+    }
+    std::string result(value);
+    std::free(value);
+    return result;
+#else
+    const char* value = std::getenv("RTFW_PROFILE");
+    return value != nullptr ? std::string(value) : std::string{};
+#endif
+}
+
 bool parse_options(int argc, char** argv, Options& options) {
     bool profile_from_cli = false;
     for (int index = 1; index < argc; ++index) {
@@ -218,8 +236,8 @@ bool parse_options(int argc, char** argv, Options& options) {
     }
 
     if (!profile_from_cli) {
-        const char* environment_profile = std::getenv("RTFW_PROFILE");
-        if (environment_profile != nullptr && environment_profile[0] != '\0') {
+        const auto environment_profile = environment_profile_path();
+        if (!environment_profile.empty()) {
             options.profile_path = environment_profile;
         }
     }

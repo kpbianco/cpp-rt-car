@@ -13,8 +13,10 @@
 #include <utility>
 
 #include "core/units.hpp"
+#include "rt/config.hpp"
 #include "rt/device.hpp"
 #include "rt/graph.hpp"
+#include "rt/status.hpp"
 #include "rt/version.hpp"
 
 class SimCore;
@@ -40,12 +42,12 @@ struct Capabilities {
 // Query runtime capabilities
 Capabilities query_capabilities() noexcept;
 
-// Example function using strong types
+// Deprecated 1.x compatibility shim. New code should use the typed duration
+// fields on HostFrameContext and PeriodicRunConfig directly.
+[[deprecated("use the runtime frame/period duration fields directly")]]
 core::seconds tick_duration(core::seconds dt) noexcept;
 
-inline constexpr std::uint32_t runtime_config_schema_version = 7;
 inline constexpr std::uint32_t observability_schema_version = 2;
-inline constexpr std::size_t observability_identifier_capacity = 64;
 inline constexpr std::uint32_t observability_metadata_size = 184;
 inline constexpr std::uint32_t checkpoint_schema_version = 1;
 inline constexpr std::uint32_t input_log_schema_version = 1;
@@ -57,46 +59,6 @@ enum class RuntimeState : std::uint8_t {
     finalized,
     running,
     stopped,
-};
-
-enum class Status : std::int32_t {
-    ok = 0,
-    invalid_argument = -1,
-    invalid_state = -2,
-    invalid_config = -3,
-    capacity_exceeded = -4,
-    callback_failed = -5,
-    resource_exhausted = -6,
-    internal_error = -7,
-    invalid_handle = -8,
-    graph_cycle = -9,
-    resource_conflict = -10,
-    queue_full = -11,
-    scratch_exhausted = -12,
-    platform_preflight_failed = -13,
-    clock_failure = -14,
-    invalid_artifact = -15,
-    incompatible_artifact = -16,
-    device_queue_full = -17,
-    device_timeout = -18,
-    device_error = -19,
-    device_lost = -20,
-    device_canceled = -21,
-    device_reset_required = -22,
-    incompatible_abi = -23,
-};
-
-[[nodiscard]] const char* status_message(Status status) noexcept;
-
-enum class NumericalMode : std::uint8_t {
-    precise,
-    fused_multiply_add,
-};
-
-enum class ExecutorPolicy : std::uint8_t {
-    static_deterministic,
-    bounded_throughput,
-    host_adapter,
 };
 
 /*
@@ -140,23 +102,6 @@ struct HostExecutorAdapter {
     std::size_t queue_capacity = 0;
     HostExecutorSubmit submit = nullptr;
     HostExecutorTryExecuteOne try_execute_one = nullptr;
-};
-
-enum class OverloadPolicy : std::uint8_t {
-    reject_submission,
-    fail_frame,
-};
-
-enum class PlatformPreflightMode : std::uint8_t {
-    disabled,
-    strict,
-};
-
-enum class DeterminismTier : std::uint8_t {
-    unspecified = 0,
-    schedule_independent = 1,
-    reproducible_build = 2,
-    portable_deterministic = 3,
 };
 
 enum class PlatformCheckId : std::uint8_t {
@@ -272,56 +217,6 @@ private:
 
     friend class detail::Executor;
 };
-
-struct RuntimeConfig {
-    std::size_t callback_capacity = 64;
-    std::size_t scratch_bytes = 64 * 1024;
-    std::size_t trace_capacity = 1024;
-    NumericalMode numerical_mode = NumericalMode::precise;
-    ExecutorPolicy executor_policy = ExecutorPolicy::static_deterministic;
-    std::size_t worker_count = 1;
-    std::size_t executor_queue_capacity = 1024;
-    std::size_t scratch_alignment = 64;
-    std::size_t task_scratch_bytes = 4 * 1024;
-    std::size_t task_scratch_slots = 1024;
-    std::size_t memory_budget_bytes = 256 * 1024 * 1024;
-    OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
-    std::uint64_t watchdog_timeout_ns = 0;
-    std::uint32_t watchdog_max_degradation_level = 0;
-    PlatformPreflightMode platform_preflight_mode =
-        PlatformPreflightMode::disabled;
-    // D1 is an explicit application contract: only registered canonical state
-    // is compared, and callbacks must obey the restrictions documented in
-    // docs/determinism_replay.md. D2 and D3 are reserved and rejected.
-    DeterminismTier determinism_tier = DeterminismTier::unspecified;
-    std::size_t state_capacity = 64;
-    std::size_t snapshot_max_bytes = 1024 * 1024;
-    std::size_t replay_input_capacity = 4096;
-    std::size_t input_log_max_bytes = 1024 * 1024;
-    std::size_t device_backend_capacity = 1;
-    std::size_t device_buffer_capacity = 64;
-    std::size_t device_outstanding_capacity = 64;
-    std::size_t device_completion_batch = 16;
-    // Stable caller-supplied provenance copied into every observability
-    // snapshot. IDs use [A-Za-z0-9._:/@-] and must be NUL terminated.
-    std::array<char, observability_identifier_capacity> workload_id{
-        'u', 'n', 's', 'p', 'e', 'c', 'i', 'f', 'i', 'e', 'd', '\0'};
-};
-
-// Applies one strict schema key to a typed configuration. The supported keys
-// are callback_capacity, scratch_bytes, trace_capacity, numerical_mode,
-// executor_policy, worker_count, executor_queue_capacity, scratch_alignment,
-// task_scratch_bytes, task_scratch_slots, memory_budget_bytes,
-// overload_policy, watchdog_timeout_ns, watchdog_max_degradation_level,
-// platform_preflight_mode, determinism_tier, state_capacity,
-// snapshot_max_bytes, replay_input_capacity, input_log_max_bytes,
-// device_backend_capacity, device_buffer_capacity,
-// device_outstanding_capacity, device_completion_batch, and workload_id.
-// Unknown keys and partially parsed values are rejected.
-[[nodiscard]] Status set_runtime_config_value(
-    RuntimeConfig& config,
-    std::string_view key,
-    std::string_view value) noexcept;
 
 class RuntimeClock {
 public:
@@ -975,6 +870,8 @@ private:
     friend DemoPipeline build_demo_pipeline(SimCore& sim);
 };
 
+[[deprecated(
+    "legacy SimCore demo; use rt::Runtime and the rtfw::runtime target")]]
 DemoPipeline build_demo_pipeline(SimCore& sim);
 
 inline std::uint64_t DemoPipeline::loadCounter(const std::atomic<std::uint64_t>& counter) const {
