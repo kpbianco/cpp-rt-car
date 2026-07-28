@@ -39,6 +39,7 @@
     "XDMA": "candidate"
   },
   "contract_sha256": {
+    ".gitattributes": "d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c",
     ".github/workflows/autotune-mapping.yml": "130b5c76c6ae659d00a1b67c28bc4314db7ca9925e6b94dc4891a8760ee989f5",
     ".github/workflows/autotune-smoke.yml": "aba2383c10d5df50c042b46ff46550dc70433a035044ad28caadc712b67a2b8f",
     ".github/workflows/ci.yml": "edeaff004a469dedb32ab05b0249c0d98f88d681feb37c80b128af4d85598940",
@@ -69,7 +70,7 @@
     "tests/package_consumer/CMakeLists.txt": "dd963b678b4a090ededdd1ab4342fdaaa8fa26641b4124e2e62ab8d5f8678cdb",
     "tools/check_c_abi.py": "2aa2657320256c74163f8293f357cb8140f65e7db13c98ed0b9523f2aebec22b",
     "tools/check_hardware_evidence.py": "b284d5341cb443ad4041858a25e3c0f8cf13c1cf176bb05fb0f56b47c17ad6c4",
-    "tools/check_release_contract.py": "13bbc6c8f1ac7b606422e6ab966214f539ada847973bab475245dd7dc22c168c",
+    "tools/check_release_contract.py": "efbadf5030eb18d57c452bfb7859919a52d0b49fbeb72fe2d12c427ac5c583fd",
     "tools/extract_release_archive.py": "9d9675afb6c08e76c320ecf71d2098478523443d850b69e45369504a055561e2",
     "tools/release_manifest.py": "be588f6823f8faa435fd5b77a888e71bdf2f9188c9ba5ac05b4e777a79e2cb96",
     "tools/stage_release_artifacts.py": "28d1f9ee40b6aa2634083ba2e288f0cc3b7926248ccbae2628e6f34ab7a7bb0e",

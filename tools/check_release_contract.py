@@ -49,6 +49,7 @@ PINNED_ACTIONS = {
 }
 
 HASHED_CONTRACT_PATHS = {
+    ".gitattributes",
     ".github/workflows/autotune-mapping.yml",
     ".github/workflows/autotune-smoke.yml",
     ".github/workflows/ci.yml",
