@@ -30,6 +30,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M10 | Candidate | Xilinx Linux XDMA AXI-MM backend; hardware qualification pending |
 | M11 | Complete | Stable ABI, package/export cleanup, and engine adapters |
 | M12 | Complete | Portable 1.0 release contract; deployment qualification remains separate |
+| M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 
 ## M0 — Product contract and truth reset
 
@@ -399,3 +400,41 @@ gates. PREEMPT_RT deployment records are also reviewed separately from portable
 1.0. The exact release and support promise is in
 [the release policy](release_policy.md) and
 [portable support matrix](portable_support_matrix.json).
+
+## M13 — Strict runtime profiles and operational autotune
+
+Delivered in 1.1:
+
+- installed `<rt/profile.hpp>` with a 64 KiB, allocation-free,
+  transactional UTF-8/JSON parser and bounded diagnostics;
+- complete resolved profiles containing all 25 runtime-config schema-v7
+  fields, explicit envelope/runtime compatibility, and optional opaque
+  experiment provenance;
+- fail-closed rejection of malformed input, unknown/duplicate contract keys,
+  missing fields, invalid types/cross-field values, incompatible versions, and
+  trailing bytes;
+- `rtfw_runtime_demo`, which loads a profile or `RTFW_PROFILE`, builds four
+  independent physics systems plus a dependency barrier on `rt::Runtime`, and
+  reports direct frame/deadline/executor metrics;
+- an operational production autotune spec restricted to supported
+  `worker_count`, `executor_policy`, and `executor_queue_capacity` factors;
+- generated default/example profiles, content-derived profile IDs, schema and
+  mapping checks, strict parser tests, and a mandatory generated-profile C++
+  round trip in CI;
+- unchanged stable C ABI v8, device ABI, and Apache-2.0 license.
+
+Exit gates:
+
+- parsing succeeds without allocation and never partially updates outputs;
+- every runtime field is resolved and validated by the authoritative typed
+  runtime contract;
+- incompatible schema/runtime versions and negative parser mutations fail
+  closed with bounded diagnostics;
+- generated factor changes reach the effective `RuntimeConfig`;
+- the real target-runtime demo accepts a generated profile and emits the
+  metrics consumed by `run_one.py`;
+- documentation does not convert autotune output into an RT1, RT2, CUDA, XDMA,
+  or portable latency claim.
+
+The profile format and precedence rules are in
+[the runtime profile contract](runtime_profiles.md).

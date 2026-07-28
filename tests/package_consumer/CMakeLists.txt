@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(rtfw_package_consumer LANGUAGES C CXX)
 
 find_package(
-    rtfw 1.0 CONFIG REQUIRED
+    rtfw 1.1 CONFIG REQUIRED
     COMPONENTS
         c_shared
         c_static
@@ -29,6 +29,13 @@ target_link_libraries(
         rtfw::cuda_backend
         rtfw::xdma_backend)
 
+add_executable(rtfw_consumer_profile profile_consumer.cpp)
+target_compile_features(rtfw_consumer_profile PRIVATE cxx_std_20)
+target_link_libraries(
+    rtfw_consumer_profile
+    PRIVATE
+        rtfw::simcore_rt)
+
 if (WIN32)
     add_custom_command(
         TARGET rtfw_consumer_shared
@@ -43,3 +50,4 @@ enable_testing()
 add_test(NAME installed_c_shared COMMAND rtfw_consumer_shared)
 add_test(NAME installed_c_static COMMAND rtfw_consumer_static)
 add_test(NAME installed_cpp_runtime COMMAND rtfw_consumer_cpp)
+add_test(NAME installed_cpp_profile COMMAND rtfw_consumer_profile)

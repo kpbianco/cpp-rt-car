@@ -1,6 +1,6 @@
 # Xilinx XDMA Backend Candidate and Qualification Contract
 
-RTFW 1.0 contains the M10 XDMA backend candidate for one deliberately narrow
+RTFW 1.1 contains the M10 XDMA backend candidate for one deliberately narrow
 stack:
 
 - x86-64 Linux;
@@ -192,4 +192,4 @@ M10 can move from Candidate to Complete only after a declared tuple records:
   recovery evidence;
 - raw latency decomposition and an explicit reviewed pass/fail record.
 
-No tuple has completed those gates in the 1.0.0 support matrix.
+No tuple has completed those gates in the 1.1.0 support matrix.

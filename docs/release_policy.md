@@ -1,6 +1,6 @@
 # Release and Compatibility Policy
 
-RTFW 1.0 is a portable RT0 runtime release. It supports the named build and
+RTFW 1.1 is a portable RT0 runtime release. It supports the named build and
 test tuples in [the portable support matrix](portable_support_matrix.json).
 Passing those gates establishes functional behavior and bounded-capacity API
 semantics; it does not establish a latency bound, RT1 measurement result, RT2
@@ -24,9 +24,10 @@ domains. A package-major change does not silently change any other domain.
 | Surface | 1.x promise |
 | --- | --- |
 | C ABI v8 | Stable binary interface represented by the v8 headers, fingerprint, export allowlist, and SONAME |
-| Target C++ runtime | Source compatibility for public declarations reachable from `rt/runtime.hpp`; recompilation is required and no C++ binary ABI is promised |
+| Target C++ runtime | Source compatibility for public declarations reachable from `rt/runtime.hpp` and `rt/profile.hpp`; recompilation is required and no C++ binary ABI is promised |
 | Installed CMake package | Same-major package discovery, component names, and imported target names remain compatible |
 | Artifact formats | Checkpoint/input-log readers retain explicit schema validation; incompatible formats require a new schema |
+| Runtime profiles | Profile envelope schema 1 and runtime-config schema 7 retain fail-closed compatibility checks; incompatible formats require a new schema |
 | Observability | Existing schema-v2 IDs and meanings are retained; additions require versioned review |
 | Optional CUDA/XDMA adapters | Candidate source APIs until a separately documented stability milestone |
 | Legacy `SimCore`, scheduler, plugin, fiber, and utility surfaces | Experimental and outside the 1.x compatibility promise |
@@ -48,7 +49,7 @@ allowlist, fingerprint, and compatibility test; the v8 manifest is immutable.
 - **Experimental** — no compatibility or support commitment.
 
 Only entries in `supported_tuples` in the portable matrix are supported for
-1.0. The tuple covers compiler/build/runtime functionality at RT0. Application
+1.1. The tuple covers compiler/build/runtime functionality at RT0. Application
 callbacks, host job systems, allocators, operating-system policy, drivers, and
 hardware remain part of the deployment being evaluated.
 
@@ -90,7 +91,7 @@ archive and checksum files.
 
 ## Qualification boundary
 
-Portable 1.0 completion does not promote M9 or M10 and does not create an RT2
+Portable 1.1 completion does not promote M9 or M10 and does not create an RT2
 record. PREEMPT_RT, CUDA, and XDMA evidence is admitted only through the
 versioned matrices and procedures linked from the
 [real-time readiness checklist](real_time_readiness_checklist.md),
@@ -106,6 +107,6 @@ support matrix.
 Supported release lines and reporting instructions are in
 [the repository security policy](../SECURITY.md). Release checksums detect
 artifact corruption or substitution only when the manifest itself is obtained
-from a trusted channel. RTFW 1.0 does not claim signed releases,
+from a trusted channel. RTFW 1.1 does not claim signed releases,
 bit-for-bit-reproducible builds, plugin isolation, or safe execution of
 untrusted native callbacks.

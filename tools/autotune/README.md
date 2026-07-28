@@ -1,63 +1,88 @@
 # Autotune Tooling
 
-This directory implements a design-of-experiments, scoring, search, validation,
-and reporting pipeline. `spec_smoke.yaml` plus `smoke_app.py` are the supported
-end-to-end test target in the current repository.
+This directory implements design-of-experiments generation, scoring, search,
+robustness validation, persistence, analysis, profile installation, and
+reporting.
 
-`spec.yaml` is a target integration design, not an operational `rtfw_demo`
-configuration. The demo does not yet implement the `--config`, `--run`, or
-`--rt` arguments issued by `run_one.py`, and it does not load the generated
-profile. See the [status guide](../../docs/DOE_AUTOTUNE.md).
+- `spec_smoke.yaml` plus `smoke_app.py` are the fast synthetic pipeline test.
+- `spec.yaml` plus `rtfw_runtime_demo` are the operational target-runtime
+  integration in RTFW 1.1.
+
+See the [status and claim guide](../../docs/DOE_AUTOTUNE.md) before interpreting
+results.
 
 ## Specification
 
-A spec has these main sections:
+A spec contains:
 
-- `app`: executable path, warm-up and measurement durations, frame budget, and
-  extra arguments;
-- `metrics`: hard constraints and an ordered scalar objective;
+- `app`: executable, warm-up/measurement durations, frame budget, and
+  arguments;
+- `metrics`: hard constraints and ordered scalar objective;
 - `params`: categorical, integer, floating-point, or Boolean factors;
 - optional scenarios and robustness seeds.
 
-The current factor mapper can emit configuration fields for threads, chunking,
-layout, scheduler experiments, prefetch, numerical settings, arenas, huge
-pages, emergency helpers, and governor controls. Schema-valid output does not
-mean the production runtime consumes those fields.
+The production spec deliberately maps only `worker_count`,
+`executor_policy`, and `executor_queue_capacity`. `check_mapping_coverage.py`
+fails if a production factor is not explicitly represented by
+`make_config.py`.
 
-## Supported smoke
+`make_config.py` emits a complete resolved profile described by
+`config.schema.json`. The runtime fields are authoritative configuration;
+`params` is opaque experiment provenance. A schema pass is necessary but not
+sufficient: the C++ loader performs exact runtime type, value, power-of-two,
+cross-field, schema, and package-version checks.
+
+## Checked commands
 
 ```bash
 tools/autotune/run_smoke.sh
 python3 tools/autotune/make_config.py --self-test
 python3 tools/autotune/mapping_smoke.py
+python3 tools/autotune/mapping_smoke.py --demo build/rtfw_runtime_demo
 ```
 
-The first command targets the synthetic app. The latter commands verify
-mapping coverage and schema behavior. The planned real-demo dry run is disabled
-unless `RTFW_ENABLE_PLANNED_AUTOTUNE_ROUNDTRIP=1`; enabling it against the
-current demo is expected to fail because the runtime interface is not
-implemented.
+The first command targets the synthetic app. The no-argument mapping smoke
+checks generation, schema validation, distinct content-derived identities, and
+factor coverage. Supplying `--demo` additionally makes the real C++ profile
+round trip mandatory; CI builds the executable and runs this form.
+
+Run one production sample:
+
+```bash
+python3 tools/autotune/run_one.py \
+  --app build/rtfw_runtime_demo \
+  --config configs/default.json \
+  --warmup 1 \
+  --run 5 \
+  --spec tools/autotune/spec.yaml \
+  --extra --rt
+```
 
 ## Result records
 
-Each `run_one.py` invocation emits a JSON object containing:
+Each `run_one.py` invocation emits:
 
-- `ok` and `objective`;
+- `ok` and scalar `objective`;
 - raw application `metrics`;
 - derived `_summary`;
 - sampled `_params`, `_seed`, `_scenario`, and `_ts`;
 - host `env` metadata;
 - `_schema: "v1"`.
 
-JSONL append operations flush and `fsync` each record. This protects the log
-from a partially buffered final record; it does not make a trial valid or
-reproducible. Consumers must verify provenance, schema, constraints, and dropped
-telemetry.
+The demo payload includes profile/runtime/config identity, direct frame
+percentiles and standard deviation, deadline/watchdog/log counters, and
+executor statistics. JSONL appends flush and `fsync` each record to reduce
+partial-tail risk; that does not authenticate a record or make the experiment
+representative.
 
-## Runtime integration gate
+`install_profile.py` accepts only the exact production factor set. Legacy or
+partially mapped results fail instead of being silently converted with default
+values.
 
-Before switching `spec.yaml` from planned to supported, CI must build
-`rtfw_demo`, run at least one generated config through it, prove every tunable
-changes the resolved runtime policy, verify bounded warm-up/measurement
-semantics, and validate direct frame/deadline metrics. This is tracked in the
-[roadmap](../../docs/roadmap.md).
+## Interpretation boundary
+
+A generated profile is a runtime configuration candidate, not a hardware
+qualification record. Validate it with the real embedding workload and retain
+environment/build provenance before deployment. The standalone demo cannot
+attach a `host_adapter`, register application devices, or predict CUDA/XDMA
+completion behavior.

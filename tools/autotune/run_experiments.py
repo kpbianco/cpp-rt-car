@@ -939,21 +939,30 @@ def _run_pipeline(
     start_json = json.dumps(best_params, sort_keys=True)
     local_output_path = results_dir / "local_opt.json"
     if not local_output_path.exists():
+        optimize_command = [
+            sys.executable,
+            str(OPTIMIZE),
+            "--spec",
+            str(spec_path),
+            "--start-json",
+            start_json,
+            "--iters",
+            str(args.local_iters),
+            "--replicates",
+            str(args.replicates),
+            "--out",
+            str(local_output_path),
+        ]
+        if "warmup" in app_overrides:
+            optimize_command.extend(
+                ["--warmup-sec", str(app_overrides["warmup"])]
+            )
+        if "run" in app_overrides:
+            optimize_command.extend(
+                ["--run-sec", str(app_overrides["run"])]
+            )
         subprocess.run(
-            [
-                sys.executable,
-                str(OPTIMIZE),
-                "--spec",
-                str(spec_path),
-                "--start-json",
-                start_json,
-                "--iters",
-                str(args.local_iters),
-                "--replicates",
-                str(args.replicates),
-                "--out",
-                str(local_output_path),
-            ],
+            optimize_command,
             check=True,
         )
 

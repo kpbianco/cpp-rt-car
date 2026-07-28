@@ -1,11 +1,11 @@
 # Architecture
 
-This page separates the supported 1.0 target runtime from compatibility and
+This page separates the supported 1.1 target runtime from compatibility and
 candidate paths. The normative contract is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 1.0 implementation
+## Current 1.1 implementation
 
 ### M1–M12 host, device, and distribution runtime
 
@@ -178,7 +178,8 @@ See the [determinism/replay contract](determinism_replay.md),
 [XDMA backend contract](xdma_backend.md),
 [ADR-0001](adr/0001-one-executor-boundary.md),
 [ADR-0002](adr/0002-host-driven-time.md), and
-[ADR-0003](adr/0003-device-backend-boundary.md).
+[ADR-0003](adr/0003-device-backend-boundary.md), and the
+[runtime profile contract](runtime_profiles.md).
 
 ## Memory layout utilities
 
@@ -188,7 +189,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M12 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M13 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
@@ -200,6 +201,10 @@ that arbitrary host data is automatically optimized.
   `tools/extract_release_archive.py`, `tools/release_manifest.py`,
   `tools/check_hardware_evidence.py`,
   `tests/test_release_tools.py`, `.github/workflows/release.yml`
+- M13 runtime profiles/autotune: `rt/include/rt/profile.hpp`,
+  `rt/src/runtime_profile.cpp`, `src/runtime_profile_demo.cpp`,
+  `tools/autotune/config.schema.json`, `tools/autotune/spec.yaml`,
+  `docs/runtime_profiles.md`
 - M4 memory plan: `rt/src/aligned_storage.hpp`,
   `docs/memory_plan.md`
 - M5 time/platform controls: `rt/src/watchdog_monitor.cpp`,

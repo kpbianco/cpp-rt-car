@@ -7,7 +7,7 @@ RTFW is a C++20 bounded-resource simulation runtime for hosts that need an
 explicit phase/resource graph, fixed-capacity CPU execution, controlled memory,
 versioned observability/replay, and asynchronous device integration.
 
-> **Status: 1.0.0 portable RT0 release.** Named GCC, Clang, and MSVC tuples
+> **Status: 1.1.0 portable RT0 release.** Named GCC, Clang, and MSVC tuples
 > support the target `rt::Runtime` path and stable C ABI v8. Portable support
 > makes no hard-real-time, worst-case-latency, cross-platform bitwise-
 > determinism, CUDA-hardware, XDMA, or C++ binary ABI claim. See the
@@ -41,8 +41,8 @@ versioned observability/replay, and asynchronous device integration.
 | Legacy snapshots | Experimental compatibility surface | Demo/native-layout helpers are bounds checked but remain outside target checkpoint schema v1 |
 | C ABI | Stable ABI v8 | Version/fingerprint handshake, exact shared-library export allowlist, ABI-numbered SONAME, fixed-width contracts, and relocated shared/static consumers |
 | Portable distribution | Supported RT0 on named tuples | Same-major CMake package discovery, relocated C/C++ consumers, checked release contract, CPack archives, and content-addressed artifact manifests |
-| Runtime configuration | Implemented M1–M11 schema | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, artifacts, and the host-adapter policy; unknown keys fail |
-| Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
+| Runtime configuration | Implemented M1–M13 schema | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, artifacts, and the host-adapter policy; unknown keys fail |
+| Runtime profiles/autotune | Implemented RT0 host tooling | Allocation-free transactional profile parser, exact version/schema compatibility, complete resolved configs, profile-driven target-runtime demo, generated-profile round trip, and direct frame metrics |
 | Legacy GPU stub | Experimental compatibility path | Detached CPU-thread stub outside `rt::Runtime`; superseded for new CUDA work by the separate M9 candidate |
 | Xilinx XDMA AXI-MM backend | Candidate; not hardware-qualified | Portable fixed-capacity state machine plus an opt-in Linux character-device adapter, timeout quarantine, fake-driver stress tests, and raw-evidence tooling for one named stack |
 
@@ -80,11 +80,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DSIM_WE
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
 ./build/rtfw_demo --threads 2 --metrics-json
+./build/rtfw_runtime_demo --config configs/default_safe.json --run 20ms --rt --metrics-json-interval
 ```
 
-The demo runs 3,000 frames at a nominal 1 kHz and emits one JSON snapshot at
-exit. Successful execution is a functional smoke test, not an RT
-qualification.
+The legacy demo runs 3,000 frames at a nominal 1 kHz. The second command loads
+a strict profile and drives the supported `rt::Runtime` graph. Successful
+execution is a functional smoke test, not an RT qualification or tuning
+recommendation.
 
 The CUDA candidate is opt-in and uses the Driver API, so the host owns CUDA
 initialization, context, stream, module, and kernel lifetimes:
@@ -140,16 +142,19 @@ latest samples retained by a rolling histogram, whose default capacity is 120.
 Several worker telemetry names are also provisional; see
 [observability](docs/observability.md).
 
-The demo does not implement `--config`, `--rt`, `--run`, `--duration`, or
-`RTFW_PROFILE`. Typed configuration and M5 self-paced execution belong to the
-embedding runtime; demo/profile integration remains planned.
+The legacy `rtfw_demo` intentionally does not implement `--config`, `--rt`,
+`--run`, `--duration`, or `RTFW_PROFILE`. The separate
+`rtfw_runtime_demo` exercises those target-runtime controls without changing
+legacy snapshot or CLI behavior. See the
+[runtime profile contract](docs/runtime_profiles.md).
 
 ## Embedding lifecycle
 
-Release 1.0 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
+Release 1.1 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
 memory closure, M5 time/platform controls, M6 observability, and M7
-checkpoint/replay, the M8 device ABI/mock, and the M11 stable ABI/host adapter in
-`<rt/runtime.hpp>` and `<rt/c_api.h>`:
+checkpoint/replay, the M8 device ABI/mock, M11 stable ABI/host adapter, M12
+portable distribution, and M13 profile loader in `<rt/runtime.hpp>`,
+`<rt/profile.hpp>`, and `<rt/c_api.h>`:
 
 1. configure a typed runtime and optionally attach a borrowed host job system;
 2. register callback/device phases, logical resources, canonical replay state,
@@ -237,7 +242,7 @@ RTFW separates portable functionality from deployment qualification:
 No RT2 record exists yet.
 
 Determinism is tiered from D0 (unspecified) through D3 (portable approved
-fixed-point/specified math). Release 1.0 supports D0 and an explicit D1
+fixed-point/specified math). Release 1.1 supports D0 and an explicit D1
 contract for registered canonical state. Its worker-count and compiler-artifact
 fixtures do not prove D2, arbitrary floating-point identity, or cross-machine
 D3 behavior. Definitions and evidence requirements are in the
@@ -249,7 +254,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M12 portable runtime plus the M9 CUDA and M10 XDMA candidates, graph compiler, unified/host executors, memory/time/platform/observability/replay/device controls, and experimental legacy scheduler/fiber/plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M13 portable runtime plus the M9 CUDA and M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and experimental legacy scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |
@@ -318,19 +323,23 @@ CI currently provides:
 - exact shared-library symbol checks, host-adapter C/C++ saturation,
   stale-completion and no-allocation tests, plus relocated Linux/Windows
   `find_package()` consumers;
-- autotune mapping and synthetic autotune smoke;
+- strict allocation-free profile parsing, negative compatibility/config
+  cases, generated mapping, real runtime round-trip, and synthetic autotune
+  smoke;
 - scaling artifact smoke;
 - documentation/version/claim checks.
 
 These jobs provide regression evidence, not real-time qualification. Missing
 high-risk gates are tracked in [the roadmap](docs/roadmap.md).
 
-## Experimental tooling
+## Autotune tooling
 
-The autotune analysis pipeline is usable with its synthetic smoke target. Its
-default production-style spec currently invokes command-line/configuration
-interfaces that `rtfw_demo` does not implement, so it must not be used to claim
-runtime tuning results. See [DOE/autotune status](docs/DOE_AUTOTUNE.md).
+The analysis pipeline retains its synthetic CI target, while the default spec
+now drives `rtfw_runtime_demo` through the strict profile contract. Its
+measurements describe only the built binary, declared workload, and observed
+host; they are not portable latency bounds, hardware qualification, or an
+automatic deployment recommendation. See
+[DOE/autotune status](docs/DOE_AUTOTUNE.md).
 
 The platform hardening scripts make privileged, best-effort host changes. They
 are deployment experiments, not library behavior and not evidence of RT2.

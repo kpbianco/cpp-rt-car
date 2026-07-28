@@ -30,10 +30,16 @@ jobs:
           cmake --build build --parallel 2
           ctest --test-dir build --output-on-failure
           ./build/rtfw_demo --threads 2 --metrics-json
+          ./build/rtfw_runtime_demo --config configs/default_safe.json --run 20ms --rt --metrics-json-interval
       - name: Validate demo CLI
         run: |
           test "$(./build/rtfw_demo --version)" = "$(cat VERSION.txt)"
           if ./build/rtfw_demo --definitely-not-an-option; then
             echo "unknown option was accepted" >&2
+            exit 1
+          fi
+          test "$(./build/rtfw_runtime_demo --version)" = "$(cat VERSION.txt)"
+          if ./build/rtfw_runtime_demo --definitely-not-an-option; then
+            echo "runtime demo accepted an unknown option" >&2
             exit 1
           fi

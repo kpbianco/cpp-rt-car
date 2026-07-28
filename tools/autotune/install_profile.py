@@ -12,10 +12,10 @@ from typing import Any, Iterable, Mapping, Sequence
 
 if __package__ is None or __package__ == "":
     sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
-    from tools.autotune.make_config import build_config
+    from tools.autotune.make_config import MAPPED_PARAMS, build_config
     from tools.autotune import common_host
 else:
-    from .make_config import build_config
+    from .make_config import MAPPED_PARAMS, build_config
     from . import common_host
 
 
@@ -67,12 +67,7 @@ def extract_params(payload: Any) -> Mapping[str, Any] | None:
             if isinstance(data, Mapping):
                 return data
 
-        if {
-            "threads",
-            "chunk_target_us",
-            "aosoa_block",
-            "steal_threshold",
-        }.issubset(payload.keys()):
+        if MAPPED_PARAMS.issubset(payload.keys()):
             return payload
 
         for key in ("best", "best_run", "best_experiment"):
@@ -126,6 +121,19 @@ def main() -> None:
         )
 
     params = load_best_params(search_paths)
+    provided = set(params)
+    if provided != MAPPED_PARAMS:
+        missing = sorted(MAPPED_PARAMS - provided)
+        extra = sorted(provided - MAPPED_PARAMS)
+        details = []
+        if missing:
+            details.append(f"missing: {', '.join(missing)}")
+        if extra:
+            details.append(f"unknown: {', '.join(extra)}")
+        raise SystemExit(
+            "Autotune result does not match the production profile factor set "
+            f"({'; '.join(details)})."
+        )
     config = build_config(params)
 
     tokens = common_host.host_tokens(

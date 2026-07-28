@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import sys
 from typing import Any, Iterable, Mapping
 
@@ -100,6 +101,35 @@ def validate(instance: Any, schema: Mapping[str, Any], path: str = "$") -> list[
         if instance not in options:
             errors.append(f"{path}: expected one of {options!r}, got {instance!r}")
             return errors
+
+    if "const" in schema and instance != schema["const"]:
+        errors.append(
+            f"{path}: expected constant {schema['const']!r}, got {instance!r}"
+        )
+        return errors
+
+    if _is_number(instance):
+        minimum = schema.get("minimum")
+        maximum = schema.get("maximum")
+        if _is_number(minimum) and instance < minimum:
+            errors.append(f"{path}: value {instance!r} is below minimum {minimum!r}")
+        if _is_number(maximum) and instance > maximum:
+            errors.append(f"{path}: value {instance!r} exceeds maximum {maximum!r}")
+
+    if isinstance(instance, str):
+        minimum_length = schema.get("minLength")
+        maximum_length = schema.get("maxLength")
+        pattern = schema.get("pattern")
+        if _is_integer(minimum_length) and len(instance) < minimum_length:
+            errors.append(
+                f"{path}: string length {len(instance)} is below {minimum_length}"
+            )
+        if _is_integer(maximum_length) and len(instance) > maximum_length:
+            errors.append(
+                f"{path}: string length {len(instance)} exceeds {maximum_length}"
+            )
+        if isinstance(pattern, str) and re.search(pattern, instance) is None:
+            errors.append(f"{path}: string does not match pattern {pattern!r}")
 
     if (allowed_types and allowed_types == ["array"]) or (
         allowed_types is None and "items" in schema

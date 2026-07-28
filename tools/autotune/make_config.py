@@ -4,11 +4,47 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import pathlib
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Tuple
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _load_runtime_contract() -> Tuple[int, int, int, int]:
+    version_text = (REPO_ROOT / "VERSION.txt").read_text(
+        encoding="utf-8"
+    ).strip()
+    version_match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version_text)
+    if version_match is None:
+        raise RuntimeError("VERSION.txt does not contain MAJOR.MINOR.PATCH")
+
+    runtime_header = (REPO_ROOT / "rt/include/rt/runtime.hpp").read_text(
+        encoding="utf-8"
+    )
+    schema_match = re.search(
+        r"runtime_config_schema_version\s*=\s*(\d+)",
+        runtime_header,
+    )
+    if schema_match is None:
+        raise RuntimeError("runtime.hpp does not declare a config schema")
+    major, minor, patch = (
+        int(value) for value in version_match.groups()
+    )
+    return major, minor, patch, int(schema_match.group(1))
+
+
+(
+    RUNTIME_VERSION_MAJOR,
+    RUNTIME_VERSION_MINOR,
+    RUNTIME_VERSION_PATCH,
+    RUNTIME_CONFIG_SCHEMA,
+) = _load_runtime_contract()
 
 
 @dataclass(frozen=True)
@@ -348,7 +384,11 @@ def validate_params(params: Mapping[str, Any], specs: Mapping[str, ParamSpec]) -
     return validated
 
 
-def set_path(target: MutableMapping[str, Any], path: Iterable[str], value: Any) -> None:
+def set_path(
+    target: MutableMapping[str, Any],
+    path: Iterable[str],
+    value: Any,
+) -> None:
     current: MutableMapping[str, Any] = target
     *parents, leaf = list(path)
     for key in parents:
@@ -356,72 +396,98 @@ def set_path(target: MutableMapping[str, Any], path: Iterable[str], value: Any) 
         if not isinstance(node, MutableMapping):
             node = {}
             current[key] = node
-        current = node  # type: ignore[assignment]
+        current = node
     current[leaf] = value
 
 
-PARAM_TO_CONFIG_PATH: Mapping[str, Tuple[str, ...]] = {
-    "threads": ("threads",),
-    "chunk_target_us": ("chunking", "target_p90_us"),
-    "aosoa_block": ("layout", "aosoa_block"),
-    "steal_threshold": ("scheduler", "steal_threshold"),
-    "prefetch_distance_bytes": ("prefetch", "distance_bytes"),
-    "fma_mode": ("numerics", "fma"),
-    "ftz_daz": ("numerics", "ftz_daz"),
-    "arena_per_thread_mb": ("memory", "arena_per_thread_mb"),
-    "huge_pages": ("memory", "huge_pages"),
-    "emergency_spawn_enabled": ("scheduler", "emergency_spawn"),
-    "priority_policy": ("scheduler", "priority_policy"),
-    "governor_target_util": ("governor", "target_util"),
-    "governor_hysteresis": ("governor", "hysteresis"),
-}
+# Only factors that map to the supported rt::Runtime contract belong in the
+# production spec. Synthetic smoke parameters remain in the opaque params
+# block but never masquerade as runtime settings.
+MAPPED_PARAMS = frozenset(
+    {
+        "worker_count",
+        "executor_policy",
+        "executor_queue_capacity",
+    }
+)
 
-#: Names of autotune parameters that build_config knows how to translate. When
-#: adding new knobs to spec.yaml, extend this set (and PARAM_TO_CONFIG_PATH) so
-#: coverage checks continue to pass.
-MAPPED_PARAMS = frozenset(PARAM_TO_CONFIG_PATH.keys())
+
+def _profile_id(resolved_profile: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        dict(resolved_profile),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return f"autotune.{hashlib.sha256(canonical).hexdigest()[:16]}"
 
 
 def build_config(params: Mapping[str, Any]) -> Dict[str, Any]:
-    config: Dict[str, Any] = {}
+    worker_count = params.get("worker_count", params.get("threads", 1))
+    if isinstance(worker_count, bool) or not isinstance(worker_count, int):
+        raise SystemExit("worker_count must resolve to a positive integer")
+    if worker_count <= 0:
+        raise SystemExit("worker_count must resolve to a positive integer")
 
-    for name, path in PARAM_TO_CONFIG_PATH.items():
-        if name not in params:
-            continue
-        set_path(config, path, params[name])
+    executor_policy = params.get("executor_policy", "bounded_throughput")
+    if executor_policy not in {"static_deterministic", "bounded_throughput"}:
+        raise SystemExit(
+            "executor_policy must be static_deterministic or bounded_throughput"
+        )
 
-    chunking = config.setdefault("chunking", {})
-    chunking.setdefault("min_items", 1)
-    chunking.setdefault("max_items", 1024)
+    queue_capacity = params.get("executor_queue_capacity", 1024)
+    if isinstance(queue_capacity, bool) or not isinstance(queue_capacity, int):
+        raise SystemExit("executor_queue_capacity must be an integer")
+    if (
+        queue_capacity < 2
+        or queue_capacity > 1_048_576
+        or queue_capacity & (queue_capacity - 1)
+    ):
+        raise SystemExit(
+            "executor_queue_capacity must be a power of two in the range 2..1048576"
+        )
 
-    layout = config.setdefault("layout", {})
-    layout.setdefault("align_bytes", 64)
-    layout.setdefault("pad_to_simd", True)
-
-    prefetch = config.setdefault("prefetch", {})
-    if "prefetch_distance_bytes" in params:
-        enabled = params["prefetch_distance_bytes"] > 0
-        set_path(config, ("prefetch", "enabled"), enabled)
-    prefetch.setdefault("distance_bytes", 0)
-    prefetch.setdefault("enabled", prefetch.get("distance_bytes", 0) > 0)
-
-    scheduler = config.setdefault("scheduler", {})
-    scheduler.setdefault("priority_policy", "normal")
-    scheduler.setdefault("emergency_spawn", True)
-
-    numerics = config.setdefault("numerics", {})
-    numerics.setdefault("ftz_daz", True)
-
-    memory = config.setdefault("memory", {})
-    memory.setdefault("numa", "first_touch")
-    memory.setdefault("pretouch", True)
-
-    tracing = config.setdefault("tracing", {})
-    tracing.setdefault("bintrace", True)
-
-    # Emit the original params alongside the resolved config for traceability.
-    config["params"] = dict(params)
-    return config
+    runtime = {
+        "callback_capacity": 8,
+        "scratch_bytes": 4096,
+        "trace_capacity": 4096,
+        "numerical_mode": "precise",
+        "executor_policy": executor_policy,
+        "worker_count": worker_count,
+        "executor_queue_capacity": queue_capacity,
+        "scratch_alignment": 64,
+        "task_scratch_bytes": 256,
+        "task_scratch_slots": queue_capacity,
+        "memory_budget_bytes": 268435456,
+        "overload_policy": "fail_frame",
+        "watchdog_timeout_ns": 0,
+        "watchdog_max_degradation_level": 0,
+        "platform_preflight_mode": "disabled",
+        "determinism_tier": "d0",
+        "state_capacity": 8,
+        "snapshot_max_bytes": 1048576,
+        "replay_input_capacity": 64,
+        "input_log_max_bytes": 1048576,
+        "device_backend_capacity": 1,
+        "device_buffer_capacity": 8,
+        "device_outstanding_capacity": 8,
+        "device_completion_batch": 8,
+        "workload_id": "autotune.runtime_demo",
+    }
+    profile = {
+        "schema_version": 1,
+        "runtime_compatibility": {
+            "major": RUNTIME_VERSION_MAJOR,
+            "minimum_minor": RUNTIME_VERSION_MINOR,
+        },
+        "runtime_config_schema": RUNTIME_CONFIG_SCHEMA,
+        "runtime": runtime,
+        # Parameters are evidence/provenance only. The C++ loader ignores this
+        # object after validating its JSON shape.
+        "params": dict(params),
+    }
+    profile["profile_id"] = _profile_id(profile)
+    return profile
 
 
 def write_json(path: pathlib.Path, data: Mapping[str, Any]) -> None:
@@ -433,19 +499,9 @@ def write_json(path: pathlib.Path, data: Mapping[str, Any]) -> None:
 
 def run_self_test() -> None:
     canonical_params = {
-        "threads": "physical",
-        "chunk_target_us": 100,
-        "aosoa_block": 256,
-        "prefetch_distance_bytes": 128,
-        "steal_threshold": 4,
-        "priority_policy": "normal",
-        "emergency_spawn_enabled": True,
-        "governor_target_util": 0.95,
-        "governor_hysteresis": 0.02,
-        "ftz_daz": True,
-        "fma_mode": "auto_no_when_deterministic",
-        "huge_pages": True,
-        "arena_per_thread_mb": 64,
+        "worker_count": 4,
+        "executor_policy": "bounded_throughput",
+        "executor_queue_capacity": 512,
     }
 
     config = build_config(canonical_params)
@@ -465,27 +521,21 @@ def run_self_test() -> None:
                 f"SELF-TEST FAILED: {'.'.join(path)} expected {expected!r}, got {node!r}"
             )
 
-    require(("threads",), "physical")
-    require(("chunking", "target_p90_us"), 100)
-    require(("chunking", "min_items"), 1)
-    require(("chunking", "max_items"), 1024)
-    require(("layout", "aosoa_block"), 256)
-    require(("layout", "align_bytes"), 64)
-    require(("layout", "pad_to_simd"), True)
-    require(("prefetch", "distance_bytes"), 128)
-    require(("prefetch", "enabled"), True)
-    require(("scheduler", "steal_threshold"), 4)
-    require(("scheduler", "priority_policy"), "normal")
-    require(("scheduler", "emergency_spawn"), True)
-    require(("governor", "target_util"), 0.95)
-    require(("governor", "hysteresis"), 0.02)
-    require(("numerics", "ftz_daz"), True)
-    require(("numerics", "fma"), "auto_no_when_deterministic")
-    require(("memory", "huge_pages"), True)
-    require(("memory", "arena_per_thread_mb"), 64)
-    require(("memory", "numa"), "first_touch")
-    require(("memory", "pretouch"), True)
-    require(("tracing", "bintrace"), True)
+    require(("schema_version",), 1)
+    require(("runtime_compatibility", "major"), RUNTIME_VERSION_MAJOR)
+    require(
+        ("runtime_compatibility", "minimum_minor"),
+        RUNTIME_VERSION_MINOR,
+    )
+    require(("runtime_config_schema",), RUNTIME_CONFIG_SCHEMA)
+    require(("runtime", "worker_count"), 4)
+    require(("runtime", "executor_policy"), "bounded_throughput")
+    require(("runtime", "executor_queue_capacity"), 512)
+    require(("runtime", "task_scratch_slots"), 512)
+    require(("runtime", "workload_id"), "autotune.runtime_demo")
+    profile_id = config.get("profile_id")
+    if not isinstance(profile_id, str) or not profile_id.startswith("autotune."):
+        raise SystemExit("SELF-TEST FAILED: profile_id was not content-derived")
 
     if config.get("params") != canonical_params:
         raise SystemExit("SELF-TEST FAILED: params block did not round-trip canonical values")

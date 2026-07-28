@@ -25,3 +25,11 @@ jobs:
         run: |
           python tools/autotune/make_config.py --self-test
           python tools/autotune/mapping_smoke.py
+
+      - name: Build profile-driven runtime demo
+        run: |
+          cmake -S . -B build -DENABLE_TESTS=OFF -DSIM_WERROR=ON
+          cmake --build build --parallel 2 --target rtfw_runtime_demo
+
+      - name: Exercise generated profile through the C++ loader
+        run: python tools/autotune/mapping_smoke.py --demo build/rtfw_runtime_demo

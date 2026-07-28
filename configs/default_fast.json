@@ -1,54 +1,41 @@
 {
-  "schema_version": 1,
-  "threads": "physical_plus_smt",
-  "chunking": {
-    "target_p90_us": 140,
-    "min_items": 48,
-    "max_items": 4096
-  },
-  "layout": {
-    "aosoa_block": 256,
-    "align_bytes": 64,
-    "pad_to_simd": true
-  },
-  "prefetch": {
-    "enabled": true,
-    "distance_bytes": 1536
-  },
-  "scheduler": {
-    "type": "work_steal",
-    "steal_threshold": 2,
-    "emergency_spawn": true,
-    "aging": true
-  },
-  "governor": {
-    "target_util": 0.95,
-    "hysteresis": 0.025
-  },
-  "numerics": {
-    "ftz_daz": true,
-    "fma": "auto"
-  },
-  "memory": {
-    "huge_pages": true,
-    "arena_per_thread_mb": 64,
-    "numa": "first_touch",
-    "pretouch": true
-  },
-  "tracing": {
-    "bintrace": false
-  },
   "params": {
-    "threads": 0,
-    "chunk_target_us": 140,
-    "aosoa_block": 256,
-    "steal_threshold": 2,
-    "prefetch_distance_bytes": 1536,
-    "huge_pages": true,
-    "governor_target_util": 0.95,
-    "governor_hysteresis": 0.025,
-    "fma_mode": "auto",
-    "emergency_spawn_enabled": true,
-    "arena_per_thread_mb": 64
-  }
+    "executor_policy": "bounded_throughput",
+    "executor_queue_capacity": 1024,
+    "worker_count": 4
+  },
+  "profile_id": "autotune.075f166fd427baea",
+  "runtime": {
+    "callback_capacity": 8,
+    "determinism_tier": "d0",
+    "device_backend_capacity": 1,
+    "device_buffer_capacity": 8,
+    "device_completion_batch": 8,
+    "device_outstanding_capacity": 8,
+    "executor_policy": "bounded_throughput",
+    "executor_queue_capacity": 1024,
+    "input_log_max_bytes": 1048576,
+    "memory_budget_bytes": 268435456,
+    "numerical_mode": "precise",
+    "overload_policy": "fail_frame",
+    "platform_preflight_mode": "disabled",
+    "replay_input_capacity": 64,
+    "scratch_alignment": 64,
+    "scratch_bytes": 4096,
+    "snapshot_max_bytes": 1048576,
+    "state_capacity": 8,
+    "task_scratch_bytes": 256,
+    "task_scratch_slots": 1024,
+    "trace_capacity": 4096,
+    "watchdog_max_degradation_level": 0,
+    "watchdog_timeout_ns": 0,
+    "worker_count": 4,
+    "workload_id": "autotune.runtime_demo"
+  },
+  "runtime_compatibility": {
+    "major": 1,
+    "minimum_minor": 1
+  },
+  "runtime_config_schema": 7,
+  "schema_version": 1
 }

@@ -222,6 +222,33 @@ def extract_scenario(config_data: Dict[str, Any], config_path: pathlib.Path) -> 
     return config_path.stem or "default"
 
 
+def resolve_seed(
+    config_data: Dict[str, Any],
+    config_path: pathlib.Path,
+    spec_data: Mapping[str, Any],
+    extras: List[str],
+) -> int:
+    configured = extract_seed(config_data, config_path)
+    robustness = spec_data.get("robustness")
+    if not isinstance(robustness, Mapping):
+        return configured
+
+    seed_arg = robustness.get("seed_arg")
+    if isinstance(seed_arg, str) and seed_arg:
+        for index in range(len(extras) - 1):
+            if extras[index] == seed_arg:
+                parsed = _try_parse_int(extras[index + 1])
+                if parsed is not None:
+                    configured = parsed
+
+    seed_env = robustness.get("seed_env")
+    if isinstance(seed_env, str) and seed_env:
+        parsed = _try_parse_int(os.environ.get(seed_env))
+        if parsed is not None:
+            configured = parsed
+    return configured
+
+
 def collect_env_info() -> Dict[str, Any]:
     tokens = common_host.host_tokens()
     cpu_model = tokens.get("cpu_model", "unknown-cpu")
@@ -255,12 +282,15 @@ def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
                         total += float(value)
         return total
 
-    p50 = accumulate("p50_ms")
-    p95 = accumulate("p95_ms")
-    p99 = accumulate("p99_ms")
-    stdev = 0.0
-    if p95 > p50:
-        stdev = (p95 - p50) / 1.645
+    p50 = flatten_dict_search(payload, ["p50_frame_ms"])
+    p95 = flatten_dict_search(payload, ["p95_frame_ms"])
+    p99 = flatten_dict_search(payload, ["p99_frame_ms"])
+    stdev = flatten_dict_search(payload, ["stdev_frame_ms"])
+    p50 = accumulate("p50_ms") if p50 is None else p50
+    p95 = accumulate("p95_ms") if p95 is None else p95
+    p99 = accumulate("p99_ms") if p99 is None else p99
+    if stdev is None:
+        stdev = (p95 - p50) / 1.645 if p95 > p50 else 0.0
 
     def counter_value(names: Iterable[str]) -> int:
         if not isinstance(counters, dict):
@@ -271,6 +301,9 @@ def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return int(value)
         return 0
 
+    queue_rejections = counter_value(
+        ["executor.queue_rejections", "queue_rejections"]
+    )
     metrics = {
         "p50_frame_ms": p50,
         "p95_frame_ms": p95,
@@ -278,8 +311,14 @@ def extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
         "stdev_frame_ms": stdev,
         "missed_frames": counter_value(["missed_frames"]),
         "watchdog_trips": counter_value(["watchdog.trips", "watchdog_trips"]),
-        "log_drops": counter_value(["log_drops"]),
+        "trace_events_dropped": counter_value(
+            ["trace.events_dropped", "trace_events_dropped"]
+        ),
+        "log_drops": counter_value(
+            ["log_drops", "trace.events_dropped", "trace_events_dropped"]
+        ),
         "queue_max": counter_value(["worker.queue_max", "worker_pool.queue_max"]),
+        "queue_rejections": queue_rejections,
         "emergency_spawns": counter_value(
             ["worker.emergency_spawns", "worker_pool.emergency_spawns"]
         ),
@@ -339,7 +378,9 @@ def main() -> None:
 
     if args.warmup > 0:
         warmup_cmd = base_cmd + ["--run", format_duration(args.warmup)]
-        run_command(warmup_cmd, capture=False, extra_env=scenario_env)
+        # Warmup output is deliberately discarded so callers receive exactly
+        # one machine-readable result object from this process.
+        run_command(warmup_cmd, capture=True, extra_env=scenario_env)
 
     run_cmd = base_cmd + ["--metrics-json-interval", "--run", format_duration(args.run)]
     completed = run_command(run_cmd, capture=True, extra_env=scenario_env)
@@ -370,7 +411,12 @@ def main() -> None:
         "metrics": payload,
         "_summary": metrics_summary,
         "_params": params,
-        "_seed": extract_seed(config_data, config_path),
+        "_seed": resolve_seed(
+            config_data,
+            config_path,
+            spec_data,
+            extras,
+        ),
         "_scenario": scenario,
         "_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "env": collect_env_info(),
