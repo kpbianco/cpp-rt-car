@@ -479,7 +479,10 @@ typedef struct cabi_device_backend {
     uint64_t submissions;
     uint64_t completions;
     uint64_t resets;
+    uint64_t unregisters;
+    uint64_t shutdown_attempts;
     uint64_t shutdowns;
+    uint32_t shutdown_failures_remaining;
 } cabi_device_backend;
 
 static rtfw_device_status cabi_device_capabilities(
@@ -549,6 +552,7 @@ static rtfw_device_status cabi_device_unregister_buffer(
         backend->pending_submission != 0u) {
         return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
     }
+    ++backend->unregisters;
     backend->buffer = NULL;
     backend->buffer_bytes = 0u;
     return RTFW_DEVICE_STATUS_OK;
@@ -655,6 +659,11 @@ static rtfw_device_status cabi_device_shutdown(void *instance) {
     cabi_device_backend *backend = (cabi_device_backend *)instance;
     if (!backend || !backend->initialized) {
         return RTFW_DEVICE_STATUS_INVALID_STATE;
+    }
+    ++backend->shutdown_attempts;
+    if (backend->shutdown_failures_remaining != 0u) {
+        --backend->shutdown_failures_remaining;
+        return RTFW_DEVICE_STATUS_ERROR;
     }
     backend->initialized = 0;
     backend->pending_submission = 0u;
@@ -1757,6 +1766,7 @@ int main(void) {
         rtfw_device_buffer_id device_buffer =
             RTFW_INVALID_DEVICE_BUFFER_ID;
         rtfw_phase_id device_phase = RTFW_INVALID_PHASE_ID;
+        rtfw_phase_id stale_phase = RTFW_INVALID_PHASE_ID;
         rtfw_device_backend_api backend_api;
         cabi_device_backend backend_state;
         cabi_device_command command;
@@ -1766,6 +1776,7 @@ int main(void) {
         rtfw_device_health device_health;
         rtfw_memory_plan device_plan;
         rtfw_metric_snapshot device_metrics;
+        rtfw_runtime_state teardown_state = RTFW_STATE_CONFIGURING;
         rtfw_config device_config = config;
 
         memset(&backend_api, 0, sizeof(backend_api));
@@ -1927,10 +1938,87 @@ int main(void) {
             device_metrics.samples[
                 RTFW_METRIC_DEVICE_COMPLETIONS].value != 1u ||
             device_metrics.samples[
-                RTFW_METRIC_DEVICE_RESETS].value != 1u ||
-            stop_fn(device_instance) != RTFW_STATUS_OK ||
-            backend_state.shutdowns != 1u) {
-            fprintf(stderr, "C ABI device health/reset/shutdown failed\n");
+                RTFW_METRIC_DEVICE_RESETS].value != 1u) {
+            fprintf(stderr, "C ABI device health/reset failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+
+        /*
+         * ABI v8 destroy is void, so failed device teardown must retain the
+         * handle and borrowed objects. A later stop retries only unresolved
+         * ownership: the successfully unregistered buffer is not repeated,
+         * while the failed backend shutdown remains retryable.
+         */
+        backend_state.shutdown_failures_remaining = 2u;
+        if (stop_fn(device_instance) != RTFW_STATUS_DEVICE_ERROR ||
+            get_state_fn(device_instance, &teardown_state) !=
+                RTFW_STATUS_OK ||
+            teardown_state != RTFW_STATE_RUNNING ||
+            backend_state.unregisters != 1u ||
+            backend_state.shutdown_attempts != 1u ||
+            backend_state.shutdowns != 0u ||
+            backend_state.buffer != NULL ||
+            backend_state.initialized == 0 ||
+            strstr(
+                last_error_fn(device_instance),
+                "device teardown failed") == NULL) {
+            fprintf(stderr, "C ABI device stop failure was not recoverable\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        if (register_phase_fn(
+                device_instance,
+                NULL,
+                test_callback,
+                NULL,
+                &stale_phase) != RTFW_STATUS_INVALID_ARGUMENT ||
+            stale_phase != RTFW_INVALID_PHASE_ID ||
+            strstr(
+                last_error_fn(device_instance),
+                "callback name") == NULL) {
+            fprintf(stderr, "C ABI teardown stale-error setup failed\n");
+            destroy_fn(device_instance);
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        destroy_fn(device_instance);
+        if (backend_state.unregisters != 1u ||
+            backend_state.shutdown_attempts != 2u ||
+            backend_state.shutdowns != 0u ||
+            backend_state.initialized == 0 ||
+            get_state_fn(device_instance, &teardown_state) !=
+                RTFW_STATUS_OK ||
+            teardown_state != RTFW_STATE_RUNNING ||
+            strstr(
+                last_error_fn(device_instance),
+                "device teardown failed") == NULL) {
+            fprintf(
+                stderr,
+                "C ABI destroy did not retain failed teardown "
+                "(unregisters=%llu shutdown_attempts=%llu "
+                "shutdowns=%llu initialized=%d state=%u error='%s')\n",
+                (unsigned long long)backend_state.unregisters,
+                (unsigned long long)backend_state.shutdown_attempts,
+                (unsigned long long)backend_state.shutdowns,
+                backend_state.initialized,
+                (unsigned int)teardown_state,
+                last_error_fn(device_instance));
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        if (stop_fn(device_instance) != RTFW_STATUS_OK ||
+            get_state_fn(device_instance, &teardown_state) !=
+                RTFW_STATUS_OK ||
+            teardown_state != RTFW_STATE_STOPPED ||
+            backend_state.unregisters != 1u ||
+            backend_state.shutdown_attempts != 3u ||
+            backend_state.shutdowns != 1u ||
+            backend_state.initialized != 0 ||
+            last_error_fn(device_instance)[0] != '\0') {
+            fprintf(stderr, "C ABI device teardown retry failed\n");
             destroy_fn(device_instance);
             lib_close(handle);
             return EXIT_FAILURE;

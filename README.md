@@ -7,7 +7,7 @@ RTFW is a C++20 bounded-resource simulation runtime for hosts that need an
 explicit phase/resource graph, fixed-capacity CPU execution, controlled memory,
 versioned observability/replay, and asynchronous device integration.
 
-> **Status: 1.2.0 portable RT0 release.** Named GCC, Clang, and MSVC tuples
+> **Status: 1.2.1 portable RT0 release.** Named GCC, Clang, and MSVC tuples
 > support the target `rt::Runtime` path and stable C ABI v8. Portable support
 > makes no hard-real-time, worst-case-latency, cross-platform bitwise-
 > determinism, CUDA-hardware, XDMA, or C++ binary ABI claim. See the
@@ -18,7 +18,7 @@ versioned observability/replay, and asynchronous device integration.
 
 | Area | Status | What exists today |
 | --- | --- | --- |
-| Host runtime lifecycle | Implemented RT0 surface | `rt::Runtime` enforces configure/finalize/start/step/stop and freezes graph topology at finalization |
+| Host runtime lifecycle | Implemented RT0 surface | `rt::Runtime` enforces configure/finalize/start/step/stop, freezes graph topology at finalization, and retains unresolved device ownership for checked teardown retry |
 | Compiled graph | Implemented RT0 surface | C and C++ hosts declare phase dependencies and logical resource access; finalization rejects invalid handles, cycles, and unordered conflicts |
 | Host-driven callbacks | Implemented RT0 surface | `step()` waits synchronously without pacing; dependency-ready callbacks may run concurrently on the fixed team |
 | Unified CPU executor | Implemented RT0 surface | Static deterministic assignment and bounded local-queue throughput policies run graph, range, and fixed-tree reduction work |
@@ -174,7 +174,8 @@ boundary in `<rt/runtime.hpp>`,
 9. write/restore bounded checkpoints or replay a validated input log from a
    non-RT host lane;
 10. inspect/reset device health from a non-RT host lane when applicable;
-11. stop.
+11. call `stop()` and require success before releasing borrowed backend,
+    buffer, callback, state, clock, or host-executor storage.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -216,7 +217,8 @@ Accepted architecture decisions:
 - [ADR-0002: host-driven time by default](docs/adr/0002-host-driven-time.md)
 - [ADR-0003: bounded device backend ABI](docs/adr/0003-device-backend-boundary.md)
 
-The M1–M14 portable runtime now implements lifecycle, both explicit time modes,
+The M1–M14 portable runtime plus the 1.2.1 lifecycle-safety closure implements
+lifecycle, both explicit time modes,
 compiled graph validation, all three CPU policies, the bounded target-path
 memory plan, watchdog/degradation, platform preflight, versioned
 observability, bounded registered-state replay, and the bounded poll-only
@@ -255,7 +257,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M14 portable runtime plus the M9 CUDA and M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M14 portable runtime plus the 1.2.1 lifecycle-safety closure and the M9 CUDA/M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |

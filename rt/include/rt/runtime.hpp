@@ -746,6 +746,10 @@ public:
         PeriodicFrameObserver observer = nullptr,
         void* observer_data = nullptr,
         PeriodicRunResult* result = nullptr) noexcept;
+    // Device cleanup failures retain borrowed ownership, quiesce execution,
+    // and leave the public lifecycle state unchanged. Retry stop() until it
+    // succeeds before releasing borrowed resources. The destructor cannot
+    // report this status and is only a best-effort fallback.
     [[nodiscard]] Status stop() noexcept;
     [[nodiscard]] Status device_health(
         DeviceBackendHandle backend,

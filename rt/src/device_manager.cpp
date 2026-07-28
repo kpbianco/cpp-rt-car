@@ -18,6 +18,10 @@ constexpr std::uint32_t kOutstandingSubmitting = 2;
 constexpr std::uint32_t kOutstandingSubmitted = 3;
 constexpr std::uint32_t kOutstandingEarlyReady = 4;
 
+constexpr std::uint8_t kBackendOwnershipNone = 0;
+constexpr std::uint8_t kBackendOwnershipInitialized = 1;
+constexpr std::uint8_t kBackendOwnershipInitializationUncertain = 2;
+
 bool bytes_zero(const std::uint64_t* values, std::size_t count) noexcept {
     for (std::size_t index = 0; index < count; ++index) {
         if (values[index] != 0) {
@@ -90,7 +94,7 @@ DeviceManager::DeviceManager(
       completion_batch_(completion_batch) {}
 
 DeviceManager::~DeviceManager() {
-    stop();
+    (void)stop();
 }
 
 bool DeviceManager::estimate_control_storage(
@@ -121,7 +125,6 @@ bool DeviceManager::estimate_control_storage(
 }
 
 Status DeviceManager::initialize_backends() noexcept {
-    std::size_t initialized_count = 0;
     for (std::size_t index = 0;
          index < backends_.size();
          ++index) {
@@ -147,21 +150,13 @@ Status DeviceManager::initialize_backends() noexcept {
         }
         const auto status = device_status_to_runtime(device_status);
         if (status != Status::ok) {
-            for (std::size_t rollback = initialized_count;
-                 rollback != 0;
-                 --rollback) {
-                auto& initialized = backends_[rollback - 1];
-                try {
-                    (void)initialized.api.shutdown(
-                        initialized.api.instance);
-                } catch (...) {
-                }
-                initialized_backends_[rollback - 1] = 0;
-            }
+            initialized_backends_[index] =
+                kBackendOwnershipInitializationUncertain;
+            (void)shutdown_backends();
             return status;
         }
-        initialized_backends_[index] = 1;
-        ++initialized_count;
+        initialized_backends_[index] =
+            kBackendOwnershipInitialized;
     }
 
     for (std::size_t index = 0; index < buffers_.size(); ++index) {
@@ -190,7 +185,7 @@ Status DeviceManager::initialize_backends() noexcept {
         const auto status = device_status_to_runtime(device_status);
         if (status != Status::ok ||
             native_buffer_tokens_[index] == 0) {
-            shutdown_backends();
+            (void)shutdown_backends();
             return status == Status::ok
                 ? Status::device_error
                 : status;
@@ -199,34 +194,103 @@ Status DeviceManager::initialize_backends() noexcept {
     return Status::ok;
 }
 
-void DeviceManager::shutdown_backends() noexcept {
+bool DeviceManager::backend_has_registered_buffers(
+    std::size_t backend_index) const noexcept {
+    for (std::size_t index = 0;
+         index < buffers_.size();
+         ++index) {
+        if (buffers_[index].backend_index == backend_index &&
+            native_buffer_tokens_[index] != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool DeviceManager::has_backend_ownership() const noexcept {
+    return std::any_of(
+               native_buffer_tokens_.begin(),
+               native_buffer_tokens_.end(),
+               [](std::uint64_t token) {
+                   return token != 0;
+               }) ||
+           std::any_of(
+               initialized_backends_.begin(),
+               initialized_backends_.end(),
+               [](std::uint8_t initialized) {
+                   return initialized != 0;
+               });
+}
+
+bool DeviceManager::cleanup_pending() const noexcept {
+    return has_backend_ownership();
+}
+
+Status DeviceManager::shutdown_backends() noexcept {
+    Status first_failure = Status::ok;
     for (std::size_t index = buffers_.size(); index != 0; --index) {
         const auto buffer_index = index - 1;
         const auto token = native_buffer_tokens_[buffer_index];
         if (token == 0) {
             continue;
         }
-        auto& backend =
-            backends_[buffers_[buffer_index].backend_index];
+        const auto backend_index =
+            static_cast<std::size_t>(
+                buffers_[buffer_index].backend_index);
+        if (backend_index >= backends_.size() ||
+            initialized_backends_[backend_index] ==
+                kBackendOwnershipNone) {
+            if (first_failure == Status::ok) {
+                first_failure = Status::invalid_state;
+            }
+            continue;
+        }
+        auto& backend = backends_[backend_index];
+        rtfw_device_status device_status =
+            RTFW_DEVICE_STATUS_INTERNAL_ERROR;
         try {
-            (void)backend.api.unregister_buffer(
+            device_status = backend.api.unregister_buffer(
                 backend.api.instance,
                 token);
         } catch (...) {
+            device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
         }
-        native_buffer_tokens_[buffer_index] = 0;
+        const auto status = device_status_to_runtime(device_status);
+        if (status == Status::ok) {
+            native_buffer_tokens_[buffer_index] = 0;
+        } else if (first_failure == Status::ok) {
+            first_failure = status;
+        }
     }
     for (std::size_t index = backends_.size(); index != 0; --index) {
-        if (initialized_backends_[index - 1] == 0) {
+        const auto backend_index = index - 1;
+        const auto ownership =
+            initialized_backends_[backend_index];
+        if (ownership == kBackendOwnershipNone ||
+            backend_has_registered_buffers(backend_index)) {
             continue;
         }
-        auto& backend = backends_[index - 1];
+        auto& backend = backends_[backend_index];
+        rtfw_device_status device_status =
+            RTFW_DEVICE_STATUS_INTERNAL_ERROR;
         try {
-            (void)backend.api.shutdown(backend.api.instance);
+            device_status =
+                backend.api.shutdown(backend.api.instance);
         } catch (...) {
+            device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
         }
-        initialized_backends_[index - 1] = 0;
+        const auto status = device_status_to_runtime(device_status);
+        if (status == Status::ok ||
+            (ownership ==
+                 kBackendOwnershipInitializationUncertain &&
+             device_status == RTFW_DEVICE_STATUS_INVALID_STATE)) {
+            initialized_backends_[backend_index] =
+                kBackendOwnershipNone;
+        } else if (first_failure == Status::ok) {
+            first_failure = status;
+        }
     }
+    return first_failure;
 }
 
 Status DeviceManager::start(
@@ -234,6 +298,8 @@ Status DeviceManager::start(
     DeviceEventObserver observer,
     void* observer_data) noexcept {
     if (started_.load(std::memory_order_acquire) ||
+        has_backend_ownership() ||
+        service_thread_.joinable() ||
         outstanding_capacity_ == 0 ||
         completion_batch_ == 0 ||
         backends_.empty()) {
@@ -259,7 +325,7 @@ Status DeviceManager::start(
         executor_ = nullptr;
         observer_ = nullptr;
         observer_data_ = nullptr;
-        shutdown_backends();
+        (void)shutdown_backends();
         return Status::resource_exhausted;
     }
     while (!service_ready_.load(std::memory_order_acquire)) {
@@ -268,35 +334,36 @@ Status DeviceManager::start(
     return Status::ok;
 }
 
-void DeviceManager::stop() noexcept {
-    if (!started_.exchange(false, std::memory_order_acq_rel)) {
-        return;
-    }
-    stopping_.store(true, std::memory_order_release);
-    wake_sequence_.fetch_add(1, std::memory_order_release);
-    wake_sequence_.notify_all();
-    if (service_thread_.joinable()) {
-        service_thread_.join();
-    }
-    for (std::size_t index = 0;
-         index < outstanding_capacity_;
-         ++index) {
-        auto& slot = outstanding_slots_[index];
-        const auto previous =
-            slot.state.exchange(
-                kOutstandingFree,
-                std::memory_order_acq_rel);
-        if (previous == kOutstandingSubmitted && executor_) {
-            (void)executor_->complete_external(
-                slot.phase_index,
-                Status::device_canceled);
+Status DeviceManager::stop() noexcept {
+    const bool was_started =
+        started_.exchange(false, std::memory_order_acq_rel);
+    if (was_started || service_thread_.joinable()) {
+        stopping_.store(true, std::memory_order_release);
+        wake_sequence_.fetch_add(1, std::memory_order_release);
+        wake_sequence_.notify_all();
+        if (service_thread_.joinable()) {
+            service_thread_.join();
         }
+        for (std::size_t index = 0;
+             index < outstanding_capacity_;
+             ++index) {
+            auto& slot = outstanding_slots_[index];
+            const auto previous =
+                slot.state.exchange(
+                    kOutstandingFree,
+                    std::memory_order_acq_rel);
+            if (previous == kOutstandingSubmitted && executor_) {
+                (void)executor_->complete_external(
+                    slot.phase_index,
+                    Status::device_canceled);
+            }
+        }
+        outstanding_count_.store(0, std::memory_order_release);
+        executor_ = nullptr;
+        observer_ = nullptr;
+        observer_data_ = nullptr;
     }
-    outstanding_count_.store(0, std::memory_order_release);
-    shutdown_backends();
-    executor_ = nullptr;
-    observer_ = nullptr;
-    observer_data_ = nullptr;
+    return shutdown_backends();
 }
 
 DeviceManager::Outstanding* DeviceManager::acquire_outstanding() noexcept {

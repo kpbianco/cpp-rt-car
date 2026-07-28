@@ -7,7 +7,7 @@ in [ADRs](adr/README.md).
 
 ## Current 1.2 implementation
 
-### M1–M14 host, device, distribution, and SDK runtime
+### M1–M14 host, device, distribution, and SDK runtime plus 1.2.1 safety closure
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -189,7 +189,8 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M14 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M14 host/device runtime and 1.2.1 lifecycle-safety closure:
+  `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`

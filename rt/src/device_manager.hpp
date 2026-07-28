@@ -85,7 +85,8 @@ public:
         Executor& executor,
         DeviceEventObserver observer,
         void* observer_data) noexcept;
-    void stop() noexcept;
+    [[nodiscard]] Status stop() noexcept;
+    [[nodiscard]] bool cleanup_pending() const noexcept;
 
     [[nodiscard]] Status submit(
         std::size_t backend_index,
@@ -125,7 +126,10 @@ private:
     };
 
     [[nodiscard]] Status initialize_backends() noexcept;
-    void shutdown_backends() noexcept;
+    [[nodiscard]] Status shutdown_backends() noexcept;
+    [[nodiscard]] bool backend_has_registered_buffers(
+        std::size_t backend_index) const noexcept;
+    [[nodiscard]] bool has_backend_ownership() const noexcept;
     void service_loop() noexcept;
     void process_completion(
         std::size_t backend_index,

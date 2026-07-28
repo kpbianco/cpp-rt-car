@@ -2790,6 +2790,25 @@ RTFW_API const char* rtfw_last_error(const rtfw_handle* handle) {
 }
 
 RTFW_API void rtfw_destroy(rtfw_handle* handle) {
+    if (!handle) {
+        return;
+    }
+    const auto state = handle->runtime.state();
+    if (state == rt::RuntimeState::finalized ||
+        state == rt::RuntimeState::running) {
+        handle->clear_boundary_error();
+        if (handle->runtime.stop() != rt::Status::ok) {
+            /*
+             * ABI v8 has no status-bearing destroy function. Preserve the
+             * handle and every borrowed backend/buffer lifetime on teardown
+             * failure so a caller retaining the pointer can inspect
+             * last_error(), retry stop(), and call destroy again. Deleting here
+             * would falsely release runtime ownership after a backend
+             * explicitly retained hardware resources.
+             */
+            return;
+        }
+    }
     delete handle;
 }
 

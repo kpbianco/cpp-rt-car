@@ -773,25 +773,39 @@ struct CudaDeviceBackend::Impl {
             if (result != CudaDriverResult::success ||
                 event == 0) {
                 if (event != 0) {
-                    (void)backend->driver.event_destroy(
-                        backend->driver.user_data,
-                        event);
+                    slot.event = event;
                 }
                 break;
             }
             slot.event = event;
         }
         if (created != backend->config.queue_capacity) {
-            for (std::size_t index = created; index != 0; --index) {
+            bool cleanup_incomplete = false;
+            for (std::size_t index = created + 1;
+                 index != 0;
+                 --index) {
                 auto& slot = backend->slots[index - 1];
-                (void)backend->driver.event_destroy(
-                    backend->driver.user_data,
-                    slot.event);
-                slot.event = 0;
+                if (slot.event == 0) {
+                    continue;
+                }
+                const auto cleanup_result =
+                    backend->driver.event_destroy(
+                        backend->driver.user_data,
+                        slot.event);
+                if (cleanup_result == CudaDriverResult::success) {
+                    slot.event = 0;
+                } else {
+                    cleanup_incomplete = true;
+                }
             }
-            result = combine_with_pop(
-                result,
-                backend->pop_context());
+            const auto pop_result = backend->pop_context();
+            cleanup_incomplete =
+                cleanup_incomplete ||
+                pop_result != CudaDriverResult::success;
+            result = combine_with_pop(result, pop_result);
+            backend->shutdown_incomplete.store(
+                cleanup_incomplete,
+                std::memory_order_release);
             backend->initialized.store(false, std::memory_order_release);
             const auto status =
                 result == CudaDriverResult::success
@@ -802,19 +816,30 @@ struct CudaDeviceBackend::Impl {
         }
         result = backend->pop_context();
         if (result != CudaDriverResult::success) {
-            // A failed pop leaves context state uncertain. Best-effort event
-            // cleanup avoids overwriting handles if initialization is retried.
+            bool cleanup_incomplete = true;
+            // A failed pop leaves context state uncertain. Preserve any event
+            // whose destruction also fails so shutdown can retry only the
+            // unresolved handles before initialization is attempted again.
             for (std::size_t index = 0;
                  index < backend->config.queue_capacity;
                  ++index) {
                 auto& slot = backend->slots[index];
                 if (slot.event != 0) {
-                    (void)backend->driver.event_destroy(
-                        backend->driver.user_data,
-                        slot.event);
-                    slot.event = 0;
+                    const auto cleanup_result =
+                        backend->driver.event_destroy(
+                            backend->driver.user_data,
+                            slot.event);
+                    if (cleanup_result ==
+                        CudaDriverResult::success) {
+                        slot.event = 0;
+                    } else {
+                        cleanup_incomplete = true;
+                    }
                 }
             }
+            backend->shutdown_incomplete.store(
+                cleanup_incomplete,
+                std::memory_order_release);
             backend->initialized.store(false, std::memory_order_release);
             const auto status = device_status(result);
             backend->set_health_after(status);

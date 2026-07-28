@@ -35,20 +35,36 @@ The target lifecycle is:
 4. `finalize()` validates backend limits and commits manager, outstanding-slot,
    completion-batch, and graph storage to the memory plan.
 5. `start()` starts the fixed CPU team, initializes each backend, registers
-   buffers, then starts one runtime-owned device service lane. Failure rolls
-   back all completed registrations and service lanes.
+   buffers, then starts one runtime-owned device service lane. Failure performs
+   a checked reverse rollback. An initialization failure is
+   ownership-uncertain until one `shutdown()` attempt returns `OK` or
+   `INVALID_STATE`; any other cleanup result is retained for `stop()` retry.
 6. `step()` invokes a command provider on a CPU worker. The provider fills one
    fixed-size submission and returns. Accepted device work retains the phase's
    graph completion token; independent CPU work remains runnable.
 7. The service lane polls completions and releases dependent graph phases.
-8. `stop()` joins the service lane before stopping the CPU executor,
-   unregisters buffers in reverse order, and calls backend shutdown. No backend
+8. `stop()` joins the service lane, cancels unresolved graph tokens,
+   unregisters buffers in reverse order, and shuts backends down in reverse
+   order before the CPU executor and watchdog finish stopping. Successful
+   operations clear their ownership markers. Failed operations retain them;
+   a backend is never shut down while one of its buffers remains registered,
+   and independent cleanup continues while the first failure is preserved.
+   Repeated `stop()` calls invoke only the unresolved operations. No backend
    callback exists in the ABI, so backend code cannot call into destroyed
    runtime or plugin ownership.
 
 Runtime control methods are single-host-thread operations. The host must not
 destroy a runtime, backend instance, buffer, plugin, or callback data while a
 host call or callback is active.
+
+If cleanup fails, `stop()` returns that status and leaves the public lifecycle
+state at `running` or `finalized`; execution, restore/replay, health, reset, and
+restart operations are gated until a later `stop()` succeeds. The service
+lanes and executor are already quiesced. The host must retain every borrowed
+backend table, instance, buffer, plugin, and callback object throughout the
+retry. A C++ destructor cannot report a cleanup result and is only a
+best-effort fallback, so device integrations must use the checked `stop()`
+path.
 
 ## ABI shape
 
@@ -71,6 +87,14 @@ by a null function. `submit()` and `poll()` must return without sleeping,
 waiting for device completion, allocating an unbounded spill queue, invoking
 host code, or creating a per-submission thread. `poll()` writes only to the
 caller-provided completion array and never invokes a callback.
+
+After an `initialize()` attempt fails, the runtime calls `shutdown()` once.
+The backend returns `INVALID_STATE` only when that failed initialization owns
+no resource requiring release. If partial initialization or rollback retained
+anything, `shutdown()` returns the cleanup failure and remains retryable; it
+must not report `INVALID_STATE`. The runtime then retains the backend table and
+instance until a later shutdown succeeds. The same retry rule applies after a
+failed buffer unregistration or ordinary shutdown.
 
 `submit()` and `poll()` may run concurrently for one initialized backend
 instance. A backend must synchronize its own fixed-capacity state without
@@ -168,9 +192,10 @@ diagnostic and does not establish a completion deadline.
 ## Evidence and exclusions
 
 Automated evidence covers queue saturation, cancellation, delayed dependency
-release, timeout, error, loss, reset, shutdown, malformed tables, C ABI dynamic
-loading, memory-plan accounting, steady-state allocation, and sanitizer
-execution in `tests/test_device_runtime.cpp`, `tests/test_trace_noalloc.cpp`, and
+release, timeout, error, loss, reset, reverse/retryable shutdown, failed-start
+rollback, malformed tables, C ABI dynamic loading, memory-plan accounting,
+steady-state allocation, and sanitizer execution in
+`tests/test_device_runtime.cpp`, `tests/test_trace_noalloc.cpp`, and
 `tests/test_cabi_dlopen.c`. `samples/device_mock.cpp` is the minimal C++ flow.
 
 M9 remains separately gated even though 1.2 contains a real CUDA Driver API

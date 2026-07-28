@@ -42,6 +42,8 @@ struct FakeDriver {
     std::atomic<std::uint64_t> now_ns{1};
     std::atomic<std::uint64_t> transfers{0};
     std::atomic<std::uint64_t> resets{0};
+    std::atomic<std::uint64_t> shutdowns{0};
+    std::atomic<bool> fail_initialize_after_acquire_once{false};
     std::atomic<bool> fail_shutdown_once{false};
 
     static FakeDriver* self(void* user_data) noexcept {
@@ -51,12 +53,19 @@ struct FakeDriver {
     static rt::XdmaDriverResult initialize(void* user_data) noexcept {
         auto* fake = self(user_data);
         bool expected = false;
-        return fake && fake->initialized.compare_exchange_strong(
-                           expected,
-                           true,
-                           std::memory_order_acq_rel)
-            ? rt::XdmaDriverResult::success
-            : rt::XdmaDriverResult::invalid_value;
+        if (!fake ||
+            !fake->initialized.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_acq_rel)) {
+            return rt::XdmaDriverResult::invalid_value;
+        }
+        if (fake->fail_initialize_after_acquire_once.exchange(
+                false,
+                std::memory_order_acq_rel)) {
+            return rt::XdmaDriverResult::io_error;
+        }
+        return rt::XdmaDriverResult::success;
     }
 
     static rt::XdmaTransferResult transfer(
@@ -120,17 +129,20 @@ struct FakeDriver {
 
     static rt::XdmaDriverResult shutdown(void* user_data) noexcept {
         auto* fake = self(user_data);
-        if (fake &&
-            fake->fail_shutdown_once.exchange(
+        if (!fake) {
+            return rt::XdmaDriverResult::invalid_value;
+        }
+        fake->shutdowns.fetch_add(1, std::memory_order_relaxed);
+        if (fake->fail_shutdown_once.exchange(
                 false,
                 std::memory_order_acq_rel)) {
             return rt::XdmaDriverResult::reset_required;
         }
         bool expected = true;
-        return fake && fake->initialized.compare_exchange_strong(
-                           expected,
-                           false,
-                           std::memory_order_acq_rel)
+        return fake->initialized.compare_exchange_strong(
+                   expected,
+                   false,
+                   std::memory_order_acq_rel)
             ? rt::XdmaDriverResult::success
             : rt::XdmaDriverResult::invalid_value;
     }
@@ -454,6 +466,38 @@ void recovery_and_no_allocation() {
     assert(api.shutdown(api.instance) == RTFW_DEVICE_STATUS_OK);
 }
 
+void partial_initialize_cleanup_retries() {
+    FakeDriver fake;
+    fake.fail_initialize_after_acquire_once.store(
+        true,
+        std::memory_order_release);
+    fake.fail_shutdown_once.store(true, std::memory_order_release);
+    rt::XdmaBackendConfig config{};
+    config.queue_capacity = 2;
+    config.buffer_capacity = 1;
+    config.worker_count = 1;
+    rt::XdmaDeviceBackend backend(fake.api(), config);
+    auto api = backend.api();
+    rtfw_device_init_config requested{};
+    requested.struct_size = sizeof(requested);
+    requested.abi_version = RTFW_DEVICE_ABI_VERSION;
+    requested.requested_in_flight = 2;
+    requested.requested_registered_buffers = 1;
+
+    assert(
+        api.initialize(api.instance, &requested) ==
+        RTFW_DEVICE_STATUS_ERROR);
+    assert(fake.initialized.load(std::memory_order_acquire));
+    assert(fake.shutdowns.load(std::memory_order_acquire) == 1);
+    assert(api.shutdown(api.instance) == RTFW_DEVICE_STATUS_OK);
+    assert(!fake.initialized.load(std::memory_order_acquire));
+    assert(fake.shutdowns.load(std::memory_order_acquire) == 2);
+    assert(
+        api.shutdown(api.instance) ==
+        RTFW_DEVICE_STATUS_INVALID_STATE);
+    assert(fake.shutdowns.load(std::memory_order_acquire) == 2);
+}
+
 void concurrent_submit_poll() {
     FakeDriver fake;
     rt::XdmaBackendConfig config{};
@@ -587,6 +631,7 @@ int main() {
     saturation_and_timeout_quarantine();
     validation_rejects_malformed_work();
     recovery_and_no_allocation();
+    partial_initialize_cleanup_retries();
     concurrent_submit_poll();
 #if defined(RTFW_XDMA_LINUX_AVAILABLE)
     linux_adapter_smoke();

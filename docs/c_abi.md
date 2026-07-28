@@ -1,7 +1,7 @@
 # Stable C ABI
 
 Release 0.12 introduced ABI version 8, the first stable C ABI for RTFW;
-release 1.2 retains it. The stability promise applies to the symbols and C
+release 1.2.1 retains it. The stability promise applies to the symbols and C
 declarations represented by
 `abi/rtfw_c_abi_v8.exports`, `rt/include/rt/c_api.h`, and
 `rt/include/rt/device_abi.h`. It does not turn the C++ API into a binary ABI,
@@ -79,6 +79,15 @@ and verifies the installed Apache-2.0 digest.
   Callback user data, device instances, registered buffers, registered state,
   and host job-system user data remain caller-owned for their documented
   lifetime.
+- Device-owning callers must require `rtfw_stop()` to return
+  `RTFW_STATUS_OK` before releasing borrowed objects or calling
+  `rtfw_destroy()`. Failed device cleanup is retryable and leaves the public
+  runtime state unchanged while execution and state mutation are gated.
+- ABI v8 retains its void `rtfw_destroy()`. The implementation does not delete
+  a handle when its implicit stop reports a device-cleanup failure, but the
+  void call cannot safely advertise that outcome. This fail-safe preserves a
+  pointer already known to require cleanup; it is not a substitute for checked
+  `rtfw_stop()`.
 - Returned error strings are library-owned. A handle-specific error may change
   on the next call using that handle.
 - `RTFW_STATUS_INCOMPATIBLE_ABI` is reserved for header/library ABI mismatch;
@@ -117,7 +126,8 @@ deployment tuple are qualified together.
 
 - header/manifest/fingerprint check: `tools/check_c_abi.py`;
 - exact shared-library export check: `abi/rtfw_c_abi_v8.exports`;
-- dynamic legacy-surface coverage: `tests/test_cabi_dlopen.c`;
+- dynamic legacy-surface and failed-teardown retry coverage:
+  `tests/test_cabi_dlopen.c`;
 - C and C++ host-adapter, prestarted host-team concurrency, saturation,
   stale-completion, and no-allocation coverage:
   `tests/host_adapter_tests.cpp`;
