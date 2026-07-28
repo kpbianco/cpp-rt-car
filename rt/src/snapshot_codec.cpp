@@ -6,7 +6,7 @@
 #include <cstring>
 #include <limits>
 
-#include <rt/snapshot.hpp>
+#include <rt/canonical_bytes.hpp>
 
 namespace {
 

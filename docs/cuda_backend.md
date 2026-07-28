@@ -1,11 +1,11 @@
 # CUDA Backend Candidate and Qualification Contract
 
-RTFW 1.1 retains the M9 CUDA Driver API backend candidate introduced in 0.10. The backend is a
+RTFW 1.2 retains the M9 CUDA Driver API backend candidate introduced in 0.10. The backend is a
 real vendor adapter, not the legacy detached-thread GPU stub and not the M8 CPU
 mock. Its implementation and CPU-only state-machine evidence are present, but
 the repository has no approved hardware support tuple. M9 therefore remains a
 candidate rather than a completed or qualified milestone.
-There is no qualified tuple in the 1.1 support matrix.
+There is no qualified tuple in the 1.2 support matrix.
 
 ## Claim boundary
 
@@ -243,4 +243,4 @@ has:
 - raw latency-decomposition samples and thresholds selected before the run;
 - an explicit pass/fail review committed to the versioned support matrix.
 
-No tuple has completed those gates in the repository at 1.1.0.
+No tuple has completed those gates in the repository at 1.2.0.

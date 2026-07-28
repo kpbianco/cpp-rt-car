@@ -253,6 +253,9 @@ void NativePlatformPreflightProbe::inspect(
     std::size_t planned_runtime_bytes,
     const RuntimeClock& clock,
     PlatformPreflightReport& report) noexcept {
+#if !defined(__linux__)
+    static_cast<void>(planned_runtime_bytes);
+#endif
     report = {};
     report.mode = PlatformPreflightMode::strict;
     report.passed = true;

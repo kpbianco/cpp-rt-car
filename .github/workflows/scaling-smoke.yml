@@ -27,6 +27,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DSIM_WERROR=ON \
             -DENABLE_TESTS=OFF \
+            -DRTFW_BUILD_EXPERIMENTAL=ON \
             -DSIM_DOWNLOAD_GTEST=OFF
       - name: Build rtfw_demo
         run: cmake --build build --config RelWithDebInfo --target simcore_app -- -j2

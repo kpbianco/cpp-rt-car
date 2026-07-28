@@ -1,5 +1,10 @@
 #include <rt/c_api.h>
 
+#if defined(LOG_ENABLED) || defined(LOG_DEFAULT_LEVEL) || \
+    defined(PROF_ENABLED) || defined(SIM_WERROR)
+#error "RTFW project policy leaked into an installed C consumer"
+#endif
+
 #include <stdint.h>
 
 int main(void) {

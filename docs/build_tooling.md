@@ -13,6 +13,22 @@ ctest --test-dir build --output-on-failure
 Tests use the checked-in GoogleTest submodule by default. Clone submodules
 recursively or initialize them before configuring with tests.
 
+## Embedding with add_subdirectory
+
+An in-tree host can add RTFW without inheriting repository tooling:
+
+```cmake
+add_subdirectory(third_party/rtfw)
+target_link_libraries(my_engine PRIVATE rtfw::runtime)
+```
+
+Subproject mode builds library targets only by default. A parent's generic
+`ENABLE_TESTS` value does not enable RTFW tests, and RTFW does not create CPack
+or package targets in the parent. Use the namespaced
+`RTFW_BUILD_TESTS=ON` switch for an intentional subproject test build.
+Repository examples, benchmarks, demos, experiments, and installation remain
+separate explicit options.
+
 ## Optional CUDA Driver API adapter
 
 The bounded CUDA state machine (`rtfw::cuda_backend`) is built without a
@@ -105,11 +121,13 @@ cmake --build --preset pgo-use
 `VERSION.txt` is the release source of truth. CMake installs shared/static
 libraries, public headers, package config/version files, the license, and the
 version, changelog, security, support-matrix, and release-contract files.
-Release 1.1 exports component-checked targets for shared C, static C, the C++
+Release 1.2 exports component-checked targets for shared C, static C, the C++
 runtime, and portable/optional CUDA/XDMA adapters. `find_package()`
 compatibility is same-major for 1.x. Stable C ABI compatibility is checked
 independently at runtime; target C++ compatibility is source-only and requires
-recompilation.
+recompilation. Install layouts honor `CMAKE_INSTALL_INCLUDEDIR` and
+`CMAKE_INSTALL_DATADIR`; neither consumer include paths nor license discovery
+assume the default `include`/`share` layout.
 
 CI builds the CPack archive, stages and verifies it, extracts that exact
 downloadable artifact to a fresh prefix, then configures and runs
@@ -119,13 +137,35 @@ CUDA/XDMA state-machine components:
 
 ```cmake
 find_package(
-  rtfw 1.1 CONFIG REQUIRED
+  rtfw 1.2 CONFIG REQUIRED
   COMPONENTS
-    c_shared c_static cpp_runtime
+    c_shared c_static runtime cpp_runtime
     cuda_backend xdma_backend)
 ```
 
-and links their corresponding imported targets. Linux CI also compares the
+On Linux, that gate also configures a nested project with only the C language
+enabled and links both C components. This verifies that the static C target
+exports the implementation toolchain's required C++ runtime libraries instead
+of relying on the consumer to enable C++.
+
+New C++ integrations link `rtfw::runtime`; `rtfw::simcore_rt` remains a 1.x
+compatibility name. The preferred C targets are `rtfw::c_shared` and
+`rtfw::c_static`, while `rtfw::rtfw` and `rtfw::rtfw_static` remain
+compatible. Project warning/Werror and logging/profiler macros are never
+consumer usage requirements. Optional CUDA/XDMA adapter export files are
+loaded only when those components are requested. Their opt-in qualification
+workflows also install to a relocated prefix and compile/link consumers that
+request `cuda_driver` or `xdma_linux` explicitly.
+
+The default package contains only the contract-listed runtime/C/backend
+headers. Broad source-tree SimCore, scheduler, plugin, crashdump, NUMA,
+numerics, and snapshot experiments require `RTFW_BUILD_EXPERIMENTAL=ON`;
+installation additionally requires `RTFW_INSTALL_EXPERIMENTAL=ON`. The narrow
+`rtfw::simcore_rt` compatibility archive remains available through 1.x for the
+accidental demo/fiber link path, but the corresponding SimCore, HAL/GPU, and
+fiber headers are not part of the default SDK.
+
+Linux CI also compares the
 built shared-library symbols with the v8 allowlist. Run the header/manifest
 half locally with:
 
@@ -144,6 +184,7 @@ Windows. It also creates a SHA-256 sidecar:
 cmake -S . -B build-release \
   -DCMAKE_BUILD_TYPE=Release \
   -DENABLE_TESTS=OFF \
+  -DRTFW_BUILD_EXPERIMENTAL=OFF \
   -DSIM_WERROR=ON
 cmake --build build-release --config Release --parallel 2
 cpack --config build-release/CPackConfig.cmake -C Release -B cpack-output

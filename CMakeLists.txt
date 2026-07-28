@@ -8,6 +8,9 @@ endif()
 
 project(rtfw VERSION "${RTFW_VERSION}" LANGUAGES C CXX)
 
+set(RTFW_PROJECT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(RTFW_PROJECT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+
 include(GNUInstallDirs)
 
 find_package(Threads REQUIRED)
@@ -27,14 +30,55 @@ if (RTFW_BUILD_ID_LENGTH GREATER 63 OR
     "RTFW_BUILD_ID must be 1-63 characters from A-Za-z0-9._:/@-")
 endif()
 
+# Build the repository tools by default only when RTFW is the top-level
+# project. add_subdirectory() consumers receive library targets only.
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set(RTFW_TOP_LEVEL ON)
+else()
+  set(RTFW_TOP_LEVEL OFF)
+endif()
+
 # Options (toggle logging / profiler / tests)
 option(ENABLE_LOG "Enable logging" ON)
 option(ENABLE_PROF "Enable profiler" ON)
-option(ENABLE_TESTS "Build tests" ON)
+if (RTFW_TOP_LEVEL)
+  # Legacy top-level spelling retained for existing presets and automation.
+  option(ENABLE_TESTS "Build RTFW tests" ON)
+  # Keep it authoritative on every reconfigure; do not leave a second cache
+  # entry that can drift from the documented legacy switch.
+  set(RTFW_BUILD_TESTS "${ENABLE_TESTS}")
+else()
+  # A parent's generic ENABLE_TESTS cache entry must not opt this subproject
+  # into dependency discovery, test registration, or global test targets.
+  option(
+    RTFW_BUILD_TESTS
+    "Build RTFW tests when used through add_subdirectory"
+    OFF)
+endif()
 option(ENABLE_RAPIDCHECK "Enable RapidCheck property tests" OFF)
 option(SIM_BUILD_FUZZERS "Build the Clang libFuzzer harness" OFF)
 option(SIM_ENABLE_IWYU "Run include-what-you-use during builds" OFF)
 option(SIM_WARN_ODR "Enable -Wodr to detect ODR violations" OFF)
+option(
+  RTFW_BUILD_EXPERIMENTAL
+  "Build unsupported SimCore, scheduler, plugin, and utility experiments"
+  OFF)
+option(
+  RTFW_INSTALL_EXPERIMENTAL
+  "Install unsupported research targets and headers"
+  OFF)
+option(
+  RTFW_BUILD_EXAMPLES
+  "Build embedding and backend examples"
+  "${RTFW_TOP_LEVEL}")
+option(
+  RTFW_BUILD_BENCHMARKS
+  "Build experimental microbenchmarks"
+  OFF)
+option(
+  RTFW_BUILD_RUNTIME_DEMO
+  "Build and install the supported profile-driven runtime demo"
+  "${RTFW_TOP_LEVEL}")
 option(
   RTFW_ENABLE_CUDA
   "Build the optional CUDA Driver API adapter and hardware qualification tool"
@@ -43,6 +87,11 @@ option(
   RTFW_ENABLE_XDMA
   "Build the Linux Xilinx XDMA character-device adapter and qualification tool"
   OFF)
+
+if (RTFW_INSTALL_EXPERIMENTAL AND NOT RTFW_BUILD_EXPERIMENTAL)
+  message(FATAL_ERROR
+    "RTFW_INSTALL_EXPERIMENTAL requires RTFW_BUILD_EXPERIMENTAL=ON")
+endif()
 
 # Sanitizer toggles (semicolons to enable multiple: address;thread;leak;memory;hwaddress;safe-stack;cfi)
 set(SIM_SANITIZERS "" CACHE STRING "Sanitizers to enable for all targets")
@@ -126,7 +175,7 @@ function(simcore_link_sanitizer_runtime target)
   set(_handled_tags)
   set(_runtime_entries)
   if (CMAKE_CXX_COMPILER)
-    set(_dummy_dir "${CMAKE_BINARY_DIR}/CMakeFiles")
+    set(_dummy_dir "${RTFW_PROJECT_BINARY_DIR}/CMakeFiles")
     file(MAKE_DIRECTORY "${_dummy_dir}")
     set(_dummy_src "${_dummy_dir}/simcore_sanitize_dummy.cpp")
     if (NOT EXISTS "${_dummy_src}")
@@ -409,12 +458,15 @@ endif()
 # Use FetchContent to obtain googletest at configure time instead of
 # expecting a checked out submodule. This keeps the repository light and
 # avoids build failures when the submodule is missing.
-if (ENABLE_TESTS)
+if (RTFW_BUILD_TESTS)
     option(SIM_DOWNLOAD_GTEST "Download GoogleTest if it is not provided" ON)
     set(SIM_GTEST_AVAILABLE OFF)
 
-    if (EXISTS "${CMAKE_SOURCE_DIR}/external/googletest/CMakeLists.txt")
-        add_subdirectory(external/googletest)
+    if (EXISTS
+        "${RTFW_PROJECT_SOURCE_DIR}/external/googletest/CMakeLists.txt")
+        add_subdirectory(
+            "${RTFW_PROJECT_SOURCE_DIR}/external/googletest"
+            "${RTFW_PROJECT_BINARY_DIR}/_deps/googletest")
         set(SIM_GTEST_AVAILABLE ON)
         set(SIM_GTEST_LIBRARIES gtest gtest_main gmock)
     else()
@@ -440,7 +492,16 @@ if (ENABLE_TESTS)
             set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
             FetchContent_MakeAvailable(googletest)
             set(SIM_GTEST_AVAILABLE ON)
-            set(SIM_GTEST_LIBRARIES gtest gtest_main gmock)
+            set(SIM_GTEST_LIBRARIES)
+            foreach(gtest_target gtest gtest_main gmock)
+                if (TARGET ${gtest_target})
+                    list(APPEND SIM_GTEST_LIBRARIES ${gtest_target})
+                endif()
+            endforeach()
+            if (NOT TARGET gtest)
+                message(FATAL_ERROR
+                    "The GoogleTest source override did not provide gtest")
+            endif()
         else()
             message(WARNING "GoogleTest not available; gtest-based tests will be skipped.")
         endif()
@@ -457,52 +518,82 @@ if (ENABLE_TESTS)
     endif()
 endif()
 
-# Header-only core library
-add_library(simcore INTERFACE)
-target_include_directories(simcore INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hal>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/gpu>
-    $<INSTALL_INTERFACE:include>
-)
-target_link_libraries(simcore INTERFACE Threads::Threads)
-
-add_library(simcore_platform STATIC src/platform_init.cpp)
-target_sources(simcore_platform PRIVATE src/metrics.cpp)
-target_include_directories(simcore_platform PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>)
-target_link_libraries(simcore_platform PUBLIC simcore)
-set_target_properties(simcore_platform PROPERTIES
-    CXX_VISIBILITY_PRESET hidden
-    POSITION_INDEPENDENT_CODE ON
-    VISIBILITY_INLINES_HIDDEN YES)
-
-# Enable warnings for project sources only
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(simcore INTERFACE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wnon-virtual-dtor)
-elseif (MSVC)
-    target_compile_options(simcore INTERFACE /W4)
-endif()
-
-if (SIM_WERROR)
+function(rtfw_enable_project_warnings target)
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(simcore INTERFACE -Werror)
+    target_compile_options(
+      ${target}
+      PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wconversion
+        -Wshadow
+        -Wnon-virtual-dtor)
+    if (SIM_WERROR)
+      target_compile_options(${target} PRIVATE -Werror)
+    endif()
   elseif (MSVC)
-    target_compile_options(simcore INTERFACE /WX)
+    target_compile_options(${target} PRIVATE /W4)
+    if (SIM_WERROR)
+      target_compile_options(${target} PRIVATE /WX)
+    endif()
   endif()
+endfunction()
+
+if (RTFW_BUILD_EXPERIMENTAL)
+  # Header-only research surface. Its feature macros stay build-local and are
+  # never part of a supported installed target's usage requirements.
+  add_library(simcore INTERFACE)
+  target_include_directories(simcore INTERFACE
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hal>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/gpu>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  )
+  target_link_libraries(simcore INTERFACE Threads::Threads)
+  target_compile_features(simcore INTERFACE cxx_std_20)
+  if (ENABLE_LOG)
+    target_compile_definitions(
+      simcore INTERFACE
+      $<BUILD_INTERFACE:LOG_ENABLED>
+      $<BUILD_INTERFACE:LOG_DEFAULT_LEVEL=2>)
+  endif()
+  if (ENABLE_PROF)
+    target_compile_definitions(
+      simcore INTERFACE $<BUILD_INTERFACE:PROF_ENABLED>)
+  endif()
+
+  add_library(simcore_platform STATIC src/platform_init.cpp src/metrics.cpp)
+  target_include_directories(simcore_platform PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  target_link_libraries(simcore_platform PUBLIC simcore)
+  set_target_properties(simcore_platform PROPERTIES
+      CXX_VISIBILITY_PRESET hidden
+      POSITION_INDEPENDENT_CODE ON
+      VISIBILITY_INLINES_HIDDEN YES)
+  rtfw_enable_project_warnings(simcore_platform)
+
+  add_library(rt_memory INTERFACE)
+  target_include_directories(
+    rt_memory INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+  # Core module retained only for research/compatibility headers.
+  add_library(simcore_core INTERFACE)
+  target_include_directories(simcore_core INTERFACE
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 endif()
 
 # In your top-level CMakeLists.txt
 
 # Ensure asserts are ON for tests (avoid -DNDEBUG)
-if (CMAKE_BUILD_TYPE MATCHES "Release")
+if (RTFW_BUILD_TESTS AND CMAKE_BUILD_TYPE MATCHES "Release")
   message(WARNING "Tests are more useful with assertions; consider Debug or RelWithDebInfo.")
 endif()
-
-add_library(rt_memory INTERFACE)
-target_include_directories(rt_memory INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Optional toggles:
 # target_compile_definitions(rt_memory INTERFACE RT_ARENA_PRETOUCH=1)
@@ -513,30 +604,15 @@ target_include_directories(rt_memory INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/inclu
 
 
 
-if (ENABLE_LOG)
-    target_compile_definitions(simcore INTERFACE -DLOG_ENABLED -DLOG_DEFAULT_LEVEL=2)
-endif()
-
-if (ENABLE_PROF)
-    target_compile_definitions(simcore INTERFACE -DPROF_ENABLED)
-endif()
-
 option(SIM_ENABLE_AVX2 "Enable experimental global AVX2/FMA compilation" OFF)
 
 if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
   add_compile_options(-mavx2 -mfma)
 endif()
 
-target_compile_features(simcore INTERFACE cxx_std_20)
-
-# Core module (math, containers)
-add_library(simcore_core INTERFACE)
-target_include_directories(simcore_core INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
-    $<INSTALL_INTERFACE:include>)
-
-# Runtime module providing C API surface
-set(RT_SOURCES
+# Supported runtime implementation. This is the only C++ execution library
+# behind the stable C libraries and the preferred installed C++ target.
+set(RTFW_RUNTIME_SOURCES
     rt/src/compiled_graph.cpp
     rt/src/device_manager.cpp
     rt/src/executor.cpp
@@ -544,40 +620,88 @@ set(RT_SOURCES
     rt/src/mock_device.cpp
     rt/src/native_platform_preflight.cpp
     rt/src/observability_export.cpp
-    rt/src/runtime.cpp
+    rt/src/runtime_compat.cpp
     rt/src/runtime_profile.cpp
     rt/src/snapshot_codec.cpp
-    rt/src/plugin_manager.cpp
-    rt/src/scheduler.cpp
     rt/src/telemetry.cpp
-    rt/src/fiber_pool.cpp
     rt/src/watchdog_monitor.cpp
 )
 
-if (UNIX)
-    list(APPEND RT_SOURCES rt/src/crashdump_posix.cpp)
-else()
-    list(APPEND RT_SOURCES rt/src/crashdump_stub.cpp)
-endif()
-
-add_library(simcore_rt STATIC ${RT_SOURCES})
+add_library(rtfw_runtime STATIC ${RTFW_RUNTIME_SOURCES})
 target_compile_definitions(
-    simcore_rt
+    rtfw_runtime
     PRIVATE RTFW_BUILD_ID_STRING="${RTFW_BUILD_ID}")
+target_compile_features(rtfw_runtime PUBLIC cxx_std_20)
+target_include_directories(rtfw_runtime PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_link_libraries(rtfw_runtime PUBLIC Threads::Threads)
+set_target_properties(rtfw_runtime PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    EXPORT_NAME runtime
+    OUTPUT_NAME rtfw_runtime
+    POSITION_INDEPENDENT_CODE ON
+    VISIBILITY_INLINES_HIDDEN YES)
+rtfw_enable_project_warnings(rtfw_runtime)
+add_library(rtfw::runtime ALIAS rtfw_runtime)
+
+# Narrow 1.x compatibility library. It keeps declarations that accidentally
+# became reachable from runtime.hpp linkable without putting their research
+# implementation in the supported runtime archive.
+add_library(
+    simcore_rt STATIC
+    rt/src/runtime.cpp
+    rt/src/fiber_pool.cpp)
+target_compile_features(simcore_rt PUBLIC cxx_std_20)
 target_include_directories(simcore_rt PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hal>
-    $<INSTALL_INTERFACE:include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/gpu>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_link_libraries(simcore_rt PUBLIC simcore_core Threads::Threads)
+target_link_libraries(simcore_rt PUBLIC rtfw_runtime Threads::Threads)
 set_target_properties(simcore_rt PROPERTIES
     CXX_VISIBILITY_PRESET hidden
+    EXPORT_NAME simcore_rt
     POSITION_INDEPENDENT_CODE ON
     VISIBILITY_INLINES_HIDDEN YES)
-if (UNIX)
-    target_link_libraries(simcore_rt PUBLIC dl)
+rtfw_enable_project_warnings(simcore_rt)
+add_library(rtfw::simcore_rt ALIAS simcore_rt)
+
+if (RTFW_BUILD_EXPERIMENTAL)
+  set(RTFW_EXPERIMENTAL_SOURCES
+      rt/src/plugin_manager.cpp
+      rt/src/scheduler.cpp)
+  if (UNIX)
+    list(APPEND RTFW_EXPERIMENTAL_SOURCES rt/src/crashdump_posix.cpp)
+  else()
+    list(APPEND RTFW_EXPERIMENTAL_SOURCES rt/src/crashdump_stub.cpp)
+  endif()
+  add_library(rtfw_experimental STATIC ${RTFW_EXPERIMENTAL_SOURCES})
+  target_compile_features(rtfw_experimental PUBLIC cxx_std_20)
+  target_include_directories(rtfw_experimental PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  target_link_libraries(
+      rtfw_experimental PUBLIC simcore simcore_rt Threads::Threads)
+  if (UNIX)
+    target_link_libraries(rtfw_experimental PRIVATE dl)
+  endif()
+  set_target_properties(rtfw_experimental PROPERTIES
+      CXX_VISIBILITY_PRESET hidden
+      EXPORT_NAME experimental
+      OUTPUT_NAME rtfw_experimental
+      POSITION_INDEPENDENT_CODE ON
+      VISIBILITY_INLINES_HIDDEN YES)
+  rtfw_enable_project_warnings(rtfw_experimental)
+  add_library(rtfw::experimental ALIAS rtfw_experimental)
 endif()
 
 # CUDA backend state machine. This target deliberately has no toolkit
@@ -588,9 +712,8 @@ target_include_directories(rtfw_cuda_backend PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_link_libraries(rtfw_cuda_backend PUBLIC simcore_core)
 set_target_properties(rtfw_cuda_backend PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     EXPORT_NAME cuda_backend
@@ -598,6 +721,7 @@ set_target_properties(rtfw_cuda_backend PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     VISIBILITY_INLINES_HIDDEN YES
 )
+rtfw_enable_project_warnings(rtfw_cuda_backend)
 add_library(rtfw::cuda_backend ALIAS rtfw_cuda_backend)
 
 # Vendor headers and symbols stay in a separate opt-in adapter.
@@ -606,7 +730,7 @@ if (RTFW_ENABLE_CUDA)
     add_library(rtfw_cuda_driver STATIC rt/src/cuda_driver.cpp)
     target_include_directories(rtfw_cuda_driver PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
     target_compile_definitions(
         rtfw_cuda_driver
@@ -621,6 +745,7 @@ if (RTFW_ENABLE_CUDA)
         POSITION_INDEPENDENT_CODE ON
         VISIBILITY_INLINES_HIDDEN YES
     )
+    rtfw_enable_project_warnings(rtfw_cuda_driver)
     add_library(rtfw::cuda_driver ALIAS rtfw_cuda_driver)
 endif()
 
@@ -633,10 +758,10 @@ target_include_directories(rtfw_xdma_backend PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(
-    rtfw_xdma_backend PUBLIC simcore_core Threads::Threads)
+    rtfw_xdma_backend PUBLIC Threads::Threads)
 set_target_properties(rtfw_xdma_backend PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     EXPORT_NAME xdma_backend
@@ -644,6 +769,7 @@ set_target_properties(rtfw_xdma_backend PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     VISIBILITY_INLINES_HIDDEN YES
 )
+rtfw_enable_project_warnings(rtfw_xdma_backend)
 add_library(rtfw::xdma_backend ALIAS rtfw_xdma_backend)
 
 if (RTFW_ENABLE_XDMA)
@@ -655,7 +781,7 @@ if (RTFW_ENABLE_XDMA)
     target_compile_features(rtfw_xdma_linux PUBLIC cxx_std_20)
     target_include_directories(rtfw_xdma_linux PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
     target_compile_definitions(
         rtfw_xdma_linux
@@ -669,6 +795,7 @@ if (RTFW_ENABLE_XDMA)
         POSITION_INDEPENDENT_CODE ON
         VISIBILITY_INLINES_HIDDEN YES
     )
+    rtfw_enable_project_warnings(rtfw_xdma_linux)
     add_library(rtfw::xdma_linux ALIAS rtfw_xdma_linux)
 endif()
 
@@ -683,12 +810,13 @@ foreach(lib rtfw_shared rtfw_static)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
-            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
     set_target_properties(${lib} PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         POSITION_INDEPENDENT_CODE ON
         VISIBILITY_INLINES_HIDDEN YES)
+    rtfw_enable_project_warnings(${lib})
 endforeach()
 
 target_compile_definitions(rtfw_shared PRIVATE RTFW_BUILD=1)
@@ -754,60 +882,100 @@ if (MSVC)
     )
 endif()
 
-target_link_libraries(rtfw_shared PRIVATE simcore simcore_platform simcore_rt)
-target_link_libraries(rtfw_static PUBLIC simcore simcore_platform simcore_rt)
+target_link_libraries(rtfw_shared PRIVATE rtfw_runtime)
+target_link_libraries(rtfw_static PRIVATE rtfw_runtime)
+
+# A C-only project still needs the implementation toolchain's C++ support
+# libraries when it selects the static C API. Export only the C++-specific
+# portion; libraries already implicit for the C driver remain implicit.
+set(RTFW_CXX_RUNTIME_LIBRARIES ${CMAKE_CXX_IMPLICIT_LINK_LIBRARIES})
+foreach(runtime_library IN LISTS CMAKE_C_IMPLICIT_LINK_LIBRARIES)
+    list(REMOVE_ITEM RTFW_CXX_RUNTIME_LIBRARIES "${runtime_library}")
+endforeach()
+list(REMOVE_DUPLICATES RTFW_CXX_RUNTIME_LIBRARIES)
+if (RTFW_CXX_RUNTIME_LIBRARIES)
+    target_link_libraries(
+        rtfw_static INTERFACE ${RTFW_CXX_RUNTIME_LIBRARIES})
+endif()
 
 set_target_properties(rtfw_shared PROPERTIES EXPORT_NAME rtfw)
 add_library(rtfw ALIAS rtfw_shared)
+add_library(rtfw::rtfw ALIAS rtfw_shared)
+add_library(rtfw::rtfw_static ALIAS rtfw_static)
+
+add_library(rtfw_c_shared INTERFACE)
+target_link_libraries(rtfw_c_shared INTERFACE rtfw_shared)
+set_target_properties(rtfw_c_shared PROPERTIES EXPORT_NAME c_shared)
+add_library(rtfw::c_shared ALIAS rtfw_c_shared)
+
+add_library(rtfw_c_static INTERFACE)
+target_link_libraries(rtfw_c_static INTERFACE rtfw_static)
+set_target_properties(rtfw_c_static PROPERTIES EXPORT_NAME c_static)
+add_library(rtfw::c_static ALIAS rtfw_c_static)
 
 simcore_link_sanitizer_runtime(rtfw_shared)
 
-# Main executable
-add_executable(simcore_app src/main.cpp)
-target_link_libraries(simcore_app PRIVATE simcore_platform)
-set_target_properties(simcore_app PROPERTIES OUTPUT_NAME rtfw_demo)
-add_executable(rtfw_demo ALIAS simcore_app)
+if (RTFW_BUILD_EXPERIMENTAL)
+  # Legacy demonstration executable retained for repository regression only.
+  add_executable(simcore_app src/main.cpp)
+  target_link_libraries(simcore_app PRIVATE simcore_platform simcore_rt)
+  set_target_properties(simcore_app PROPERTIES OUTPUT_NAME rtfw_demo)
+  add_executable(rtfw_demo ALIAS simcore_app)
+  rtfw_enable_project_warnings(simcore_app)
 
-# Profile-driven target-runtime demo and autotune workload.
-add_executable(rtfw_runtime_demo src/runtime_profile_demo.cpp)
-target_link_libraries(rtfw_runtime_demo PRIVATE simcore_rt)
+  # Sample trace dump utility for the legacy binary trace.
+  add_executable(trace_dump src/trace_dump.cpp)
+  target_link_libraries(trace_dump PRIVATE simcore_platform)
+  target_include_directories(trace_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  rtfw_enable_project_warnings(trace_dump)
+endif()
 
-# Sample trace dump utility
-add_executable(trace_dump src/trace_dump.cpp)
-target_link_libraries(trace_dump PRIVATE simcore_platform)
-target_include_directories(trace_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if (RTFW_BUILD_RUNTIME_DEMO)
+  # Profile-driven target-runtime demo and autotune workload.
+  add_executable(rtfw_runtime_demo src/runtime_profile_demo.cpp)
+  target_link_libraries(rtfw_runtime_demo PRIVATE rtfw_runtime)
+  rtfw_enable_project_warnings(rtfw_runtime_demo)
+endif()
 
-# Tiny sample programs
-if (ENABLE_TESTS)
+if (RTFW_BUILD_TESTS)
     enable_testing()
 endif()
-add_subdirectory(samples)
+if (RTFW_BUILD_EXAMPLES)
+  add_subdirectory(samples)
+endif()
 
-# Micro benchmarks
-add_subdirectory(bench)
+if (RTFW_BUILD_BENCHMARKS)
+  if (NOT RTFW_BUILD_EXPERIMENTAL)
+    message(FATAL_ERROR
+      "RTFW_BUILD_BENCHMARKS requires RTFW_BUILD_EXPERIMENTAL=ON")
+  endif()
+  add_subdirectory(bench)
+endif()
 
 # Tests
-if (ENABLE_TESTS)
+if (RTFW_BUILD_TESTS)
     add_subdirectory(tests)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeterminismTargets.cmake)
 endif()
 
 # Optional Bloaty size analysis
 find_program(BLOATY_EXE NAMES bloaty)
-if (BLOATY_EXE)
+if (BLOATY_EXE AND TARGET simcore_app)
   add_custom_target(bloaty
     COMMAND ${BLOATY_EXE} $<TARGET_FILE:simcore_app> -d compileunits,symbols -n 0.1
     DEPENDS simcore_app
     COMMENT "Run Bloaty on simcore_app")
 endif()
 
-add_custom_target(tests
-    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/build      # wipe  ▸ optional
-    COMMAND ${CMAKE_COMMAND} -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug ${CMAKE_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} --build . -- -j
-    COMMAND ctest --output-on-failure
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "Configure, build and run all tests")
+if (RTFW_BUILD_TESTS)
+  add_custom_target(rtfw_tests
+      COMMAND
+          ${CMAKE_CTEST_COMMAND}
+          --test-dir ${RTFW_PROJECT_BINARY_DIR}
+          --output-on-failure
+      WORKING_DIRECTORY ${RTFW_PROJECT_BINARY_DIR}
+      COMMENT "Run configured tests")
+endif()
 
 include(CMakePackageConfigHelpers)
 
@@ -817,7 +985,9 @@ install(
     TARGETS
         rtfw_shared
         rtfw_static
-        simcore_platform
+        rtfw_c_shared
+        rtfw_c_static
+        rtfw_runtime
         simcore_rt
         rtfw_cuda_backend
         rtfw_xdma_backend
@@ -828,15 +998,16 @@ install(
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(
-    TARGETS rtfw_runtime_demo
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+if (RTFW_BUILD_RUNTIME_DEMO)
+  install(
+      TARGETS rtfw_runtime_demo
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 if (RTFW_ENABLE_CUDA)
     install(
         TARGETS rtfw_cuda_driver
-        EXPORT rtfwTargets
+        EXPORT rtfwCudaTargets
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -847,7 +1018,7 @@ endif()
 if (RTFW_ENABLE_XDMA)
     install(
         TARGETS rtfw_xdma_linux
-        EXPORT rtfwTargets
+        EXPORT rtfwXdmaTargets
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -855,87 +1026,102 @@ if (RTFW_ENABLE_XDMA)
     )
 endif()
 
+# The default SDK surface is intentionally explicit. Internal and research
+# headers may exist in the source tree without becoming an accidental API.
 install(
-    TARGETS simcore simcore_core
-    EXPORT rtfwTargets
-    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
+    FILES include/rtfw/version.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rtfw)
+install(
+    FILES
+        rt/include/rt/c_api.h
+        rt/include/rt/device_abi.h
+        rt/include/rt/canonical_bytes.hpp
+        rt/include/rt/config.hpp
+        rt/include/rt/device.hpp
+        rt/include/rt/graph.hpp
+        rt/include/rt/mock_device.hpp
+        rt/include/rt/observability_export.hpp
+        rt/include/rt/profile.hpp
+        rt/include/rt/runtime.hpp
+        rt/include/rt/status.hpp
+        rt/include/rt/version.hpp
+        rt/include/rt/cuda_backend.hpp
+        rt/include/rt/xdma_backend.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rt)
+install(
+    FILES core/include/core/units.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/core)
 
-install(
-    DIRECTORY include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    FILES_MATCHING
-        PATTERN "*.h"
-        PATTERN "*.hh"
-        PATTERN "*.hpp"
-        PATTERN "*.hxx"
-        PATTERN "*.inl"
-        PATTERN "*.ipp"
-        PATTERN "*.tpp"
-)
+if (RTFW_ENABLE_CUDA)
+  install(
+      FILES rt/include/rt/cuda_driver.hpp
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rt)
+endif()
 
-install(
-    DIRECTORY rt/include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    FILES_MATCHING
-        PATTERN "*.h"
-        PATTERN "*.hh"
-        PATTERN "*.hpp"
-        PATTERN "*.hxx"
-        PATTERN "*.inl"
-        PATTERN "*.ipp"
-        PATTERN "*.tpp"
-)
+if (RTFW_ENABLE_XDMA)
+  install(
+      FILES rt/include/rt/xdma_linux.hpp
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rt)
+endif()
 
-install(
-    DIRECTORY core/include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    FILES_MATCHING
-        PATTERN "*.h"
-        PATTERN "*.hh"
-        PATTERN "*.hpp"
-        PATTERN "*.hxx"
-        PATTERN "*.inl"
-        PATTERN "*.ipp"
-        PATTERN "*.tpp"
-)
-
-install(
-    FILES api/cabi.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/api
-)
-
-install(
-    DIRECTORY hal/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hal
-    FILES_MATCHING
-        PATTERN "*.h"
-        PATTERN "*.hh"
-        PATTERN "*.hpp"
-        PATTERN "*.hxx"
-        PATTERN "*.inl"
-        PATTERN "*.ipp"
-        PATTERN "*.tpp"
-)
-
-install(
-    DIRECTORY gpu/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gpu
-    FILES_MATCHING
-        PATTERN "*.h"
-        PATTERN "*.hh"
-        PATTERN "*.hpp"
-        PATTERN "*.hxx"
-        PATTERN "*.inl"
-        PATTERN "*.ipp"
-        PATTERN "*.tpp"
-)
+if (RTFW_INSTALL_EXPERIMENTAL)
+  install(
+      TARGETS
+          simcore
+          simcore_core
+          simcore_platform
+          rt_memory
+          rtfw_experimental
+      EXPORT rtfwExperimentalTargets
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+      INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(
+      DIRECTORY include/ rt/include/ core/include/
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+      FILES_MATCHING
+          PATTERN "*.h"
+          PATTERN "*.hh"
+          PATTERN "*.hpp"
+          PATTERN "*.hxx"
+          PATTERN "*.inl"
+          PATTERN "*.ipp"
+          PATTERN "*.tpp")
+  install(
+      FILES api/cabi.h
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/api)
+  install(
+      DIRECTORY hal/
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hal
+      FILES_MATCHING
+          PATTERN "*.h"
+          PATTERN "*.hh"
+          PATTERN "*.hpp"
+          PATTERN "*.hxx"
+          PATTERN "*.inl"
+          PATTERN "*.ipp"
+          PATTERN "*.tpp")
+  install(
+      DIRECTORY gpu/
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gpu
+      FILES_MATCHING
+          PATTERN "*.h"
+          PATTERN "*.hh"
+          PATTERN "*.hpp"
+          PATTERN "*.hxx"
+          PATTERN "*.inl"
+          PATTERN "*.ipp"
+          PATTERN "*.tpp")
+endif()
 
 configure_package_config_file(
     cmake/rtfwConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/rtfwConfig.cmake
     INSTALL_DESTINATION ${RTFW_INSTALL_CMAKEDIR}
-    PATH_VARS CMAKE_INSTALL_INCLUDEDIR
+    PATH_VARS
+        CMAKE_INSTALL_INCLUDEDIR
+        CMAKE_INSTALL_DATADIR
 )
 
 if (PROJECT_VERSION_MAJOR EQUAL 0)
@@ -999,30 +1185,50 @@ install(
     DESTINATION ${RTFW_INSTALL_CMAKEDIR}
 )
 
-export(
-    EXPORT rtfwTargets
-    NAMESPACE rtfw::
-    FILE ${CMAKE_CURRENT_BINARY_DIR}/rtfwTargets.cmake
-)
-
-set(CPACK_PACKAGE_NAME "rtfw")
-set(CPACK_PACKAGE_VENDOR "RTFW contributors")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Bounded-resource C++20 simulation runtime")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(RTFW_PACKAGE_TOOLCHAIN
-    "${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
-string(REGEX REPLACE "[^A-Za-z0-9._-]" "_"
-    RTFW_PACKAGE_TOOLCHAIN "${RTFW_PACKAGE_TOOLCHAIN}")
-set(CPACK_PACKAGE_FILE_NAME
-    "rtfw-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${RTFW_PACKAGE_TOOLCHAIN}")
-set(CPACK_PACKAGE_CHECKSUM SHA256)
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
-set(CPACK_VERBATIM_VARIABLES YES)
-if (WIN32)
-    set(CPACK_GENERATOR ZIP)
-else()
-    set(CPACK_GENERATOR TGZ)
+if (RTFW_ENABLE_CUDA)
+  install(
+      EXPORT rtfwCudaTargets
+      FILE rtfwCudaTargets.cmake
+      NAMESPACE rtfw::
+      DESTINATION ${RTFW_INSTALL_CMAKEDIR})
 endif()
-include(CPack)
+
+if (RTFW_ENABLE_XDMA)
+  install(
+      EXPORT rtfwXdmaTargets
+      FILE rtfwXdmaTargets.cmake
+      NAMESPACE rtfw::
+      DESTINATION ${RTFW_INSTALL_CMAKEDIR})
+endif()
+
+if (RTFW_INSTALL_EXPERIMENTAL)
+  install(
+      EXPORT rtfwExperimentalTargets
+      FILE rtfwExperimentalTargets.cmake
+      NAMESPACE rtfw::
+      DESTINATION ${RTFW_INSTALL_CMAKEDIR})
+endif()
+
+if (RTFW_TOP_LEVEL)
+  set(CPACK_PACKAGE_NAME "rtfw")
+  set(CPACK_PACKAGE_VENDOR "RTFW contributors")
+  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+      "Bounded-resource C++20 simulation runtime")
+  set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+  set(RTFW_PACKAGE_TOOLCHAIN
+      "${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+  string(REGEX REPLACE "[^A-Za-z0-9._-]" "_"
+      RTFW_PACKAGE_TOOLCHAIN "${RTFW_PACKAGE_TOOLCHAIN}")
+  set(CPACK_PACKAGE_FILE_NAME
+      "rtfw-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${RTFW_PACKAGE_TOOLCHAIN}")
+  set(CPACK_PACKAGE_CHECKSUM SHA256)
+  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+  set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+  set(CPACK_VERBATIM_VARIABLES YES)
+  if (WIN32)
+      set(CPACK_GENERATOR ZIP)
+  else()
+      set(CPACK_GENERATOR TGZ)
+  endif()
+  include(CPack)
+endif()

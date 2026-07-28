@@ -46,7 +46,7 @@ record and measurements are listed in the
 [product contract](product_contract.md). Host setup and library behavior stay
 separate.
 
-Release 1.1 retains an optional read-only strict Linux prerequisite preflight
+Release 1.2 retains an optional read-only strict Linux prerequisite preflight
 for the target `rt::Runtime`. It checks clock support, PREEMPT_RT, memory-lock
 coverage, isolated affinity, and realtime scheduling before runtime threads
 start. It deliberately does not apply any of those settings, and passing it is

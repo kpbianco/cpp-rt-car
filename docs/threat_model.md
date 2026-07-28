@@ -2,7 +2,7 @@
 
 ## Trust boundary
 
-RTFW 1.1 is an in-process native library. The host application, runtime,
+RTFW 1.2 is an in-process native library. The host application, runtime,
 callbacks, and loaded plugins share one address space and authority. Plugins
 and device backends are trusted code; ABI validation is not a security
 boundary. Portable RT0 support is not a sandboxing claim.

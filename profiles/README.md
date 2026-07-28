@@ -1,6 +1,6 @@
 # Runtime Profile Fixtures
 
-`example-linux.json` is a schema-valid RTFW 1.1 profile used to demonstrate the
+`example-linux.json` is a schema-valid RTFW 1.1+ profile used to demonstrate the
 installed profile shape. It is consumed by the strict C++ runtime-profile
 loader, but it is not an autotune recommendation, latency result, hardware
 qualification record, or claim about every Linux host.

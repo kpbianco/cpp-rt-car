@@ -1,13 +1,13 @@
 # Architecture
 
-This page separates the supported 1.1 target runtime from compatibility and
+This page separates the supported 1.2 target runtime from compatibility and
 candidate paths. The normative contract is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 1.1 implementation
+## Current 1.2 implementation
 
-### M1–M12 host, device, and distribution runtime
+### M1–M14 host, device, distribution, and SDK runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -189,7 +189,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M13 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M14 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
@@ -205,6 +205,9 @@ that arbitrary host data is automatically optimized.
   `rt/src/runtime_profile.cpp`, `src/runtime_profile_demo.cpp`,
   `tools/autotune/config.schema.json`, `tools/autotune/spec.yaml`,
   `docs/runtime_profiles.md`
+- M14 SDK/package boundary: `rtfw::runtime`, `rt/include/rt/config.hpp`,
+  `rt/include/rt/status.hpp`, `rt/include/rt/canonical_bytes.hpp`,
+  `cmake/rtfwConfig.cmake.in`, `tests/package_consumer/package_contract.cmake`
 - M4 memory plan: `rt/src/aligned_storage.hpp`,
   `docs/memory_plan.md`
 - M5 time/platform controls: `rt/src/watchdog_monitor.cpp`,

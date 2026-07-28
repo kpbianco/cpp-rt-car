@@ -1245,9 +1245,10 @@ private:
       const std::size_t levelStart = head;
       while (head < q.size())
         ++head;
-      using Diff = std::vector<std::size_t>::difference_type;
-      std::vector<std::size_t> level(q.begin() + static_cast<Diff>(levelStart),
-                                     q.begin() + static_cast<Diff>(head));
+      std::vector<std::size_t> level;
+      level.reserve(head - levelStart);
+      for (std::size_t index = levelStart; index < head; ++index)
+        level.push_back(q[index]);
       if (level.empty())
         break;
       levels.push_back(level);

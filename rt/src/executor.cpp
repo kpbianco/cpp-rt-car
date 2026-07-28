@@ -34,6 +34,12 @@ constexpr std::size_t kHostTokenCasAttemptLimit = 64;
 
 namespace rt::detail {
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// The producer/consumer cursors intentionally occupy separate cache lines.
+#pragma warning(disable : 4324)
+#endif
+
 class Executor::Queue final {
     struct Cell {
         std::atomic<std::size_t> sequence{0};
@@ -127,6 +133,10 @@ private:
     alignas(64) std::atomic<std::size_t> enqueue_{0};
     alignas(64) std::atomic<std::size_t> dequeue_{0};
 };
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 void Executor::TaskGroup::reset() noexcept {
     pending.store(0, std::memory_order_relaxed);

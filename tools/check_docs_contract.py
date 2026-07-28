@@ -257,6 +257,9 @@ def check_runtime_contract() -> None:
     samples_cmake = read("samples/CMakeLists.txt")
     tests_cmake = read("tests/CMakeLists.txt")
     runtime_header = read("rt/include/rt/runtime.hpp")
+    config_header = read("rt/include/rt/config.hpp")
+    status_header = read("rt/include/rt/status.hpp")
+    canonical_bytes_header = read("rt/include/rt/canonical_bytes.hpp")
     runtime_source = read("rt/src/host_runtime.cpp")
     profile_header = read("rt/include/rt/profile.hpp")
     profile_source = read("rt/src/runtime_profile.cpp")
@@ -266,6 +269,7 @@ def check_runtime_contract() -> None:
     profile_doc = read("docs/runtime_profiles.md")
     profile_schema = read("tools/autotune/config.schema.json")
     autotune_spec = read("tools/autotune/spec.yaml")
+    autotune_make_config = read("tools/autotune/make_config.py")
     mapping_smoke = read("tools/autotune/mapping_smoke.py")
     mapping_workflow = read(".github/workflows/autotune-mapping.yml")
     c_header = read("rt/include/rt/c_api.h")
@@ -311,7 +315,12 @@ def check_runtime_contract() -> None:
     cuda_test = read("tests/test_cuda_backend.cpp")
     xdma_test = read("tests/xdma_backend_tests.cpp")
     host_adapter_test = read("tests/host_adapter_tests.cpp")
+    add_subdirectory_consumer = read(
+        "tests/add_subdirectory_consumer/CMakeLists.txt"
+    )
     package_consumer = read("tests/package_consumer/CMakeLists.txt")
+    package_contract = read("tests/package_consumer/package_contract.cmake")
+    package_config = read("cmake/rtfwConfig.cmake.in")
     snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
     noalloc_test = read("tests/test_trace_noalloc.cpp")
     ci_workflow = read(".github/workflows/ci.yml")
@@ -543,16 +552,16 @@ def check_runtime_contract() -> None:
         "graph_cycle",
         "resource_conflict",
     ):
-        if status not in runtime_header:
-            fail(f"rt/include/rt/runtime.hpp: missing M2 status {status!r}")
+        if status not in status_header:
+            fail(f"rt/include/rt/status.hpp: missing M2 status {status!r}")
 
     for status in ("platform_preflight_failed", "clock_failure"):
-        if status not in runtime_header:
-            fail(f"rt/include/rt/runtime.hpp: missing M5 status {status!r}")
+        if status not in status_header:
+            fail(f"rt/include/rt/status.hpp: missing M5 status {status!r}")
 
     for status in ("invalid_artifact", "incompatible_artifact"):
-        if status not in runtime_header:
-            fail(f"rt/include/rt/runtime.hpp: missing M7 status {status!r}")
+        if status not in status_header:
+            fail(f"rt/include/rt/status.hpp: missing M7 status {status!r}")
 
     for status in (
         "device_queue_full",
@@ -562,7 +571,7 @@ def check_runtime_contract() -> None:
         "device_canceled",
         "device_reset_required",
     ):
-        if status not in runtime_header or status.upper() not in c_header:
+        if status not in status_header or status.upper() not in c_header:
             fail(f"M8 status contract is missing {status!r}")
 
     for capability in (
@@ -603,8 +612,9 @@ def check_runtime_contract() -> None:
         or "| M11 | Complete |" not in roadmap
         or "| M12 | Complete |" not in roadmap
         or "| M13 | Complete |" not in roadmap
+        or "| M14 | Complete |" not in roadmap
     ):
-        fail("docs/roadmap.md: M8-M13 milestone status is not advanced")
+        fail("docs/roadmap.md: M1-M14 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
@@ -828,9 +838,13 @@ def check_runtime_contract() -> None:
         "COMPONENTS",
         "c_shared",
         "c_static",
+        "runtime",
         "cpp_runtime",
         "cuda_backend",
         "xdma_backend",
+        "rtfw::c_shared",
+        "rtfw::c_static",
+        "rtfw::runtime",
         "rtfw::rtfw",
         "rtfw::rtfw_static",
         "rtfw::simcore_rt",
@@ -839,13 +853,110 @@ def check_runtime_contract() -> None:
     ):
         if token not in package_consumer:
             fail(f"package consumer is missing {token!r}")
+
+    for token in (
+        "add_library(rtfw::runtime ALIAS rtfw_runtime)",
+        "add_library(rtfw::rtfw ALIAS rtfw_shared)",
+        "add_library(rtfw::rtfw_static ALIAS rtfw_static)",
+        "add_library(rtfw::simcore_rt ALIAS simcore_rt)",
+        "EXPORT_NAME runtime",
+        "RTFW_BUILD_TESTS",
+        "RTFW_BUILD_EXPERIMENTAL",
+        "RTFW_INSTALL_EXPERIMENTAL",
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>",
+        "rtfwCudaTargets",
+        "rtfwXdmaTargets",
+        "rt/include/rt/canonical_bytes.hpp",
+        "rt/include/rt/config.hpp",
+        "rt/include/rt/status.hpp",
+    ):
+        if token not in cmake:
+            fail(f"CMakeLists.txt: missing M14 package boundary {token!r}")
+    for forbidden in (
+        "target_compile_options(simcore INTERFACE -Wall",
+        "target_compile_options(simcore INTERFACE -Werror",
+        "target_compile_definitions(simcore INTERFACE -DLOG_ENABLED",
+        "target_link_libraries(rtfw_static PUBLIC simcore",
+        "$<INSTALL_INTERFACE:include>",
+    ):
+        if forbidden in cmake:
+            fail(f"CMakeLists.txt: leaks project policy {forbidden!r}")
+    if '#include "rt/runtime.hpp"' not in profile_header:
+        fail("rt/profile.hpp dropped its 1.x transitive runtime contract")
+    if '#include "rt/config.hpp"' not in profile_header:
+        fail("rt/profile.hpp does not import the focused configuration API")
+    for token in (
+        "enum class Status",
+        "status_message(",
+    ):
+        if token not in status_header:
+            fail(f"rt/status.hpp: missing M14 API token {token!r}")
+    for token in (
+        "struct RuntimeConfig",
+        "set_runtime_config_value(",
+        "runtime_config_schema_version = 7",
+    ):
+        if token not in config_header:
+            fail(f"rt/config.hpp: missing M14 API token {token!r}")
+    if 'rt/include/rt/config.hpp' not in autotune_make_config:
+        fail("autotune config generator does not read the canonical config API")
+    if "runtime.hpp does not declare a config schema" in autotune_make_config:
+        fail("autotune config generator still scans the compatibility facade")
+    for token in (
+        "store_u32_le(",
+        "store_u64_le(",
+        "load_u32_le(",
+        "load_u64_le(",
+    ):
+        if token not in canonical_bytes_header:
+            fail(f"rt/canonical_bytes.hpp: missing M14 helper {token!r}")
+    for token in (
+        "expected_headers",
+        "INTERFACE_COMPILE_OPTIONS",
+        "INTERFACE_COMPILE_DEFINITIONS",
+        "cxx_std_20",
+        "RTFW_DATA_DIR",
+        "rtfw::cuda_driver",
+        "rtfw::xdma_linux",
+        "Installed Apache-2.0 license digest changed",
+    ):
+        if token not in package_contract:
+            fail(f"package boundary test is missing {token!r}")
     for token in (
         "Relocated package consumer",
         "check_c_abi.py --library",
         "rtfw-relocated",
+        "tests/add_subdirectory_consumer",
+        "RTFW_EXPECT_TESTS=ON",
+        "CMAKE_INSTALL_INCLUDEDIR=sdk/include",
+        "CMAKE_INSTALL_DATADIR=sdk/data",
     ):
         if token not in ci_workflow:
             fail(f".github/workflows/ci.yml: missing M11 gate {token!r}")
+
+    for token in (
+        "set(ENABLE_TESTS ON",
+        "rtfw::rtfw",
+        "rtfw::rtfw_static",
+        "rtfw::simcore_rt",
+        "RTFW_EXPECT_TESTS",
+        "test_cabi_dlopen",
+        "package_source",
+        "simcore_tests",
+    ):
+        if token not in add_subdirectory_consumer:
+            fail(f"add_subdirectory consumer is missing {token!r}")
+    for token in (
+        "RTFW_DATA_DIR",
+        "rtfw_FIND_REQUIRED_cuda_driver",
+        "find_package(CUDAToolkit QUIET)",
+    ):
+        if token not in package_config:
+            fail(f"package config is missing {token!r}")
+    if "RTFW_TEST_CUDA_DRIVER=ON" not in cuda_workflow:
+        fail("CUDA workflow does not consume the installed cuda_driver component")
+    if "RTFW_TEST_XDMA_LINUX=ON" not in xdma_workflow:
+        fail("XDMA workflow does not consume the installed xdma_linux component")
 
     for token, surface in (
         ("CrossInstanceDeviceStateIsIsolated", device_test),
@@ -1491,6 +1602,9 @@ def main() -> int:
             ".github/workflows/cuda-qualification.yml",
             ".github/workflows/xdma-qualification.yml",
             "rt/include/rt/runtime.hpp",
+            "rt/include/rt/config.hpp",
+            "rt/include/rt/status.hpp",
+            "rt/include/rt/canonical_bytes.hpp",
             "rt/include/rt/profile.hpp",
             "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
@@ -1545,6 +1659,10 @@ def main() -> int:
             "tests/package_consumer/CMakeLists.txt",
             "tests/package_consumer/c_consumer.c",
             "tests/package_consumer/cpp_consumer.cpp",
+            "tests/package_consumer/cuda_consumer.cpp",
+            "tests/package_consumer/xdma_consumer.cpp",
+            "tests/package_consumer/warning_consumer.cpp",
+            "tests/package_consumer/package_contract.cmake",
             "tests/package_consumer/profile_consumer.cpp",
             "tests/determinism_artifact.cpp",
             "tests/snapshot_fuzz.cpp",

@@ -27,7 +27,8 @@ void write_json_string(
     std::string_view value) {
     output.put('"');
     constexpr char hex[] = "0123456789abcdef";
-    for (const unsigned char byte : value) {
+    for (const char character : value) {
+        const auto byte = static_cast<unsigned char>(character);
         switch (byte) {
         case '"':
             output << "\\\"";

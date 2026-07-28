@@ -1,6 +1,6 @@
 # DOE and Autotune Status
 
-RTFW 1.1 connects the design-of-experiments pipeline to the supported
+RTFW 1.2 connects the design-of-experiments pipeline to the supported
 `rt::Runtime` path. The default production spec generates complete runtime
 profiles and drives `rtfw_runtime_demo`; the separate synthetic target remains
 the fast end-to-end tooling test.

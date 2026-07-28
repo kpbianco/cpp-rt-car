@@ -31,6 +31,7 @@ jobs:
           cmake -S . -B build-cuda \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DENABLE_TESTS=ON \
+            -DRTFW_BUILD_EXPERIMENTAL=OFF \
             -DRTFW_ENABLE_CUDA=ON \
             -DSIM_WERROR=ON
       - name: Build backend and qualification tool
@@ -47,6 +48,27 @@ jobs:
             -C RelWithDebInfo \
             --output-on-failure \
             -R simcore_all
+      - name: Install and consume the CUDA package component
+        run: |
+          cmake --build build-cuda \
+            --config RelWithDebInfo \
+            --parallel 2
+          cmake --install build-cuda \
+            --config RelWithDebInfo \
+            --prefix "${RUNNER_TEMP}/rtfw-cuda"
+          cmake \
+            -S tests/package_consumer \
+            -B build-cuda-consumer \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/rtfw-cuda" \
+            -DRTFW_TEST_CUDA_DRIVER=ON
+          cmake --build build-cuda-consumer \
+            --config RelWithDebInfo \
+            --parallel 2
+          ctest --test-dir build-cuda-consumer \
+            -C RelWithDebInfo \
+            --output-on-failure \
+            -R installed_cuda_driver
       - name: Capture raw hardware evidence
         env:
           RTFW_CUDA_WARMUP: ${{ inputs.warmup }}

@@ -4,6 +4,32 @@ All notable changes to the supported target runtime are recorded here. The
 project follows [Semantic Versioning](https://semver.org/) for package releases;
 the stable C ABI has its own version.
 
+## 1.2.0
+
+Professional SDK and package boundary:
+
+- adds `rtfw::runtime` and the `runtime` package component as the preferred
+  supported C++20 integration surface while retaining `cpp_runtime` and
+  `rtfw::simcore_rt` as 1.x compatibility names;
+- splits the supported runtime archive from plugin, scheduler, crashdump,
+  fiber, detached GPU-stub, and legacy SimCore implementation paths;
+- installs an exact default public-header allowlist and keeps broader research
+  headers/targets behind explicit build/install options;
+- adds focused status/configuration/canonical-byte entry points while
+  retaining `profile.hpp`'s 1.x transitive runtime include for compatibility;
+- prevents warning/Werror, logging, profiler, and legacy target dependencies
+  from leaking into installed consumers and propagates the required C++20
+  feature from `rtfw::runtime`;
+- isolates optional CUDA/XDMA adapter exports so ordinary runtime and C
+  consumers do not acquire vendor dependencies;
+- makes `add_subdirectory` library-only by default, preserves parent test and
+  CPack ownership, and honors non-default install include/data directories;
+- adds relocated header self-containment, exact package inventory, genuinely
+  C-only shared/static consumers, preferred and compatibility target,
+  independent backend, policy-leak, and installed Apache-2.0 digest gates;
+- retains stable C ABI v8, device ABI v1, schema versions, SONAME 8, and the
+  unmodified Apache-2.0 license.
+
 ## 1.1.0
 
 Runtime-profile and autotune integration:

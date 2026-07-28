@@ -24,15 +24,15 @@ def _load_runtime_contract() -> Tuple[int, int, int, int]:
     if version_match is None:
         raise RuntimeError("VERSION.txt does not contain MAJOR.MINOR.PATCH")
 
-    runtime_header = (REPO_ROOT / "rt/include/rt/runtime.hpp").read_text(
+    config_header = (REPO_ROOT / "rt/include/rt/config.hpp").read_text(
         encoding="utf-8"
     )
     schema_match = re.search(
         r"runtime_config_schema_version\s*=\s*(\d+)",
-        runtime_header,
+        config_header,
     )
     if schema_match is None:
-        raise RuntimeError("runtime.hpp does not declare a config schema")
+        raise RuntimeError("config.hpp does not declare a config schema")
     major, minor, patch = (
         int(value) for value in version_match.groups()
     )

@@ -31,6 +31,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M11 | Complete | Stable ABI, package/export cleanup, and engine adapters |
 | M12 | Complete | Portable 1.0 release contract; deployment qualification remains separate |
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
+| M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 
 ## M0 — Product contract and truth reset
 
@@ -438,3 +439,37 @@ Exit gates:
 
 The profile format and precedence rules are in
 [the runtime profile contract](runtime_profiles.md).
+
+## M14 — Professional SDK and package boundary
+
+Delivered in 1.2:
+
+- canonical `runtime` component and `rtfw::runtime` C++20 target, with the
+  existing `cpp_runtime` component and `rtfw::simcore_rt` target retained as
+  1.x compatibility paths;
+- a supported runtime archive containing only graph, executor, memory,
+  time/platform, observability, replay/profile, and device-runtime code;
+- default-off broad research targets for SimCore, plugins, scheduler,
+  crashdump, and utilities, with a narrow separate 1.x compatibility archive
+  retaining the accidental demo/fiber link path outside the supported runtime;
+- an exact default installed-header allowlist plus focused status,
+  configuration, and canonical-byte headers;
+- isolated optional CUDA/XDMA adapter exports and build-local project warning,
+  Werror, logging, and profiling policy;
+- relocated consumers that validate every supported header alone, exact SDK
+  inventory, automatic C++20 propagation, independent components,
+  compatibility aliases, policy isolation, and the installed license digest;
+- release-contract schema 2, with explicit preferred/compatibility targets,
+  default/conditional headers, forbidden default surfaces, and experiment
+  defaults.
+
+Exit gates:
+
+- stable C ABI v8, SONAME 8, device ABI v1, and existing schemas are unchanged;
+- `rtfw::runtime` has no plugin, scheduler, fiber, crashdump, SimCore, HAL
+  stub, GPU stub, `dl`, warning-policy, or feature-macro dependency;
+- the default package exports only contracted targets and headers;
+- optional vendor dependencies are resolved only for requested adapter
+  components;
+- old target names still compile and run supported runtime consumers;
+- source and installed Apache-2.0 digests remain canonical.

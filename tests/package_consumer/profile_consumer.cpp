@@ -41,6 +41,9 @@ constexpr std::string_view profile = R"json({
 } // namespace
 
 int main() {
+    // profile.hpp exposed the Runtime declaration before 1.2; retain that
+    // transitive 1.x source-compatibility contract.
+    rt::Runtime runtime;
     rt::RuntimeConfig config;
     rt::RuntimeProfileMetadata metadata;
     rt::RuntimeProfileError error;
@@ -51,7 +54,8 @@ int main() {
             error) != rt::Status::ok) {
         return 1;
     }
-    if (config.worker_count != 1 ||
+    if (runtime.state() != rt::RuntimeState::configuring ||
+        config.worker_count != 1 ||
         config.executor_policy !=
             rt::ExecutorPolicy::static_deterministic ||
         metadata.schema_version != rt::runtime_profile_schema_version ||
