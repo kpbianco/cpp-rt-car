@@ -32,6 +32,13 @@ pass; file presence or a passing smoke test is not sufficient.
 | M12 | Complete | Portable 1.0 release contract; deployment qualification remains separate |
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
+| M14.1 | Complete | Recoverable device initialization and teardown safety closure |
+| M15 | Next | Explicit CPU topology, thread policy, memory residency, NUMA, and stack ownership |
+| M16 | Planned | Multi-rate deterministic simulation domains and release coordination |
+| M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
+| M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
+| M19 | Planned | Game-engine, simulation-host, and extension integration kits |
+| M20 | Planned | Operational, security, release, and long-duration hardening |
 
 ## M0 — Product contract and truth reset
 
@@ -473,3 +480,138 @@ Exit gates:
   components;
 - old target names still compile and run supported runtime consumers;
 - source and installed Apache-2.0 digests remain canonical.
+
+## M14.1 — Recoverable device lifecycle safety
+
+Delivered in 1.2.1:
+
+- status-bearing, deterministic reverse buffer/backend cleanup that retains
+  failed ownership markers and retries only unresolved operations;
+- ownership-uncertain handling for failed initialization, including a checked
+  shutdown attempt and recoverable failed rollback;
+- runtime quiescence and fail-closed execution/state-mutation gates while
+  cleanup is pending, without falsely reporting the public `stopped` state;
+- ABI-v8-compatible C destruction that preserves a handle when implicit device
+  cleanup fails, plus an explicit checked-stop integration contract;
+- injected multi-backend, failed-start, CUDA/XDMA partial-initialization,
+  dynamic-C, warnings-as-errors, sanitizer, ABI, and release-contract
+  evidence.
+
+Exit gates:
+
+- no registered buffer or initialized backend marker is cleared after its
+  release callback fails;
+- no backend shutdown runs while one of its registered buffers remains;
+- first cleanup failure is preserved while independent reverse cleanup
+  continues;
+- repeated stop touches only unresolved ownership and becomes idempotent after
+  success;
+- execution, restore, and replay cannot mutate state during cleanup-pending;
+- C ABI v8, 70 exports, SONAME 8, device ABI v1, schemas, package inventory,
+  qualification claims, and Apache-2.0 remain unchanged.
+
+## M15 — CPU and memory policy
+
+Planned outcome:
+
+- role-aware policy for frame, executor-worker, device-service, watchdog, and
+  accelerator-I/O threads;
+- deterministic CPU-set resolution, affinity, scheduler class/priority, and
+  spin/yield/park wait policy with apply-and-verify startup barriers;
+- explicit region and runtime-owned stack policy covering alignment, page
+  rounding, guards, prefaulting, locking, residency, huge-page fallback, NUMA
+  binding, first touch, and rollback;
+- requested/resolved/applied reports and complete byte accounting, while
+  externally owned host-engine and vendor threads remain verify-only.
+
+Exit gates:
+
+- strict policy fails closed before callbacks run and rolls back every partial
+  thread or memory commitment;
+- all runtime-owned threads and regions are represented exactly once;
+- portable defaults retain current behavior and all zero-allocation,
+  determinism, sanitizer, ABI, and package gates pass;
+- no RT1 or RT2 claim is made from policy configuration alone.
+
+## M16 — Multi-rate simulation
+
+Planned outcome:
+
+- explicit rate domains, rational release relationships, phase ownership, and
+  deterministic cross-rate data-transfer semantics;
+- bounded overrun policy, release/deadline observability, and host-driven plus
+  self-paced coordination without constructing hidden worker pools.
+
+Exit gates:
+
+- harmonic and non-harmonic schedules match a reference timeline;
+- cross-rate snapshots are race-free and deterministic at their declared tier;
+- overload never creates unbounded catch-up work or silently skips mandatory
+  releases.
+
+## M17 — HAL v2 and heterogeneous memory
+
+Planned outcome:
+
+- a versioned HAL v2 alongside a complete device-ABI-v1 compatibility shim;
+- explicit host, pinned, device, shared, and imported memory domains with
+  alignment, coherency, ownership, and synchronization contracts;
+- fixed-capacity per-backend submission lanes so executor workers never invoke
+  potentially blocking vendor APIs;
+- capability discovery, completion/error/timestamp domains, CUDA and XDMA v2
+  adapters, and lifecycle-safe plugin/factory ownership.
+
+Exit gates:
+
+- no vendor callback executes on an executor worker;
+- submit, worker, and poll steady state is allocation-free and bounded;
+- blocked-driver, queue failure, quarantine, coherency, cross-instance,
+  sanitizer, and v1-compatibility tests pass.
+
+## M18 — Hardware and real-time qualification
+
+Planned outcome:
+
+- retained evidence for named CPU/kernel/BIOS/compiler/runtime/workload tuples;
+- CUDA driver/GPU and XDMA driver/firmware/bitstream/BDF tuples with functional,
+  recovery, resource-stability, and latency-decomposition evidence;
+- RT1/RT2 promotion only against thresholds selected before measurement.
+
+Exit gates:
+
+- qualification tools reject incomplete provenance, post-selected thresholds,
+  unstable resources, or missing failure/recovery trials;
+- only reviewed tuples enter support matrices; portable builds retain no
+  implied latency or hardware claim.
+
+## M19 — Engine and extension integration
+
+Planned outcome:
+
+- maintained adapters and examples for engine job systems, allocators,
+  clocks, telemetry, state serialization, and external GPU/FPGA resources;
+- lifecycle-safe extension registration, version negotiation, and unload
+  rules with no dependency on the experimental plugin path.
+
+Exit gates:
+
+- at least one representative game-engine-style host and one independent
+  simulation host pass relocated integration, hot-reload/unload, saturation,
+  and long-run tests;
+- adapters do not bypass runtime ownership, capacity, determinism, or
+  qualification boundaries.
+
+## M20 — Operational and release hardening
+
+Planned outcome:
+
+- fuzzing and sanitizer matrix expansion, static analysis, SBOM/provenance,
+  signed reproducible releases, vulnerability response, deprecation tooling,
+  long-duration soak/fault campaigns, and supported-version maintenance rules.
+
+Exit gates:
+
+- every shipped artifact is reproducible, attributable, install-tested, and
+  covered by the declared support/security policy;
+- release promotion is blocked by ABI, docs, package, license, evidence,
+  sanitizer, soak, or unresolved critical-security failures.

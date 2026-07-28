@@ -10,6 +10,7 @@
 #include <span>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <rt/mock_device.hpp>
 #include <rt/runtime.hpp>
@@ -130,7 +131,594 @@ rt::CallbackResult record_cpu_order(
     return rt::CallbackResult::ok;
 }
 
+rt::CallbackResult no_op_cpu(
+    void*,
+    const rt::CallbackContext&) {
+    return rt::CallbackResult::ok;
+}
+
+struct TeardownProbe {
+    std::uint32_t id = 0;
+    std::vector<std::uint32_t>* calls = nullptr;
+    rtfw_device_status initialize_failure = RTFW_DEVICE_STATUS_OK;
+    rtfw_device_status register_failure = RTFW_DEVICE_STATUS_OK;
+    rtfw_device_status unregister_failure = RTFW_DEVICE_STATUS_OK;
+    rtfw_device_status shutdown_failure = RTFW_DEVICE_STATUS_OK;
+    std::size_t initialize_failures_remaining = 0;
+    std::size_t register_failure_call = 0;
+    std::size_t unregister_failures_remaining = 0;
+    std::size_t shutdown_failures_remaining = 0;
+    std::size_t initialize_calls = 0;
+    std::size_t register_calls = 0;
+    std::size_t unregister_calls = 0;
+    std::size_t shutdown_calls = 0;
+    std::size_t shutdown_with_registered_buffers = 0;
+    std::size_t registered_buffers = 0;
+    std::uint64_t next_buffer_token = 1;
+    bool initialize_failure_retains_ownership = false;
+    bool initialized = false;
+
+    static constexpr std::uint32_t initialize_event = 100;
+    static constexpr std::uint32_t register_event = 200;
+    static constexpr std::uint32_t unregister_event = 300;
+    static constexpr std::uint32_t shutdown_event = 400;
+
+    void record(std::uint32_t event) {
+        if (calls) {
+            calls->push_back(event + id);
+        }
+    }
+
+    static TeardownProbe* self(void* instance) {
+        return static_cast<TeardownProbe*>(instance);
+    }
+
+    static rtfw_device_status get_capabilities(
+        void* instance,
+        rtfw_device_capabilities* capabilities) noexcept {
+        auto* probe = self(instance);
+        if (!probe || !capabilities ||
+            capabilities->struct_size < sizeof(*capabilities)) {
+            return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+        }
+        *capabilities = {};
+        capabilities->struct_size = sizeof(*capabilities);
+        capabilities->abi_version = RTFW_DEVICE_ABI_VERSION;
+        capabilities->max_in_flight = 8;
+        capabilities->max_registered_buffers = 8;
+        capabilities->max_buffer_bytes =
+            std::numeric_limits<std::uint64_t>::max();
+        capabilities->inline_payload_capacity =
+            RTFW_DEVICE_INLINE_PAYLOAD_CAPACITY;
+        capabilities->buffer_ref_capacity =
+            RTFW_DEVICE_BUFFER_REF_CAPACITY;
+        capabilities->supports_cancel = 1;
+        capabilities->supports_reset = 1;
+        capabilities->deterministic_mock = 1;
+        const auto name =
+            probe->id == 0
+            ? std::string_view{"test.teardown.0"}
+            : std::string_view{"test.teardown.1"};
+        std::copy(
+            name.begin(),
+            name.end(),
+            capabilities->backend_id);
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status initialize(
+        void* instance,
+        const rtfw_device_init_config*) noexcept {
+        auto* probe = self(instance);
+        if (!probe) {
+            return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+        }
+        ++probe->initialize_calls;
+        probe->record(initialize_event);
+        if (probe->initialize_failures_remaining != 0) {
+            --probe->initialize_failures_remaining;
+            probe->initialized =
+                probe->initialize_failure_retains_ownership;
+            return probe->initialize_failure;
+        }
+        probe->initialized = true;
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status register_buffer(
+        void* instance,
+        const rtfw_device_buffer_registration*,
+        std::uint64_t* out_token) noexcept {
+        auto* probe = self(instance);
+        if (!probe || !out_token || !probe->initialized) {
+            return RTFW_DEVICE_STATUS_INVALID_STATE;
+        }
+        ++probe->register_calls;
+        probe->record(register_event);
+        *out_token = 0;
+        if (probe->register_calls == probe->register_failure_call) {
+            return probe->register_failure;
+        }
+        *out_token =
+            (static_cast<std::uint64_t>(probe->id + 1) << 32u) |
+            probe->next_buffer_token++;
+        ++probe->registered_buffers;
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status unregister_buffer(
+        void* instance,
+        std::uint64_t) noexcept {
+        auto* probe = self(instance);
+        if (!probe || !probe->initialized ||
+            probe->registered_buffers == 0) {
+            return RTFW_DEVICE_STATUS_INVALID_STATE;
+        }
+        ++probe->unregister_calls;
+        probe->record(unregister_event);
+        if (probe->unregister_failures_remaining != 0) {
+            --probe->unregister_failures_remaining;
+            return probe->unregister_failure;
+        }
+        --probe->registered_buffers;
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status submit(
+        void*,
+        const rtfw_device_submission*) noexcept {
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status poll(
+        void*,
+        rtfw_device_completion*,
+        std::uint64_t,
+        std::uint64_t* out_count) noexcept {
+        if (!out_count) {
+            return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+        }
+        *out_count = 0;
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status cancel(
+        void*,
+        std::uint64_t) noexcept {
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status get_health(
+        void* instance,
+        rtfw_device_health* health) noexcept {
+        auto* probe = self(instance);
+        if (!probe || !health ||
+            health->struct_size < sizeof(*health)) {
+            return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+        }
+        *health = {};
+        health->struct_size = sizeof(*health);
+        health->state = probe->initialized
+            ? RTFW_DEVICE_HEALTH_HEALTHY
+            : RTFW_DEVICE_HEALTH_SHUTDOWN;
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status reset(void*) noexcept {
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status shutdown(void* instance) noexcept {
+        auto* probe = self(instance);
+        if (!probe) {
+            return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+        }
+        ++probe->shutdown_calls;
+        probe->record(shutdown_event);
+        if (!probe->initialized) {
+            return RTFW_DEVICE_STATUS_INVALID_STATE;
+        }
+        if (probe->registered_buffers != 0) {
+            ++probe->shutdown_with_registered_buffers;
+            return RTFW_DEVICE_STATUS_INVALID_STATE;
+        }
+        if (probe->shutdown_failures_remaining != 0) {
+            --probe->shutdown_failures_remaining;
+            return probe->shutdown_failure;
+        }
+        probe->initialized = false;
+        return RTFW_DEVICE_STATUS_OK;
+    }
+
+    rtfw_device_backend_api api() {
+        rtfw_device_backend_api output{};
+        output.struct_size = sizeof(output);
+        output.abi_version = RTFW_DEVICE_ABI_VERSION;
+        output.instance = this;
+        output.get_capabilities = &get_capabilities;
+        output.initialize = &initialize;
+        output.register_buffer = &register_buffer;
+        output.unregister_buffer = &unregister_buffer;
+        output.submit = &submit;
+        output.poll = &poll;
+        output.cancel = &cancel;
+        output.get_health = &get_health;
+        output.reset = &reset;
+        output.shutdown = &shutdown;
+        return output;
+    }
+};
+
 } // namespace
+
+TEST(DeviceRuntime, FailedTeardownRetainsOwnershipAndRetriesOnlyPendingWork) {
+    std::vector<std::uint32_t> calls;
+    TeardownProbe first;
+    first.id = 0;
+    first.calls = &calls;
+    first.shutdown_failure = RTFW_DEVICE_STATUS_RESET_REQUIRED;
+    first.shutdown_failures_remaining = 1;
+    TeardownProbe second;
+    second.id = 1;
+    second.calls = &calls;
+    second.unregister_failure = RTFW_DEVICE_STATUS_LOST;
+    second.unregister_failures_remaining = 1;
+
+    rt::Runtime runtime;
+    auto config = device_config(1, 1, 2);
+    config.device_backend_capacity = 2;
+    config.device_buffer_capacity = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
+        rt::Status::ok);
+
+    rt::DeviceBackendHandle first_backend;
+    rt::DeviceBackendHandle second_backend;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"first", first.api()},
+            first_backend),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"second", second.api()},
+            second_backend),
+        rt::Status::ok);
+    std::array<std::byte, 16> first_storage{};
+    std::array<std::byte, 16> second_storage{};
+    rt::DeviceBufferHandle first_buffer;
+    rt::DeviceBufferHandle second_buffer;
+    ASSERT_EQ(
+        runtime.register_device_buffer(
+            {"first.buffer", first_backend, first_storage},
+            first_buffer),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_device_buffer(
+            {"second.buffer", second_backend, second_storage},
+            second_buffer),
+        rt::Status::ok);
+    std::array<std::byte, 8> registered_state{};
+    registered_state.fill(std::byte{0x11});
+    ASSERT_EQ(
+        runtime.register_state(
+            {"teardown.state", 1, registered_state}),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    std::size_t checkpoint_size = 0;
+    ASSERT_EQ(
+        runtime.checkpoint_size(checkpoint_size),
+        rt::Status::ok);
+    std::vector<std::byte> checkpoint(checkpoint_size);
+    rt::ArtifactWriteResult checkpoint_result;
+    ASSERT_EQ(
+        runtime.write_checkpoint(
+            0,
+            checkpoint,
+            checkpoint_result),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    calls.clear();
+    EXPECT_EQ(runtime.stop(), rt::Status::device_lost);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::running);
+    EXPECT_EQ(second.unregister_calls, 1u);
+    EXPECT_EQ(second.shutdown_calls, 0u);
+    EXPECT_EQ(second.registered_buffers, 1u);
+    EXPECT_TRUE(second.initialized);
+    EXPECT_EQ(first.unregister_calls, 1u);
+    EXPECT_EQ(first.shutdown_calls, 1u);
+    EXPECT_EQ(first.registered_buffers, 0u);
+    EXPECT_TRUE(first.initialized);
+    EXPECT_EQ(first.shutdown_with_registered_buffers, 0u);
+    EXPECT_EQ(second.shutdown_with_registered_buffers, 0u);
+    EXPECT_EQ(
+        calls,
+        (std::vector<std::uint32_t>{
+            TeardownProbe::unregister_event + 1,
+            TeardownProbe::unregister_event,
+            TeardownProbe::shutdown_event,
+        }));
+
+    rt::StepResult step_result;
+    EXPECT_EQ(
+        runtime.step(
+            rt::HostFrameContext{
+                1,
+                1ms,
+                std::nullopt,
+            },
+            &step_result),
+        rt::Status::invalid_state);
+    auto health = rt::make_device_health();
+    EXPECT_EQ(
+        runtime.device_health(second_backend, health),
+        rt::Status::invalid_state);
+    EXPECT_EQ(
+        runtime.reset_device(second_backend),
+        rt::Status::invalid_state);
+    registered_state.fill(std::byte{0x22});
+    const auto state_before_restore = registered_state;
+    EXPECT_EQ(
+        runtime.restore_checkpoint(checkpoint),
+        rt::Status::invalid_state);
+    EXPECT_EQ(registered_state, state_before_restore);
+    rt::ReplayResult replay_result;
+    EXPECT_EQ(
+        runtime.replay(
+            checkpoint,
+            {},
+            nullptr,
+            nullptr,
+            &replay_result),
+        rt::Status::invalid_state);
+    EXPECT_EQ(registered_state, state_before_restore);
+    std::array<rt::RuntimeTraceEvent, 64> teardown_trace{};
+    rt::RuntimeTraceCursor teardown_cursor;
+    rt::RuntimeTraceReadResult teardown_trace_result;
+    ASSERT_EQ(
+        runtime.read_trace(
+            teardown_cursor,
+            teardown_trace,
+            teardown_trace_result),
+        rt::Status::ok);
+    EXPECT_EQ(
+        std::count_if(
+            teardown_trace.begin(),
+            teardown_trace.begin() +
+                static_cast<std::ptrdiff_t>(
+                    teardown_trace_result.events_read),
+            [](const rt::RuntimeTraceEvent& event) {
+                return event.type ==
+                    rt::RuntimeTraceEventType::stopped;
+            }),
+        0);
+
+    calls.clear();
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+    EXPECT_EQ(first.unregister_calls, 1u);
+    EXPECT_EQ(first.shutdown_calls, 2u);
+    EXPECT_EQ(second.unregister_calls, 2u);
+    EXPECT_EQ(second.shutdown_calls, 1u);
+    EXPECT_FALSE(first.initialized);
+    EXPECT_FALSE(second.initialized);
+    EXPECT_EQ(
+        calls,
+        (std::vector<std::uint32_t>{
+            TeardownProbe::unregister_event + 1,
+            TeardownProbe::shutdown_event + 1,
+            TeardownProbe::shutdown_event,
+        }));
+    ASSERT_EQ(
+        runtime.read_trace(
+            teardown_cursor,
+            teardown_trace,
+            teardown_trace_result),
+        rt::Status::ok);
+    EXPECT_EQ(
+        std::count_if(
+            teardown_trace.begin(),
+            teardown_trace.begin() +
+                static_cast<std::ptrdiff_t>(
+                    teardown_trace_result.events_read),
+            [](const rt::RuntimeTraceEvent& event) {
+                return event.type ==
+                    rt::RuntimeTraceEventType::stopped;
+            }),
+        1);
+
+    calls.clear();
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_TRUE(calls.empty());
+}
+
+TEST(DeviceRuntime, FailedStartRollbackRemainsRecoverableThroughStop) {
+    std::vector<std::uint32_t> calls;
+    TeardownProbe first;
+    first.id = 0;
+    first.calls = &calls;
+    TeardownProbe second;
+    second.id = 1;
+    second.calls = &calls;
+    second.initialize_failure = RTFW_DEVICE_STATUS_ERROR;
+    second.initialize_failures_remaining = 1;
+    second.initialize_failure_retains_ownership = true;
+    second.shutdown_failure = RTFW_DEVICE_STATUS_RESET_REQUIRED;
+    second.shutdown_failures_remaining = 1;
+
+    rt::Runtime runtime;
+    auto config = device_config(1, 1, 2);
+    config.device_backend_capacity = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
+        rt::Status::ok);
+    rt::DeviceBackendHandle ignored;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"first", first.api()},
+            ignored),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"second", second.api()},
+            ignored),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.start(), rt::Status::device_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_FALSE(first.initialized);
+    EXPECT_TRUE(second.initialized);
+    EXPECT_EQ(first.shutdown_calls, 1u);
+    EXPECT_EQ(second.shutdown_calls, 1u);
+    EXPECT_EQ(
+        calls,
+        (std::vector<std::uint32_t>{
+            TeardownProbe::initialize_event,
+            TeardownProbe::initialize_event + 1,
+            TeardownProbe::shutdown_event + 1,
+            TeardownProbe::shutdown_event,
+        }));
+    EXPECT_EQ(runtime.start(), rt::Status::invalid_state);
+
+    calls.clear();
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+    EXPECT_EQ(first.shutdown_calls, 1u);
+    EXPECT_EQ(second.shutdown_calls, 2u);
+    EXPECT_FALSE(first.initialized);
+    EXPECT_FALSE(second.initialized);
+    EXPECT_EQ(
+        calls,
+        (std::vector<std::uint32_t>{
+            TeardownProbe::shutdown_event + 1,
+        }));
+}
+
+TEST(DeviceRuntime, FailedInitializeWithoutOwnershipCanRestart) {
+    std::vector<std::uint32_t> calls;
+    TeardownProbe first;
+    first.id = 0;
+    first.calls = &calls;
+    TeardownProbe second;
+    second.id = 1;
+    second.calls = &calls;
+    second.initialize_failure = RTFW_DEVICE_STATUS_ERROR;
+    second.initialize_failures_remaining = 1;
+
+    rt::Runtime runtime;
+    auto config = device_config(1, 1, 2);
+    config.device_backend_capacity = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
+        rt::Status::ok);
+    rt::DeviceBackendHandle ignored;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"first", first.api()},
+            ignored),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"second", second.api()},
+            ignored),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.start(), rt::Status::device_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_FALSE(first.initialized);
+    EXPECT_FALSE(second.initialized);
+    EXPECT_EQ(first.shutdown_calls, 1u);
+    EXPECT_EQ(second.shutdown_calls, 1u);
+    EXPECT_EQ(
+        calls,
+        (std::vector<std::uint32_t>{
+            TeardownProbe::initialize_event,
+            TeardownProbe::initialize_event + 1,
+            TeardownProbe::shutdown_event + 1,
+            TeardownProbe::shutdown_event,
+        }));
+
+    calls.clear();
+    EXPECT_EQ(runtime.start(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::running);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+}
+
+TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
+    std::vector<std::uint32_t> calls;
+    TeardownProbe probe;
+    probe.calls = &calls;
+    probe.register_failure = RTFW_DEVICE_STATUS_ERROR;
+    probe.register_failure_call = 2;
+    probe.unregister_failure = RTFW_DEVICE_STATUS_LOST;
+    probe.unregister_failures_remaining = 1;
+
+    rt::Runtime runtime;
+    auto config = device_config(1, 1, 2);
+    config.device_backend_capacity = 1;
+    config.device_buffer_capacity = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
+        rt::Status::ok);
+    rt::DeviceBackendHandle backend;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"probe", probe.api()},
+            backend),
+        rt::Status::ok);
+    std::array<std::byte, 16> first_storage{};
+    std::array<std::byte, 16> second_storage{};
+    rt::DeviceBufferHandle ignored;
+    ASSERT_EQ(
+        runtime.register_device_buffer(
+            {"first", backend, first_storage},
+            ignored),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_device_buffer(
+            {"second", backend, second_storage},
+            ignored),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.start(), rt::Status::device_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_TRUE(probe.initialized);
+    EXPECT_EQ(probe.registered_buffers, 1u);
+    EXPECT_EQ(probe.unregister_calls, 1u);
+    EXPECT_EQ(probe.shutdown_calls, 0u);
+    EXPECT_EQ(
+        calls,
+        (std::vector<std::uint32_t>{
+            TeardownProbe::initialize_event,
+            TeardownProbe::register_event,
+            TeardownProbe::register_event,
+            TeardownProbe::unregister_event,
+        }));
+    EXPECT_EQ(runtime.start(), rt::Status::invalid_state);
+
+    calls.clear();
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+    EXPECT_FALSE(probe.initialized);
+    EXPECT_EQ(probe.registered_buffers, 0u);
+    EXPECT_EQ(probe.unregister_calls, 2u);
+    EXPECT_EQ(probe.shutdown_calls, 1u);
+    EXPECT_EQ(
+        calls,
+        (std::vector<std::uint32_t>{
+            TeardownProbe::unregister_event,
+            TeardownProbe::shutdown_event,
+        }));
+}
 
 TEST(DeviceMock, BoundedQueueSaturatesWithoutBlocking) {
     rt::MockDeviceBackend backend({

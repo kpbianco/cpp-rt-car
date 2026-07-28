@@ -465,6 +465,15 @@ struct XdmaDeviceBackend::Impl {
         if (result != XdmaDriverResult::success) {
             const auto status = normalize(result);
             backend->account_completion(status);
+            const auto cleanup =
+                backend->driver.shutdown(backend->driver.user_data);
+            if (cleanup != XdmaDriverResult::success &&
+                cleanup != XdmaDriverResult::invalid_value) {
+                backend->shutdown_incomplete.store(
+                    true,
+                    std::memory_order_release);
+                backend->account_completion(normalize(cleanup));
+            }
             backend->initialize_active.store(
                 false,
                 std::memory_order_release);

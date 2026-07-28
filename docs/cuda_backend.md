@@ -72,6 +72,12 @@ poll, reset, and shutdown interaction. It never creates a context, stream,
 module, or worker thread, so an engine can retain ownership of its established
 CUDA environment.
 
+If event creation or context-pop cleanup fails during initialization, the
+backend preserves every event whose destruction did not succeed, marks
+shutdown incomplete, and rejects reinitialization. Checked shutdown retries
+only those unresolved handles; the runtime's ownership-uncertain failed-start
+path retains the backend until that cleanup succeeds.
+
 Kernel registration returns a stable, one-based token. Device buffer
 registration also returns a private token; the runtime translates its logical
 buffer handle before calling the backend.
@@ -243,4 +249,4 @@ has:
 - raw latency-decomposition samples and thresholds selected before the run;
 - an explicit pass/fail review committed to the versioned support matrix.
 
-No tuple has completed those gates in the repository at 1.2.0.
+No tuple has completed those gates in the repository at 1.2.1.

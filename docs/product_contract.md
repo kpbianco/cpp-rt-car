@@ -2,7 +2,7 @@
 
 Status: accepted contract for the supported 1.x portable runtime
 
-Current release: 1.2.0 portable RT0 product with stable C ABI v8
+Current release: 1.2.1 portable RT0 product with stable C ABI v8
 
 ## Product definition
 
@@ -29,6 +29,9 @@ demo, and operational runtime autotune mapping without changing C ABI v8.
 M14 adds the canonical `rtfw::runtime` target, exact default SDK inventory,
 consumer-policy isolation, and optional adapter dependency boundaries without
 changing C ABI v8 or device ABI v1.
+Release 1.2.1 closes the device lifecycle error path: failed initialization
+rollback, buffer unregistration, and backend shutdown retain explicit ownership
+state and are retried through checked `stop()` without changing either ABI.
 
 ## Claim policy
 
@@ -64,7 +67,9 @@ The 1.2 lifecycle is:
 4. **Run** — execute host-driven steps or a self-paced loop without graph
    mutation, hidden thread creation, or unbounded submission on an RT lane.
 5. **Stop** — reject new submissions, drain or cancel according to policy,
-   stop service lanes, and release resources.
+   stop service lanes, and release resources. A device cleanup failure keeps
+   the prior public lifecycle state, gates execution and state mutation, and
+   requires `stop()` retry before the host releases borrowed storage.
 
 `rt::Runtime` now enforces the configure/finalize/start/step/stop state machine,
 compiles dependencies and logical resource access at finalization, and freezes
@@ -228,7 +233,7 @@ callback expressions.
 
 | Surface | 1.2 status | Notes |
 | --- | --- | --- |
-| `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen topology |
+| `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen topology and recoverable, fail-closed device cleanup |
 | Compiled graph | Implemented RT0 surface | Deterministic topological order; invalid/foreign handles, cycles, and unordered conflicting resource access fail before start |
 | Host-driven callbacks | Implemented RT0 surface | Synchronous host wait; dependency-ready callbacks may overlap without step-time pacing or worker creation |
 | Unified CPU executor | Implemented RT0 surface | Static assignments, bounded local-queue throughput, and a borrowed host job-system adapter share one graph/range/reduction representation |

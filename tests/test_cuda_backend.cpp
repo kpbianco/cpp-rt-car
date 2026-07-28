@@ -63,7 +63,19 @@ public:
         now_ns_.fetch_add(nanoseconds, std::memory_order_relaxed);
     }
 
+    std::uint64_t event_destroy_attempts(
+        rt::CudaEvent event) const noexcept {
+        if (event == 0 || event > event_destroy_attempts_.size()) {
+            return 0;
+        }
+        return event_destroy_attempts_[
+            static_cast<std::size_t>(event - 1)]
+            .load(std::memory_order_acquire);
+    }
+
     std::atomic<bool> complete_on_record{false};
+    std::atomic<bool> fail_next_pop_context{false};
+    std::atomic<bool> fail_next_event_destroy{false};
     std::atomic<bool> fail_next_event_record{false};
     std::atomic<bool> fail_next_event_query{false};
     std::atomic<bool> fail_next_event_sync{false};
@@ -71,6 +83,8 @@ public:
     std::atomic<bool> fail_next_mem_free{false};
     std::atomic<bool> fail_next_host_register{false};
     std::atomic<bool> lose_context_on_query{false};
+    std::atomic<std::uint64_t> event_create_failure_call{0};
+    std::atomic<std::uint64_t> event_create_calls{0};
     std::atomic<std::uint64_t> event_syncs{0};
     std::atomic<std::uint64_t> stream_syncs{0};
     std::atomic<std::uint64_t> allocations{0};
@@ -129,8 +143,14 @@ private:
     static rt::CudaDriverResult pop_context(
         void* user_data,
         rt::CudaContext* out_context) noexcept {
-        if (!user_data || !out_context) {
+        auto* driver = self(user_data);
+        if (!driver || !out_context) {
             return rt::CudaDriverResult::invalid_value;
+        }
+        if (driver->fail_next_pop_context.exchange(
+                false,
+                std::memory_order_acq_rel)) {
+            return rt::CudaDriverResult::error;
         }
         *out_context = context;
         return rt::CudaDriverResult::success;
@@ -142,6 +162,16 @@ private:
         auto* driver = self(user_data);
         if (!driver || !out_event) {
             return rt::CudaDriverResult::invalid_value;
+        }
+        *out_event = 0;
+        const auto call =
+            driver->event_create_calls.fetch_add(
+                1,
+                std::memory_order_relaxed) + 1;
+        if (call ==
+            driver->event_create_failure_call.load(
+                std::memory_order_acquire)) {
+            return rt::CudaDriverResult::out_of_memory;
         }
         for (std::size_t index = 0;
              index < driver->events_.size();
@@ -173,6 +203,14 @@ private:
             driver ? event_for(*driver, event) : nullptr;
         if (!state) {
             return rt::CudaDriverResult::invalid_value;
+        }
+        driver->event_destroy_attempts_[
+            static_cast<std::size_t>(event - 1)]
+            .fetch_add(1, std::memory_order_relaxed);
+        if (driver->fail_next_event_destroy.exchange(
+                false,
+                std::memory_order_acq_rel)) {
+            return rt::CudaDriverResult::error;
         }
         state->recorded.store(false, std::memory_order_relaxed);
         state->ready.store(false, std::memory_order_relaxed);
@@ -452,6 +490,9 @@ private:
     }
 
     std::array<EventState, event_capacity> events_{};
+    std::array<
+        std::atomic<std::uint64_t>,
+        event_capacity> event_destroy_attempts_{};
     std::array<Allocation, allocation_capacity> memory_{};
     std::atomic<std::uint64_t> now_ns_{1};
 };
@@ -590,6 +631,74 @@ TEST(CudaBackend, RejectsMalformedDriverAndSetup) {
             &registration,
             &token),
         RTFW_DEVICE_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
+}
+
+TEST(CudaBackend, FailedInitializeCleanupRetriesOnlyUnresolvedEvents) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(
+        driver.api(),
+        config(streams, 3, 1));
+    auto api = backend.api();
+
+    driver.event_create_failure_call.store(
+        3,
+        std::memory_order_release);
+    driver.fail_next_event_destroy.store(
+        true,
+        std::memory_order_release);
+    EXPECT_EQ(
+        initialize(api, 3, 0),
+        RTFW_DEVICE_STATUS_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(driver.event_create_calls.load(), 3u);
+    EXPECT_EQ(driver.event_destroy_attempts(1), 1u);
+    EXPECT_EQ(driver.event_destroy_attempts(2), 1u);
+    EXPECT_EQ(
+        initialize(api, 3, 0),
+        RTFW_DEVICE_STATUS_INVALID_STATE);
+
+    driver.fail_next_event_destroy.store(
+        true,
+        std::memory_order_release);
+    EXPECT_EQ(
+        api.shutdown(api.instance),
+        RTFW_DEVICE_STATUS_RESET_REQUIRED);
+    EXPECT_EQ(driver.event_destroy_attempts(1), 1u);
+    EXPECT_EQ(driver.event_destroy_attempts(2), 2u);
+    EXPECT_EQ(
+        initialize(api, 3, 0),
+        RTFW_DEVICE_STATUS_INVALID_STATE);
+
+    EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
+    EXPECT_EQ(driver.event_destroy_attempts(1), 1u);
+    EXPECT_EQ(driver.event_destroy_attempts(2), 3u);
+    EXPECT_EQ(initialize(api, 3, 0), RTFW_DEVICE_STATUS_OK);
+    EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
+}
+
+TEST(CudaBackend, FailedInitializePopRequiresCleanupBeforeReuse) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(
+        driver.api(),
+        config(streams, 2, 1));
+    auto api = backend.api();
+
+    driver.fail_next_pop_context.store(
+        true,
+        std::memory_order_release);
+    EXPECT_EQ(initialize(api, 2, 0), RTFW_DEVICE_STATUS_ERROR);
+    EXPECT_EQ(driver.event_destroy_attempts(1), 1u);
+    EXPECT_EQ(driver.event_destroy_attempts(2), 1u);
+    EXPECT_EQ(
+        initialize(api, 2, 0),
+        RTFW_DEVICE_STATUS_INVALID_STATE);
+
+    EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
+    EXPECT_EQ(driver.event_destroy_attempts(1), 1u);
+    EXPECT_EQ(driver.event_destroy_attempts(2), 1u);
+    EXPECT_EQ(initialize(api, 2, 0), RTFW_DEVICE_STATUS_OK);
     EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
 }
 

@@ -30,15 +30,27 @@ independent support matrices and evidence gates.
 | `finalized` | `start()`, preflight, and create configured runtime-owned lanes or bind the already-running host team | `running` |
 | `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
 | `running` | `run_periodic(config)` | `running` |
-| `finalized` or `running` | `stop()` | `stopped` |
+| `finalized` or `running` | `stop()` and all device cleanup succeeds | `stopped` |
+| `finalized` or `running` | `stop()` and device cleanup fails | public state unchanged; execution and mutation gated |
+| cleanup pending | repeated `stop()` | retry unresolved cleanup; `stopped` only on success |
 | `stopped` | repeated `stop()` | `stopped` |
 
 Other transitions return `rt::Status::invalid_state`. A stopped runtime is
 terminal. Destruction requires that no host call or callback is active; hosts
-should call `stop()` so their own resource lifecycle is explicit.
+with device backends must call `stop()` and require success before releasing
+borrowed resources. The C++ destructor is a best-effort fallback because it
+cannot return a cleanup status.
 Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
+
+A failed backend initialization gets one checked shutdown attempt. Failed
+buffer unregistration and backend shutdown preserve their ownership markers,
+and later `stop()` calls retry only unresolved operations in reverse order.
+The device service, executor, and watchdog lanes are quiesced even when cleanup
+fails. While cleanup is pending, `start()`, `step()`, `run_periodic()`,
+checkpoint restore, replay, device health, and device reset fail closed;
+read-only lifecycle diagnostics remain available.
 
 Control operations are single-host-thread operations in 1.2. `step()`,
 `run_periodic()`, checkpoint/restore, input-log export, and replay are
@@ -244,6 +256,15 @@ Stable C ABI v8 mirrors the lifecycle:
 - `rtfw_set_host_executor`;
 - `rtfw_stop`;
 - `rtfw_destroy`.
+
+Device-owning C integrations call `rtfw_stop()` until it returns
+`RTFW_STATUS_OK` before `rtfw_destroy()`. ABI v8 predates a status-bearing
+destroy function. As a compatible fail-safe, `rtfw_destroy()` attempts stop and
+does not delete the handle when device cleanup fails; the retained pointer can
+be passed to `rtfw_last_error()`, `rtfw_stop()`, and finally `rtfw_destroy()`
+after recovery. Because the void return cannot tell an arbitrary caller whether
+the handle was consumed, this behavior does not replace the checked-stop
+sequence.
 
 Public configuration, frame, callback, result, and memory-plan structures carry
 sizes, and configuration carries stable `RTFW_C_ABI_VERSION` 8 in release

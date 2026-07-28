@@ -777,7 +777,7 @@ struct Runtime::Impl {
 
     ~Impl() {
         if (devices) {
-            devices->stop();
+            (void)devices->stop();
         }
         if (executor) {
             executor->stop();
@@ -1396,6 +1396,7 @@ struct Runtime::Impl {
     std::atomic<bool> replay_dispatch{false};
     std::atomic<std::uint32_t> degradation_level{0};
     bool watchdog_started = false;
+    bool stop_pending = false;
     const HostFrameContext* active_frame = nullptr;
     std::array<char, 256> error{};
     mutable std::atomic_flag error_lock = ATOMIC_FLAG_INIT;
@@ -2458,6 +2459,11 @@ Status Runtime::start() noexcept {
     if (impl_->state != RuntimeState::finalized) {
         return impl_->fail(Status::invalid_state, "start requires finalized state");
     }
+    if (impl_->stop_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device teardown is pending; retry stop");
+    }
     if (!impl_->executor) {
         return impl_->fail(
             Status::internal_error,
@@ -2540,11 +2546,16 @@ Status Runtime::start() noexcept {
                 impl_->watchdog.stop();
                 impl_->watchdog_started = false;
             }
+            impl_->stop_pending =
+                impl_->devices->cleanup_pending();
             return impl_->fail(
                 device_status,
-                "failed to start device service lane");
+                impl_->stop_pending
+                    ? "failed to start device service lane and rollback is pending; retry stop"
+                    : "failed to start device service lane");
         }
     }
+    impl_->stop_pending = false;
     impl_->state = RuntimeState::running;
     impl_->clear_error();
     impl_->record(
@@ -2567,6 +2578,11 @@ Status Runtime::step(
     }
     if (impl_->state != RuntimeState::running) {
         return impl_->fail(Status::invalid_state, "step requires non-reentrant running state");
+    }
+    if (impl_->stop_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device teardown is pending; retry stop");
     }
     if (impl_->in_periodic_run.load(std::memory_order_acquire) &&
         !impl_->periodic_dispatch.load(std::memory_order_acquire)) {
@@ -2716,6 +2732,11 @@ Status Runtime::run_periodic(
         return impl_->fail(
             Status::invalid_state,
             "periodic execution requires running state");
+    }
+    if (impl_->stop_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device teardown is pending; retry stop");
     }
     output.final_degradation_level =
         impl_->degradation_level.load(std::memory_order_acquire);
@@ -2945,13 +2966,9 @@ Status Runtime::stop() noexcept {
         return impl_->fail(Status::invalid_state, "stop requires finalized or running state");
     }
 
-    impl_->record(
-        RuntimeTraceEventType::stopped,
-        Status::ok,
-        impl_->clock_now(),
-        0);
+    Status device_status = Status::ok;
     if (impl_->devices) {
-        impl_->devices->stop();
+        device_status = impl_->devices->stop();
     }
     if (impl_->executor) {
         impl_->executor->stop();
@@ -2960,6 +2977,18 @@ Status Runtime::stop() noexcept {
         impl_->watchdog.stop();
         impl_->watchdog_started = false;
     }
+    if (device_status != Status::ok) {
+        impl_->stop_pending = true;
+        return impl_->fail(
+            device_status,
+            "device teardown failed; retry stop before releasing borrowed resources");
+    }
+    impl_->stop_pending = false;
+    impl_->record(
+        RuntimeTraceEventType::stopped,
+        Status::ok,
+        impl_->clock_now(),
+        0);
     impl_->state = RuntimeState::stopped;
     impl_->clear_error();
     return Status::ok;
@@ -2977,6 +3006,11 @@ Status Runtime::device_health(
         return impl_->fail(
             Status::invalid_state,
             "device health requires a running device service");
+    }
+    if (impl_->stop_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device teardown is pending; retry stop");
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
@@ -3010,6 +3044,11 @@ Status Runtime::reset_device(
         return impl_->fail(
             Status::invalid_state,
             "device reset requires a running device service");
+    }
+    if (impl_->stop_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device teardown is pending; retry stop");
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
@@ -3490,6 +3529,11 @@ Status Runtime::restore_checkpoint(
             Status::invalid_state,
             "checkpoint restore requires a finalized runtime");
     }
+    if (impl_->stop_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device teardown is pending; retry stop");
+    }
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
         impl_->in_replay.load(std::memory_order_acquire)) {
@@ -3668,6 +3712,11 @@ Status Runtime::replay(
         return impl_->fail(
             Status::invalid_state,
             "replay requires a running runtime");
+    }
+    if (impl_->stop_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device teardown is pending; retry stop");
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||

@@ -145,6 +145,13 @@ host must retain borrowed storage and deployment ownership until shutdown
 succeeds or an external device/driver teardown becomes the final reclamation
 boundary.
 
+If driver initialization reports failure after acquiring partial ownership,
+the backend immediately attempts driver shutdown. `success` and
+`invalid_value` establish that no ownership remains; any other cleanup result
+sets the backend's retryable shutdown-incomplete state. This lets the runtime's
+failed-start rollback preserve the backend instance until a later checked
+`stop()` completes cleanup.
+
 ## Portable evidence
 
 Automated CPU-only evidence covers:
@@ -192,4 +199,4 @@ M10 can move from Candidate to Complete only after a declared tuple records:
   recovery evidence;
 - raw latency decomposition and an explicit reviewed pass/fail record.
 
-No tuple has completed those gates in the 1.2.0 support matrix.
+No tuple has completed those gates in the 1.2.1 support matrix.

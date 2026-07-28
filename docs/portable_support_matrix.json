@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "runtime_version": "1.2.0",
+  "runtime_version": "1.2.1",
   "contract": "Portable RT0 functionality only; no latency or hard-real-time claim.",
   "support_policy": "docs/release_policy.md",
   "supported_tuples": [

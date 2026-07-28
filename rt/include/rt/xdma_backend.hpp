@@ -44,6 +44,13 @@ struct XdmaDriverApi {
     std::uint32_t api_version = xdma_driver_api_version;
     void* user_data = nullptr;
 
+    /*
+     * A non-success initialize result may still represent partial driver
+     * ownership. The backend makes one immediate shutdown rollback attempt;
+     * shutdown must therefore be safe after any initialize call. A shutdown
+     * result of success or invalid_value proves that no ownership remains.
+     * Any other result must remain retryable by a later shutdown call.
+     */
     XdmaDriverResult (*initialize)(void* user_data) noexcept = nullptr;
     XdmaTransferResult (*transfer)(
         void* user_data,

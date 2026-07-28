@@ -4,6 +4,26 @@ All notable changes to the supported target runtime are recorded here. The
 project follows [Semantic Versioning](https://semver.org/) for package releases;
 the stable C ABI has its own version.
 
+## 1.2.1
+
+Recoverable device lifecycle safety:
+
+- preserves failed buffer-unregistration and backend-shutdown ownership in
+  deterministic reverse order instead of discarding backend status;
+- makes `stop()` idempotently retry only unresolved device cleanup, keeps the
+  prior public lifecycle state on failure, and gates execution and state
+  mutation until teardown succeeds;
+- treats failed backend initialization as ownership-uncertain and performs a
+  checked shutdown pass, retaining the backend for later retry when that
+  cleanup also fails;
+- keeps the ABI-v8 `rtfw_destroy` handle alive when its implicit stop cannot
+  release borrowed device resources, allowing a caller that followed the
+  checked-stop contract to retry;
+- adds injected multi-backend, failed-start, state-mutation, CUDA/XDMA
+  partial-init, and dynamic-C teardown recovery coverage;
+- retains stable C ABI v8 with 70 exports, device ABI v1, all schema versions,
+  SONAME 8, the M14 SDK inventory, and the unmodified Apache-2.0 license.
+
 ## 1.2.0
 
 Professional SDK and package boundary:
