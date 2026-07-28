@@ -189,3 +189,4 @@ typedef struct rtfw_device_backend_api {
 #ifdef __cplusplus
 }
 #endif
+

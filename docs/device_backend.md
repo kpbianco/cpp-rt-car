@@ -1,6 +1,6 @@
 # Bounded Device Backend Contract
 
-RTFW 0.12 retains the M8 target `rt::Runtime` device contract introduced in
+RTFW 1.0 retains the M8 target `rt::Runtime` device contract introduced in
 0.9. The base contract adds a
 size/versioned C backend ABI, device phases in the compiled graph, one
 runtime-owned completion-service lane, and a deterministic fault-injectable
@@ -173,7 +173,7 @@ loading, memory-plan accounting, steady-state allocation, and sanitizer
 execution in `tests/test_device_runtime.cpp`, `tests/test_trace_noalloc.cpp`, and
 `tests/test_cabi_dlopen.c`. `samples/device_mock.cpp` is the minimal C++ flow.
 
-M9 remains separately gated even though 0.12 contains a real CUDA Driver API
+M9 remains separately gated even though 1.0 contains a real CUDA Driver API
 adapter candidate. It still needs a named driver, toolkit, hardware, OS, and
 workload support tuple plus functional, recovery, resource, and
 latency-decomposition evidence before its support matrix can contain a

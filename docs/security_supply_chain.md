@@ -1,7 +1,8 @@
 # Security and Supply-Chain Status
 
-RTFW 0.12 has security-oriented experiments and CI helpers, not a hardened
-plugin sandbox or complete supply-chain policy.
+RTFW 1.0 has a portable release-integrity contract and security-oriented CI
+helpers. It is not a hardened plugin sandbox and does not claim signed
+provenance or reproducible builds.
 
 ## Process restriction experiment
 
@@ -29,17 +30,34 @@ may disclose paths. It must not be described as a production crash handler.
 - CI can generate an SPDX JSON SBOM with `anchore/sbom-action`.
 - `tools/sbom.py` inventories git submodules and can compare them with a
   repository allowlist.
-- `tools/store_repro_build.py` records artifact hashes and metadata.
+- `tools/release_manifest.py` records and verifies every packaged artifact's
+  relative path, byte length, SHA-256 digest, release version, and complete
+  source commit.
+- `tools/stage_release_artifacts.py` rejects stale or unexpected top-level
+  CPack output and admits only one archive with a matching checksum sidecar.
+- `tools/extract_release_archive.py` applies member-count/expanded-size bounds
+  and rejects traversal, duplicates, unsafe links, and unsupported archive
+  member types before the packaged-consumer gate.
+- `release/rtfw-release-contract.json` locks reviewed portable support,
+  compatibility, ABI, and public-contract digests.
+- Every workflow action is pinned to a reviewed full commit rather than a
+  movable major-version tag.
+- `tools/store_repro_build.py` records content-addressed build artifacts and
+  metadata for comparison.
 
-These are useful inputs, but signing, provenance attestation, release-key
-policy, vulnerability response, and reproducible-build verification remain
-release-engineering work.
+The archive manifest detects accidental corruption or substitution after it is
+created, but it is not authentication. Signing, provenance attestation,
+release-key policy, and reproducible-build verification remain release-
+engineering work. Vulnerability reporting and supported security versions are
+defined in the repository [security policy](../SECURITY.md).
 
 ## Code anchors
 
 - Process restriction experiment: `include/simcore/sandbox.hpp`
 - Crash text helper: `include/simcore/minidump.hpp`
 - Submodule SBOM check: `tools/sbom.py`
-- Artifact metadata: `tools/store_repro_build.py`
+- Release contract and artifact metadata:
+  `tools/check_release_contract.py`, `tools/release_manifest.py`,
+  `tools/stage_release_artifacts.py`, `tools/extract_release_archive.py`,
+  `tools/store_repro_build.py`
 - Threat boundaries: [threat model](threat_model.md)
-

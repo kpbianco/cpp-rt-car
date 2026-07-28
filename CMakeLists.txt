@@ -948,7 +948,11 @@ install(
 )
 
 install(
-    FILES LICENSE VERSION.txt
+    FILES
+        LICENSE
+        VERSION.txt
+        CHANGELOG.md
+        SECURITY.md
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw
 )
 
@@ -957,6 +961,16 @@ install(
         abi/rtfw_c_abi_v8.exports
         abi/rtfw_c_abi_v8.sha256
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw/abi
+)
+
+install(
+    FILES
+        docs/portable_support_matrix.json
+        docs/release_policy.md
+        docs/cuda_support_matrix.json
+        docs/xdma_support_matrix.json
+        release/rtfw-release-contract.json
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw/release
 )
 
 install(
@@ -970,3 +984,25 @@ export(
     NAMESPACE rtfw::
     FILE ${CMAKE_CURRENT_BINARY_DIR}/rtfwTargets.cmake
 )
+
+set(CPACK_PACKAGE_NAME "rtfw")
+set(CPACK_PACKAGE_VENDOR "RTFW contributors")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Bounded-resource C++20 simulation runtime")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(RTFW_PACKAGE_TOOLCHAIN
+    "${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+string(REGEX REPLACE "[^A-Za-z0-9._-]" "_"
+    RTFW_PACKAGE_TOOLCHAIN "${RTFW_PACKAGE_TOOLCHAIN}")
+set(CPACK_PACKAGE_FILE_NAME
+    "rtfw-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${RTFW_PACKAGE_TOOLCHAIN}")
+set(CPACK_PACKAGE_CHECKSUM SHA256)
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+set(CPACK_VERBATIM_VARIABLES YES)
+if (WIN32)
+    set(CPACK_GENERATOR ZIP)
+else()
+    set(CPACK_GENERATOR TGZ)
+endif()
+include(CPack)

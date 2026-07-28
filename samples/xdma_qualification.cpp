@@ -230,7 +230,11 @@ void write_evidence(
     const Options& options,
     const std::vector<Sample>& samples,
     const rtfw_device_health& health) {
-    std::cout << "{\n  \"schema_version\": 1,\n";
+    std::cout
+        << "{\n"
+        << "  \"schema_version\": 1,\n"
+        << "  \"result\": \"pass\",\n"
+        << "  \"qualification_claim\": \"evidence_only\",\n";
     std::cout << "  \"runtime_version\": ";
     write_json_string(std::cout, RTFW_VERSION_STRING);
     std::cout << ",\n  \"backend_id\": "

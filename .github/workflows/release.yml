@@ -1,0 +1,148 @@
+name: Portable release artifacts
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.tuple }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            tuple: ubuntu-22.04-x86_64-gcc-11
+            cc: gcc-11
+            cxx: g++-11
+            cmake_args: ""
+            generator: TGZ
+          - os: ubuntu-22.04
+            tuple: ubuntu-22.04-x86_64-clang-14
+            cc: clang-14
+            cxx: clang++-14
+            cmake_args: ""
+            generator: TGZ
+          - os: windows-2022
+            tuple: windows-server-2022-x86_64-msvc-v143
+            cmake_args: "-A x64 -T v143"
+            generator: ZIP
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Select declared Linux compiler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+          echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          "${{ matrix.cxx }}" --version
+      - name: Verify portable release contract
+        run: python tools/check_release_contract.py
+      - name: Verify release tag
+        if: github.ref_type == 'tag'
+        run: >
+          python tools/check_release_contract.py
+          --tag "${{ github.ref_name }}"
+      - name: Configure release package
+        run: >
+          cmake -S . -B build-release
+          -DCMAKE_BUILD_TYPE=Release
+          -DENABLE_TESTS=OFF
+          -DSIM_WERROR=ON
+          ${{ matrix.cmake_args }}
+      - name: Build release package
+        run: cmake --build build-release --config Release --parallel 2
+      - name: Build release archive
+        run: >
+          cpack --config build-release/CPackConfig.cmake
+          -C Release
+          -G ${{ matrix.generator }}
+          -B cpack-output
+      - name: Stage verified release archive
+        run: >
+          python tools/stage_release_artifacts.py
+          --cpack-dir cpack-output
+          --artifact-dir release-artifacts
+          --generator ${{ matrix.generator }}
+          --version-file VERSION.txt
+      - name: Create release manifest
+        run: >
+          python tools/release_manifest.py create
+          --artifact-dir release-artifacts
+          --output
+          release-artifacts/rtfw-${{ matrix.tuple }}-manifest.json
+          --version-file VERSION.txt
+          --source-commit "${{ github.sha }}"
+      - name: Verify release manifest
+        run: >
+          python tools/release_manifest.py verify
+          --artifact-dir release-artifacts
+          --manifest
+          release-artifacts/rtfw-${{ matrix.tuple }}-manifest.json
+          --version-file VERSION.txt
+      - name: Extract verified archive to relocated prefix
+        run: >
+          python tools/extract_release_archive.py
+          --artifact-dir release-artifacts
+          --destination "${{ runner.temp }}/rtfw-relocated"
+      - name: Configure packaged consumer
+        run: >
+          cmake -S tests/package_consumer -B build-consumer
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ runner.temp }}/rtfw-relocated"
+          ${{ matrix.cmake_args }}
+      - name: Build packaged consumer
+        run: cmake --build build-consumer --config Release --parallel 2
+      - name: Run packaged consumer
+        run: >
+          ctest --test-dir build-consumer
+          -C Release
+          --output-on-failure
+      - name: Upload immutable release inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rtfw-${{ matrix.tuple }}-${{ github.sha }}
+          path: release-artifacts/
+          if-no-files-found: error
+
+  publish:
+    name: Publish immutable GitHub Release
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified tuple artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: rtfw-*-${{ github.sha }}
+          path: release-assets
+      - name: Publish tag assets exactly once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mapfile -d '' assets < <(
+            find release-assets -type f -print0 | sort -z
+          )
+          test "${#assets[@]}" -eq 9
+          gh release create "${{ github.ref_name }}" \
+            "${assets[@]}" \
+            --verify-tag \
+            --generate-notes \
+            --draft \
+            --title "RTFW ${{ github.ref_name }}"
+          gh release edit "${{ github.ref_name }}" --draft=false

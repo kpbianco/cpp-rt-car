@@ -2,10 +2,10 @@
 
 ## Trust boundary
 
-RTFW 0.12 is an in-process native library prototype. The host application,
-runtime, callbacks, and loaded plugins share one address space and authority.
-Plugins and device backends are trusted code; ABI validation is not a security
-boundary.
+RTFW 1.0 is an in-process native library. The host application, runtime,
+callbacks, and loaded plugins share one address space and authority. Plugins
+and device backends are trusted code; ABI validation is not a security
+boundary. Portable RT0 support is not a sandboxing claim.
 
 ## Assets
 
@@ -26,7 +26,7 @@ boundary.
 | Malformed checkpoint/config | M1 runtime keys and C structure headers fail closed; M7 target checkpoints/input logs have absolute bounds, schema/identity checks, transactional restore, and fuzz coverage, but their FNV checksums are not authentication; legacy snapshots, profiles, and other experimental parsers remain outside that contract |
 | Device hang/loss | M8 defines timeout/loss statuses, poll-only completion, health/reset/shutdown, and deterministic mock evidence; M9 quarantines timed-out or uncertain CUDA work until physical drain and treats context loss as host-recreation-required, but a malicious backend still shares process authority and no hardware-driver recovery tuple is qualified |
 | Telemetry leakage/corruption | M6 target records are size/schema tagged with cursor loss accounting, but non-RT exporters can disclose runtime data and no sink access policy exists; legacy telemetry remains experimental |
-| Supply-chain substitution | Submodule/SBOM helpers and CI dependency review exist; signed release provenance is not established |
+| Supply-chain substitution | Submodule/SBOM helpers, CI dependency review, a checked release contract, and complete artifact SHA-256 manifests exist; manifests are unsigned and signed provenance is not established |
 | Host-policy mutation | Hardening scripts can make privileged system-wide changes and require operator review; M5 strict preflight is read-only |
 
 ## Required controls
@@ -39,4 +39,3 @@ Untrusted extensions require an out-of-process boundary; the tiny
 
 See [security status](security_supply_chain.md) and the
 [product contract](product_contract.md).
-

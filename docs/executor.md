@@ -1,6 +1,6 @@
 # Unified CPU Executor
 
-Release 0.12 carries the M3 CPU-execution surface in `rt::Runtime` and adds the
+Release 1.0 carries the M3 CPU-execution surface in `rt::Runtime` and adds the
 M11 host job-system adapter. The M4 memory contract still governs runtime-owned
 executor storage. The
 compiled graph, independent phase callbacks, nested range work, and nested

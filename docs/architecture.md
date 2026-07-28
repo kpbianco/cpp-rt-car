@@ -1,13 +1,13 @@
 # Architecture
 
-This page separates the 0.12 implementation from the accepted target
-architecture. The normative target is the
+This page separates the supported 1.0 target runtime from compatibility and
+candidate paths. The normative contract is the
 [product contract](product_contract.md); the decisions behind it are recorded
 in [ADRs](adr/README.md).
 
-## Current 0.12 implementation
+## Current 1.0 implementation
 
-### M1–M11 host, device, and distribution runtime
+### M1–M12 host, device, and distribution runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -61,6 +61,12 @@ aligned scratch, and generation-tagged completion context to a borrowed,
 capacity-matched host job system. It also freezes C ABI v8, hides non-C
 symbols, checks an exact export allowlist, and validates relocated installed
 package consumers. The C++ API remains source-only.
+
+M12 closes the portable RT0 release contract. It names the supported
+compiler/OS tuples, adds an independent-device-state concurrency gate, applies
+same-major package and target C++ source-compatibility policy, and checks
+strict CPack staging plus content-addressed package and hardware-evidence
+manifests. These gates do not promote RT1, RT2, CUDA, or XDMA qualification.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
@@ -163,6 +169,9 @@ headers or changing the portable device contract. M10 adds the optional Linux
 XDMA AXI-MM candidate, likewise behind the unchanged M8 contract and a separate
 support matrix.
 M11 adds the borrowed host job-system policy and stable distribution boundary.
+M12 names the portable RT0 support tuples and makes the 1.x compatibility,
+release archive, digest-manifest, and independent-device-isolation gates
+machine-verifiable.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
@@ -179,12 +188,18 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M11 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
+- M1–M12 host/device runtime: `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
 - M3 executor: `rt/src/executor.cpp`
 - M11 host adapter and stable distribution: `rt/src/executor.cpp`,
   `rt/include/rt/c_api.h`, `docs/c_abi.md`, `tests/package_consumer`
+- M12 portable release contract: `docs/portable_support_matrix.json`,
+  `docs/release_policy.md`, `release/rtfw-release-contract.json`,
+  `tools/check_release_contract.py`, `tools/stage_release_artifacts.py`,
+  `tools/extract_release_archive.py`, `tools/release_manifest.py`,
+  `tools/check_hardware_evidence.py`,
+  `tests/test_release_tools.py`, `.github/workflows/release.yml`
 - M4 memory plan: `rt/src/aligned_storage.hpp`,
   `docs/memory_plan.md`
 - M5 time/platform controls: `rt/src/watchdog_monitor.cpp`,
@@ -202,7 +217,7 @@ that arbitrary host data is automatically optimized.
 - M10 XDMA candidate: `rt/include/rt/xdma_backend.hpp`,
   `rt/include/rt/xdma_linux.hpp`, `rt/src/xdma_backend.cpp`,
   `rt/src/xdma_linux.cpp`, `docs/xdma_backend.md`
-- Experimental C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
+- Stable C lifecycle ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - Phase registration and graph: `SimCore::addPhase`,
   `SimCore::addDependency`, `SimCore::buildTopoLevels`;
   `include/simcore/SimCore.hpp`

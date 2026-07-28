@@ -1,0 +1,111 @@
+# Release and Compatibility Policy
+
+RTFW 1.0 is a portable RT0 runtime release. It supports the named build and
+test tuples in [the portable support matrix](portable_support_matrix.json).
+Passing those gates establishes functional behavior and bounded-capacity API
+semantics; it does not establish a latency bound, RT1 measurement result, RT2
+qualification, or hardware-backend qualification.
+
+## Versioning
+
+RTFW package releases follow Semantic Versioning:
+
+- patch releases fix defects without intentionally changing supported API
+  behavior;
+- minor releases may add backward-compatible target-runtime functionality;
+- major releases may remove or incompatibly change stable source interfaces.
+
+The package version, C ABI version, device ABI version, observability schema,
+checkpoint schema, and qualification-record schema are independent version
+domains. A package-major change does not silently change any other domain.
+
+## Compatibility surfaces
+
+| Surface | 1.x promise |
+| --- | --- |
+| C ABI v8 | Stable binary interface represented by the v8 headers, fingerprint, export allowlist, and SONAME |
+| Target C++ runtime | Source compatibility for public declarations reachable from `rt/runtime.hpp`; recompilation is required and no C++ binary ABI is promised |
+| Installed CMake package | Same-major package discovery, component names, and imported target names remain compatible |
+| Artifact formats | Checkpoint/input-log readers retain explicit schema validation; incompatible formats require a new schema |
+| Observability | Existing schema-v2 IDs and meanings are retained; additions require versioned review |
+| Optional CUDA/XDMA adapters | Candidate source APIs until a separately documented stability milestone |
+| Legacy `SimCore`, scheduler, plugin, fiber, and utility surfaces | Experimental and outside the 1.x compatibility promise |
+
+Stable C++ source declarations are deprecated for at least one minor release
+before removal when a safe compatibility path exists. Security fixes may
+disable unsafe behavior immediately, but the release notes must identify the
+exception. Incompatible C ABI changes require a new ABI number, SONAME,
+allowlist, fingerprint, and compatibility test; the v8 manifest is immutable.
+
+## Support levels
+
+- **Supported** — the exact tuple is a required pull-request and release gate;
+  regressions are release blockers.
+- **Best effort** — expected to work from portable code paths but not exercised
+  on every change.
+- **Candidate** — implementation and portable tests exist, but any hardware or
+  latency claim requires an independently reviewed tuple.
+- **Experimental** — no compatibility or support commitment.
+
+Only entries in `supported_tuples` in the portable matrix are supported for
+1.0. The tuple covers compiler/build/runtime functionality at RT0. Application
+callbacks, host job systems, allocators, operating-system policy, drivers, and
+hardware remain part of the deployment being evaluated.
+
+## Release gate
+
+A release candidate must:
+
+1. match `VERSION.txt`, the public version header, package metadata, support
+   matrices, changelog, and checked-in release contract;
+2. pass the complete required CI matrix, documentation contract, stable C ABI
+   check, sanitizers, determinism exchange, and relocated external consumers;
+3. pass the dedicated multi-runtime device-isolation gate;
+4. produce CPack archives from every supported tuple and run the relocated
+   consumer against each exact extracted archive;
+5. produce a content-addressed release manifest containing every archive's
+   relative name, byte length, and SHA-256 digest;
+6. retain the CI-generated SPDX SBOM and never describe a checksum or build
+   record as a reproducible-build proof;
+7. pin every third-party workflow action to a reviewed full commit;
+8. review every present-tense support, determinism, latency, and qualification
+   claim before creating tag `v<version>`.
+
+The tag must identify the exact source commit used by the release workflow.
+Release archives and their generated manifest are immutable after publication;
+a changed artifact requires a new package version.
+After all three exact-tuple package/consumer jobs pass, a tag-triggered workflow
+publishes their nine uniquely named archive, checksum, and manifest assets as
+one draft GitHub Release, then makes it public. A manual workflow dispatch
+builds and retains the same inputs for review but does not publish a release.
+Publication fails if the tag does not exist or the release already exists;
+assets are never overwritten. An interrupted upload remains a draft for
+operator review rather than exposing a partial public release.
+
+The checked-in release contract's digest keys are repository-relative source
+paths. The contract is included in installed packages as an audit reference,
+not as a claim that the binary archive contains the source workflows and
+release tools. The separate artifact manifest hashes the complete published
+archive and checksum files.
+
+## Qualification boundary
+
+Portable 1.0 completion does not promote M9 or M10 and does not create an RT2
+record. PREEMPT_RT, CUDA, and XDMA evidence is admitted only through the
+versioned matrices and procedures linked from the
+[real-time readiness checklist](real_time_readiness_checklist.md),
+[CUDA contract](cuda_backend.md), and [XDMA contract](xdma_backend.md).
+Raw evidence marked `evidence_only` is an input to review, not a qualification.
+The opt-in CUDA/XDMA workflows validate that evidence schema, then bind every
+raw file to the complete source commit with a SHA-256 manifest before upload.
+Neither a schema pass nor that integrity manifest promotes the corresponding
+support matrix.
+
+## Security and lifecycle
+
+Supported release lines and reporting instructions are in
+[the repository security policy](../SECURITY.md). Release checksums detect
+artifact corruption or substitution only when the manifest itself is obtained
+from a trusted channel. RTFW 1.0 does not claim signed releases,
+bit-for-bit-reproducible builds, plugin isolation, or safe execution of
+untrusted native callbacks.

@@ -104,25 +104,30 @@ cmake --build --preset pgo-use
 
 `VERSION.txt` is the release source of truth. CMake installs shared/static
 libraries, public headers, package config/version files, the license, and the
-version file. Release 0.12 exports component-checked targets for shared C,
-static C, the C++ runtime, and portable/optional CUDA/XDMA adapters. While the
-package major version is zero, `find_package()` compatibility is limited to the
-same minor release; stable C ABI compatibility is checked independently at
-runtime.
+version, changelog, security, support-matrix, and release-contract files.
+Release 1.0 exports component-checked targets for shared C, static C, the C++
+runtime, and portable/optional CUDA/XDMA adapters. `find_package()`
+compatibility is same-major for 1.x. Stable C ABI compatibility is checked
+independently at runtime; target C++ compatibility is source-only and requires
+recompilation.
 
-CI installs to one prefix, relocates the complete tree, then configures and
-runs `tests/package_consumer` as an external project on Linux and Windows. The
-consumer requests:
+CI builds the CPack archive, stages and verifies it, extracts that exact
+downloadable artifact to a fresh prefix, then configures and runs
+`tests/package_consumer` as an external project on Linux and Windows. The
+consumer requests the stable C/C++ surfaces plus the always-built portable
+CUDA/XDMA state-machine components:
 
 ```cmake
 find_package(
-  rtfw 0.12 CONFIG REQUIRED
-  COMPONENTS c_shared c_static cpp_runtime)
+  rtfw 1.0 CONFIG REQUIRED
+  COMPONENTS
+    c_shared c_static cpp_runtime
+    cuda_backend xdma_backend)
 ```
 
-and links `rtfw::rtfw`, `rtfw::rtfw_static`, and `rtfw::simcore_rt`. Linux CI
-also compares the built shared-library symbols with the v8 allowlist. Run the
-header/manifest half locally with:
+and links their corresponding imported targets. Linux CI also compares the
+built shared-library symbols with the v8 allowlist. Run the header/manifest
+half locally with:
 
 ```bash
 python3 tools/check_c_abi.py
@@ -130,9 +135,64 @@ python3 tools/check_c_abi.py
 
 See [the stable C ABI contract](c_abi.md) for SONAME and compatibility rules.
 
+## Portable release archive
+
+CPack creates a `.tar.gz` archive on non-Windows hosts and a `.zip` archive on
+Windows. It also creates a SHA-256 sidecar:
+
+```bash
+cmake -S . -B build-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_TESTS=OFF \
+  -DSIM_WERROR=ON
+cmake --build build-release --config Release --parallel 2
+cpack --config build-release/CPackConfig.cmake -C Release -B cpack-output
+python3 tools/stage_release_artifacts.py \
+  --cpack-dir cpack-output \
+  --artifact-dir release-artifacts \
+  --generator TGZ \
+  --version-file VERSION.txt
+```
+
+The staging check admits exactly one archive and its matching CPack SHA-256
+sidecar, leaving CPack's internal `_CPack_Packages` tree unpublished. The
+release workflow then records every staged file, its byte length, its SHA-256,
+and the complete source commit in a manifest and verifies the directory
+contains neither missing nor unlisted files:
+
+```bash
+python3 tools/release_manifest.py create \
+  --artifact-dir release-artifacts \
+  --output release-artifacts/rtfw-release-manifest.json \
+  --version-file VERSION.txt \
+  --source-commit <full-40-character-git-sha>
+python3 tools/release_manifest.py verify \
+  --artifact-dir release-artifacts \
+  --manifest release-artifacts/rtfw-release-manifest.json \
+  --version-file VERSION.txt
+python3 tools/extract_release_archive.py \
+  --artifact-dir release-artifacts \
+  --destination extracted-prefix
+```
+
+These digests detect substitution or corruption after creation; they are not
+a signature, provenance attestation, or proof of reproducible builds. The
+extractor rejects traversal, duplicate members, unsafe links, unsupported
+member types, and bounded-size violations before the packaged-consumer test.
+For an exact `v<version>` tag, the release workflow publishes the three
+archive/checksum/tuple-manifest sets only after all three packaged consumers
+pass. A manual dispatch performs the builds without publishing.
+The normative compatibility and release rules are in
+[the release policy](release_policy.md).
+
 ## Code anchors
 
 - Build configuration and installation: `CMakeLists.txt`
 - Presets: `CMakePresets.json`
 - Clang toolchain: `cmake/toolchains/clang.cmake`
 - Version source: `VERSION.txt`
+- Release contract check: `tools/check_release_contract.py`
+- Archive staging check: `tools/stage_release_artifacts.py`
+- Safe archive extraction: `tools/extract_release_archive.py`
+- Artifact manifest: `tools/release_manifest.py`
+- Archive workflow: `.github/workflows/release.yml`

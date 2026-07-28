@@ -29,7 +29,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M9 | Candidate | Real CUDA backend; hardware qualification pending |
 | M10 | Candidate | Xilinx Linux XDMA AXI-MM backend; hardware qualification pending |
 | M11 | Complete | Stable ABI, package/export cleanup, and engine adapters |
-| M12 | Qualified separately | Portable 1.0, PREEMPT_RT, CUDA, and XDMA evidence |
+| M12 | Complete | Portable 1.0 release contract; deployment qualification remains separate |
 
 ## M0 — Product contract and truth reset
 
@@ -350,12 +350,52 @@ The exact promise and change rules are in
 [the stable C ABI contract](c_abi.md) and
 [the executor contract](executor.md).
 
-## M12 — Portable release and deployment qualification
+## M12 — Portable release and deployment-qualification boundary
 
-The repository now contains the portable distribution mechanisms required for
-a 1.0 release, but the product remains 0.12 while release policy, supported
-platform declarations, and final evidence review are completed. PREEMPT_RT,
-CUDA, and XDMA qualification remain tuple-specific: they publish raw evidence
-for declared deployments and cannot be inferred from portable CI. M9 and M10
-therefore remain Candidate until real hardware records pass their independent
-gates.
+Delivered in 1.0:
+
+- an explicit 1.x SemVer, deprecation, stable-surface, support-level, security,
+  and release policy;
+- a machine-readable portable support matrix naming Ubuntu 22.04 GCC 11,
+  Ubuntu 22.04 Clang 14, and Windows Server 2022 MSVC v143 as supported RT0
+  tuples;
+- same-major CMake package compatibility while preserving C ABI v8 as the
+  independent stable binary boundary and explicitly declining a C++ binary
+  ABI;
+- a dedicated concurrent two-runtime gate proving independent device backends,
+  borrowed buffers, metrics, health, and shutdown state;
+- deterministic release-contract validation with reviewed SHA-256 identities
+  for stable headers, ABI manifests, licensing, support policy, package
+  configuration, release tools, and required workflows;
+- full-commit pins for every third-party workflow action, including the
+  release publisher's artifact download;
+- CPack install archives consumed directly from fresh extracted prefixes,
+  content-addressed artifact manifests, negative staging/extraction/manifest/
+  contract tests, and tag/version validation on every supported tuple;
+- all-tuple tag publication with unique assets and fail-if-existing release
+  semantics; manual workflow runs do not publish;
+- validated CUDA/XDMA `evidence_only` schemas and source-commit-bound raw
+  evidence manifests that cannot promote a hardware support tuple;
+- a changelog and supported-version security policy;
+- final evidence review that leaves RT1, RT2, CUDA, and XDMA claims unqualified
+  unless their separate tuple procedures pass.
+
+Exit gates:
+
+- every named portable tuple is represented by a pinned required CI runner and
+  exact declared compiler;
+- version, changelog, package metadata, support matrices, stable surface, and
+  release tag agree;
+- every package archive is relocatable and covered by a source-commit,
+  byte-length, and SHA-256 manifest;
+- corrupt, missing, unlisted, duplicate, or path-escaping release artifacts
+  fail validation;
+- concurrent runtimes cannot share device or observability state;
+- release documentation never converts portable CI or raw hardware evidence
+  into an RT1, RT2, CUDA, or XDMA qualification claim.
+
+M9 and M10 remain Candidate until real hardware records pass their independent
+gates. PREEMPT_RT deployment records are also reviewed separately from portable
+1.0. The exact release and support promise is in
+[the release policy](release_policy.md) and
+[portable support matrix](portable_support_matrix.json).
