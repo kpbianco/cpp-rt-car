@@ -6,14 +6,16 @@
 #include <rt/device_abi.h>
 #include <rtfw/version.h>
 
-#if defined _WIN32 || defined __CYGWIN__
-#  if defined RTFW_STATIC_DEFINE
-#    define RTFW_API
-#  elif defined RTFW_BUILD
+#if defined RTFW_STATIC_DEFINE
+#  define RTFW_API
+#elif defined _WIN32 || defined __CYGWIN__
+#  if defined RTFW_BUILD
 #    define RTFW_API __declspec(dllexport)
 #  else
 #    define RTFW_API __declspec(dllimport)
 #  endif
+#elif defined __GNUC__ || defined __clang__
+#  define RTFW_API __attribute__((visibility("default")))
 #else
 #  define RTFW_API
 #endif
@@ -25,12 +27,15 @@ extern "C" {
 #define RT_VERSION_MAJOR RTFW_VERSION_MAJOR
 #define RT_VERSION_MINOR RTFW_VERSION_MINOR
 #define RT_VERSION_PATCH RTFW_VERSION_PATCH
-#define RTFW_C_ABI_VERSION 7u
+#define RTFW_C_ABI_VERSION 8u
+#define RTFW_C_ABI_MIN_COMPATIBLE_VERSION 8u
+#define RTFW_C_ABI_LAYOUT_FINGERPRINT UINT64_C(0xd0e7a5a14bf35f97)
 
 typedef struct {
     uint8_t compiled_graph;
     uint8_t host_driven_time;
     uint8_t unified_cpu_executor;
+    uint8_t host_executor_adapter;
     uint8_t bounded_memory_plan;
     uint8_t self_paced_time;
     uint8_t frame_watchdog;
@@ -68,6 +73,25 @@ typedef int32_t rtfw_status;
 #define RTFW_STATUS_DEVICE_LOST ((rtfw_status)-20)
 #define RTFW_STATUS_DEVICE_CANCELED ((rtfw_status)-21)
 #define RTFW_STATUS_DEVICE_RESET_REQUIRED ((rtfw_status)-22)
+#define RTFW_STATUS_INCOMPATIBLE_ABI ((rtfw_status)-23)
+
+typedef uint64_t rtfw_abi_feature_flags;
+#define RTFW_ABI_FEATURE_HOST_EXECUTOR_ADAPTER \
+    (UINT64_C(1) << 0)
+#define RTFW_ABI_FEATURE_DEVICE_BACKEND \
+    (UINT64_C(1) << 1)
+#define RTFW_ABI_FEATURE_DETERMINISTIC_REPLAY \
+    (UINT64_C(1) << 2)
+
+typedef struct rtfw_abi_info {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint32_t min_compatible_abi_version;
+    uint32_t pointer_size;
+    uint64_t layout_fingerprint;
+    uint64_t feature_flags;
+    uint64_t reserved[4];
+} rtfw_abi_info;
 
 typedef uint32_t rtfw_runtime_state;
 #define RTFW_STATE_CONFIGURING ((rtfw_runtime_state)0u)
@@ -86,6 +110,7 @@ typedef uint32_t rtfw_numerical_mode;
 typedef uint32_t rtfw_executor_policy;
 #define RTFW_EXECUTOR_STATIC_DETERMINISTIC ((rtfw_executor_policy)0u)
 #define RTFW_EXECUTOR_BOUNDED_THROUGHPUT ((rtfw_executor_policy)1u)
+#define RTFW_EXECUTOR_HOST_ADAPTER ((rtfw_executor_policy)2u)
 
 typedef uint32_t rtfw_overload_policy;
 #define RTFW_OVERLOAD_REJECT_SUBMISSION ((rtfw_overload_policy)0u)
@@ -577,17 +602,63 @@ typedef rtfw_callback_result (*rtfw_replay_input_callback)(
     void* user_data,
     const rtfw_replay_input_view* input);
 
+/*
+ * A host adapter copies each job before submit returns and invokes execute
+ * exactly once for every accepted job. completion_context and
+ * completion_token are opaque runtime values. scratch is exclusive to that
+ * job and valid only until execute returns.
+ */
+typedef void (*rtfw_host_job_execute)(
+    void* execution_context,
+    void* completion_context,
+    uint64_t completion_token,
+    uint32_t worker_index);
+
+typedef struct rtfw_host_job {
+    uint32_t struct_size;
+    uint32_t reserved0;
+    rtfw_host_job_execute execute;
+    void* execution_context;
+    void* completion_context;
+    uint64_t completion_token;
+    void* scratch;
+    uint64_t scratch_bytes;
+    uint64_t reserved[2];
+} rtfw_host_job;
+
+typedef rtfw_status (*rtfw_host_executor_submit)(
+    void* user_data,
+    const rtfw_host_job* job);
+typedef uint8_t (*rtfw_host_executor_try_execute_one)(
+    void* user_data);
+
+typedef struct rtfw_host_executor {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    void* user_data;
+    uint64_t worker_count;
+    uint64_t queue_capacity;
+    rtfw_host_executor_submit submit;
+    rtfw_host_executor_try_execute_one try_execute_one;
+    uint64_t reserved[4];
+} rtfw_host_executor;
+
 /* Capability bytes are 0 or 1 and report completed target-path guarantees. */
 RTFW_API uint32_t rt_version_major(void);
 RTFW_API uint32_t rt_version_minor(void);
 RTFW_API uint32_t rt_version_patch(void);
 RTFW_API rt_capabilities_c rt_query_capabilities(void);
+RTFW_API rtfw_status rtfw_get_abi_info(rtfw_abi_info* out_info);
+RTFW_API rtfw_status rtfw_check_abi(
+    uint32_t requested_abi_version,
+    uint64_t requested_layout_fingerprint);
 RTFW_API const char* rtfw_status_message(rtfw_status status);
 RTFW_API const char* rtfw_metric_name(rtfw_metric_id id);
 RTFW_API const char* rtfw_trace_event_name(
     rtfw_trace_event_type type);
 
 /* Use the init functions below. All reserved members must remain zero. */
+RTFW_API void rtfw_abi_info_init(rtfw_abi_info* info);
 RTFW_API void rtfw_config_init(rtfw_config* config);
 RTFW_API rtfw_status rtfw_config_set(
     rtfw_config* config,
@@ -623,18 +694,27 @@ RTFW_API void rtfw_replay_result_init(
     rtfw_replay_result* result);
 RTFW_API void rtfw_device_health_init(
     rtfw_device_health* health);
+RTFW_API void rtfw_host_executor_init(
+    rtfw_host_executor* executor);
 
 /*
  * The runtime copies configuration and callback names. Callback user_data is
  * borrowed until the runtime is stopped/destroyed. Callback context and
  * scratch pointers are valid only for that synchronous callback invocation.
  * Lifecycle and graph functions are single-host-thread operations in ABI
- * version 7. Device backend tables, instances, and registered buffer storage
+ * version 8. Device backend tables, instances, and registered buffer storage
  * are borrowed until rtfw_stop or rtfw_destroy has completed shutdown.
  */
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
     rtfw_handle** out_handle);
+/*
+ * Copies the adapter table and borrows user_data through stop/destroy. This is
+ * valid only while configuring and required by RTFW_EXECUTOR_HOST_ADAPTER.
+ */
+RTFW_API rtfw_status rtfw_set_host_executor(
+    rtfw_handle* handle,
+    const rtfw_host_executor* executor);
 RTFW_API rtfw_status rtfw_register_callback(
     rtfw_handle* handle,
     const char* name,

@@ -8,7 +8,8 @@ simulation execution. The repository explores phase graphs, parallel range
 work, fixed-capacity queues, frame arenas, numerical controls, tracing, and
 asynchronous device patterns.
 
-> **Status: 0.11.0 experimental.** This release is not production-ready and has
+> **Status: 0.12.0 experimental.** The C ABI is now a controlled stable
+> boundary, but the product is not production-ready and has
 > no hard-real-time, worst-case-latency, cross-platform bitwise-determinism,
 > CUDA-hardware, or XDMA qualification. See the
 > [product contract](docs/product_contract.md)
@@ -22,6 +23,7 @@ asynchronous device patterns.
 | Compiled graph | Implemented RT0 surface | C and C++ hosts declare phase dependencies and logical resource access; finalization rejects invalid handles, cycles, and unordered conflicts |
 | Host-driven callbacks | Implemented RT0 surface | `step()` waits synchronously without pacing; dependency-ready callbacks may run concurrently on the fixed team |
 | Unified CPU executor | Implemented RT0 surface | Static deterministic assignment and bounded local-queue throughput policies run graph, range, and fixed-tree reduction work |
+| Host job-system adapter | Implemented RT0 surface | A third executor policy submits the same immutable graph/range/reduction jobs to a borrowed fixed-capacity engine queue with explicit runtime scratch and generation-tagged completion context |
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
@@ -38,15 +40,16 @@ asynchronous device patterns.
 | Legacy trace | Experimental | `SimCore` retains process-global per-thread binary rings and offline adapters outside the M6 contract |
 | Legacy metrics | Experimental | Demo JSON uses mutex-backed counters and rolling phase histograms with a default 120-sample capacity |
 | Legacy snapshots | Experimental compatibility surface | Demo/native-layout helpers are bounds checked but remain outside target checkpoint schema v1 |
-| C ABI | Experimental ABI v7 surface | Size/version-checked lifecycle, graph, nested-work, memory, time/platform, observability, replay, and device calls use fixed-width discriminators and typed status codes |
-| Runtime configuration | Implemented M1–M8 schema | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, and artifact limits; unknown keys fail |
+| C ABI | Stable ABI v8 | Version/fingerprint handshake, exact shared-library export allowlist, ABI-numbered SONAME, fixed-width contracts, and relocated shared/static consumers |
+| Runtime configuration | Implemented M1–M11 schema | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, artifacts, and the host-adapter policy; unknown keys fail |
 | Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
 | Legacy GPU stub | Experimental compatibility path | Detached CPU-thread stub outside `rt::Runtime`; superseded for new CUDA work by the separate M9 candidate |
 | Xilinx XDMA AXI-MM backend | Candidate; not hardware-qualified | Portable fixed-capacity state machine plus an opt-in Linux character-device adapter, timeout quarantine, fake-driver stress tests, and raw-evidence tooling for one named stack |
 
 `rt::Runtime` does not use the legacy `WorkerPool`, `rt::Scheduler`, or
 `FiberPool`. Those compatibility experiments retain different lifetime and
-task rules and are not alternate policies of the M3 executor.
+task rules. The M11 host adapter is the only supported path for an external
+engine job system.
 
 ## Quick start
 
@@ -127,12 +130,12 @@ embedding runtime; demo/profile integration remains planned.
 
 ## Embedding lifecycle
 
-Release 0.11 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
+Release 0.12 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
 memory closure, M5 time/platform controls, M6 observability, and M7
-checkpoint/replay plus the M8 device ABI/mock in
+checkpoint/replay, the M8 device ABI/mock, and the M11 stable ABI/host adapter in
 `<rt/runtime.hpp>` and `<rt/c_api.h>`:
 
-1. configure a typed runtime;
+1. configure a typed runtime and optionally attach a borrowed host job system;
 2. register callback/device phases, logical resources, canonical replay state,
    optional device backends, and borrowed device buffers while configuring;
 3. declare phase dependencies and read/write resource access;
@@ -140,7 +143,8 @@ checkpoint/replay plus the M8 device ABI/mock in
    plan, allocate aligned phase/task scratch, trace, and fixed queue storage,
    and freeze topology and static assignments;
 5. optionally require strict read-only platform preflight, then start the fixed
-   worker team and configured watchdog/device service lanes;
+   runtime worker team or bind the already-running host team, plus configured
+   watchdog/device service lanes;
 6. submit host-owned frame index, simulation delta, and optional deadline to
    `step()`, or run a finite absolute-cadence loop with `run_periodic()`;
 7. inspect per-frame timing, watchdog/degradation, and preflight results;
@@ -152,7 +156,8 @@ checkpoint/replay plus the M8 device ABI/mock in
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
-uses local queues and bounded steals. Both use the same team for nested
+uses local queues and bounded steals; `host_adapter` borrows a declared engine
+queue/team. All three use the same task representation for nested
 `parallel_for()` and deterministic-tree `parallel_reduce()` calls. See the
 [host runtime contract](docs/host_runtime.md), the
 [compiled graph contract](docs/compiled_graph.md), the
@@ -161,7 +166,8 @@ uses local queues and bounded steals. Both use the same team for nested
 [time/platform contract](docs/time_platform.md), the
 [observability contract](docs/observability.md), the
 [determinism/replay contract](docs/determinism_replay.md), the
-[device backend contract](docs/device_backend.md), and the working
+[device backend contract](docs/device_backend.md), and the
+[stable C ABI contract](docs/c_abi.md), plus the working
 [C](samples/embed_c/mini_app.c) and
 [C++](samples/embed_cpp/mini_app.cpp) examples plus the
 [mock-device sample](samples/device_mock.cpp). The optional M9 CUDA and M10 XDMA candidates have separate
@@ -188,11 +194,13 @@ Accepted architecture decisions:
 - [ADR-0002: host-driven time by default](docs/adr/0002-host-driven-time.md)
 - [ADR-0003: bounded device backend ABI](docs/adr/0003-device-backend-boundary.md)
 
-The M1–M8 host runtime now implements lifecycle, both explicit time modes,
-compiled graph validation, the first two CPU policies, the bounded target-path
+The M1–M11 host runtime now implements lifecycle, both explicit time modes,
+compiled graph validation, all three CPU policies, the bounded target-path
 memory plan, watchdog/degradation, platform preflight, versioned
 observability, bounded registered-state replay, and the bounded poll-only
-device path. M9 adds an optional CUDA Driver API backend candidate and M10 adds the bounded
+device path. M11 adds the host job-system policy, stable C ABI, controlled
+symbols, and installed-package gates. M9 adds an optional CUDA Driver API
+backend candidate and M10 adds the bounded
 Xilinx Linux XDMA AXI-MM candidate without changing the core device ABI or
 claiming a qualified deployment. The existing
 `SimCore` demo and legacy scheduler components remain outside that target
@@ -211,7 +219,7 @@ RTFW separates portable functionality from deployment qualification:
 No RT2 record exists yet.
 
 Determinism is tiered from D0 (unspecified) through D3 (portable approved
-fixed-point/specified math). Release 0.11 supports D0 and an explicit D1
+fixed-point/specified math). Release 0.12 supports D0 and an explicit D1
 contract for registered canonical state. Its worker-count and compiler-artifact
 fixtures do not prove D2, arbitrary floating-point identity, or cross-machine
 D3 behavior. Definitions and evidence requirements are in the
@@ -223,7 +231,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M8 host runtime plus the M9 CUDA candidate, graph compiler, unified executor, memory/time/platform/observability/replay/device controls, and experimental legacy scheduler/fiber/plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M11 host runtime plus the M9 CUDA and M10 XDMA candidates, graph compiler, unified/host executors, memory/time/platform/observability/replay/device controls, and experimental legacy scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |
@@ -271,7 +279,7 @@ CI currently provides:
 - fake-clock absolute-release/deadline/no-drift tests, one-shot watchdog and
   frame-thread degradation tests, and fail-closed preflight tests;
 - schema/provenance, interval-partition, trace-loss, instance-isolation,
-  contended-emission, C ABI v7, JSON-export, and ThreadSanitizer observability
+  contended-emission, stable C ABI v8, JSON-export, and ThreadSanitizer observability
   gates;
 - D1 equality across 1/2/4 workers, cross-worker checkpoint transfer,
   transactional corruption rejection, checkpoint/input replay, bounded
@@ -289,6 +297,9 @@ CI currently provides:
   validates H2C/C2H AXI-MM integrity, and uploads raw per-direction timing
   without automatically creating a support claim;
 - shared/static C and C++ compiled-graph samples plus dynamic C ABI loading;
+- exact shared-library symbol checks, host-adapter C/C++ saturation,
+  stale-completion and no-allocation tests, plus relocated Linux/Windows
+  `find_package()` consumers;
 - autotune mapping and synthetic autotune smoke;
 - scaling artifact smoke;
 - documentation/version/claim checks.

@@ -27,6 +27,7 @@ struct Capabilities {
     bool compiled_graph;
     bool host_driven_time;
     bool unified_cpu_executor;
+    bool host_executor_adapter;
     bool bounded_memory_plan;
     bool self_paced_time;
     bool frame_watchdog;
@@ -82,6 +83,7 @@ enum class Status : std::int32_t {
     device_lost = -20,
     device_canceled = -21,
     device_reset_required = -22,
+    incompatible_abi = -23,
 };
 
 [[nodiscard]] const char* status_message(Status status) noexcept;
@@ -94,6 +96,50 @@ enum class NumericalMode : std::uint8_t {
 enum class ExecutorPolicy : std::uint8_t {
     static_deterministic,
     bounded_throughput,
+    host_adapter,
+};
+
+/*
+ * One immutable job record submitted to a borrowed engine job system. The
+ * adapter copies this record before submit() returns and invokes execute
+ * exactly once for every accepted job. Scratch is runtime-owned, exclusive to
+ * the invocation, and valid until execute returns. completion_context is an
+ * opaque runtime token and must only be passed back to execute.
+ */
+using HostJobExecute = void (*)(
+    void* execution_context,
+    void* completion_context,
+    std::uint64_t completion_token,
+    std::uint32_t worker_index);
+
+struct HostExecutorJob {
+    HostJobExecute execute = nullptr;
+    void* execution_context = nullptr;
+    void* completion_context = nullptr;
+    std::uint64_t completion_token = 0;
+    std::byte* scratch = nullptr;
+    std::size_t scratch_bytes = 0;
+};
+
+using HostExecutorSubmit = Status (*)(
+    void* user_data,
+    const HostExecutorJob& job) noexcept;
+using HostExecutorTryExecuteOne = bool (*)(void* user_data) noexcept;
+
+/*
+ * A borrowed, already-running host job system. The declared worker/queue
+ * capacities must exactly match RuntimeConfig when host_adapter is selected.
+ * submit() is bounded and returns queue_full without accepting the job when
+ * capacity is unavailable. try_execute_one() may execute at most one queued
+ * job and is required so nested runtime work cannot deadlock a saturated host
+ * team. The adapter and user_data outlive Runtime::stop().
+ */
+struct HostExecutorAdapter {
+    void* user_data = nullptr;
+    std::size_t worker_count = 0;
+    std::size_t queue_capacity = 0;
+    HostExecutorSubmit submit = nullptr;
+    HostExecutorTryExecuteOne try_execute_one = nullptr;
 };
 
 enum class OverloadPolicy : std::uint8_t {
@@ -758,6 +804,10 @@ public:
     Runtime& operator=(const Runtime&) = delete;
 
     [[nodiscard]] Status configure(const RuntimeConfig& config) noexcept;
+    // Copies the callback table and borrows adapter.user_data through stop().
+    // May be called only while configuring.
+    [[nodiscard]] Status set_host_executor(
+        const HostExecutorAdapter& adapter) noexcept;
     [[nodiscard]] Status configure_key(
         std::string_view key,
         std::string_view value) noexcept;

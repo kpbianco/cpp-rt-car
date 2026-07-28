@@ -28,7 +28,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M8 | Complete | Device ABI and deterministic fault-injectable mock |
 | M9 | Candidate | Real CUDA backend; hardware qualification pending |
 | M10 | Candidate | Xilinx Linux XDMA AXI-MM backend; hardware qualification pending |
-| M11 | Planned | Stable ABI, package/export cleanup, and engine adapters |
+| M11 | Complete | Stable ABI, package/export cleanup, and engine adapters |
 | M12 | Qualified separately | Portable 1.0, PREEMPT_RT, CUDA, and XDMA evidence |
 
 ## M0 — Product contract and truth reset
@@ -317,9 +317,45 @@ blocking and kernel page-pin/allocation behavior prevent any inherited RT1 or
 RT2 claim. The exact contract is in
 [the XDMA backend contract](xdma_backend.md).
 
-## M11/M12 — Distribution and qualification
+## M11 — Stable distribution and engine adapters
 
-Portable 1.0 requires a stable C ABI, controlled symbols, clean
-`find_package()` consumption, compatibility checks, and the release gates in
-the product contract. PREEMPT_RT, CUDA, and XDMA qualifications publish raw
-evidence for declared deployment tuples.
+Delivered in 0.12:
+
+- C ABI v8 as the first stable binary boundary, including current/minimum
+  compatibility metadata, a reviewed public-surface fingerprint, and a typed
+  incompatibility status;
+- hidden internal visibility, an exact checked-in C export allowlist,
+  ABI-numbered ELF SONAME, and Linux dynamic-symbol verification;
+- CMake package components for shared C, static C, C++ runtime, and optional
+  CUDA/XDMA targets with pre-1.0 same-minor package-version compatibility;
+- clean shared/static/C++ consumers configured against a relocated install tree
+  on Linux and Windows;
+- a real `host_adapter` executor policy exposed in C++ and stable C, using a
+  borrowed capacity-matched host job system, runtime-owned scratch,
+  generation-tagged completion contexts, bounded overload, and nested-work
+  helping;
+- functional, saturation, stale-completion, no-allocation, dynamic ABI, and
+  ThreadSanitizer gates.
+
+Exit gates:
+
+- header/library ABI mismatch fails before runtime creation;
+- the built shared-library export set equals the reviewed allowlist;
+- no runtime CPU worker is created for the host-adapter policy;
+- accepted host jobs complete exactly once without stale-token reuse;
+- shared C, static C, and C++ imported targets configure and run after install
+  relocation.
+
+The exact promise and change rules are in
+[the stable C ABI contract](c_abi.md) and
+[the executor contract](executor.md).
+
+## M12 — Portable release and deployment qualification
+
+The repository now contains the portable distribution mechanisms required for
+a 1.0 release, but the product remains 0.12 while release policy, supported
+platform declarations, and final evidence review are completed. PREEMPT_RT,
+CUDA, and XDMA qualification remain tuple-specific: they publish raw evidence
+for declared deployments and cannot be inferred from portable CI. M9 and M10
+therefore remain Candidate until real hardware records pass their independent
+gates.

@@ -12,7 +12,7 @@
         _Static_assert(condition, #name)
 #endif
 
-RTFW_C_STATIC_ASSERT(RTFW_C_ABI_VERSION == 7u, unexpected_c_abi_version);
+RTFW_C_STATIC_ASSERT(RTFW_C_ABI_VERSION == 8u, unexpected_c_abi_version);
 RTFW_C_STATIC_ASSERT(
     sizeof(rtfw_status) == sizeof(int32_t),
     status_width_changed);
@@ -100,6 +100,12 @@ static int lib_close(rtfw_lib_handle handle) {
 typedef void (*rtfw_config_init_fn)(rtfw_config *);
 typedef rtfw_status (*rtfw_config_set_fn)(rtfw_config *, const char *, const char *);
 typedef rt_capabilities_c (*rt_query_capabilities_fn)(void);
+typedef void (*rtfw_abi_info_init_fn)(rtfw_abi_info *);
+typedef rtfw_status (*rtfw_get_abi_info_fn)(rtfw_abi_info *);
+typedef rtfw_status (*rtfw_check_abi_fn)(uint32_t, uint64_t);
+typedef void (*rtfw_host_executor_init_fn)(rtfw_host_executor *);
+typedef rtfw_status (*rtfw_set_host_executor_fn)(
+    rtfw_handle *, const rtfw_host_executor *);
 typedef const char *(*rtfw_status_message_fn)(rtfw_status);
 typedef const char *(*rtfw_metric_name_fn)(rtfw_metric_id);
 typedef const char *(*rtfw_trace_event_name_fn)(rtfw_trace_event_type);
@@ -697,6 +703,11 @@ int main(void) {
     rtfw_config_init_fn config_init_fn;
     rtfw_config_set_fn config_set_fn;
     rt_query_capabilities_fn capabilities_fn;
+    rtfw_abi_info_init_fn abi_info_init_fn;
+    rtfw_get_abi_info_fn get_abi_info_fn;
+    rtfw_check_abi_fn check_abi_fn;
+    rtfw_host_executor_init_fn host_executor_init_fn;
+    rtfw_set_host_executor_fn set_host_executor_fn;
     rtfw_status_message_fn status_message_fn;
     rtfw_metric_name_fn metric_name_fn;
     rtfw_trace_event_name_fn trace_event_name_fn;
@@ -759,6 +770,11 @@ int main(void) {
     LOAD_FUNCTION(config_init_fn, "rtfw_config_init");
     LOAD_FUNCTION(config_set_fn, "rtfw_config_set");
     LOAD_FUNCTION(capabilities_fn, "rt_query_capabilities");
+    LOAD_FUNCTION(abi_info_init_fn, "rtfw_abi_info_init");
+    LOAD_FUNCTION(get_abi_info_fn, "rtfw_get_abi_info");
+    LOAD_FUNCTION(check_abi_fn, "rtfw_check_abi");
+    LOAD_FUNCTION(host_executor_init_fn, "rtfw_host_executor_init");
+    LOAD_FUNCTION(set_host_executor_fn, "rtfw_set_host_executor");
     LOAD_FUNCTION(status_message_fn, "rtfw_status_message");
     LOAD_FUNCTION(metric_name_fn, "rtfw_metric_name");
     LOAD_FUNCTION(trace_event_name_fn, "rtfw_trace_event_name");
@@ -857,10 +873,39 @@ int main(void) {
     loaded_task_scratch = task_scratch_fn;
 
     {
+        rtfw_abi_info abi;
+        rtfw_host_executor host_executor;
+        abi_info_init_fn(&abi);
+        host_executor_init_fn(&host_executor);
+        if (get_abi_info_fn(&abi) != RTFW_STATUS_OK ||
+            abi.abi_version != RTFW_C_ABI_VERSION ||
+            abi.min_compatible_abi_version !=
+                RTFW_C_ABI_MIN_COMPATIBLE_VERSION ||
+            abi.layout_fingerprint !=
+                RTFW_C_ABI_LAYOUT_FINGERPRINT ||
+            abi.pointer_size != sizeof(void *) ||
+            check_abi_fn(
+                RTFW_C_ABI_VERSION,
+                RTFW_C_ABI_LAYOUT_FINGERPRINT) != RTFW_STATUS_OK ||
+            check_abi_fn(
+                RTFW_C_ABI_VERSION - 1u,
+                RTFW_C_ABI_LAYOUT_FINGERPRINT) !=
+                RTFW_STATUS_INCOMPATIBLE_ABI ||
+            host_executor.struct_size != sizeof(host_executor) ||
+            host_executor.abi_version != RTFW_C_ABI_VERSION) {
+            fprintf(stderr, "ABI handshake contract mismatch\n");
+            lib_close(handle);
+            return EXIT_FAILURE;
+        }
+        (void)set_host_executor_fn;
+    }
+
+    {
         const rt_capabilities_c capabilities = capabilities_fn();
         if (capabilities.compiled_graph != 1 ||
             capabilities.host_driven_time != 1 ||
             capabilities.unified_cpu_executor != 1 ||
+            capabilities.host_executor_adapter != 1 ||
             capabilities.bounded_memory_plan != 1 ||
             capabilities.self_paced_time != 1 ||
             capabilities.frame_watchdog != 1 ||
@@ -908,6 +953,9 @@ int main(void) {
             strcmp(
                 status_message_fn(RTFW_STATUS_INCOMPATIBLE_ARTIFACT),
                 "checkpoint or input-log artifact is incompatible") != 0 ||
+            strcmp(
+                status_message_fn(RTFW_STATUS_INCOMPATIBLE_ABI),
+                "C ABI version or layout is incompatible") != 0 ||
             strcmp(
                 status_message_fn((rtfw_status)INT32_MAX),
                 "unknown runtime status") != 0) {

@@ -1,6 +1,6 @@
 # Determinism, Checkpoints, and Replay
 
-RTFW 0.11 retains milestone M7 for the target `rt::Runtime` path. It provides
+RTFW 0.12 retains milestone M7 for the target `rt::Runtime` path. It provides
 an explicit D1 contract for registered state, a stable little-endian
 checkpoint format, a stable input-log format, and bounded checkpoint replay.
 It does not qualify arbitrary application code as deterministic, and it does
@@ -8,7 +8,7 @@ not establish D2 or D3.
 
 ## Supported tiers
 
-| Tier | 0.11 behavior |
+| Tier | 0.12 behavior |
 | --- | --- |
 | D0 — unspecified | Supported. Checkpoints require an exact resolved configuration identity. No schedule-independent state claim is made. |
 | D1 — schedule-independent | Supported as an explicit application contract. The same binary, ISA, semantic configuration, seed, input log, and registered-state schema must produce identical registered state across supported worker counts. |
@@ -168,7 +168,7 @@ The M7 gates include:
 - a Clang libFuzzer/ASan/UBSan parser target with a bounded CI run;
 - allocation instrumentation around checkpoint write, inspect, restore, and
   input-log write;
-- C ABI v7 dynamic-loader coverage and C/C++ embedding samples;
+- stable C ABI v8 dynamic-loader coverage and C/C++ embedding samples;
 - CI artifact exchange that compares checkpoint bytes produced by GCC/Clang
   and FMA-on/FMA-off builds.
 

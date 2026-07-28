@@ -12,6 +12,9 @@ include(GNUInstallDirs)
 
 find_package(Threads REQUIRED)
 
+set(RTFW_C_ABI_VERSION 8)
+set(RTFW_C_ABI_MIN_COMPATIBLE_VERSION 8)
+
 set(
   RTFW_BUILD_ID
   "rtfw-${PROJECT_VERSION}"
@@ -463,6 +466,7 @@ target_include_directories(simcore INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/gpu>
     $<INSTALL_INTERFACE:include>
 )
+target_link_libraries(simcore INTERFACE Threads::Threads)
 
 add_library(simcore_platform STATIC src/platform_init.cpp)
 target_sources(simcore_platform PRIVATE src/metrics.cpp)
@@ -470,7 +474,10 @@ target_include_directories(simcore_platform PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(simcore_platform PUBLIC simcore)
-set_target_properties(simcore_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(simcore_platform PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    POSITION_INDEPENDENT_CODE ON
+    VISIBILITY_INLINES_HIDDEN YES)
 
 # Enable warnings for project sources only
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -563,8 +570,11 @@ target_include_directories(simcore_rt PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hal>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(simcore_rt PUBLIC simcore_core)
-set_target_properties(simcore_rt PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(simcore_rt PUBLIC simcore_core Threads::Threads)
+set_target_properties(simcore_rt PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    POSITION_INDEPENDENT_CODE ON
+    VISIBILITY_INLINES_HIDDEN YES)
 if (UNIX)
     target_link_libraries(simcore_rt PUBLIC dl)
 endif()
@@ -581,9 +591,11 @@ target_include_directories(rtfw_cuda_backend PUBLIC
 )
 target_link_libraries(rtfw_cuda_backend PUBLIC simcore_core)
 set_target_properties(rtfw_cuda_backend PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
     EXPORT_NAME cuda_backend
     OUTPUT_NAME rtfw_cuda_backend
     POSITION_INDEPENDENT_CODE ON
+    VISIBILITY_INLINES_HIDDEN YES
 )
 add_library(rtfw::cuda_backend ALIAS rtfw_cuda_backend)
 
@@ -602,9 +614,11 @@ if (RTFW_ENABLE_CUDA)
         rtfw_cuda_driver
         PUBLIC rtfw_cuda_backend CUDA::cuda_driver)
     set_target_properties(rtfw_cuda_driver PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
         EXPORT_NAME cuda_driver
         OUTPUT_NAME rtfw_cuda_driver
         POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN YES
     )
     add_library(rtfw::cuda_driver ALIAS rtfw_cuda_driver)
 endif()
@@ -623,9 +637,11 @@ target_include_directories(rtfw_xdma_backend PUBLIC
 target_link_libraries(
     rtfw_xdma_backend PUBLIC simcore_core Threads::Threads)
 set_target_properties(rtfw_xdma_backend PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
     EXPORT_NAME xdma_backend
     OUTPUT_NAME rtfw_xdma_backend
     POSITION_INDEPENDENT_CODE ON
+    VISIBILITY_INLINES_HIDDEN YES
 )
 add_library(rtfw::xdma_backend ALIAS rtfw_xdma_backend)
 
@@ -646,9 +662,11 @@ if (RTFW_ENABLE_XDMA)
     target_link_libraries(
         rtfw_xdma_linux PUBLIC rtfw_xdma_backend)
     set_target_properties(rtfw_xdma_linux PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
         EXPORT_NAME xdma_linux
         OUTPUT_NAME rtfw_xdma_linux
         POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN YES
     )
     add_library(rtfw::xdma_linux ALIAS rtfw_xdma_linux)
 endif()
@@ -666,7 +684,10 @@ foreach(lib rtfw_shared rtfw_static)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rt/include>
             $<INSTALL_INTERFACE:include>
     )
-    set_target_properties(${lib} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(${lib} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN YES)
 endforeach()
 
 target_compile_definitions(rtfw_shared PRIVATE RTFW_BUILD=1)
@@ -675,9 +696,50 @@ target_compile_definitions(rtfw_static PUBLIC RTFW_STATIC_DEFINE=1)
 set_target_properties(rtfw_shared PROPERTIES
     OUTPUT_NAME rtfw
     VERSION "${PROJECT_VERSION}"
-    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    SOVERSION "${RTFW_C_ABI_VERSION}"
 )
 set_target_properties(rtfw_static PROPERTIES OUTPUT_NAME rtfw_static)
+
+set(
+    RTFW_ABI_EXPORTS_FILE
+    "${CMAKE_CURRENT_SOURCE_DIR}/abi/rtfw_c_abi_v8.exports")
+file(STRINGS "${RTFW_ABI_EXPORTS_FILE}" RTFW_C_ABI_EXPORTS
+    REGEX "^[A-Za-z_][A-Za-z0-9_]*$")
+if (NOT RTFW_C_ABI_EXPORTS)
+    message(FATAL_ERROR "The C ABI export allowlist is empty")
+endif()
+
+if (UNIX AND NOT APPLE)
+    set(RTFW_ELF_VERSION_SCRIPT
+        "${CMAKE_CURRENT_BINARY_DIR}/rtfw-c-abi.map")
+    file(WRITE "${RTFW_ELF_VERSION_SCRIPT}"
+        "RTFW_${RTFW_C_ABI_VERSION} {\n  global:\n")
+    foreach(symbol IN LISTS RTFW_C_ABI_EXPORTS)
+        file(APPEND "${RTFW_ELF_VERSION_SCRIPT}" "    ${symbol};\n")
+    endforeach()
+    file(APPEND "${RTFW_ELF_VERSION_SCRIPT}" "  local: *;\n};\n")
+    target_link_options(
+        rtfw_shared
+        PRIVATE "LINKER:--version-script=${RTFW_ELF_VERSION_SCRIPT}")
+    set_property(
+        TARGET rtfw_shared
+        APPEND PROPERTY LINK_DEPENDS
+        "${RTFW_ELF_VERSION_SCRIPT};${RTFW_ABI_EXPORTS_FILE}")
+elseif (APPLE)
+    set(RTFW_MACHO_EXPORT_LIST
+        "${CMAKE_CURRENT_BINARY_DIR}/rtfw-c-abi.exports")
+    file(WRITE "${RTFW_MACHO_EXPORT_LIST}" "")
+    foreach(symbol IN LISTS RTFW_C_ABI_EXPORTS)
+        file(APPEND "${RTFW_MACHO_EXPORT_LIST}" "_${symbol}\n")
+    endforeach()
+    target_link_options(
+        rtfw_shared
+        PRIVATE "LINKER:-exported_symbols_list,${RTFW_MACHO_EXPORT_LIST}")
+    set_property(
+        TARGET rtfw_shared
+        APPEND PROPERTY LINK_DEPENDS
+        "${RTFW_MACHO_EXPORT_LIST};${RTFW_ABI_EXPORTS_FILE}")
+endif()
 
 if (MSVC)
     # Give each binary its own program database to avoid clashes when
@@ -866,10 +928,16 @@ configure_package_config_file(
     PATH_VARS CMAKE_INSTALL_INCLUDEDIR
 )
 
+if (PROJECT_VERSION_MAJOR EQUAL 0)
+    set(RTFW_PACKAGE_VERSION_COMPATIBILITY SameMinorVersion)
+else()
+    set(RTFW_PACKAGE_VERSION_COMPATIBILITY SameMajorVersion)
+endif()
+
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/rtfwConfigVersion.cmake
     VERSION "${PROJECT_VERSION}"
-    COMPATIBILITY SameMajorVersion
+    COMPATIBILITY "${RTFW_PACKAGE_VERSION_COMPATIBILITY}"
 )
 
 install(
@@ -882,6 +950,13 @@ install(
 install(
     FILES LICENSE VERSION.txt
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw
+)
+
+install(
+    FILES
+        abi/rtfw_c_abi_v8.exports
+        abi/rtfw_c_abi_v8.sha256
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rtfw/abi
 )
 
 install(

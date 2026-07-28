@@ -2,7 +2,7 @@
 
 /*
  * Compatibility include for the pre-M1 header path. New integrations should
- * include <rt/c_api.h>. The C ABI is experimental until M11.
+ * include <rt/c_api.h>. Stable ABI v8 is documented in docs/c_abi.md.
  */
 #include <rt/c_api.h>
 

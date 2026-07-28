@@ -1,9 +1,10 @@
 # Unified CPU Executor
 
-Release 0.11 carries the M3 CPU-execution surface in `rt::Runtime` through the
-M8 release. The M4 memory contract still governs executor storage. The
+Release 0.12 carries the M3 CPU-execution surface in `rt::Runtime` and adds the
+M11 host job-system adapter. The M4 memory contract still governs runtime-owned
+executor storage. The
 compiled graph, independent phase callbacks, nested range work, and nested
-reductions all use one runtime-owned worker team and one internal immutable work
+reductions all use one executor boundary and one internal immutable work
 record. The legacy `SimCore`, `WorkerPool`, `rt::Scheduler`, and `FiberPool`
 remain compatibility experiments; `rt::Runtime` does not call them.
 
@@ -22,6 +23,13 @@ exactly the configured worker count. No executor thread is created after
 joins every worker. If the M5 watchdog is configured, `start()` also creates
 one separate service lane; it never executes graph or nested CPU work.
 
+The `host_adapter` policy is the explicit exception to runtime-owned worker and
+queue storage. The host attaches a fixed callback table before finalization,
+declares capacities equal to the runtime configuration, and keeps its job
+system live through `stop()`. `start()` creates no CPU worker for that policy;
+the host owns worker threads, queue memory, affinity, priority, and shutdown.
+Runtime-owned graph state and aligned task scratch remain fully planned.
+
 Workers use bounded lock-free local rings. They yield when idle; there is no
 condition-variable service thread, emergency spawn, detached task, or
 unsubmitted inline fallback in this executor. A worker waiting for nested work
@@ -34,6 +42,7 @@ execution and prevents nested-pool deadlock.
 | --- | --- |
 | `static_deterministic` | Phase `i` is preassigned to worker `i % worker_count`; range/reduction task `j` from phase `i` is assigned to `(i + j) % worker_count`. Workers consume only their own queue. |
 | `bounded_throughput` | Graph phases retain a stable initial queue, while nested work is submitted to the current worker's local queue. An idle worker makes at most one pass over the other configured queues before yielding. A successful pop from another worker's queue is counted as a steal. |
+| `host_adapter` | Every graph/range/reduction record is copied into a bounded host job-system queue. The host invokes the record once with an explicit runtime scratch span, completion context/token, and valid worker index. Runtime waiters call the host's one-job help function so nested work cannot deadlock the borrowed team. |
 
 `Runtime::static_phase_assignment_at()` exposes the frozen phase metadata for
 the static policy. `Runtime::executor_stats()` reports the selected policy,
@@ -41,7 +50,8 @@ configured worker and queue counts, accepted submissions, local executions,
 steal attempts, successful steals, queue rejections, scratch exhaustions, and
 worker starts. These
 counters are functional M3 evidence, not the versioned production
-versioned observability counters completed in M6.
+observability counters completed in M6. For `host_adapter`, `worker_starts` is
+zero and local executions count jobs returned through the host callback.
 
 The graph compiler's registration-index topological order remains the canonical
 introspection order returned by `compiled_phase_at()`. Runtime callback
@@ -73,10 +83,13 @@ The C ABI exposes the same behavior through the opaque callback-local
 
 ## Bounded submission
 
-`executor_queue_capacity` is a per-worker power of two in `[2, 1048576]`.
-Queue operations make at most 64 compare/exchange attempts. A physically full
-queue, or one that remains contended for that bounded attempt budget, returns
-`rt::Status::queue_full` / `RTFW_STATUS_QUEUE_FULL`.
+`executor_queue_capacity` is a power of two in `[2, 1048576]`. It is the
+capacity of each runtime-owned worker queue for the two native policies and
+the total accepted-job reservation for `host_adapter`. Native queue operations
+make at most 64 compare/exchange attempts. A physically full native queue, a
+native queue that remains contended for that bounded attempt budget, or a host
+adapter at its declared capacity returns `rt::Status::queue_full` /
+`RTFW_STATUS_QUEUE_FULL`.
 
 A range or reduction call can therefore produce an accepted prefix of child
 tasks before a later submission is rejected. Every accepted child finishes
@@ -92,8 +105,18 @@ frame failed even when a callback ignores that returned status. Root graph
 submission failure always fails the step. The complete accounting and
 ownership rules are in the [memory-plan contract](memory_plan.md).
 
-Finalization also rejects a queue capacity too small to hold the compiled
-graph's worst static per-worker phase count.
+For `host_adapter`, the runtime reserves its scratch/completion slot before
+calling host `submit`. A non-success result means the host neither queued nor
+invoked that job. The adapter must report capacity pressure as `queue_full` and
+must not retry, allocate, block, or run an emergency helper. Each accepted
+record carries a monotonically tagged completion token; a stale or duplicate
+host invocation cannot complete a slot after that slot has been reused. Token
+and slot state are claimed as one atomic generation word, and the finite
+generation space fails closed instead of recycling a token.
+
+Finalization also rejects a native per-worker queue or total host-adapter
+reservation too small to hold its share of the compiled graph's static phase
+count.
 
 ## Failure and synchronization
 
@@ -119,6 +142,9 @@ state belongs in host-owned memory described by graph resource declarations.
 
 - implementation: `rt/src/executor.cpp`, `rt/src/executor.hpp`;
 - runtime integration: `rt/src/host_runtime.cpp`;
+- C/C++ host-adapter, prestarted host-team concurrency, saturation,
+  stale-completion, and post-start allocation gates:
+  `tests/host_adapter_tests.cpp`;
 - policy, saturation, nested-work, reduction, stress, and steal tests:
   `tests/test_executor.cpp`;
 - plan, task-scratch, nested ownership, and overload tests:

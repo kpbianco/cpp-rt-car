@@ -299,6 +299,8 @@ rtfw_status to_c_status(rt::Status status) noexcept {
         return RTFW_STATUS_DEVICE_CANCELED;
     case rt::Status::device_reset_required:
         return RTFW_STATUS_DEVICE_RESET_REQUIRED;
+    case rt::Status::incompatible_abi:
+        return RTFW_STATUS_INCOMPATIBLE_ABI;
     }
     return RTFW_STATUS_INTERNAL_ERROR;
 }
@@ -337,6 +339,28 @@ bool config_header_valid(const rtfw_config& config) noexcept {
            bytes_are_zero(
                reinterpret_cast<const uint8_t*>(config.reserved),
                sizeof(config.reserved));
+}
+
+bool abi_info_header_valid(const rtfw_abi_info& info) noexcept {
+    return info.struct_size >= sizeof(rtfw_abi_info) &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(info.reserved),
+               sizeof(info.reserved));
+}
+
+bool host_executor_header_valid(
+    const rtfw_host_executor& executor) noexcept {
+    return executor.struct_size >= sizeof(rtfw_host_executor) &&
+           executor.abi_version == RTFW_C_ABI_VERSION &&
+           executor.worker_count <=
+               std::numeric_limits<std::size_t>::max() &&
+           executor.queue_capacity <=
+               std::numeric_limits<std::size_t>::max() &&
+           executor.submit != nullptr &&
+           executor.try_execute_one != nullptr &&
+           bytes_are_zero(
+               reinterpret_cast<const uint8_t*>(executor.reserved),
+               sizeof(executor.reserved));
 }
 
 bool frame_header_valid(const rtfw_frame_context& frame) noexcept {
@@ -568,6 +592,10 @@ bool to_cpp_config(
         target.executor_policy =
             rt::ExecutorPolicy::bounded_throughput;
         break;
+    case RTFW_EXECUTOR_HOST_ADAPTER:
+        target.executor_policy =
+            rt::ExecutorPolicy::host_adapter;
+        break;
     default:
         return false;
     }
@@ -669,11 +697,19 @@ void from_cpp_config(
         source.numerical_mode == rt::NumericalMode::fused_multiply_add
         ? RTFW_NUMERICAL_FUSED_MULTIPLY_ADD
         : RTFW_NUMERICAL_PRECISE;
-    target.executor_policy =
-        source.executor_policy ==
-            rt::ExecutorPolicy::bounded_throughput
-        ? RTFW_EXECUTOR_BOUNDED_THROUGHPUT
-        : RTFW_EXECUTOR_STATIC_DETERMINISTIC;
+    switch (source.executor_policy) {
+    case rt::ExecutorPolicy::static_deterministic:
+        target.executor_policy =
+            RTFW_EXECUTOR_STATIC_DETERMINISTIC;
+        break;
+    case rt::ExecutorPolicy::bounded_throughput:
+        target.executor_policy =
+            RTFW_EXECUTOR_BOUNDED_THROUGHPUT;
+        break;
+    case rt::ExecutorPolicy::host_adapter:
+        target.executor_policy = RTFW_EXECUTOR_HOST_ADAPTER;
+        break;
+    }
     target.worker_count = source.worker_count;
     target.executor_queue_capacity =
         source.executor_queue_capacity;
@@ -1233,7 +1269,41 @@ struct rtfw_handle {
     rt::Runtime runtime;
     std::vector<std::unique_ptr<CCallback>> callbacks;
     std::vector<std::unique_ptr<CDeviceCallback>> device_callbacks;
+    rtfw_host_executor c_host_executor{};
     std::array<char, 256> boundary_error{};
+
+    static rt::Status submit_host_job(
+        void* opaque,
+        const rt::HostExecutorJob& job) noexcept {
+        auto& handle = *static_cast<rtfw_handle*>(opaque);
+        rtfw_host_job c_job{};
+        c_job.struct_size = sizeof(c_job);
+        c_job.execute = job.execute;
+        c_job.execution_context = job.execution_context;
+        c_job.completion_context = job.completion_context;
+        c_job.completion_token = job.completion_token;
+        c_job.scratch = job.scratch;
+        c_job.scratch_bytes = job.scratch_bytes;
+        const auto status = handle.c_host_executor.submit(
+            handle.c_host_executor.user_data,
+            &c_job);
+        switch (status) {
+        case RTFW_STATUS_OK:
+            return rt::Status::ok;
+        case RTFW_STATUS_QUEUE_FULL:
+            return rt::Status::queue_full;
+        case RTFW_STATUS_RESOURCE_EXHAUSTED:
+            return rt::Status::resource_exhausted;
+        default:
+            return rt::Status::internal_error;
+        }
+    }
+
+    static bool try_execute_one_host_job(void* opaque) noexcept {
+        auto& handle = *static_cast<rtfw_handle*>(opaque);
+        return handle.c_host_executor.try_execute_one(
+                   handle.c_host_executor.user_data) != 0u;
+    }
 
     void clear_boundary_error() noexcept {
         boundary_error[0] = '\0';
@@ -1269,6 +1339,7 @@ RTFW_API rt_capabilities_c rt_query_capabilities(void) {
         static_cast<uint8_t>(capabilities.compiled_graph),
         static_cast<uint8_t>(capabilities.host_driven_time),
         static_cast<uint8_t>(capabilities.unified_cpu_executor),
+        static_cast<uint8_t>(capabilities.host_executor_adapter),
         static_cast<uint8_t>(capabilities.bounded_memory_plan),
         static_cast<uint8_t>(capabilities.self_paced_time),
         static_cast<uint8_t>(capabilities.frame_watchdog),
@@ -1280,6 +1351,39 @@ RTFW_API rt_capabilities_c rt_query_capabilities(void) {
         static_cast<uint8_t>(
             capabilities.bounded_device_backend),
     };
+}
+
+RTFW_API rtfw_status rtfw_get_abi_info(
+    rtfw_abi_info* out_info) {
+    if (!out_info || !abi_info_header_valid(*out_info)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    const auto struct_size = out_info->struct_size;
+    std::memset(out_info, 0, sizeof(*out_info));
+    out_info->struct_size = struct_size;
+    out_info->abi_version = RTFW_C_ABI_VERSION;
+    out_info->min_compatible_abi_version =
+        RTFW_C_ABI_MIN_COMPATIBLE_VERSION;
+    out_info->pointer_size = sizeof(void*);
+    out_info->layout_fingerprint =
+        RTFW_C_ABI_LAYOUT_FINGERPRINT;
+    out_info->feature_flags =
+        RTFW_ABI_FEATURE_HOST_EXECUTOR_ADAPTER |
+        RTFW_ABI_FEATURE_DEVICE_BACKEND |
+        RTFW_ABI_FEATURE_DETERMINISTIC_REPLAY;
+    return RTFW_STATUS_OK;
+}
+
+RTFW_API rtfw_status rtfw_check_abi(
+    uint32_t requested_abi_version,
+    uint64_t requested_layout_fingerprint) {
+    if (requested_abi_version < RTFW_C_ABI_MIN_COMPATIBLE_VERSION ||
+        requested_abi_version > RTFW_C_ABI_VERSION ||
+        requested_layout_fingerprint !=
+            RTFW_C_ABI_LAYOUT_FINGERPRINT) {
+        return RTFW_STATUS_INCOMPATIBLE_ABI;
+    }
+    return RTFW_STATUS_OK;
 }
 
 RTFW_API const char* rtfw_status_message(rtfw_status status) {
@@ -1335,6 +1439,8 @@ RTFW_API const char* rtfw_status_message(rtfw_status status) {
     case RTFW_STATUS_DEVICE_RESET_REQUIRED:
         return rt::status_message(
             rt::Status::device_reset_required);
+    case RTFW_STATUS_INCOMPATIBLE_ABI:
+        return rt::status_message(rt::Status::incompatible_abi);
     }
     return "unknown runtime status";
 }
@@ -1353,6 +1459,14 @@ RTFW_API const char* rtfw_trace_event_name(
     rtfw_trace_event_type type) {
     return rt::runtime_trace_event_name(
         static_cast<rt::RuntimeTraceEventType>(type));
+}
+
+RTFW_API void rtfw_abi_info_init(rtfw_abi_info* info) {
+    if (!info) {
+        return;
+    }
+    std::memset(info, 0, sizeof(*info));
+    info->struct_size = sizeof(*info);
 }
 
 RTFW_API void rtfw_config_init(rtfw_config* config) {
@@ -1557,6 +1671,16 @@ RTFW_API void rtfw_device_health_init(
     health->struct_size = sizeof(*health);
 }
 
+RTFW_API void rtfw_host_executor_init(
+    rtfw_host_executor* executor) {
+    if (!executor) {
+        return;
+    }
+    std::memset(executor, 0, sizeof(*executor));
+    executor->struct_size = sizeof(*executor);
+    executor->abi_version = RTFW_C_ABI_VERSION;
+}
+
 RTFW_API rtfw_status rtfw_create(
     const rtfw_config* config,
     rtfw_handle** out_handle) {
@@ -1586,6 +1710,36 @@ RTFW_API rtfw_status rtfw_create(
     } catch (...) {
         return RTFW_STATUS_INTERNAL_ERROR;
     }
+}
+
+RTFW_API rtfw_status rtfw_set_host_executor(
+    rtfw_handle* handle,
+    const rtfw_host_executor* executor) {
+    if (!handle || !executor ||
+        !host_executor_header_valid(*executor)) {
+        return RTFW_STATUS_INVALID_ARGUMENT;
+    }
+    if (handle->runtime.state() !=
+        rt::RuntimeState::configuring) {
+        return handle->fail(
+            RTFW_STATUS_INVALID_STATE,
+            "host executor attachment is frozen");
+    }
+
+    const rt::HostExecutorAdapter adapter{
+        handle,
+        static_cast<std::size_t>(executor->worker_count),
+        static_cast<std::size_t>(executor->queue_capacity),
+        &rtfw_handle::submit_host_job,
+        &rtfw_handle::try_execute_one_host_job,
+    };
+    const auto status = handle->runtime.set_host_executor(adapter);
+    if (status != rt::Status::ok) {
+        return to_c_status(status);
+    }
+    handle->c_host_executor = *executor;
+    handle->clear_boundary_error();
+    return RTFW_STATUS_OK;
 }
 
 RTFW_API rtfw_status rtfw_register_phase(
