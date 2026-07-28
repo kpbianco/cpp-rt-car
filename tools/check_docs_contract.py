@@ -87,6 +87,17 @@ def check_version() -> str:
                 "match VERSION.txt"
             )
 
+    try:
+        portable_matrix = json.loads(read("docs/portable_support_matrix.json"))
+    except json.JSONDecodeError as exc:
+        fail(f"docs/portable_support_matrix.json: invalid JSON: {exc}")
+    else:
+        if portable_matrix.get("runtime_version") != version:
+            fail(
+                "docs/portable_support_matrix.json: runtime_version does not "
+                "match VERSION.txt"
+            )
+
     cmake = read("CMakeLists.txt")
     required_cmake = (
         'file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/VERSION.txt"',
@@ -99,7 +110,7 @@ def check_version() -> str:
             fail(f"CMakeLists.txt: missing version contract snippet {snippet!r}")
 
     readme = read("README.md")
-    if f"**Status: {version} experimental.**" not in readme:
+    if f"**Status: {version} portable RT0 release.**" not in readme:
         fail("README.md: status version does not match VERSION.txt")
 
     return version
@@ -229,8 +240,9 @@ def check_claims() -> None:
 
     readme = read("README.md")
     required_qualifiers = (
-        "not production-ready",
+        "portable RT0 release",
         "no hard-real-time",
+        "no C++ binary ABI",
         "No RT2 record exists yet.",
         "Legacy GPU stub | Experimental compatibility path",
         "Xilinx XDMA AXI-MM backend | Candidate; not hardware-qualified",
@@ -300,6 +312,16 @@ def check_runtime_contract() -> None:
     xdma_sample = read("samples/xdma_qualification.cpp")
     cuda_workflow = read(".github/workflows/cuda-qualification.yml")
     xdma_workflow = read(".github/workflows/xdma-qualification.yml")
+    release_workflow = read(".github/workflows/release.yml")
+    release_contract = read("release/rtfw-release-contract.json")
+    release_checker = read("tools/check_release_contract.py")
+    release_manifest = read("tools/release_manifest.py")
+    release_stager = read("tools/stage_release_artifacts.py")
+    release_extractor = read("tools/extract_release_archive.py")
+    hardware_checker = read("tools/check_hardware_evidence.py")
+    release_test = read("tests/test_release_tools.py")
+    portable_matrix = read("docs/portable_support_matrix.json")
+    release_policy = read("docs/release_policy.md")
 
     for method in (
         "Status configure(",
@@ -569,8 +591,9 @@ def check_runtime_contract() -> None:
         or "| M9 | Candidate |" not in roadmap
         or "| M10 | Candidate |" not in roadmap
         or "| M11 | Complete |" not in roadmap
+        or "| M12 | Complete |" not in roadmap
     ):
-        fail("docs/roadmap.md: M8-M11 milestone status is not advanced")
+        fail("docs/roadmap.md: M8-M12 milestone status is not advanced")
 
     if not re.search(
         r"return\s*\{\s*true\s*,\s*true\s*,\s*true\s*,\s*true\s*,"
@@ -791,10 +814,17 @@ def check_runtime_contract() -> None:
         if token not in cmake:
             fail(f"CMakeLists.txt: missing M11 distribution gate {token!r}")
     for token in (
-        "COMPONENTS c_shared c_static cpp_runtime",
+        "COMPONENTS",
+        "c_shared",
+        "c_static",
+        "cpp_runtime",
+        "cuda_backend",
+        "xdma_backend",
         "rtfw::rtfw",
         "rtfw::rtfw_static",
         "rtfw::simcore_rt",
+        "rtfw::cuda_backend",
+        "rtfw::xdma_backend",
     ):
         if token not in package_consumer:
             fail(f"package consumer is missing {token!r}")
@@ -805,6 +835,33 @@ def check_runtime_contract() -> None:
     ):
         if token not in ci_workflow:
             fail(f".github/workflows/ci.yml: missing M11 gate {token!r}")
+
+    for token, surface in (
+        ("CrossInstanceDeviceStateIsIsolated", device_test),
+        ("SameMajorVersion", cmake),
+        ("include(CPack)", cmake),
+        ("CPACK_PACKAGE_CHECKSUM SHA256", cmake),
+        ("portable_rt0", release_contract),
+        ("supported_tuples", portable_matrix),
+        ("Source compatibility", release_policy),
+        ("tools/check_release_contract.py", release_workflow),
+        ("tools/release_manifest.py create", release_workflow),
+        ("tools/release_manifest.py verify", release_workflow),
+        (
+            "actions/upload-artifact@"
+            "ea165f8d65b6e75b540449e92b4886f43607fa02",
+            release_workflow,
+        ),
+        ("HASHED_CONTRACT_PATHS", release_checker),
+        ("source_commit", release_manifest),
+        ("CPack SHA-256 sidecar does not match", release_stager),
+        ("archive contains unsafe path", release_extractor),
+        ("qualification_claim", hardware_checker),
+        ("evidence_only", hardware_checker),
+        ("test_round_trip_and_corruption_rejection", release_test),
+    ):
+        if token not in surface:
+            fail(f"M12 portable release gate is missing {token!r}")
 
     for token in (
         "TelemetryRing::emit(",
@@ -1253,6 +1310,8 @@ def main() -> int:
         (
             "LICENSE",
             "VERSION.txt",
+            "CHANGELOG.md",
+            "SECURITY.md",
             "include/rtfw/version.h",
             "docs/product_contract.md",
             "docs/host_runtime.md",
@@ -1267,12 +1326,15 @@ def main() -> int:
             "docs/cuda_support_matrix.json",
             "docs/xdma_backend.md",
             "docs/xdma_support_matrix.json",
+            "docs/portable_support_matrix.json",
+            "docs/release_policy.md",
             "docs/c_abi.md",
             "docs/roadmap.md",
             "docs/adr/0001-one-executor-boundary.md",
             "docs/adr/0002-host-driven-time.md",
             "docs/adr/0003-device-backend-boundary.md",
             ".github/workflows/docs-contract.yml",
+            ".github/workflows/release.yml",
             ".github/workflows/cuda-qualification.yml",
             ".github/workflows/xdma-qualification.yml",
             "rt/include/rt/runtime.hpp",
@@ -1320,6 +1382,7 @@ def main() -> int:
             "tests/test_observability.cpp",
             "tests/test_determinism_replay.cpp",
             "tests/test_device_runtime.cpp",
+            "tests/test_release_tools.py",
             "tests/test_cuda_backend.cpp",
             "tests/xdma_backend_tests.cpp",
             "tests/host_adapter_tests.cpp",
@@ -1331,6 +1394,12 @@ def main() -> int:
             "abi/rtfw_c_abi_v8.exports",
             "abi/rtfw_c_abi_v8.sha256",
             "tools/check_c_abi.py",
+            "tools/check_release_contract.py",
+            "tools/check_hardware_evidence.py",
+            "tools/release_manifest.py",
+            "tools/extract_release_archive.py",
+            "tools/stage_release_artifacts.py",
+            "release/rtfw-release-contract.json",
         )
     )
     check_version()

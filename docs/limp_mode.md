@@ -19,7 +19,7 @@ Release 0.6 adds a separate M5 target-path signal:
 `CallbackContext::degradation_level`. A one-shot watchdog event is consumed and
 the capped level is incremented only by the frame thread after the graph
 returns. The watchdog service lane never calls the host or mutates that state.
-Callbacks must explicitly choose cheaper work; 0.12 does not automatically
+Callbacks must explicitly choose cheaper work; 1.0 does not automatically
 disable phases and has no recovery policy. See the
 [time/platform contract](time_platform.md).
 
@@ -33,4 +33,3 @@ semantics, and versioned telemetry remain future work.
 - Watchdog experiment: `rt::Watchdog`; `rt/include/rt/watchdog.hpp`
 - Target-path watchdog/degradation:
   `rt/src/watchdog_monitor.cpp`, `rt/src/host_runtime.cpp`
-

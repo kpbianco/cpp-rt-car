@@ -14,13 +14,16 @@ on:
         default: "10000"
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   cuda-linux:
     name: CUDA hardware evidence
     runs-on: [self-hosted, linux, x64, nvidia-gpu]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Configure CUDA candidate
@@ -54,9 +57,24 @@ jobs:
             --warmup "$RTFW_CUDA_WARMUP" \
             --iterations "$RTFW_CUDA_ITERATIONS" \
             > cuda-evidence/cuda-qualification.json
+      - name: Validate and bind raw evidence to source
+        run: |
+          python3 tools/check_hardware_evidence.py \
+            --backend cuda \
+            --evidence cuda-evidence/cuda-qualification.json \
+            --version-file VERSION.txt
+          python3 tools/release_manifest.py create \
+            --artifact-dir cuda-evidence \
+            --output cuda-evidence/evidence-manifest.json \
+            --version-file VERSION.txt \
+            --source-commit "${{ github.sha }}"
+          python3 tools/release_manifest.py verify \
+            --artifact-dir cuda-evidence \
+            --manifest cuda-evidence/evidence-manifest.json \
+            --version-file VERSION.txt
       - name: Upload raw evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cuda-qualification-${{ github.sha }}
-          path: cuda-evidence/cuda-qualification.json
+          path: cuda-evidence/
           if-no-files-found: error

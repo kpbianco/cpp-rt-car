@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   determinism-linux:
     name: Determinism (${{ matrix.compiler }}, FMA=${{ matrix.fma }})
@@ -20,7 +23,7 @@ jobs:
         compiler: [gcc, clang]
         fma: [ON, OFF]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Real-time hardening
@@ -28,11 +31,13 @@ jobs:
       - name: Set up compiler
         run: |
           if [ "${{matrix.compiler}}" = "clang" ]; then
-            echo "CC=clang" >> $GITHUB_ENV
-            echo "CXX=clang++" >> $GITHUB_ENV
+            echo "CC=clang-14" >> "$GITHUB_ENV"
+            echo "CXX=clang++-14" >> "$GITHUB_ENV"
+            clang++-14 --version
           else
-            echo "CC=gcc" >> $GITHUB_ENV
-            echo "CXX=g++" >> $GITHUB_ENV
+            echo "CC=gcc-11" >> "$GITHUB_ENV"
+            echo "CXX=g++-11" >> "$GITHUB_ENV"
+            g++-11 --version
           fi
       - name: Configure determinism tests
         run: |
@@ -57,7 +62,7 @@ jobs:
           build/tests/rtfw_determinism_artifact \
             "m7-${{ matrix.compiler }}-fma-${{ matrix.fma }}.rtcp"
       - name: Upload M7 checkpoint artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: m7-checkpoint-${{ matrix.compiler }}-${{ matrix.fma }}
           path: m7-${{ matrix.compiler }}-fma-${{ matrix.fma }}.rtcp
@@ -69,7 +74,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download compiler artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: m7-checkpoint-*
           path: artifacts
@@ -89,13 +94,13 @@ jobs:
     name: Snapshot parser fuzz smoke
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Configure snapshot fuzzer
         env:
-          CC: clang
-          CXX: clang++
+          CC: clang-14
+          CXX: clang++-14
         run: |
           cmake -S . -B build-fuzz \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -124,7 +129,7 @@ jobs:
         build_type: [Debug, RelWithDebInfo]
         fma: [ON, OFF]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Real-time hardening
@@ -132,11 +137,13 @@ jobs:
       - name: Set up compiler
         run: |
           if [ "${{matrix.compiler}}" = "clang" ]; then
-            echo "CC=clang" >> $GITHUB_ENV
-            echo "CXX=clang++" >> $GITHUB_ENV
+            echo "CC=clang-14" >> "$GITHUB_ENV"
+            echo "CXX=clang++-14" >> "$GITHUB_ENV"
+            clang++-14 --version
           else
-            echo "CC=gcc" >> $GITHUB_ENV
-            echo "CXX=g++" >> $GITHUB_ENV
+            echo "CC=gcc-11" >> "$GITHUB_ENV"
+            echo "CXX=g++-11" >> "$GITHUB_ENV"
+            g++-11 --version
           fi
       - name: Configure
         run: |
@@ -160,6 +167,13 @@ jobs:
           GTEST_DEATH_TEST_STYLE: threadsafe
           GTEST_FILTER: MetricsJson.*
         run: ctest --test-dir build -C ${{matrix.build_type}} --output-on-failure -R simcore_all
+      - name: CrossInstanceDeviceStateIsIsolated
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          GTEST_DEATH_TEST_STYLE: threadsafe
+          GTEST_FILTER: DeviceRuntime.CrossInstanceDeviceStateIsIsolated
+        run: ctest --test-dir build -C ${{matrix.build_type}} --output-on-failure -R simcore_all
       - name: Test
         env:
           ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
@@ -167,14 +181,14 @@ jobs:
           GTEST_DEATH_TEST_STYLE: threadsafe
         run: ctest --test-dir build -C ${{matrix.build_type}} --output-on-failure
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: .
           format: spdx-json
           output-file: sbom-${{matrix.compiler}}-${{matrix.build_type}}-${{matrix.fma}}.spdx.json
           artifact-name: sbom-${{matrix.compiler}}-${{matrix.build_type}}-${{matrix.fma}}
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
         if: github.event_name == 'pull_request'
         continue-on-error: true
 
@@ -185,13 +199,13 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Configure executor ThreadSanitizer gate
         env:
-          CC: gcc
-          CXX: g++
+          CC: gcc-11
+          CXX: g++-11
         run: |
           cmake -S . -B build-tsan \
             -DCMAKE_BUILD_TYPE=Debug \
@@ -215,31 +229,31 @@ jobs:
             -R 'simcore_all|host_adapter|xdma_backend'
 
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     strategy:
       matrix:
         build_type: [Debug, RelWithDebInfo]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Real-time hardening
         run: powershell -ExecutionPolicy Bypass -File tools/rt_harden.ps1
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DSIM_WERROR=ON
+        run: cmake -S . -B build -A x64 -T v143 -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_TESTS=ON -DSIM_WERROR=ON
       - name: Build
         run: cmake --build build --config ${{matrix.build_type}} -- /m
       - name: Test
         run: ctest --test-dir build -C ${{matrix.build_type}} --output-on-failure
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: .
           format: spdx-json
           output-file: sbom-windows-${{matrix.build_type}}.spdx.json
           artifact-name: sbom-windows-${{matrix.build_type}}
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
         if: github.event_name == 'pull_request'
         continue-on-error: true
 
@@ -250,7 +264,7 @@ jobs:
       matrix:
         compiler: [gcc, clang]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Real-time hardening
@@ -258,11 +272,13 @@ jobs:
       - name: Set up compiler
         run: |
           if [ "${{matrix.compiler}}" = "clang" ]; then
-            echo "CC=clang" >> $GITHUB_ENV
-            echo "CXX=clang++" >> $GITHUB_ENV
+            echo "CC=clang-14" >> "$GITHUB_ENV"
+            echo "CXX=clang++-14" >> "$GITHUB_ENV"
+            clang++-14 --version
           else
-            echo "CC=gcc" >> $GITHUB_ENV
-            echo "CXX=g++" >> $GITHUB_ENV
+            echo "CC=gcc-11" >> "$GITHUB_ENV"
+            echo "CXX=g++-11" >> "$GITHUB_ENV"
+            g++-11 --version
           fi
       - name: Configure Release embedding sample
         run: |
@@ -280,14 +296,42 @@ jobs:
           ./samples/sample_embed_cpp
 
   installed-package:
-    name: Relocated package consumer (${{ matrix.os }})
+    name: Relocated package consumer (${{ matrix.tuple }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        include:
+          - os: ubuntu-22.04
+            tuple: ubuntu-22.04-x86_64-gcc-11
+            cc: gcc-11
+            cxx: g++-11
+            cmake_args: ""
+            generator: TGZ
+          - os: ubuntu-22.04
+            tuple: ubuntu-22.04-x86_64-clang-14
+            cc: clang-14
+            cxx: clang++-14
+            cmake_args: ""
+            generator: TGZ
+          - os: windows-2022
+            tuple: windows-server-2022-x86_64-msvc-v143
+            cmake_args: "-A x64 -T v143"
+            generator: ZIP
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Select declared Linux compiler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+          echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          "${{ matrix.cxx }}" --version
+      - name: Verify portable release contract
+        run: python tools/check_release_contract.py
       - name: Verify frozen C ABI manifest
         run: python tools/check_c_abi.py
       - name: Configure package build
@@ -296,26 +340,49 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DENABLE_TESTS=OFF
           -DSIM_WERROR=ON
+          ${{ matrix.cmake_args }}
       - name: Build package
         run: cmake --build build-package --config Release --parallel 2
+      - name: Build release archive
+        run: >
+          cpack --config build-package/CPackConfig.cmake
+          -C Release
+          -G ${{ matrix.generator }}
+          -B cpack-output
+      - name: Stage verified release archive
+        run: >
+          python tools/stage_release_artifacts.py
+          --cpack-dir cpack-output
+          --artifact-dir release-artifacts
+          --generator ${{ matrix.generator }}
+          --version-file VERSION.txt
+      - name: Create release manifest
+        run: >
+          python tools/release_manifest.py create
+          --artifact-dir release-artifacts
+          --output release-artifacts/rtfw-release-manifest.json
+          --version-file VERSION.txt
+          --source-commit "${{ github.sha }}"
+      - name: Verify release manifest
+        run: >
+          python tools/release_manifest.py verify
+          --artifact-dir release-artifacts
+          --manifest release-artifacts/rtfw-release-manifest.json
+          --version-file VERSION.txt
       - name: Verify shared-library exports
         if: runner.os == 'Linux'
         run: python tools/check_c_abi.py --library build-package/librtfw.so
-      - name: Install package
+      - name: Extract verified archive to relocated prefix
         run: >
-          cmake --install build-package
-          --config Release
-          --prefix "${{ runner.temp }}/rtfw-original"
-      - name: Relocate install tree
-        run: >
-          cmake -E rename
-          "${{ runner.temp }}/rtfw-original"
-          "${{ runner.temp }}/rtfw-relocated"
+          python tools/extract_release_archive.py
+          --artifact-dir release-artifacts
+          --destination "${{ runner.temp }}/rtfw-relocated"
       - name: Configure clean external consumer
         run: >
           cmake -S tests/package_consumer -B build-consumer
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_PREFIX_PATH="${{ runner.temp }}/rtfw-relocated"
+          ${{ matrix.cmake_args }}
       - name: Build clean external consumer
         run: cmake --build build-consumer --config Release --parallel 2
       - name: Run clean external consumer

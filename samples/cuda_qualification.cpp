@@ -441,7 +441,7 @@ void write_json(
         << "  \"schema_version\": 1,\n"
         << "  \"result\": \"pass\",\n"
         << "  \"qualification_claim\": \"evidence_only\",\n"
-        << "  \"rtfw_version\": \"" RTFW_VERSION_STRING "\",\n"
+        << "  \"runtime_version\": \"" RTFW_VERSION_STRING "\",\n"
         << "  \"backend_id\": \"rtfw.cuda.driver.v1\",\n"
         << "  \"os\": \"" << operating_system() << "\",\n"
         << "  \"cuda_toolkit_version\": " << CUDA_VERSION << ",\n"

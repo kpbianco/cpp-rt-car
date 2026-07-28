@@ -2,8 +2,13 @@ cmake_minimum_required(VERSION 3.20)
 project(rtfw_package_consumer LANGUAGES C CXX)
 
 find_package(
-    rtfw 0.12 CONFIG REQUIRED
-    COMPONENTS c_shared c_static cpp_runtime)
+    rtfw 1.0 CONFIG REQUIRED
+    COMPONENTS
+        c_shared
+        c_static
+        cpp_runtime
+        cuda_backend
+        xdma_backend)
 
 if (NOT RTFW_C_ABI_VERSION EQUAL 8)
     message(FATAL_ERROR "Expected installed RTFW C ABI version 8")
@@ -17,7 +22,12 @@ target_link_libraries(rtfw_consumer_static PRIVATE rtfw::rtfw_static)
 
 add_executable(rtfw_consumer_cpp cpp_consumer.cpp)
 target_compile_features(rtfw_consumer_cpp PRIVATE cxx_std_20)
-target_link_libraries(rtfw_consumer_cpp PRIVATE rtfw::simcore_rt)
+target_link_libraries(
+    rtfw_consumer_cpp
+    PRIVATE
+        rtfw::simcore_rt
+        rtfw::cuda_backend
+        rtfw::xdma_backend)
 
 if (WIN32)
     add_custom_command(

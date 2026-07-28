@@ -39,7 +39,9 @@ latency qualification and does not prove the complete product contract.
   cancellation, delayed dependency release while independent CPU work
   proceeds, timeout, error, loss,
   health/reset, shutdown ownership, malformed backend tables, memory
-  accounting, trace ordering, and all 32 metrics.
+  accounting, trace ordering, all 32 metrics, and concurrent state isolation
+  between independent runtime/backend/buffer instances. A named isolation gate
+  also runs explicitly in every supported Linux build tuple.
 - Allocation instrumentation covers 64 post-warmup mock-device frames, and the
   dynamic C ABI test defines and drives a backend solely through loaded v7
   symbols.
@@ -75,6 +77,22 @@ latency qualification and does not prove the complete product contract.
 - Executable shared/static C and C++ compiled-graph samples, dynamic C ABI
   loading, autotune-tooling, scaling-artifact, and documentation-contract jobs
   provide focused smoke coverage.
+- The named Ubuntu GCC/Clang and Windows MSVC support tuples build and run
+  relocated consumers from the exact extracted CPack archives. Pull-request
+  CI also checks the 1.0 support/compatibility contract and creates then
+  verifies each archive manifest.
+- A tag release waits for all three supported-tuple archive consumers, requires
+  exactly nine uniquely named assets, verifies the existing tag, and creates
+  the GitHub Release once. Manual release-workflow runs do not publish.
+- Release-tool unit tests cover manifest round trips, corruption, unlisted
+  files, unsafe paths, incomplete commit identities, empty artifact sets, and
+  negative mutations of the portable support and contract digests. CPack
+  staging tests reject corrupt sidecars, unexpected/stale outputs, and
+  accidental publication of its internal staging tree. Extraction tests cover
+  flat TGZ/ZIP layouts, safe SONAME links, traversal rejection, and cleanup of
+  a rejected partial destination. The same suite
+  validates CUDA/XDMA `evidence_only` schemas and rejects promoted, duplicate,
+  or unhealthy raw records.
 
 ## What CI does not currently establish
 
@@ -100,6 +118,8 @@ latency qualification and does not prove the complete product contract.
   opt-in self-hosted XDMA workflow emits raw evidence but does not
   automatically qualify a tuple.
 - Best-effort host-hardening steps on shared runners are not RT evidence.
+- SHA-256 artifact manifests are integrity metadata, not signatures,
+  provenance attestations, or proof that two builds are reproducible.
 
 ## Adding evidence
 
@@ -116,13 +136,18 @@ predeclared thresholds, and the measurement procedure.
 - Opt-in XDMA hardware evidence:
   `.github/workflows/xdma-qualification.yml`
 - Documentation contract: `.github/workflows/docs-contract.yml`
+- Portable release workflow: `.github/workflows/release.yml`
+- Release contract and manifest tests: `tools/check_release_contract.py`,
+  `tools/stage_release_artifacts.py`, `tools/release_manifest.py`,
+  `tools/extract_release_archive.py`, `tools/check_hardware_evidence.py`,
+  `tests/test_release_tools.py`
 - Differential test: `tests/test_differential_output.cpp`
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
 - Optional fuzz harnesses: `tests/jobqueue_fuzz.cpp`,
   `tests/snapshot_fuzz.cpp`
 - Cross-build artifact producer: `tests/determinism_artifact.cpp`
-- M1–M11 lifecycle, graph, executor/host adapter, memory, time, platform,
+- M1–M12 lifecycle, graph, executor/host adapter, memory, time, platform,
   observability, replay, and device
   tests:
   `tests/test_host_runtime.cpp`,

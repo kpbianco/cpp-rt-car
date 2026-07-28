@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Store build artifacts with a content hash for reproducibility.
+"""Store a build artifact with content-addressed comparison metadata.
 
 This helper copies the specified build artifact into a destination
-folder and records its SHA256 hash in a JSON sidecar file.  The
-produced metadata can be used to guarantee reproducible builds and is
-intended to be preserved alongside performance artifacts.
+folder and records its SHA-256 hash in a JSON sidecar file. The metadata
+supports later byte-identity comparisons; one captured digest does not prove
+that the build is reproducible. Preserve it alongside performance artifacts.
 """
 
 import hashlib

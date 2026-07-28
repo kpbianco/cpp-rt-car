@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "runtime_version": "1.0.0",
+  "contract": "Portable RT0 functionality only; no latency or hard-real-time claim.",
+  "support_policy": "docs/release_policy.md",
+  "supported_tuples": [
+    {
+      "id": "ubuntu-22.04-x86_64-gcc-11",
+      "status": "supported",
+      "rt_tier": "RT0",
+      "operating_system": "Ubuntu 22.04 LTS",
+      "architecture": "x86_64",
+      "compiler": "GCC 11",
+      "cxx_standard": 20,
+      "cmake_minimum": "3.20",
+      "ci_runner": "ubuntu-22.04",
+      "ci_compiler": "gcc",
+      "validated_surfaces": [
+        "c_shared",
+        "c_static",
+        "cpp_runtime",
+        "relocated_install",
+        "host_adapter",
+        "portable_cuda_state_machine",
+        "portable_xdma_state_machine"
+      ]
+    },
+    {
+      "id": "ubuntu-22.04-x86_64-clang-14",
+      "status": "supported",
+      "rt_tier": "RT0",
+      "operating_system": "Ubuntu 22.04 LTS",
+      "architecture": "x86_64",
+      "compiler": "Clang 14",
+      "cxx_standard": 20,
+      "cmake_minimum": "3.20",
+      "ci_runner": "ubuntu-22.04",
+      "ci_compiler": "clang",
+      "validated_surfaces": [
+        "c_shared",
+        "c_static",
+        "cpp_runtime",
+        "relocated_install",
+        "host_adapter",
+        "portable_cuda_state_machine",
+        "portable_xdma_state_machine"
+      ]
+    },
+    {
+      "id": "windows-server-2022-x86_64-msvc-v143",
+      "status": "supported",
+      "rt_tier": "RT0",
+      "operating_system": "Windows Server 2022",
+      "architecture": "x86_64",
+      "compiler": "MSVC v143",
+      "cxx_standard": 20,
+      "cmake_minimum": "3.20",
+      "ci_runner": "windows-2022",
+      "ci_compiler": "msvc",
+      "validated_surfaces": [
+        "c_shared",
+        "c_static",
+        "cpp_runtime",
+        "relocated_install",
+        "host_adapter",
+        "portable_cuda_state_machine",
+        "portable_xdma_state_machine"
+      ]
+    }
+  ],
+  "best_effort_platforms": [
+    {
+      "platform": "Windows 10/11 x86_64 with MSVC v143",
+      "reason": "Same compiler and Win32 API family as the supported Windows CI tuple, but not exercised on every pull request."
+    },
+    {
+      "platform": "Other C++20 Linux distributions and toolchain versions",
+      "reason": "Expected to build through portable CMake paths, but only the named tuples are release gates."
+    },
+    {
+      "platform": "macOS",
+      "reason": "Export-list support exists, but no continuous build/test tuple is declared for 1.0."
+    }
+  ],
+  "separate_qualification": {
+    "RT1": "Requires retained measurements for the complete deployment; no portable threshold is published.",
+    "RT2": "Requires a reviewed PREEMPT_RT deployment record and predeclared deadline thresholds.",
+    "CUDA": "Candidate backend; only tuples in cuda_support_matrix.json may be called qualified.",
+    "XDMA": "Candidate backend; only tuples in xdma_support_matrix.json may be called qualified."
+  }
+}

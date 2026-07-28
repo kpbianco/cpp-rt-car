@@ -46,13 +46,16 @@ on:
         default: "10000"
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   xdma-linux:
     name: XDMA hardware evidence
     runs-on: [self-hosted, linux, x64, xdma]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
       - name: Configure XDMA candidate
@@ -111,8 +114,23 @@ jobs:
             --warmup "$RTFW_XDMA_WARMUP" \
             --iterations "$RTFW_XDMA_ITERATIONS" \
             > xdma-evidence/xdma-qualification.json
+      - name: Validate and bind raw evidence to source
+        run: |
+          python3 tools/check_hardware_evidence.py \
+            --backend xdma \
+            --evidence xdma-evidence/xdma-qualification.json \
+            --version-file VERSION.txt
+          python3 tools/release_manifest.py create \
+            --artifact-dir xdma-evidence \
+            --output xdma-evidence/evidence-manifest.json \
+            --version-file VERSION.txt \
+            --source-commit "${{ github.sha }}"
+          python3 tools/release_manifest.py verify \
+            --artifact-dir xdma-evidence \
+            --manifest xdma-evidence/evidence-manifest.json \
+            --version-file VERSION.txt
       - name: Upload raw evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: xdma-qualification-${{ github.sha }}
           path: xdma-evidence/

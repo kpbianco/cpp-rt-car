@@ -7,7 +7,7 @@ for introspection, and provides dependency tables to the M3 executor.
 
 Release 0.4 added parallel execution without changing the M2 validation rules.
 Release 0.5 includes the committed graph and executor storage in the M4 memory
-plan. Release 0.12 runs the same frozen graph from host-driven or finite
+plan. Release 1.0 runs the same frozen graph from host-driven or finite
 self-paced M5 calls. Latency qualification remains deployment-specific work.
 
 ## Graph vocabulary
@@ -126,8 +126,8 @@ The C equivalents are:
 - `rtfw_finalize`.
 
 The M1 `register_callback` / `rtfw_register_callback` forms remain available
-for independent phases that do not need a returned handle. The experimental C
-ABI v8 freezes this graph surface under the M11 compatibility policy.
+for independent phases that do not need a returned handle. Stable C ABI v8
+freezes this graph surface under the M11 compatibility policy.
 
 ## Evidence
 

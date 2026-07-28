@@ -9,6 +9,7 @@
 #include <limits>
 #include <span>
 #include <string_view>
+#include <thread>
 
 #include <rt/mock_device.hpp>
 #include <rt/runtime.hpp>
@@ -650,6 +651,185 @@ TEST(DeviceRuntime, D1RejectsUndeclaredDeterministicBackend) {
         deterministic.step({0, 1ms, std::nullopt}),
         rt::Status::ok);
     EXPECT_EQ(deterministic.stop(), rt::Status::ok);
+}
+
+TEST(DeviceRuntime, CrossInstanceDeviceStateIsIsolated) {
+    constexpr std::size_t frame_count = 32;
+    rt::MockDeviceBackend first_backend({4, 2, 1, 1'000});
+    rt::MockDeviceBackend second_backend({4, 2, 1, 1'000});
+    auto first_api = first_backend.api();
+    auto second_api = second_backend.api();
+
+    auto config = device_config(1, 2, 4);
+    config.trace_capacity = 256;
+    rt::Runtime first;
+    rt::Runtime second;
+    ASSERT_EQ(first.configure(config), rt::Status::ok);
+    ASSERT_EQ(second.configure(config), rt::Status::ok);
+
+    rt::DeviceBackendHandle first_backend_handle;
+    rt::DeviceBackendHandle second_backend_handle;
+    ASSERT_EQ(
+        first.register_device_backend(
+            {"first.mock", first_api},
+            first_backend_handle),
+        rt::Status::ok);
+    ASSERT_EQ(
+        second.register_device_backend(
+            {"second.mock", second_api},
+            second_backend_handle),
+        rt::Status::ok);
+
+    std::array<std::byte, 64> first_storage{};
+    std::array<std::byte, 64> second_storage{};
+    rt::DeviceBufferHandle first_buffer;
+    rt::DeviceBufferHandle second_buffer;
+    ASSERT_EQ(
+        first.register_device_buffer(
+            {"first.output", first_backend_handle, first_storage},
+            first_buffer),
+        rt::Status::ok);
+    ASSERT_EQ(
+        second.register_device_buffer(
+            {"second.output", second_backend_handle, second_storage},
+            second_buffer),
+        rt::Status::ok);
+
+    FillCommand first_fill{
+        first_buffer,
+        first_storage.size(),
+        0x3c,
+    };
+    FillCommand second_fill{
+        second_buffer,
+        second_storage.size(),
+        0xa7,
+    };
+    rt::PhaseHandle first_phase;
+    rt::PhaseHandle second_phase;
+    ASSERT_EQ(
+        first.register_device_phase(
+            {
+                "first.fill",
+                first_backend_handle,
+                &submit_fill,
+                &first_fill,
+            },
+            first_phase),
+        rt::Status::ok);
+    ASSERT_EQ(
+        second.register_device_phase(
+            {
+                "second.fill",
+                second_backend_handle,
+                &submit_fill,
+                &second_fill,
+            },
+            second_phase),
+        rt::Status::ok);
+    ASSERT_EQ(first.finalize(), rt::Status::ok);
+    ASSERT_EQ(second.finalize(), rt::Status::ok);
+    ASSERT_EQ(first.start(), rt::Status::ok);
+    ASSERT_EQ(second.start(), rt::Status::ok);
+
+    std::array<rt::Status, frame_count> first_statuses{};
+    std::array<rt::Status, frame_count> second_statuses{};
+    std::thread first_host([&] {
+        for (std::size_t frame = 0; frame < frame_count; ++frame) {
+            first_statuses[frame] = first.step(
+                {static_cast<std::uint64_t>(frame),
+                 1ms,
+                 std::nullopt});
+        }
+    });
+    std::thread second_host([&] {
+        for (std::size_t frame = 0; frame < frame_count; ++frame) {
+            second_statuses[frame] = second.step(
+                {static_cast<std::uint64_t>(frame),
+                 2ms,
+                 std::nullopt});
+        }
+    });
+    first_host.join();
+    second_host.join();
+
+    EXPECT_TRUE(std::all_of(
+        first_statuses.begin(),
+        first_statuses.end(),
+        [](rt::Status status) {
+            return status == rt::Status::ok;
+        }));
+    EXPECT_TRUE(std::all_of(
+        second_statuses.begin(),
+        second_statuses.end(),
+        [](rt::Status status) {
+            return status == rt::Status::ok;
+        }));
+    EXPECT_TRUE(std::all_of(
+        first_storage.begin(),
+        first_storage.end(),
+        [](std::byte value) {
+            return value == std::byte{0x3c};
+        }));
+    EXPECT_TRUE(std::all_of(
+        second_storage.begin(),
+        second_storage.end(),
+        [](std::byte value) {
+            return value == std::byte{0xa7};
+        }));
+
+    rt::RuntimeMetricSnapshot first_metrics;
+    rt::RuntimeMetricSnapshot second_metrics;
+    ASSERT_EQ(
+        first.metrics_snapshot(
+            rt::RuntimeMetricWindow::cumulative,
+            nullptr,
+            first_metrics),
+        rt::Status::ok);
+    ASSERT_EQ(
+        second.metrics_snapshot(
+            rt::RuntimeMetricWindow::cumulative,
+            nullptr,
+            second_metrics),
+        rt::Status::ok);
+    EXPECT_NE(
+        first_metrics.metadata.runtime_id,
+        second_metrics.metadata.runtime_id);
+    const auto submissions =
+        static_cast<std::size_t>(
+            rt::RuntimeMetricId::device_submissions);
+    const auto completions =
+        static_cast<std::size_t>(
+            rt::RuntimeMetricId::device_completions);
+    EXPECT_EQ(first_metrics.samples[submissions].value, frame_count);
+    EXPECT_EQ(second_metrics.samples[submissions].value, frame_count);
+    EXPECT_EQ(first_metrics.samples[completions].value, frame_count);
+    EXPECT_EQ(second_metrics.samples[completions].value, frame_count);
+
+    rt::DeviceHealth first_health = rt::make_device_health();
+    rt::DeviceHealth second_health = rt::make_device_health();
+    ASSERT_EQ(
+        first.device_health(first_backend_handle, first_health),
+        rt::Status::ok);
+    ASSERT_EQ(
+        second.device_health(second_backend_handle, second_health),
+        rt::Status::ok);
+    EXPECT_EQ(first_health.submissions, frame_count);
+    EXPECT_EQ(second_health.submissions, frame_count);
+
+    ASSERT_EQ(first.stop(), rt::Status::ok);
+    ASSERT_EQ(
+        first_api.get_health(first_api.instance, &first_health),
+        RTFW_DEVICE_STATUS_OK);
+    ASSERT_EQ(
+        second_api.get_health(second_api.instance, &second_health),
+        RTFW_DEVICE_STATUS_OK);
+    EXPECT_EQ(first_health.state, RTFW_DEVICE_HEALTH_SHUTDOWN);
+    EXPECT_EQ(second_health.state, RTFW_DEVICE_HEALTH_HEALTHY);
+    EXPECT_EQ(
+        second.step({frame_count, 2ms, std::nullopt}),
+        rt::Status::ok);
+    EXPECT_EQ(second.stop(), rt::Status::ok);
 }
 
 TEST(DeviceRuntime, DestructionShutsBackendDown) {

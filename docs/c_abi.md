@@ -1,7 +1,8 @@
 # Stable C ABI
 
-Release 0.12 introduces ABI version 8, the first stable C ABI for RTFW. The
-stability promise applies to the symbols and C declarations represented by
+Release 0.12 introduced ABI version 8, the first stable C ABI for RTFW;
+release 1.0 retains it. The stability promise applies to the symbols and C
+declarations represented by
 `abi/rtfw_c_abi_v8.exports`, `rt/include/rt/c_api.h`, and
 `rt/include/rt/device_abi.h`. It does not turn the C++ API into a binary ABI,
 qualify a deployment for hard real time, or make hardware drivers portable.
@@ -39,8 +40,8 @@ rewrite the v8 manifest.
 The shared library uses hidden visibility internally. ELF and Mach-O builds
 add an explicit export allowlist; Windows uses `RTFW_API` declarations. Linux
 CI compares the built dynamic symbol table with the checked-in list exactly.
-The shared-object SONAME follows C ABI version 8 rather than the pre-1.0
-package version.
+The shared-object SONAME follows C ABI version 8 independently of the package
+version.
 
 The installed CMake package provides these components and imported targets:
 
@@ -54,9 +55,10 @@ The installed CMake package provides these components and imported targets:
 | `xdma_backend` | `rtfw::xdma_backend` | Portable XDMA state machine |
 | `xdma_linux` | `rtfw::xdma_linux` | Optional Linux character-device adapter |
 
-While the package major version is zero, CMake version-file compatibility is
-limited to the same package minor version. The stable C ABI and the C++ source
-package therefore have deliberately separate compatibility policies.
+For 1.x, CMake version-file compatibility is same-major. The stable C ABI and
+the C++ source package therefore have deliberately separate compatibility
+policies: C ABI v8 is the binary boundary, while target C++ declarations are
+source-compatible and require recompilation.
 `tests/package_consumer` is configured outside the source build against a
 relocated install tree on Linux and Windows and runs shared C, static C, and
 C++ consumers.
@@ -118,3 +120,6 @@ deployment tuple are qualified together.
   `tests/host_adapter_tests.cpp`;
 - relocated installed consumers: `tests/package_consumer`,
   `.github/workflows/ci.yml`.
+
+The complete deprecation, package-version, and release rules are in the
+[release policy](release_policy.md).

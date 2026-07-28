@@ -20,8 +20,8 @@ must not invent one.
 
 ## ABI policy
 
-The plugin surface remains experimental in 0.12. C ABI v8 is the first stable
-binary boundary. The M1–M11 C configuration,
+The plugin surface remains experimental in 1.0. C ABI v8 is the stable binary
+boundary. The M1–M11 C configuration,
 frame, callback, result, graph, task-scratch, memory-plan, periodic, watchdog,
 degradation, preflight, metric-window, trace-cursor, provenance, canonical
 state, checkpoint, input-log, replay, backend, buffer, device-phase,
@@ -31,6 +31,9 @@ Milestone M11 freezes exported symbols, ownership, structure sizing,
 capabilities, errors, and compatibility policy as specified in
 [the C ABI contract](c_abi.md). Any incompatible change requires a new ABI
 version/SONAME/manifest; updating the v8 digest silently is prohibited.
+Target C++ declarations reachable from `rt/runtime.hpp` are source-compatible
+within 1.x but do not carry a binary ABI promise. The package, deprecation, and
+release rules are specified in the [release policy](release_policy.md).
 
 ## Thread-creation guard
 

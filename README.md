@@ -1,19 +1,18 @@
-# RTFW — Experimental Simulation Runtime
+# RTFW — Bounded Simulation Runtime
 
 [![CI](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml)
 [![Documentation contract](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml)
 
-RTFW is a C++20 research prototype for deterministic, bounded-resource
-simulation execution. The repository explores phase graphs, parallel range
-work, fixed-capacity queues, frame arenas, numerical controls, tracing, and
-asynchronous device patterns.
+RTFW is a C++20 bounded-resource simulation runtime for hosts that need an
+explicit phase/resource graph, fixed-capacity CPU execution, controlled memory,
+versioned observability/replay, and asynchronous device integration.
 
-> **Status: 0.12.0 experimental.** The C ABI is now a controlled stable
-> boundary, but the product is not production-ready and has
-> no hard-real-time, worst-case-latency, cross-platform bitwise-determinism,
-> CUDA-hardware, or XDMA qualification. See the
+> **Status: 1.0.0 portable RT0 release.** Named GCC, Clang, and MSVC tuples
+> support the target `rt::Runtime` path and stable C ABI v8. Portable support
+> makes no hard-real-time, worst-case-latency, cross-platform bitwise-
+> determinism, CUDA-hardware, XDMA, or C++ binary ABI claim. See the
 > [product contract](docs/product_contract.md)
-> and [roadmap](docs/roadmap.md) before integrating it.
+> and [release policy](docs/release_policy.md) before integrating it.
 
 ## Current implementation
 
@@ -41,6 +40,7 @@ asynchronous device patterns.
 | Legacy metrics | Experimental | Demo JSON uses mutex-backed counters and rolling phase histograms with a default 120-sample capacity |
 | Legacy snapshots | Experimental compatibility surface | Demo/native-layout helpers are bounds checked but remain outside target checkpoint schema v1 |
 | C ABI | Stable ABI v8 | Version/fingerprint handshake, exact shared-library export allowlist, ABI-numbered SONAME, fixed-width contracts, and relocated shared/static consumers |
+| Portable distribution | Supported RT0 on named tuples | Same-major CMake package discovery, relocated C/C++ consumers, checked release contract, CPack archives, and content-addressed artifact manifests |
 | Runtime configuration | Implemented M1–M11 schema | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, artifacts, and the host-adapter policy; unknown keys fail |
 | Autotune/profile integration | Tooling prototype | Profile generators and synthetic smoke tests exist; `rtfw_demo` does not load JSON profiles |
 | Legacy GPU stub | Experimental compatibility path | Detached CPU-thread stub outside `rt::Runtime`; superseded for new CUDA work by the separate M9 candidate |
@@ -50,6 +50,22 @@ asynchronous device patterns.
 `FiberPool`. Those compatibility experiments retain different lifetime and
 task rules. The M11 host adapter is the only supported path for an external
 engine job system.
+
+## Support and compatibility
+
+RTFW 1.x supports only the exact RT0 build/test tuples in the
+[portable support matrix](docs/portable_support_matrix.json). Other C++20
+platforms are best effort unless added through a reviewed matrix change. C ABI
+v8 is the stable binary boundary. The target C++ declarations reachable from
+`<rt/runtime.hpp>` are source-compatible within 1.x, require recompilation, and
+have no C++ binary ABI promise. CUDA, XDMA, RT1, and RT2 evidence is reviewed
+and promoted separately.
+
+Release archives include an immutable source commit and SHA-256 for every
+artifact in a generated manifest. The complete versioning, deprecation,
+support, and release checklist is in the
+[release policy](docs/release_policy.md); changes are recorded in the
+[changelog](CHANGELOG.md).
 
 ## Quick start
 
@@ -130,7 +146,7 @@ embedding runtime; demo/profile integration remains planned.
 
 ## Embedding lifecycle
 
-Release 0.12 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
+Release 1.0 provides the M1 lifecycle, M2 compiled graph, M3 executor, M4
 memory closure, M5 time/platform controls, M6 observability, and M7
 checkpoint/replay, the M8 device ABI/mock, and the M11 stable ABI/host adapter in
 `<rt/runtime.hpp>` and `<rt/c_api.h>`:
@@ -194,7 +210,7 @@ Accepted architecture decisions:
 - [ADR-0002: host-driven time by default](docs/adr/0002-host-driven-time.md)
 - [ADR-0003: bounded device backend ABI](docs/adr/0003-device-backend-boundary.md)
 
-The M1–M11 host runtime now implements lifecycle, both explicit time modes,
+The M1–M12 portable runtime now implements lifecycle, both explicit time modes,
 compiled graph validation, all three CPU policies, the bounded target-path
 memory plan, watchdog/degradation, platform preflight, versioned
 observability, bounded registered-state replay, and the bounded poll-only
@@ -204,8 +220,10 @@ backend candidate and M10 adds the bounded
 Xilinx Linux XDMA AXI-MM candidate without changing the core device ABI or
 claiming a qualified deployment. The existing
 `SimCore` demo and legacy scheduler components remain outside that target
-path. The [architecture guide](docs/architecture.md) distinguishes current
-and target paths.
+path. M12 adds the named support matrix, cross-instance device-isolation gate,
+1.x compatibility policy, and checked package-manifest workflow. The
+[architecture guide](docs/architecture.md) distinguishes supported and
+experimental paths.
 
 ## Real-time and determinism language
 
@@ -219,7 +237,7 @@ RTFW separates portable functionality from deployment qualification:
 No RT2 record exists yet.
 
 Determinism is tiered from D0 (unspecified) through D3 (portable approved
-fixed-point/specified math). Release 0.12 supports D0 and an explicit D1
+fixed-point/specified math). Release 1.0 supports D0 and an explicit D1
 contract for registered canonical state. Its worker-count and compiler-artifact
 fixtures do not prove D2, arbitrary floating-point identity, or cross-machine
 D3 behavior. Definitions and evidence requirements are in the
@@ -231,7 +249,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M11 host runtime plus the M9 CUDA and M10 XDMA candidates, graph compiler, unified/host executors, memory/time/platform/observability/replay/device controls, and experimental legacy scheduler/fiber/plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M12 portable runtime plus the M9 CUDA and M10 XDMA candidates, graph compiler, unified/host executors, memory/time/platform/observability/replay/device controls, and experimental legacy scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |

@@ -1,27 +1,29 @@
 # RTFW Product Contract
 
-Status: accepted target contract for the pre-1.0 development line
+Status: accepted contract for the supported 1.x portable runtime
 
-Current release: 0.12.0 experimental product with stable C ABI v8
+Current release: 1.0.0 portable RT0 product with stable C ABI v8
 
 ## Product definition
 
-RTFW is intended to become a deterministic, bounded-resource C++20 simulation
-execution runtime. A host defines a phase and resource graph, finalizes it
+RTFW is a bounded-resource C++20 simulation execution runtime with explicit
+determinism tiers. A host defines a phase and resource graph, finalizes it
 before execution, and runs it on a preallocated CPU executor. The target
 runtime supports host-driven and self-paced frames and integrates asynchronous
 device backends through bounded submission and completion interfaces.
 
-The current 0.12 implementation is a research prototype. Its target-path host
-runtime satisfies the M1 lifecycle/callback, M2 compiled-graph, M3 unified
+The 1.0 target-path runtime satisfies the M1 lifecycle/callback, M2
+compiled-graph, M3 unified
 CPU-executor, M4 bounded-memory, M5 time/platform, and M6 observability
 contracts at RT0 and the M7 registered-state D1/checkpoint/replay contract,
 plus the M8 bounded device ABI and deterministic mock contract at RT0. M9 adds
 an optional CUDA Driver API backend candidate with CPU-only evidence, and M10
 adds the named XDMA candidate, but neither has a qualified hardware tuple. M11
 adds the third host-adapter executor policy, stable C ABI v8, controlled
-exports, and relocated installed-package consumers. The product remains
-pre-1.0 and has no RT2 qualification.
+exports, and relocated installed-package consumers. M12 adds the named
+portable support matrix, cross-instance device-isolation gate, 1.x
+compatibility/release policy, and checked package-manifest workflow. No RT2,
+CUDA, or XDMA qualification is implied by portable 1.0.
 
 ## Claim policy
 
@@ -77,7 +79,7 @@ Host-driven time is the default embedding contract:
 - A host-driven step does not sleep or advance a hidden wall clock.
 - A separate self-paced mode owns an absolute periodic release schedule.
 
-The 0.12 `rt::Runtime` implements both explicit modes. The host supplies frame
+The 1.0 `rt::Runtime` implements both explicit modes. The host supplies frame
 index, delta, and optional deadline to synchronous `step()` without runtime
 pacing. `run_periodic()` executes a finite caller-thread loop using absolute
 epoch-based releases; late frames never shift that epoch. Per-frame results
@@ -99,7 +101,7 @@ policies may differ:
 | `host_adapter` | Execution through a host job-system contract with explicit scratch and completion contexts |
 | `periodic_rt` | Static execution plus qualified absolute release/deadline control |
 
-Release 0.12 implements `static_deterministic`, `bounded_throughput`, and
+Release 1.0 implements `static_deterministic`, `bounded_throughput`, and
 `host_adapter`. Graph phases, nested ranges, and reductions share one task
 representation; the first two policies own a runtime team while the third
 borrows a capacity-matched host job system with explicit scratch and completion
@@ -108,10 +110,11 @@ and `FiberPool` are separate compatibility experiments, not target policies.
 See [ADR-0001](adr/0001-one-executor-boundary.md) and the
 [executor contract](executor.md).
 
-The C++ runtime remains a source API. C plugins and language/engine bindings
-that need a cross-release binary boundary use stable ABI v8 and the installed
-`c_shared`/`c_static` package components described by the
-[C ABI contract](c_abi.md).
+The target C++ runtime is a source API governed by the 1.x release policy;
+recompilation is required and no C++ binary ABI is promised. C plugins and
+language/engine bindings that need a cross-release binary boundary use stable
+ABI v8 and the installed `c_shared`/`c_static` package components described by
+the [C ABI contract](c_abi.md).
 
 ### Memory and overload
 
@@ -139,7 +142,7 @@ fixed-capacity RT-lane emission, explicit loss accounting, runtime-isolated
 cursors, and version/build/config/workload provenance. Serialization and
 external transport remain non-RT host responsibilities.
 
-Release 0.12 implements observability schema version 2 for `rt::Runtime`.
+Release 1.0 implements observability schema version 2 for `rt::Runtime`.
 Schema 2 preserves IDs 0–21 and adds device events and metrics.
 Metric cursors independently partition monotonic counters into intervals
 without resetting global state; gauges are sampled rather than differenced.
@@ -153,7 +156,7 @@ Devices are optional backends outside the core scheduler. A backend contract
 must define capabilities, buffer registration, bounded submission, completion,
 timeout, cancellation where supported, health, reset, and shutdown.
 
-Release 0.12 retains the size/versioned, poll-only device ABI, registered
+Release 1.0 retains the size/versioned, poll-only device ABI, registered
 buffers, graph-integrated device phases, health/reset/shutdown control, and a
 fixed-capacity deterministic CPU mock. The runtime owns one completion-service
 lane; CPU workers submit without waiting for completion, and the ABI has no
@@ -193,10 +196,10 @@ An RT2 qualification record must include:
 - raw release, wake-up, compute, completion, slack, and miss samples;
 - thresholds chosen before the run and the final pass/fail result.
 
-Release 0.12 has a strict, read-only Linux prerequisite preflight. It fails
+Release 1.0 has a strict, read-only Linux prerequisite preflight. It fails
 closed on missing PREEMPT_RT, lock coverage, isolated affinity, realtime
 scheduling, or absolute clock support, but it does not validate the full
-deployment record or measured deadlines. No RT2 qualification exists in 0.12.
+deployment record or measured deadlines. No RT2 qualification exists in 1.0.
 
 ## Determinism tiers
 
@@ -207,7 +210,7 @@ deployment record or measured deadlines. No RT2 qualification exists in 0.12.
 | D2 — Reproducible build profile | D1 plus pinned compiler, flags, dependencies, and hardware class |
 | D3 — Portable deterministic | Only approved fixed-point or explicitly specified math kernels; arbitrary floating-point code is excluded |
 
-Release 0.12 supports D0 and an explicit D1 contract for registered canonical
+Release 1.0 supports D0 and an explicit D1 contract for registered canonical
 state. D1 tests cover 1, 2, and 4 workers and exchange one integer-only
 checkpoint artifact between GCC/Clang and FMA-on/FMA-off CI jobs. That narrow
 artifact comparison does not establish D2 for arbitrary callbacks or
@@ -218,7 +221,7 @@ callback expressions.
 
 ## Current support matrix
 
-| Surface | 0.12 status | Notes |
+| Surface | 1.0 status | Notes |
 | --- | --- | --- |
 | `rt::Runtime` lifecycle | Implemented RT0 surface | Strict configure/finalize/start/step/stop state machine with frozen topology |
 | Compiled graph | Implemented RT0 surface | Deterministic topological order; invalid/foreign handles, cycles, and unordered conflicting resource access fail before start |
@@ -232,8 +235,8 @@ callback expressions.
 | Determinism/checkpoint/replay | Implemented D0/D1 surface | Frozen canonical state registry, worker-count-independent D1 compatibility identity, transactional schema-v1 checkpoint restore, bounded input logs, and synchronous replay |
 | Device ABI and mock | Implemented RT0 surface | Poll-only backend ABI v1, registered borrowed buffers, graph dependency release, stable failures, health/reset/shutdown, and deterministic fault injection |
 | CUDA Driver API backend | Candidate; unqualified | Optional host-owned context/stream adapter with fixed registries, pinned host spans, async transfer/kernel operations, timeout quarantine, CPU-only tests, and raw-evidence tooling; support matrix has no qualified tuple |
-| GCC/Clang C++20 build | Experimental | Linux CI covers selected compiler/build combinations |
-| MSVC build | Experimental | Windows CI is a portability check, not an RT qualification |
+| GCC/Clang C++20 build | Supported RT0 on named tuples | Ubuntu 22.04 GCC 11 and Clang 14 are required build/test/package gates |
+| MSVC build | Supported RT0 on named tuple | Windows Server 2022 with MSVC v143 is a required build/test/package gate |
 | `SimCore` phase/range API | Experimental | Graph cycles and nested phase/range concurrency require redesign |
 | Bounded MPMC queue | Implemented primitive | `WorkerPool` uses one global FIFO queue |
 | `WorkerPool` priority/work stealing | Experimental/misnamed | Priority is not honored by normal dequeue; "steal" telemetry is not a successful-steal count |
@@ -243,6 +246,7 @@ callback expressions.
 | Metrics JSON | Experimental | Phase histograms are rolling windows, default capacity 120 |
 | Legacy snapshot helpers | Experimental compatibility surface | Bounds checks prevent truncated reads and attacker-sized vector allocation, but native-layout `SimCore` snapshots are outside checkpoint schema v1 |
 | C ABI and distribution | Stable ABI v8 / M11 complete | Exact symbol allowlist, header/library fingerprint handshake, ABI-numbered SONAME, C/C++ host adapter, package components, and relocated Linux/Windows consumers |
+| Portable release contract | Supported RT0 / M12 complete | Named support tuples, same-major CMake compatibility, cross-instance device isolation, CPack archives, and content-addressed release manifests |
 | JSON profiles/runtime autotune | Planned integration | Generators exist; `rtfw_demo` does not load their output |
 | GPU | CUDA candidate; no qualified tuple | Real Driver API adapter exists behind `RTFW_ENABLE_CUDA`; deterministic mock remains the portable gate and the legacy detached-thread stub is excluded |
 | Xilinx XDMA AXI-MM | Candidate; unqualified | Portable bounded backend and opt-in Linux character-device adapter exist for one named stack; the support matrix has no qualified tuple |
@@ -261,7 +265,7 @@ callback expressions.
 
 ## Release gates
 
-The portable 1.0 contract is complete only when:
+The portable 1.0 contract is complete because the following gates are required:
 
 1. C and C++ hosts can configure, finalize, start, execute real user callbacks,
    stop, and inspect typed errors.
@@ -280,5 +284,13 @@ The portable 1.0 contract is complete only when:
     shutdown tests.
 11. Snapshots are bounds-checked, versioned, and fuzzed.
 12. Installed CMake packages work from a clean external consumer.
+13. Two runtimes concurrently using independent device backends and borrowed
+    buffers cannot share device health, completion, telemetry, or shutdown
+    state.
+14. Named support tuples, stable surfaces, package archives, and every archive
+    digest are machine-checked by the release contract.
 
 RT2, CUDA, and XDMA qualification gates are separate from portable 1.0.
+The exact supported tuples and change rules are in the
+[portable support matrix](portable_support_matrix.json) and
+[release policy](release_policy.md).

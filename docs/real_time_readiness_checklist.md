@@ -1,7 +1,7 @@
 # Real-Time Readiness Gates
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
-0.12 has not completed any end-to-end RT2 qualification.
+1.0 has not completed any end-to-end RT2 qualification.
 
 ## Portable runtime gates
 
@@ -14,8 +14,9 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   intentional heap allocation, file I/O, condition-variable wait, or blocking
   mutex after start (M4 instrumented functional gate; user callbacks and
   legacy paths remain outside it; M8 adds an instrumented target device path).
-- [ ] Every queue-full, arena-overflow, timeout, cancellation, and shutdown path
-  has explicit bounded behavior and tests.
+- [x] Every target-runtime queue/scratch overflow, device timeout,
+  cancellation, and shutdown path has explicit bounded behavior and tests
+  (legacy `SimCore` arena overflow remains outside the supported path).
 - [x] Queue and task-scratch saturation are bounded, expose
   `reject_submission` / `fail_frame`, and create no emergency or detached
   helper (M4 functional gate).
@@ -30,10 +31,10 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
 - [x] Optional strict platform preflight is read-only, runs before runtime
   threads start, and fails closed with per-check explanations (M5 functional
   gate; not deployment qualification).
-- [ ] Multiple runtime instances have isolated clocks, numerical policy,
-  allocator state, trace state, and device state (target CPU/telemetry state is
-  isolated; the device boundary is implemented but cross-instance device
-  isolation still needs a dedicated gate).
+- [x] Multiple runtime instances have isolated clocks, numerical policy,
+  allocator state, trace state, and device state, including concurrent
+  independent mock backends, borrowed buffers, metrics, health, and shutdown
+  (M12 functional gate).
 - [x] Target trace/metrics emission uses fixed planned storage, schema-v2
   identifiers, explicit loss/window semantics, and per-runtime cursors (M6
   functional gate; export remains non-RT).
@@ -42,9 +43,11 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   identity (M7 functional gate; legacy `SimCore` snapshots remain outside it).
 - [x] The C and C++ embedding APIs can register and execute real host work with
   typed lifecycle/graph/executor/memory/time/platform/observability errors
-  plus device and host-adapter/ABI compatibility errors (M1–M11 functional
-  gate; not an
-  RT qualification).
+  plus device and host-adapter/ABI compatibility errors (M1–M12 functional
+  gate; not an RT qualification).
+- [x] Named portable support tuples, 1.x compatibility rules, release
+  archives, and content-addressed artifact manifests are machine-checked (M12
+  release gate).
 
 ## Deployment qualification gates
 

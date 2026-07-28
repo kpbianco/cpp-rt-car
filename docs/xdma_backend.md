@@ -1,6 +1,6 @@
 # Xilinx XDMA Backend Candidate and Qualification Contract
 
-RTFW 0.12 contains the M10 XDMA backend candidate for one deliberately narrow
+RTFW 1.0 contains the M10 XDMA backend candidate for one deliberately narrow
 stack:
 
 - x86-64 Linux;
@@ -170,7 +170,10 @@ emits raw per-direction:
 - poll count and completed byte count.
 
 The workflow also records kernel, module, PCI, compiler, runtime, driver, and
-bitstream identity. It uploads evidence without modifying the support matrix.
+bitstream identity. It validates the JSON as `evidence_only`, binds every raw
+file to the complete source commit with byte lengths and SHA-256 values,
+verifies that manifest, and uploads the bundle without modifying the support
+matrix.
 
 ## Qualification exit gates
 
@@ -189,5 +192,4 @@ M10 can move from Candidate to Complete only after a declared tuple records:
   recovery evidence;
 - raw latency decomposition and an explicit reviewed pass/fail record.
 
-No tuple has completed those gates in the 0.12.0 support matrix.
-
+No tuple has completed those gates in the 1.0.0 support matrix.
