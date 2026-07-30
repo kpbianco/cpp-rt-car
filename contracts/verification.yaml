@@ -1,0 +1,76 @@
+schema_version: 1
+command_file: contracts/verification.commands
+runner: scripts/agent-verify.sh
+local_profiles:
+  contract:
+    purpose: Fast repository, documentation, ABI, and release-contract validation.
+    includes:
+      - diff hygiene
+      - documentation contract
+      - release contract
+      - release-tool tests
+      - frozen C ABI manifest
+  quick:
+    purpose: Contract checks plus the exact supported README quick-start build, tests, demo, and CLI validation.
+    includes:
+      - contract
+      - portable non-experimental RelWithDebInfo build
+      - complete configured test set
+      - runtime profile demo
+      - version and unknown-option checks
+  full:
+    purpose: Quick checks plus a strict experimental-enabled local build and complete test run.
+    includes:
+      - quick
+      - warnings-as-errors
+      - RapidCheck-enabled test build
+      - complete local CTest suite
+validation_levels:
+  static:
+    status: automated
+    evidence: contract profile and repository CI
+  unit:
+    status: automated
+    evidence: CTest and focused test executables
+  simulated:
+    status: automated
+    evidence: deterministic mock and injected CUDA/XDMA/native-provider tests
+  package:
+    status: automated
+    evidence: GitHub installed-package and relocated-consumer jobs
+  sanitizer:
+    status: automated_ci
+    evidence:
+      - AddressSanitizer and UndefinedBehaviorSanitizer
+      - ThreadSanitizer
+      - bounded fuzz smoke
+  hardware_cuda:
+    status: manual_qualification
+    evidence: named NVIDIA tuple record required
+  hardware_xdma:
+    status: manual_qualification
+    evidence: named FPGA, driver, bitstream, BDF, and topology record required
+  combined_hardware:
+    status: manual_qualification
+    evidence: named CPU-GPU-FPGA workload record required
+  rt1:
+    status: manual_qualification
+    evidence: measured named profile with preselected thresholds
+  rt2:
+    status: manual_qualification
+    evidence: named PREEMPT_RT deployment and workload record required
+mandatory_github_ci:
+  - Linux GCC and Clang Debug and RelWithDebInfo matrix
+  - Windows MSVC Debug and RelWithDebInfo matrix
+  - determinism artifact exchange
+  - ThreadSanitizer
+  - package, archive, relocation, ABI, documentation, and release contracts
+manual_gates:
+  - public API and compatibility review
+  - hardware/RT support-matrix promotion
+  - performance-threshold approval on controlled hardware
+  - release publication
+known_limitations:
+  - Local verification covers only the available host compiler, OS, dependencies, and privileges.
+  - Hosted CI cannot prove CUDA, XDMA, combined hardware, RT1, RT2, thermal, or long-duration behavior.
+  - A successful strict preflight or requested policy is not proof that a deployment meets deadlines.

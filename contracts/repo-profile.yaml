@@ -1,0 +1,36 @@
+schema_version: 1
+repository: kpbianco/cpp-rt-car
+product: cpp-rt-car
+profile: assurance
+control_plane:
+  repository: kpbianco/portfolio-control
+  profile_path: profiles/assurance.yaml
+  product_path: products/cpp-rt-car
+  source_revision: 50897876440a8fdb84a5c5942abb4339cfd792d6
+audited_baseline: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
+autonomy:
+  level: 2
+  allowed_when_explicitly_requested:
+    - create isolated branch or worktree
+    - edit within approved batch scope
+    - run deterministic verification
+    - commit and push scoped changes
+    - open a draft pull request
+  forbidden:
+    - merge protected branch
+    - publish release
+    - deploy
+    - change secrets or repository settings
+    - waive a failing gate
+source_of_truth:
+  portfolio_control:
+    - product outcomes
+    - milestone state
+    - approved batch scope
+    - cross-repository traceability
+  repository:
+    - public API and ABI semantics
+    - implementation architecture
+    - release and support policy
+    - actual current state
+    - produced evidence

@@ -1,0 +1,22 @@
+# One non-interactive shell command per line.
+# Sections are cumulative: quick includes contract; full includes quick.
+
+# scope:contract
+git diff --check
+python3 tools/check_docs_contract.py
+python3 tools/check_release_contract.py
+python3 tests/test_release_tools.py
+python3 tools/check_c_abi.py
+
+# scope:quick
+cmake -S . -B build/agent-quick -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=OFF -DSIM_WERROR=OFF
+cmake --build build/agent-quick --parallel 2
+ctest --test-dir build/agent-quick --output-on-failure
+./build/agent-quick/rtfw_runtime_demo --config configs/default_safe.json --run 20ms --rt --metrics-json-interval
+test "$(./build/agent-quick/rtfw_runtime_demo --version)" = "$(cat VERSION.txt)"
+if ./build/agent-quick/rtfw_runtime_demo --definitely-not-an-option >/dev/null 2>&1; then echo "runtime demo accepted an unknown option" >&2; exit 1; fi
+
+# scope:full
+cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
+cmake --build build/agent-full --parallel 2
+ctest --test-dir build/agent-full --output-on-failure
