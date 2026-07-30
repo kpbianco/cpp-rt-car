@@ -1,0 +1,61 @@
+# RTFW repository instructions
+
+RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
+portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
+ABI v1, and Apache-2.0. M14 and M14.1 are complete; M15 is the active milestone.
+
+## Read before nontrivial work
+
+1. `contracts/repo-profile.yaml`
+2. `contracts/active-batch.yaml`
+3. `docs/CURRENT_STATE.md`
+4. `docs/HANDOFF.md`
+5. `docs/product_contract.md`
+6. `docs/architecture.md`
+7. `docs/roadmap.md`
+8. Relevant component contracts and ADRs
+9. `.agents/skills/rtfw-assurance/SKILL.md`
+
+The control-plane product source is
+`kpbianco/portfolio-control/products/cpp-rt-car/`. Repository contracts and the
+actual code remain authoritative when a stale control-plane copy conflicts.
+
+## Protected invariants
+
+- Preserve stable C ABI v8, SONAME 8, the exact export allowlist, and ABI
+  fingerprint unless an explicitly approved ABI-version batch says otherwise.
+- Preserve device ABI v1 compatibility; HAL v2 work is additive.
+- Keep `rtfw::runtime` free of experimental SimCore, scheduler, fiber, plugin,
+  crashdump, HAL/GPU stubs, `dl`, project warning policy, and leaked feature
+  macros.
+- Default installation exposes only the contracted SDK targets and headers;
+  compatibility aliases remain usable within 1.x.
+- Declared RT lanes do not gain ordinary heap allocation, hidden thread
+  creation, file I/O, blocking mutexes, unbounded waits, or spill execution.
+- Multiple runtime instances remain isolated.
+- CUDA, XDMA, combined, RT1, and RT2 support require named retained evidence.
+  Portable CI, preflight, or a benchmark alone is not qualification.
+- Do not assume direct GPU-to-FPGA peer DMA.
+- Preserve Apache-2.0 and the release/support claim boundary.
+
+## Working protocol
+
+- Implement only the active approved batch. Treat allowed and forbidden paths,
+  acceptance, validation, rollback, and stop conditions as binding.
+- Inspect before editing; do not infer repository state from a prompt.
+- Use an isolated branch/worktree and preserve unrelated user work.
+- Make the smallest coherent change and add tests with behavior.
+- Run focused checks, then `./scripts/agent-verify.sh full`.
+- Record commands, results, acceptance status, changed invariants, residual
+  risks, and unperformed validation under `docs/evidence/`.
+- A mocked backend, hosted runner, or portable build is not physical hardware
+  evidence.
+- Stop rather than silently broaden scope when a product decision, forbidden
+  path, compatibility change, or credible validation gap appears.
+
+## Repository actions
+
+Do not commit, push, open or merge a PR, release, deploy, change secrets, or
+modify repository settings unless explicitly instructed. When publication is
+authorized, use a scoped branch and draft PR; deterministic CI remains
+authoritative and no agent may waive a failing gate.
