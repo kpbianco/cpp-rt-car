@@ -1,0 +1,12 @@
+#:schema https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/config.schema.json
+
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 4
+
+[sandbox_workspace_write]
+network_access = false
+writable_roots = []
