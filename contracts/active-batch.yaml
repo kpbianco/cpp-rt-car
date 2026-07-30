@@ -1,0 +1,121 @@
+schema_version: 1
+batch:
+  id: M15-01
+  title: Add the CPU and memory policy model and exact runtime resource inventory
+  goal: Add an additive C++ policy and report model for all required thread roles and memory-region classes, integrate portable no-op resolution and strict finalization validation, and expose exact inventory/accounting identities without applying native OS policy yet.
+sources:
+  product: products/cpp-rt-car/product.yaml
+  requirements:
+    - products/cpp-rt-car/PRD.md#cap-m15--cpu-and-memory-policy
+    - products/cpp-rt-car/acceptance.yaml#CAP-M15
+  milestone: products/cpp-rt-car/milestones/M15.md
+  target_contracts:
+    - docs/product_contract.md
+    - docs/architecture.md
+    - docs/roadmap.md
+    - docs/memory_plan.md
+    - docs/time_platform.md
+    - docs/c_abi.md
+  baseline_commit: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
+  control_plane_repository: kpbianco/portfolio-control
+  control_plane_path: products/cpp-rt-car/batches/M15-01.yaml
+  control_plane_revision: c1b89ea4820e9cd1c6ea638fffa794b11ccfd7ed
+scope:
+  allowed_paths:
+    - rt/include/rt/config.hpp
+    - rt/include/rt/runtime.hpp
+    - rt/include/rt/status.hpp
+    - rt/src/host_runtime.cpp
+    - rt/src/executor.cpp
+    - rt/src/watchdog_monitor.cpp
+    - rt/src/device_manager.cpp
+    - rt/src/xdma_backend.cpp
+    - rt/src/native_platform_preflight.cpp
+    - rt/src/*policy*
+    - rt/src/*memory*
+    - tests/*policy*
+    - tests/*memory*
+    - tests/test_host_runtime.cpp
+    - tests/test_device_runtime.cpp
+    - tests/host_adapter_tests.cpp
+    - CMakeLists.txt
+    - rt/CMakeLists.txt
+    - tests/CMakeLists.txt
+    - docs/cpu_memory_policy.md
+    - docs/product_contract.md
+    - docs/architecture.md
+    - docs/roadmap.md
+    - docs/memory_plan.md
+    - docs/time_platform.md
+    - README.md
+    - release/rtfw-release-contract.json
+    - tools/check_docs_contract.py
+    - tools/check_release_contract.py
+  forbidden_paths:
+    - abi/rtfw_c_abi_v8.exports
+    - rt/include/rt/c_api.h
+    - rt/include/rt/device_abi.h
+    - LICENSE
+    - include/simcore/
+    - rt/include/rt/scheduler.hpp
+    - rt/include/rt/fiber_pool.hpp
+    - rt/include/rt/plugin.hpp
+    - .github/workflows/
+acceptance:
+  - Public C++ types cover frame, executor-worker, watchdog, device-service, and XDMA-I/O roles, plus CPU set, scheduling class/priority, NUMA node, wait strategy, stack/guard, and bounded name requests.
+  - Memory policy types cover provider ownership, alignment, page rounding, guards, prefault, locking, pinning, huge-page preference/fallback, NUMA placement, first touch, residency verification, and rollback intent.
+  - Finalization rejects malformed, contradictory, unsupported-strict, duplicate-role, overflow, and capacity-invalid policy inputs before start.
+  - Portable defaults resolve to the current 1.2.1 behavior and do not call native mutation APIs.
+  - Requested and resolved reports inventory every current runtime-owned thread role and runtime memory category with stable identifiers and exact-once accounting keys.
+  - Host-adapter and vendor-owned threads are represented as externally owned and verify-only.
+  - No runtime callback or steady-state behavior changes in this batch.
+  - Stable C ABI v8, SONAME 8, device ABI v1, SDK header inventory, package targets, compatibility aliases, schemas unrelated to this additive C++ contract, and Apache-2.0 remain unchanged.
+  - Documentation states that policy configuration and portable tests do not establish RT1 or RT2.
+  - Focused tests, full local verification, and required GitHub CI pass.
+validation:
+  local:
+    - ./scripts/agent-verify.sh contract
+    - ./scripts/agent-verify.sh quick
+    - ./scripts/agent-verify.sh full
+  focused_tests_to_add:
+    - policy default and boundary validation
+    - duplicate and contradictory request rejection
+    - exact thread-role and memory-category inventory
+    - external ownership and verify-only representation
+    - checked arithmetic and capacity rejection
+    - two-runtime isolation
+  required_ci:
+    - Linux GCC and Clang Debug/RelWithDebInfo
+    - Windows MSVC Debug/RelWithDebInfo
+    - ThreadSanitizer
+    - determinism artifact exchange
+    - installed package and compatibility consumers
+    - documentation and release contracts
+  manual:
+    - Review the public C++ source-compatibility shape before implementation merge.
+risk:
+  class: high
+  hazards:
+    - public C++ surface churn before native behavior exists
+    - incomplete resource inventory that forces incompatible redesign
+    - accidental ABI, package, or release-contract drift
+    - conflating requested/resolved data with applied or qualified state
+  stop_conditions:
+    - a stable C ABI or device ABI change becomes necessary
+    - a required thread or memory owner cannot be represented without a product decision
+    - native policy mutation is required to satisfy this batch
+    - source changes outside allowed paths are required
+    - current repository contracts contradict the control-plane batch
+rollback:
+  strategy: Revert the batch commit; portable runtime behavior and ABI remain unchanged.
+  data_migration: none
+  release_action: Do not publish a release from this batch unless separately approved.
+evidence:
+  output:
+    - docs/evidence/M15-01-<date>.md
+    - exact commands and exit results
+    - acceptance mapping
+    - changed invariants
+    - residual risks
+    - unperformed native and hardware validation
+  claim_boundary: Evidence is static, unit, simulated, package, and portable RT0 only.
