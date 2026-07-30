@@ -1,0 +1,28 @@
+schema_version: 1
+profile: assurance
+intent: Correctness, compatibility, performance, and evidence dominate iteration speed.
+required_gates:
+  - build-matrix
+  - unit-tests
+  - integration-tests
+  - static-analysis
+  - compatibility-review
+  - performance-regression-check
+  - deterministic-replay-when-applicable
+required_evidence:
+  - exact-commands
+  - test-results
+  - changed-invariants
+  - residual-risk
+  - rollback-path
+prohibited_autonomy:
+  - merge-protected-branch
+  - publish-release
+  - deploy-production
+  - waive-failing-gate
+review_focus:
+  - public-api-breakage
+  - concurrency-and-lifetime
+  - allocation-and-latency
+  - platform-assumptions
+  - configuration-compatibility
