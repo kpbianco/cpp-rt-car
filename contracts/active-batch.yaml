@@ -19,7 +19,7 @@ sources:
   baseline_commit: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
   control_plane_repository: kpbianco/portfolio-control
   control_plane_path: products/cpp-rt-car/batches/M15-01.yaml
-  control_plane_revision: c1b89ea4820e9cd1c6ea638fffa794b11ccfd7ed
+  control_plane_revision: 50897876440a8fdb84a5c5942abb4339cfd792d6
 scope:
   allowed_paths:
     - rt/include/rt/config.hpp
@@ -47,6 +47,7 @@ scope:
     - docs/roadmap.md
     - docs/memory_plan.md
     - docs/time_platform.md
+    - docs/evidence/M15-01-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
