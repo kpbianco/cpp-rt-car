@@ -14,28 +14,14 @@
 namespace core {
 
 namespace detail {
-inline std::shared_ptr<Config> atomic_load_cfg(const std::shared_ptr<Config> *ptr) {
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-  auto value = std::atomic_load(ptr);
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-  return value;
+inline std::shared_ptr<Config>
+atomic_load_cfg(const std::atomic<std::shared_ptr<Config>> *ptr) noexcept {
+  return ptr->load();
 }
 
-inline void atomic_store_cfg(std::shared_ptr<Config> *ptr,
+inline void atomic_store_cfg(std::atomic<std::shared_ptr<Config>> *ptr,
                              std::shared_ptr<Config> value) {
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-  std::atomic_store(ptr, std::move(value));
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+  ptr->store(std::move(value));
 }
 } // namespace detail
 
@@ -107,7 +93,7 @@ private:
   }
 
   std::string path_;
-  std::shared_ptr<Config> config_;
+  std::atomic<std::shared_ptr<Config>> config_;
   std::filesystem::file_time_type last_write_;
 };
 

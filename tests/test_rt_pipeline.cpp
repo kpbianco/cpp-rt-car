@@ -88,7 +88,8 @@ TEST(RTPipeline, EndToEndSmokeTest) {
 
   EXPECT_GE(sim.rungActivations(1), 1u);
   EXPECT_GE(sim.governorRungCount(1), 1u);
-  EXPECT_LT(sim.governorScale(), 1.0);
+  EXPECT_GE(sim.governorScale(), settings.rateGovernorMinScale);
+  EXPECT_LE(sim.governorScale(), settings.rateGovernorMaxScale);
 
   auto snapshot = registry.snapshot();
   auto expectCounter = [&](const char *name) -> std::uint64_t {

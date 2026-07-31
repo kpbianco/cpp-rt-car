@@ -48,8 +48,11 @@ public:
             targetRung = 1;
 
         if (targetRung > rung_) {
-            for (int rung = rung_ + 1; rung <= targetRung; ++rung) {
-                rungCounts_[static_cast<std::size_t>(rung - 1)]++;
+            for (std::size_t index = 0; index < rungCounts_.size(); ++index) {
+                const int rung = static_cast<int>(index) + 1;
+                if (rung <= rung_ || rung > targetRung)
+                    continue;
+                rungCounts_[index]++;
                 if (rungCb_)
                     rungCb_(rung);
             }
@@ -78,4 +81,3 @@ private:
     std::array<std::uint64_t, 3> rungCounts_{};
     RungCallback rungCb_;
 };
-

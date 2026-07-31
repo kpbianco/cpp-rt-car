@@ -29,3 +29,21 @@ TEST(RateGovernor, AdversarialBurstTriggersLadderAndRecovers) {
     EXPECT_GT(s, 0.95);
 }
 
+TEST(RateGovernor, CountsEachBoundedRungOnce) {
+    std::vector<int> events;
+    RateGovernor rg;
+    rg.setCallback([&](int rung) { events.push_back(rung); });
+
+    rg.update(6.5, 10.0, 0.5, 0.1);
+    rg.update(7.5, 10.0, 0.5, 0.1);
+    rg.update(8.5, 10.0, 0.5, 0.1);
+    rg.update(9.0, 10.0, 0.5, 0.1);
+
+    EXPECT_EQ(rg.rung(), 3);
+    EXPECT_EQ(events, (std::vector<int>{1, 2, 3}));
+    EXPECT_EQ(rg.rungCount(0), 0u);
+    EXPECT_EQ(rg.rungCount(1), 1u);
+    EXPECT_EQ(rg.rungCount(2), 1u);
+    EXPECT_EQ(rg.rungCount(3), 1u);
+    EXPECT_EQ(rg.rungCount(4), 0u);
+}

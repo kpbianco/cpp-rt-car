@@ -1193,10 +1193,12 @@ private:
       logDrift();
       int64_t behind = behindNs;
       if (behind > 0) {
-        int extra =
-            int((static_cast<double>(behind) / 1e9) / dt_.count());
-        if (extra > settings_.maxCatchUp)
-          extra = settings_.maxCatchUp;
+        const double behindFrames =
+            (static_cast<double>(behind) / 1e9) / dt_.count();
+        const double cappedBehindFrames =
+            std::clamp(behindFrames, 0.0,
+                       static_cast<double>(settings_.maxCatchUp));
+        const int extra = static_cast<int>(cappedBehindFrames);
 
         if (double(extra) >= settings_.adaptiveThresholdFrames)
           ++bursts_;
