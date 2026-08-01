@@ -470,6 +470,67 @@ struct StaticPhaseAssignment {
     std::size_t worker_index = 0;
 };
 
+enum class ThreadOwnership : std::uint8_t {
+    runtime,
+    host,
+    backend,
+};
+
+enum class PolicyStageState : std::uint8_t {
+    not_requested,
+    portable_default,
+    portable_fallback,
+    not_performed,
+    verify_only,
+    applied,
+    verified,
+};
+
+enum class MemoryAccountingScope : std::uint8_t {
+    runtime_plan,
+    informational_excluded,
+};
+
+struct ThreadPolicyReport {
+    ThreadResourceId id{};
+    std::uint64_t accounting_key = 0;
+    ThreadOwnership ownership = ThreadOwnership::runtime;
+    bool explicitly_requested = false;
+    ThreadPolicy requested{};
+    ThreadPolicy resolved{};
+    ThreadPolicy applied{};
+    PolicyStageState resolution = PolicyStageState::not_requested;
+    PolicyStageState application = PolicyStageState::not_performed;
+    PolicyStageState verification = PolicyStageState::not_performed;
+};
+
+struct MemoryRegionPolicyReport {
+    MemoryRegionId id{};
+    std::uint64_t accounting_key = 0;
+    MemoryProviderOwnership ownership = MemoryProviderOwnership::runtime;
+    MemoryAccountingScope accounting_scope =
+        MemoryAccountingScope::runtime_plan;
+    bool explicitly_requested = false;
+    std::size_t reported_bytes = 0;
+    std::size_t accounted_bytes = 0;
+    std::size_t requested_footprint_bytes = 0;
+    MemoryRegionPolicy requested{};
+    MemoryRegionPolicy resolved{};
+    MemoryRegionPolicy applied{};
+    PolicyStageState resolution = PolicyStageState::not_requested;
+    PolicyStageState application = PolicyStageState::not_performed;
+    PolicyStageState verification = PolicyStageState::not_performed;
+};
+
+struct CpuMemoryPolicySummary {
+    std::size_t thread_count = 0;
+    std::size_t memory_region_count = 0;
+    std::size_t runtime_owned_thread_count = 0;
+    std::size_t externally_owned_thread_count = 0;
+    std::size_t runtime_accounted_bytes = 0;
+    std::size_t informational_excluded_bytes = 0;
+};
+
 struct MemoryPlan {
     // planned_bytes is the sum of the three control fields and the three
     // *_total/storage fields. It describes requested runtime storage, not RSS.
@@ -699,6 +760,10 @@ public:
     Runtime& operator=(const Runtime&) = delete;
 
     [[nodiscard]] Status configure(const RuntimeConfig& config) noexcept;
+    // Copies every request. Validation and portable resolution occur
+    // transactionally during finalize(); schema-v7 and C ABI v8 are unchanged.
+    [[nodiscard]] Status set_cpu_memory_policy(
+        const CpuMemoryPolicyRequest& policy) noexcept;
     // Copies the callback table and borrows adapter.user_data through stop().
     // May be called only while configuring.
     [[nodiscard]] Status set_host_executor(
@@ -779,6 +844,16 @@ public:
     // runtime payload/control storage and exclude allocator metadata and OS
     // thread stacks.
     [[nodiscard]] bool memory_plan(MemoryPlan& plan) const noexcept;
+    // Available after successful finalization. Numeric role/category IDs and
+    // accounting keys are stable within the M15 C++ source contract.
+    [[nodiscard]] bool cpu_memory_policy_summary(
+        CpuMemoryPolicySummary& summary) const noexcept;
+    [[nodiscard]] bool thread_policy_report_at(
+        std::size_t index,
+        ThreadPolicyReport& report) const noexcept;
+    [[nodiscard]] bool memory_policy_report_at(
+        std::size_t index,
+        MemoryRegionPolicyReport& report) const noexcept;
     // Available after start is attempted. Strict failures leave the runtime
     // finalized so the host can inspect every failed prerequisite.
     [[nodiscard]] bool platform_preflight_report(

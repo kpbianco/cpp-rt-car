@@ -109,6 +109,13 @@ behavior, workload bounds, or measured deadline distributions. Those remain
 deployment qualification requirements in the
 [product contract](product_contract.md).
 
+M15-01 policy requests and reports do not change this behavior. They model the
+frame, watchdog, executor, and device-service roles but call no affinity,
+scheduler, NUMA, stack, or wait-policy mutation API. A required policy request
+therefore fails finalization until a later M15 native provider can apply and
+verify it. Neither portable policy resolution nor strict read-only preflight
+establishes RT1 or RT2.
+
 ## C ABI
 
 Stable ABI version 8 retains the M5 surface:

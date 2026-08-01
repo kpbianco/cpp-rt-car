@@ -7,7 +7,7 @@ in [ADRs](adr/README.md).
 
 ## Current 1.2 implementation
 
-### M1–M14 host, device, distribution, and SDK runtime plus 1.2.1 safety closure
+### M1–M15-01 host, device, distribution, SDK, and policy-model runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -96,6 +96,16 @@ an explicit compatibility handshake, and encoded graph handles. See the
 [determinism/replay contract](determinism_replay.md), and the
 [device backend contract](device_backend.md).
 
+M15-01 adds a separate C++ policy/resource layer. It copies bounded per-role
+thread and per-category memory requests, validates and resolves them during
+finalization, and retains immutable requested/resolved/applied/verified
+reports. Stable accounting keys cover the frame lane, native or borrowed
+workers, optional watchdog/device services, explicitly declared backend lanes,
+the six existing `MemoryPlan` terms, thread stacks, backend storage, registered
+state, and device buffers exactly once. Portable resolution performs no native
+mutation; external host and vendor resources are verify-only. See the
+[CPU and memory policy model](cpu_memory_policy.md).
+
 ### Legacy simulation path
 
 `SimCore` owns a phase graph, an internal range-worker team, frame arenas,
@@ -172,6 +182,8 @@ M11 adds the borrowed host job-system policy and stable distribution boundary.
 M12 names the portable RT0 support tuples and makes the 1.x compatibility,
 release archive, digest-manifest, and independent-device-isolation gates
 machine-verifiable.
+M15-01 adds immutable role/region policy reports and exact accounting
+identities without changing startup or steady-state execution.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
@@ -189,7 +201,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M14 host/device runtime and 1.2.1 lifecycle-safety closure:
+- M1–M15-01 host/device runtime, lifecycle-safety closure, and policy model:
   `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
@@ -209,6 +221,9 @@ that arbitrary host data is automatically optimized.
 - M14 SDK/package boundary: `rtfw::runtime`, `rt/include/rt/config.hpp`,
   `rt/include/rt/status.hpp`, `rt/include/rt/canonical_bytes.hpp`,
   `cmake/rtfwConfig.cmake.in`, `tests/package_consumer/package_contract.cmake`
+- M15-01 CPU/memory policy model: `rt/include/rt/config.hpp`,
+  `rt/include/rt/runtime.hpp`, `rt/src/cpu_memory_policy.cpp`,
+  `tests/test_cpu_memory_policy.cpp`, `docs/cpu_memory_policy.md`
 - M4 memory plan: `rt/src/aligned_storage.hpp`,
   `docs/memory_plan.md`
 - M5 time/platform controls: `rt/src/watchdog_monitor.cpp`,

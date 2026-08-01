@@ -32,6 +32,10 @@ changing C ABI v8 or device ABI v1.
 Release 1.2.1 closes the device lifecycle error path: failed initialization
 rollback, buffer unregistration, and backend shutdown retain explicit ownership
 state and are retried through checked `stop()` without changing either ABI.
+M15-01 adds an additive C++ CPU/memory policy and report model, strict
+finalization validation, portable no-op resolution, and exact thread/region
+accounting identities. It applies no native policy and makes no RT1 or RT2
+claim.
 
 ## Claim policy
 
@@ -259,6 +263,7 @@ callback expressions.
 | Portable release contract | Supported RT0 / M12 complete | Named support tuples, same-major CMake compatibility, cross-instance device isolation, CPack archives, and content-addressed release manifests |
 | JSON profiles/runtime autotune | Implemented RT0 host tooling | Complete resolved schema, bounded allocation-free transactional C++ parser, explicit runtime/schema compatibility, real target-runtime demo, and generated-profile CI round trip; no portable tuning or latency claim |
 | Product SDK boundary | Supported / M14 complete | Preferred `rtfw::runtime`, exact public-header inventory, isolated optional adapters, compatibility target names, and no exported project warning/feature policy |
+| CPU/memory policy model | M15-01 implemented RT0 model | Additive C++ requested/resolved/applied/verified types, exact resource identities, portable no-op resolution, and fail-closed validation; native application is not implemented |
 | GPU | CUDA candidate; no qualified tuple | Real Driver API adapter exists behind `RTFW_ENABLE_CUDA`; deterministic mock remains the portable gate and the legacy detached-thread stub is excluded |
 | Xilinx XDMA AXI-MM | Candidate; unqualified | Portable bounded backend and opt-in Linux character-device adapter exist for one named stack; the support matrix has no qualified tuple |
 | Portable hard real time | Non-goal | Only a named RT2 deployment can be qualified |

@@ -2,6 +2,7 @@
 
 #include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
+#include "cpu_memory_policy.hpp"
 #include "device_manager.hpp"
 #include "executor.hpp"
 #include "native_platform_preflight.hpp"
@@ -1373,6 +1374,11 @@ struct Runtime::Impl {
     std::vector<RegisteredState> states;
     std::vector<detail::GraphDependency> dependencies;
     std::vector<detail::GraphResourceAccess> resource_accesses;
+    std::vector<ThreadPolicyRequest> thread_policy_requests;
+    std::vector<MemoryPolicyRequest> memory_policy_requests;
+    std::vector<ThreadPolicyReport> thread_policy_reports;
+    std::vector<MemoryRegionPolicyReport> memory_policy_reports;
+    CpuMemoryPolicySummary cpu_memory_policy_summary{};
     std::vector<PhaseHandle> compiled_order;
     detail::AlignedStorage phase_scratch;
     std::unique_ptr<detail::TelemetryRing> telemetry;
@@ -1435,6 +1441,34 @@ Status Runtime::configure(const RuntimeConfig& config) noexcept {
         return impl_->fail(Status::invalid_config, nullptr);
     }
     impl_->config = config;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_cpu_memory_policy(
+    const CpuMemoryPolicyRequest& policy) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "CPU and memory policy is frozen");
+    }
+    try {
+        std::vector<ThreadPolicyRequest> thread_requests(
+            policy.threads.begin(),
+            policy.threads.end());
+        std::vector<MemoryPolicyRequest> memory_requests(
+            policy.memory_regions.begin(),
+            policy.memory_regions.end());
+        impl_->thread_policy_requests = std::move(thread_requests);
+        impl_->memory_policy_requests = std::move(memory_requests);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
     impl_->clear_error();
     return Status::ok;
 }
@@ -2118,6 +2152,68 @@ Status Runtime::finalize() noexcept {
         backend_reported_bytes = total;
     }
 
+    std::vector<detail::ThreadInventoryEntry> thread_inventory;
+    std::vector<ThreadPolicyReport> resolved_thread_policy_reports;
+    CpuMemoryPolicySummary policy_summary{};
+    const char* policy_error = nullptr;
+    try {
+        thread_inventory.reserve(
+            impl_->config.worker_count + 3);
+        thread_inventory.push_back({
+            ThreadResourceId{ThreadRole::frame, 0},
+            ThreadOwnership::host,
+        });
+        const auto worker_ownership =
+            impl_->config.executor_policy ==
+                ExecutorPolicy::host_adapter
+            ? ThreadOwnership::host
+            : ThreadOwnership::runtime;
+        for (std::size_t index = 0;
+             index < impl_->config.worker_count;
+             ++index) {
+            thread_inventory.push_back({
+                ThreadResourceId{
+                    ThreadRole::executor_worker,
+                    static_cast<std::uint32_t>(index)},
+                worker_ownership,
+            });
+        }
+        if (impl_->config.watchdog_timeout_ns != 0) {
+            thread_inventory.push_back({
+                ThreadResourceId{ThreadRole::watchdog_service, 0},
+                ThreadOwnership::runtime,
+            });
+        }
+        if (!impl_->device_backends.empty()) {
+            thread_inventory.push_back({
+                ThreadResourceId{ThreadRole::device_service, 0},
+                ThreadOwnership::runtime,
+            });
+        }
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    const auto thread_policy_status =
+        detail::resolve_thread_policies(
+            impl_->thread_policy_requests,
+            thread_inventory,
+            resolved_thread_policy_reports,
+            policy_error);
+    if (thread_policy_status != Status::ok) {
+        return impl_->fail(thread_policy_status, policy_error);
+    }
+    policy_summary.thread_count =
+        resolved_thread_policy_reports.size();
+    for (const auto& report : resolved_thread_policy_reports) {
+        if (report.ownership == ThreadOwnership::runtime) {
+            ++policy_summary.runtime_owned_thread_count;
+        } else {
+            ++policy_summary.externally_owned_thread_count;
+        }
+    }
+
     std::vector<PhaseHandle> compiled_order;
     detail::GraphCompileDiagnostic diagnostic;
     const auto compile_status = detail::compile_graph(
@@ -2276,6 +2372,37 @@ Status Runtime::finalize() noexcept {
                 memory_plan.device_control_bytes);
     }
 
+    std::size_t memory_inventory_count = 6;
+    const auto add_inventory_count =
+        [&](std::size_t count) {
+            std::size_t total = 0;
+            if (!detail::checked_add(
+                    memory_inventory_count,
+                    count,
+                    total)) {
+                return false;
+            }
+            memory_inventory_count = total;
+            return true;
+        };
+    plan_valid = plan_valid &&
+        add_inventory_count(resolved_thread_policy_reports.size()) &&
+        add_inventory_count(impl_->device_backends.size()) &&
+        add_inventory_count(impl_->states.size()) &&
+        add_inventory_count(impl_->device_buffers.size());
+    std::vector<MemoryRegionPolicyReport>
+        resolved_memory_policy_reports;
+    if (plan_valid) {
+        try {
+            resolved_memory_policy_reports.reserve(
+                memory_inventory_count);
+        } catch (const std::bad_alloc&) {
+            return impl_->fail(Status::resource_exhausted, nullptr);
+        } catch (...) {
+            return impl_->fail(Status::internal_error, nullptr);
+        }
+    }
+
     memory_plan.runtime_control_bytes = sizeof(Impl);
     const auto add_runtime_bytes =
         [&](std::size_t bytes) {
@@ -2337,6 +2464,139 @@ Status Runtime::finalize() noexcept {
         sizeof(PhaseHandle));
     plan_valid = plan_valid &&
         add_runtime_bytes(sizeof(detail::TelemetryRing));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->thread_policy_requests.capacity(),
+        sizeof(ThreadPolicyRequest));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->memory_policy_requests.capacity(),
+        sizeof(MemoryPolicyRequest));
+    plan_valid = plan_valid && add_runtime_array(
+        resolved_thread_policy_reports.capacity(),
+        sizeof(ThreadPolicyReport));
+    plan_valid = plan_valid && add_runtime_array(
+        resolved_memory_policy_reports.capacity(),
+        sizeof(MemoryRegionPolicyReport));
+
+    std::vector<detail::MemoryInventoryEntry> memory_inventory;
+    if (plan_valid) {
+        try {
+            memory_inventory.reserve(memory_inventory_count);
+            const auto add_runtime_region =
+                [&](MemoryCategory category, std::size_t bytes) {
+                    memory_inventory.push_back({
+                        MemoryRegionId{
+                            category,
+                            ThreadRole::none,
+                            0},
+                        MemoryProviderOwnership::runtime,
+                        MemoryAccountingScope::runtime_plan,
+                        bytes,
+                        bytes,
+                    });
+                };
+            add_runtime_region(
+                MemoryCategory::runtime_control,
+                memory_plan.runtime_control_bytes);
+            add_runtime_region(
+                MemoryCategory::executor_control_and_queues,
+                memory_plan.executor_control_bytes);
+            add_runtime_region(
+                MemoryCategory::device_control_and_queues,
+                memory_plan.device_control_bytes);
+            add_runtime_region(
+                MemoryCategory::phase_scratch,
+                memory_plan.phase_scratch_total_bytes);
+            add_runtime_region(
+                MemoryCategory::task_scratch,
+                memory_plan.task_scratch_total_bytes);
+            add_runtime_region(
+                MemoryCategory::trace_storage,
+                memory_plan.trace_storage_bytes);
+            for (const auto& thread :
+                 resolved_thread_policy_reports) {
+                const auto ownership =
+                    thread.ownership == ThreadOwnership::runtime
+                    ? MemoryProviderOwnership::runtime
+                    : thread.ownership == ThreadOwnership::host
+                        ? MemoryProviderOwnership::host
+                        : MemoryProviderOwnership::backend;
+                memory_inventory.push_back({
+                    MemoryRegionId{
+                        MemoryCategory::thread_stack,
+                        thread.id.role,
+                        thread.id.instance},
+                    ownership,
+                    MemoryAccountingScope::informational_excluded,
+                    thread.resolved.stack_bytes,
+                    0,
+                });
+            }
+            for (std::size_t index = 0;
+                 index < impl_->device_backends.size();
+                 ++index) {
+                memory_inventory.push_back({
+                    MemoryRegionId{
+                        MemoryCategory::backend_storage,
+                        ThreadRole::none,
+                        static_cast<std::uint32_t>(index)},
+                    MemoryProviderOwnership::backend,
+                    MemoryAccountingScope::informational_excluded,
+                    static_cast<std::size_t>(
+                        impl_->device_backends[index]
+                            .capabilities.control_storage_bytes),
+                    0,
+                });
+            }
+            for (std::size_t index = 0;
+                 index < impl_->states.size();
+                 ++index) {
+                memory_inventory.push_back({
+                    MemoryRegionId{
+                        MemoryCategory::registered_state,
+                        ThreadRole::none,
+                        static_cast<std::uint32_t>(index)},
+                    MemoryProviderOwnership::host,
+                    MemoryAccountingScope::informational_excluded,
+                    impl_->states[index].storage.size(),
+                    0,
+                });
+            }
+            for (std::size_t index = 0;
+                 index < impl_->device_buffers.size();
+                 ++index) {
+                memory_inventory.push_back({
+                    MemoryRegionId{
+                        MemoryCategory::registered_device_buffer,
+                        ThreadRole::none,
+                        static_cast<std::uint32_t>(index)},
+                    MemoryProviderOwnership::host,
+                    MemoryAccountingScope::informational_excluded,
+                    impl_->device_buffers[index].storage.size(),
+                    0,
+                });
+            }
+        } catch (const std::bad_alloc&) {
+            return impl_->fail(Status::resource_exhausted, nullptr);
+        } catch (...) {
+            return impl_->fail(Status::internal_error, nullptr);
+        }
+    }
+    if (plan_valid &&
+        memory_inventory.size() != memory_inventory_count) {
+        plan_valid = false;
+    }
+    if (plan_valid) {
+        const auto memory_policy_status =
+            detail::resolve_memory_policies(
+                impl_->memory_policy_requests,
+                memory_inventory,
+                resolved_memory_policy_reports,
+                policy_summary,
+                policy_error);
+        if (memory_policy_status != Status::ok) {
+            return impl_->fail(memory_policy_status, policy_error);
+        }
+    }
 
     memory_plan.planned_bytes =
         memory_plan.runtime_control_bytes;
@@ -2358,6 +2618,9 @@ Status Runtime::finalize() noexcept {
         add_planned_bytes(memory_plan.phase_scratch_total_bytes) &&
         add_planned_bytes(memory_plan.task_scratch_total_bytes) &&
         add_planned_bytes(memory_plan.trace_storage_bytes);
+    plan_valid = plan_valid &&
+        policy_summary.runtime_accounted_bytes ==
+            memory_plan.planned_bytes;
     if (!plan_valid) {
         return impl_->fail(
             Status::invalid_config,
@@ -2415,6 +2678,11 @@ Status Runtime::finalize() noexcept {
     impl_->executor = std::move(executor);
     impl_->devices = std::move(devices);
     impl_->finalized_memory_plan = memory_plan;
+    impl_->thread_policy_reports =
+        std::move(resolved_thread_policy_reports);
+    impl_->memory_policy_reports =
+        std::move(resolved_memory_policy_reports);
+    impl_->cpu_memory_policy_summary = policy_summary;
     impl_->telemetry_counters.reset();
     impl_->metric_snapshot_sequence = 0;
     impl_->graph_id = impl_->compute_graph_id();
@@ -3166,6 +3434,41 @@ bool Runtime::memory_plan(MemoryPlan& plan) const noexcept {
         return false;
     }
     plan = impl_->finalized_memory_plan;
+    return true;
+}
+
+bool Runtime::cpu_memory_policy_summary(
+    CpuMemoryPolicySummary& summary) const noexcept {
+    summary = {};
+    if (!impl_ || impl_->state == RuntimeState::configuring ||
+        !impl_->executor) {
+        return false;
+    }
+    summary = impl_->cpu_memory_policy_summary;
+    return true;
+}
+
+bool Runtime::thread_policy_report_at(
+    std::size_t index,
+    ThreadPolicyReport& report) const noexcept {
+    report = {};
+    if (!impl_ || impl_->state == RuntimeState::configuring ||
+        index >= impl_->thread_policy_reports.size()) {
+        return false;
+    }
+    report = impl_->thread_policy_reports[index];
+    return true;
+}
+
+bool Runtime::memory_policy_report_at(
+    std::size_t index,
+    MemoryRegionPolicyReport& report) const noexcept {
+    report = {};
+    if (!impl_ || impl_->state == RuntimeState::configuring ||
+        index >= impl_->memory_policy_reports.size()) {
+        return false;
+    }
+    report = impl_->memory_policy_reports[index];
     return true;
 }
 

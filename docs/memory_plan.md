@@ -5,6 +5,11 @@ Release 1.2 retains the M4 memory closure for the target-path runtime,
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.
 
+M15-01 adds an immutable policy inventory over this plan. Policy request and
+report storage is included in `runtime_control_bytes`; the policy does not
+change allocation providers, residency, or steady-state behavior in this
+batch. See [the CPU/memory policy model](cpu_memory_policy.md).
+
 The legacy `SimCore`, frame arenas, `WorkerPool`, `rt::Scheduler`, `FiberPool`,
 detached-thread GPU stub, plugins, and legacy snapshots are outside this
 contract. M7 target-path checkpoint/replay registry metadata and M8
@@ -44,6 +49,15 @@ payload bytes, backend-reported private storage, the small C ABI adapter
 handle, and every legacy subsystem outside `rt::Runtime`.
 Configuration/finalization temporaries are also excluded because they are
 released before the running state.
+
+The M15-01 inventory partitions `planned_bytes` into exactly six stable keys:
+runtime control, executor control/queues, device control/outstanding/completion,
+phase scratch, task scratch, and trace storage. Thread stacks, backend-reported
+storage, registered state, and registered device buffers receive separate
+unique keys with `informational_excluded` scope and never contribute to the
+runtime-plan sum. Current default stack sizes are reported as zero because
+1.2.1 neither creates custom stack allocations nor inspects OS/host stack
+storage.
 
 `state_count` and `registered_state_bytes` report the frozen borrowed state.
 `snapshot_max_bytes`, `replay_input_capacity`, and `input_log_max_bytes` expose

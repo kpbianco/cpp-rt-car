@@ -512,7 +512,23 @@ Exit gates:
 
 ## M15 — CPU and memory policy
 
-Planned outcome:
+M15-01 delivered:
+
+- additive C++ thread and memory policy request types without changing
+  runtime-config schema 7 or stable C ABI v8;
+- stable role/category identifiers and unique accounting keys for every
+  current runtime-owned or borrowed thread lane and memory-plan/excluded
+  region;
+- transactional finalization validation for malformed, contradictory,
+  duplicate, unsupported-required, overflow, and capacity-invalid requests;
+- portable default/fallback resolution with distinct requested, resolved,
+  applied, and verified report stages;
+- host-adapter, frame, XDMA, and future accelerator lanes represented as
+  externally owned and verify-only;
+- focused default, boundary, ownership, accounting, device-memory, and
+  two-runtime isolation tests.
+
+Remaining outcome:
 
 - role-aware policy for frame, executor-worker, device-service, watchdog, and
   accelerator-I/O threads;
@@ -523,6 +539,10 @@ Planned outcome:
   binding, first touch, and rollback;
 - requested/resolved/applied reports and complete byte accounting, while
   externally owned host-engine and vendor threads remain verify-only.
+
+M15-01 performs no native mutation. Thread apply/verify barriers, memory
+providers and residency, rollback, and final accounting closure remain later
+M15 batches. See [the policy model](cpu_memory_policy.md).
 
 Exit gates:
 

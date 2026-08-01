@@ -280,6 +280,7 @@ def check_runtime_contract() -> None:
     graph_test = read("tests/test_compiled_graph.cpp")
     executor_doc = read("docs/executor.md")
     memory_doc = read("docs/memory_plan.md")
+    policy_doc = read("docs/cpu_memory_policy.md")
     time_doc = read("docs/time_platform.md")
     observability_doc = read("docs/observability.md")
     determinism_doc = read("docs/determinism_replay.md")
@@ -299,6 +300,7 @@ def check_runtime_contract() -> None:
     xdma_linux = read("rt/src/xdma_linux.cpp")
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
+    policy_source = read("rt/src/cpu_memory_policy.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
     preflight_source = read("rt/src/native_platform_preflight.cpp")
     telemetry_source = read("rt/src/telemetry.cpp")
@@ -307,6 +309,7 @@ def check_runtime_contract() -> None:
     host_test = read("tests/test_host_runtime.cpp")
     executor_test = read("tests/test_executor.cpp")
     memory_test = read("tests/test_memory_plan.cpp")
+    policy_test = read("tests/test_cpu_memory_policy.cpp")
     periodic_test = read("tests/test_periodic_runtime.cpp")
     preflight_test = read("tests/test_platform_preflight.cpp")
     observability_test = read("tests/test_observability.cpp")
@@ -728,6 +731,52 @@ def check_runtime_contract() -> None:
             fail(f"tests/test_memory_plan.cpp: missing M4 gate {test_name!r}")
     if "CompleteCpuFramesDoNotAllocate" not in noalloc_test:
         fail("tests/test_trace_noalloc.cpp: missing complete M4 allocation gate")
+
+    for token in (
+        "ThreadRole::frame",
+        "ThreadRole::executor_worker",
+        "ThreadRole::xdma_io",
+        "MemoryCategory::thread_stack",
+        "PolicyRequirement::required",
+        "portable_fallback",
+    ):
+        if token not in policy_source:
+            fail(f"rt/src/cpu_memory_policy.cpp: missing M15-01 evidence {token!r}")
+    for token in (
+        "struct ThreadPolicy",
+        "struct MemoryRegionPolicy",
+        "struct CpuMemoryPolicyRequest",
+        "policy_request_capacity",
+    ):
+        if token not in config_header:
+            fail(f"rt/config.hpp: missing M15-01 public model {token!r}")
+    for token in (
+        "struct ThreadPolicyReport",
+        "struct MemoryRegionPolicyReport",
+        "set_cpu_memory_policy(",
+        "cpu_memory_policy_summary(",
+    ):
+        if token not in runtime_header:
+            fail(f"rt/runtime.hpp: missing M15-01 report API {token!r}")
+    for phrase in (
+        "does not establish RT1 or RT2",
+        "requested, resolved, applied, and verified",
+        "verify-only",
+        "exactly once",
+        "does not call affinity",
+    ):
+        if phrase not in policy_doc:
+            fail(f"docs/cpu_memory_policy.md: missing M15-01 boundary {phrase!r}")
+    for test_name in (
+        "PortableDefaultsInventoryEveryCurrentResourceOnce",
+        "HostAdapterWorkersAreExternalVerifyOnly",
+        "FinalizationRejectsStrictDuplicateAndContradictoryInputs",
+        "FinalizationRejectsCapacityAndCheckedArithmeticOverflow",
+        "DeviceAndBorrowedMemoryInventoryIsExact",
+        "RuntimeInstancesKeepIndependentResolvedInventories",
+    ):
+        if test_name not in policy_test:
+            fail(f"tests/test_cpu_memory_policy.cpp: missing M15-01 gate {test_name!r}")
 
     for token in (
         "Runtime::run_periodic(",
@@ -1581,6 +1630,7 @@ def main() -> int:
             "docs/compiled_graph.md",
             "docs/executor.md",
             "docs/memory_plan.md",
+            "docs/cpu_memory_policy.md",
             "docs/time_platform.md",
             "docs/observability.md",
             "docs/determinism_replay.md",
