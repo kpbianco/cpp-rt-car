@@ -1,5 +1,7 @@
 #include "watchdog_monitor.hpp"
 
+#include "thread_policy_transaction.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -11,22 +13,43 @@ WatchdogMonitor::~WatchdogMonitor() {
     stop();
 }
 
-Status WatchdogMonitor::start() noexcept {
+Status WatchdogMonitor::start(
+    ThreadPolicyTransaction* transaction) noexcept {
     if (started_.load(std::memory_order_acquire)) {
         return Status::invalid_state;
     }
 
     stop_requested_.store(false, std::memory_order_release);
     active_state_.store(0, std::memory_order_release);
+    startup_ready_.store(false, std::memory_order_relaxed);
+    startup_transaction_ = transaction;
     started_.store(true, std::memory_order_release);
     try {
-        thread_ = std::thread([this] { run(); });
+        thread_ = std::thread([this] {
+            const ThreadResourceId id{ThreadRole::watchdog_service, 0};
+            if (startup_transaction_) {
+                startup_transaction_->prepare_current_thread(id);
+            }
+            startup_ready_.store(true, std::memory_order_release);
+            startup_ready_.notify_all();
+            if (!startup_transaction_ ||
+                startup_transaction_->await_decision(id)) {
+                run();
+            }
+        });
     } catch (const std::bad_alloc&) {
         started_.store(false, std::memory_order_release);
+        startup_transaction_ = nullptr;
         return Status::resource_exhausted;
     } catch (...) {
         started_.store(false, std::memory_order_release);
+        startup_transaction_ = nullptr;
         return Status::internal_error;
+    }
+    auto ready = startup_ready_.load(std::memory_order_acquire);
+    while (!ready) {
+        startup_ready_.wait(ready, std::memory_order_acquire);
+        ready = startup_ready_.load(std::memory_order_acquire);
     }
     return Status::ok;
 }
@@ -41,6 +64,7 @@ void WatchdogMonitor::stop() noexcept {
     if (thread_.joinable()) {
         thread_.join();
     }
+    startup_transaction_ = nullptr;
 }
 
 std::uint64_t WatchdogMonitor::arm(

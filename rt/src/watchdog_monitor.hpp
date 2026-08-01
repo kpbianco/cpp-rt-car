@@ -10,6 +10,8 @@
 
 namespace rt::detail {
 
+class ThreadPolicyTransaction;
+
 // A fixed service lane detects an expired frame budget but never invokes host
 // code or mutates degradation state. The calling frame thread completes the
 // arm, consumes the one-shot result, and applies degradation.
@@ -21,7 +23,8 @@ public:
     WatchdogMonitor(const WatchdogMonitor&) = delete;
     WatchdogMonitor& operator=(const WatchdogMonitor&) = delete;
 
-    [[nodiscard]] Status start() noexcept;
+    [[nodiscard]] Status start(
+        ThreadPolicyTransaction* transaction = nullptr) noexcept;
     void stop() noexcept;
 
     [[nodiscard]] std::uint64_t arm(
@@ -45,11 +48,13 @@ private:
     std::mutex service_mutex_;
     std::condition_variable service_cv_;
     std::atomic<bool> started_{false};
+    std::atomic<bool> startup_ready_{false};
     std::atomic<bool> stop_requested_{false};
     std::atomic<std::uint64_t> active_state_{0};
     std::atomic<std::uint64_t> runtime_deadline_ns_{0};
     std::atomic<std::uint64_t> service_deadline_ns_{0};
     std::uint64_t next_token_ = 0;
+    ThreadPolicyTransaction* startup_transaction_ = nullptr;
 };
 
 } // namespace rt::detail

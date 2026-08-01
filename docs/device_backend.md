@@ -35,7 +35,9 @@ The target lifecycle is:
 4. `finalize()` validates backend limits and commits manager, outstanding-slot,
    completion-batch, and graph storage to the memory plan.
 5. `start()` starts the fixed CPU team, initializes each backend, registers
-   buffers, then starts one runtime-owned device service lane. Failure performs
+   buffers, then starts one runtime-owned device service lane. In M15-02 that
+   lane applies and reads back its thread policy, reports readiness, and waits
+   for the runtime-wide startup commit before polling a backend. Failure performs
    a checked reverse rollback. An initialization failure is
    ownership-uncertain until one `shutdown()` attempt returns `OK` or
    `INVALID_STATE`; any other cleanup result is retained for `stop()` retry.
@@ -52,6 +54,11 @@ The target lifecycle is:
    Repeated `stop()` calls invoke only the unresolved operations. No backend
    callback exists in the ABI, so backend code cannot call into destroyed
    runtime or plugin ownership.
+
+A required device-service thread policy failure aborts the barrier before the
+first poll and invokes this same checked reverse buffer/backend cleanup. If
+cleanup succeeds, the runtime remains finalized and a later `start()` may
+retry; a cleanup failure retains the existing explicit stop-pending ownership.
 
 Runtime control methods are single-host-thread operations. The host must not
 destroy a runtime, backend instance, buffer, plugin, or callback data while a

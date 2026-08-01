@@ -185,6 +185,76 @@ bool thread_policy_is_default(const rt::ThreadPolicy& policy) noexcept {
            policy.name == defaults.name;
 }
 
+std::size_t optional_name_length(
+    const std::array<char, rt::policy_thread_name_capacity>& name) noexcept {
+    const auto end = std::find(name.begin(), name.end(), '\0');
+    return static_cast<std::size_t>(end - name.begin());
+}
+
+bool external_policy_handle_available(
+    rt::ThreadRole role,
+    rt::ThreadOwnership ownership) noexcept {
+    return ownership == rt::ThreadOwnership::runtime ||
+           (ownership == rt::ThreadOwnership::host &&
+            role == rt::ThreadRole::frame);
+}
+
+rt::ThreadPolicy resolve_thread_policy(
+    const rt::ThreadPolicy& requested,
+    const rt::ThreadResourceId& id,
+    rt::ThreadOwnership ownership,
+    const rt::ThreadPolicyProviderCapabilities& capabilities,
+    bool& fell_back) noexcept {
+    rt::ThreadPolicy resolved{};
+    resolved.requirement = requested.requirement;
+    fell_back = false;
+    const bool has_handle =
+        external_policy_handle_available(id.role, ownership);
+
+    if (requested.cpu_set.specified) {
+        if (has_handle && capabilities.cpu_affinity) {
+            resolved.cpu_set = requested.cpu_set;
+        } else {
+            fell_back = true;
+        }
+    }
+    if (requested.scheduling_class != rt::SchedulingClass::inherit) {
+        if (has_handle && capabilities.scheduling) {
+            resolved.scheduling_class = requested.scheduling_class;
+            resolved.scheduling_priority = requested.scheduling_priority;
+        } else {
+            fell_back = true;
+        }
+    }
+    if (requested.name.front() != '\0') {
+        const auto length = optional_name_length(requested.name);
+        if (has_handle && capabilities.thread_name &&
+            capabilities.thread_name_capacity != 0 &&
+            length < capabilities.thread_name_capacity) {
+            resolved.name = requested.name;
+        } else {
+            fell_back = true;
+        }
+    }
+    if (requested.wait_strategy != rt::WaitStrategy::runtime_default) {
+        const bool supported =
+            ownership == rt::ThreadOwnership::runtime &&
+            id.role == rt::ThreadRole::executor_worker &&
+            (requested.wait_strategy == rt::WaitStrategy::spin ||
+             requested.wait_strategy == rt::WaitStrategy::yield);
+        if (supported) {
+            resolved.wait_strategy = requested.wait_strategy;
+        } else {
+            fell_back = true;
+        }
+    }
+    if (requested.numa_node != -1 || requested.stack_bytes != 0 ||
+        requested.guard_bytes != 0) {
+        fell_back = true;
+    }
+    return resolved;
+}
+
 bool valid_memory_category(rt::MemoryCategory category) noexcept {
     switch (category) {
     case rt::MemoryCategory::runtime_control:
@@ -346,6 +416,7 @@ namespace rt::detail {
 Status resolve_thread_policies(
     std::span<const ThreadPolicyRequest> requests,
     std::span<const ThreadInventoryEntry> inventory,
+    const ThreadPolicyProviderCapabilities& capabilities,
     std::vector<ThreadPolicyReport>& reports,
     const char*& error) noexcept {
     error = nullptr;
@@ -359,10 +430,6 @@ Status resolve_thread_policies(
         if (!valid_role(request.id.role) ||
             !valid_thread_policy(request.policy)) {
             error = "thread policy request is malformed or contradictory";
-            return Status::invalid_config;
-        }
-        if (request.policy.requirement == PolicyRequirement::required) {
-            error = "required thread policy is unsupported before native application";
             return Status::invalid_config;
         }
         if (std::find_if(
@@ -390,6 +457,7 @@ Status resolve_thread_policies(
 
     try {
         reports.reserve(inventory.size() + requests.size());
+        bool required_unsupported = false;
         const auto append =
             [&](ThreadResourceId id, ThreadOwnership ownership) {
                 const auto* request = find_thread_request(requests, id);
@@ -399,22 +467,44 @@ Status resolve_thread_policies(
                 report.ownership = ownership;
                 report.explicitly_requested = request != nullptr;
                 report.requested = request ? request->policy : ThreadPolicy{};
-                report.resolved = ThreadPolicy{};
-                report.resolution =
-                    request && !thread_policy_is_default(request->policy)
-                    ? PolicyStageState::portable_fallback
-                    : PolicyStageState::portable_default;
+                bool fell_back = false;
+                report.resolved = request
+                    ? resolve_thread_policy(
+                        request->policy,
+                        id,
+                        ownership,
+                        capabilities,
+                        fell_back)
+                    : ThreadPolicy{};
+                if (request && fell_back &&
+                    request->policy.requirement ==
+                        PolicyRequirement::required) {
+                    required_unsupported = true;
+                    return;
+                }
+                report.resolution = !request ||
+                        thread_policy_is_default(request->policy)
+                    ? PolicyStageState::portable_default
+                    : (fell_back
+                        ? PolicyStageState::portable_fallback
+                        : PolicyStageState::native_resolved);
                 report.application = PolicyStageState::not_performed;
                 report.verification =
                     ownership == ThreadOwnership::runtime
                     ? PolicyStageState::not_performed
                     : PolicyStageState::verify_only;
                 reports.push_back(report);
-            };
+        };
         for (const auto& entry : inventory) {
             append(entry.id, entry.ownership);
+            if (required_unsupported) {
+                break;
+            }
         }
         for (const auto& request : requests) {
+            if (required_unsupported) {
+                break;
+            }
             const bool already_present = std::any_of(
                 inventory.begin(),
                 inventory.end(),
@@ -424,6 +514,11 @@ Status resolve_thread_policies(
             if (!already_present) {
                 append(request.id, ThreadOwnership::backend);
             }
+        }
+        if (required_unsupported) {
+            reports.clear();
+            error = "required thread policy contains a field unsupported for its owner or platform";
+            return Status::invalid_config;
         }
     } catch (const std::bad_alloc&) {
         error = "thread policy report allocation failed";

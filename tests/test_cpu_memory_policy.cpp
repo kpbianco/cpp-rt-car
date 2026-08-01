@@ -255,6 +255,7 @@ TEST(CpuMemoryPolicy, FinalizationRejectsStrictDuplicateAndContradictoryInputs) 
         rt::ThreadPolicyRequest strict;
         strict.id = {rt::ThreadRole::frame, 0};
         strict.policy.requirement = rt::PolicyRequirement::required;
+        strict.policy.stack_bytes = 64 * 1024;
         rt::Runtime runtime;
         ASSERT_EQ(
             runtime.set_cpu_memory_policy({

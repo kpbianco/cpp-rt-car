@@ -33,7 +33,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
-| M15 | Next | Explicit CPU topology, thread policy, memory residency, NUMA, and stack ownership |
+| M15 | Active | M15-01 model/inventory and M15-02 thread apply/verify complete locally; memory residency, NUMA, and stack ownership remain |
 | M16 | Planned | Multi-rate deterministic simulation domains and release coordination |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
@@ -528,21 +528,37 @@ M15-01 delivered:
 - focused default, boundary, ownership, accounting, device-memory, and
   two-runtime isolation tests.
 
+M15-02 delivered locally:
+
+- an additive injectable C++ current-thread provider plus Linux affinity,
+  normal/FIFO/RR scheduler, and bounded-name apply/readback;
+- deterministic per-runtime startup commit/abort barriers for executor,
+  watchdog, and device-service lanes, with no callback or service work before
+  commit;
+- executor `spin` and `yield` wait-policy application, with unsupported
+  `park`, `adaptive`, NUMA-node, and custom-stack fields retaining explicit
+  best-effort fallback or strict rejection;
+- external frame verification without mutation and unchanged verify-only
+  host-adapter/vendor ownership;
+- retained apply/readback status, native system errors, rolled-back state,
+  strict failure cleanup, retry, native Linux, and two-runtime tests.
+
 Remaining outcome:
 
-- role-aware policy for frame, executor-worker, device-service, watchdog, and
-  accelerator-I/O threads;
-- deterministic CPU-set resolution, affinity, scheduler class/priority, and
-  spin/yield/park wait policy with apply-and-verify startup barriers;
+- provider-backed verification handles for any future externally owned lane
+  that elects to expose one; current host-adapter and vendor lanes remain
+  verify-only without mutation;
+- `park` and `adaptive` executor wait implementations if later product work
+  accepts their wake/boundedness contract;
 - explicit region and runtime-owned stack policy covering alignment, page
   rounding, guards, prefaulting, locking, residency, huge-page fallback, NUMA
   binding, first touch, and rollback;
 - requested/resolved/applied reports and complete byte accounting, while
   externally owned host-engine and vendor threads remain verify-only.
 
-M15-01 performs no native mutation. Thread apply/verify barriers, memory
-providers and residency, rollback, and final accounting closure remain later
-M15 batches. See [the policy model](cpu_memory_policy.md).
+M15-01 performs no native mutation. M15-02 owns thread apply/verify and startup
+rollback only. Memory providers, custom stacks, residency, and final accounting
+closure remain M15-03/M15-04. See [the policy model](cpu_memory_policy.md).
 
 Exit gates:
 

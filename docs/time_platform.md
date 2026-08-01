@@ -109,11 +109,13 @@ behavior, workload bounds, or measured deadline distributions. Those remain
 deployment qualification requirements in the
 [product contract](product_contract.md).
 
-M15-01 policy requests and reports do not change this behavior. They model the
-frame, watchdog, executor, and device-service roles but call no affinity,
-scheduler, NUMA, stack, or wait-policy mutation API. A required policy request
-therefore fails finalization until a later M15 native provider can apply and
-verify it. Neither portable policy resolution nor strict read-only preflight
+M15-02 keeps preflight read-only and separate from thread-policy mutation. After
+preflight passes, the frame lane is verified without mutation and the watchdog,
+executor, and device-service lanes apply/read back supported policy on their own
+threads behind one startup commit barrier. Linux supports affinity,
+normal/FIFO/RR scheduling, and bounded names; executor spin/yield is internal.
+Unsupported best-effort fields fall back and unsupported required fields fail
+closed. Neither successful application nor strict read-only preflight
 establishes RT1 or RT2.
 
 ## C ABI

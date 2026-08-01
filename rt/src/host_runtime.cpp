@@ -3,6 +3,8 @@
 #include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
 #include "cpu_memory_policy.hpp"
+#include "native_thread_policy.hpp"
+#include "thread_policy_transaction.hpp"
 #include "device_manager.hpp"
 #include "executor.hpp"
 #include "native_platform_preflight.hpp"
@@ -773,6 +775,7 @@ struct Runtime::Impl {
               injected_preflight
                   ? injected_preflight
                   : &owned_preflight) {
+        thread_policy_provider = &owned_thread_policy_provider;
         error[0] = '\0';
     }
 
@@ -1362,6 +1365,9 @@ struct Runtime::Impl {
     RuntimeClock* clock;
     detail::NativePlatformPreflightProbe owned_preflight;
     PlatformPreflightProbe* preflight;
+    detail::NativeThreadPolicyProvider owned_thread_policy_provider;
+    ThreadPolicyProvider* thread_policy_provider = nullptr;
+    detail::ThreadPolicyTransaction thread_policy_transaction;
     RuntimeConfig config{};
     HostExecutorAdapter host_executor{};
     bool host_executor_set = false;
@@ -1469,6 +1475,30 @@ Status Runtime::set_cpu_memory_policy(
     } catch (...) {
         return impl_->fail(Status::internal_error, nullptr);
     }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_thread_policy_provider(
+    ThreadPolicyProvider& provider) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "thread policy provider requires configuring state");
+    }
+    const auto capabilities = provider.capabilities();
+    if ((capabilities.thread_name &&
+         capabilities.thread_name_capacity < 2) ||
+        (!capabilities.thread_name &&
+         capabilities.thread_name_capacity != 0)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "thread policy provider capabilities are invalid");
+    }
+    impl_->thread_policy_provider = &provider;
     impl_->clear_error();
     return Status::ok;
 }
@@ -2199,6 +2229,7 @@ Status Runtime::finalize() noexcept {
         detail::resolve_thread_policies(
             impl_->thread_policy_requests,
             thread_inventory,
+            impl_->thread_policy_provider->capabilities(),
             resolved_thread_policy_reports,
             policy_error);
     if (thread_policy_status != Status::ok) {
@@ -2738,6 +2769,11 @@ Status Runtime::start() noexcept {
             "finalized runtime has no executor");
     }
 
+    auto& policy_transaction = impl_->thread_policy_transaction;
+    policy_transaction.begin(
+        *impl_->thread_policy_provider,
+        impl_->thread_policy_reports);
+
     impl_->preflight_report = {};
     impl_->preflight_report.mode =
         impl_->config.platform_preflight_mode;
@@ -2784,31 +2820,67 @@ Status Runtime::start() noexcept {
         impl_->preflight_report.passed = true;
     }
 
+    const auto frame_policy_status =
+        policy_transaction.verify_frame_thread();
+    if (frame_policy_status != Status::ok) {
+        policy_transaction.abort();
+        return impl_->fail(
+            frame_policy_status,
+            "required frame-thread policy verification failed");
+    }
+
     impl_->degradation_level.store(0, std::memory_order_release);
     if (impl_->config.watchdog_timeout_ns != 0) {
-        const auto watchdog_status = impl_->watchdog.start();
+        const auto watchdog_status =
+            impl_->watchdog.start(&policy_transaction);
         if (watchdog_status != Status::ok) {
+            policy_transaction.abort();
             return impl_->fail(
                 watchdog_status,
                 "failed to start watchdog service lane");
         }
         impl_->watchdog_started = true;
+        const auto policy_status = policy_transaction.failure();
+        if (policy_status != Status::ok) {
+            policy_transaction.abort();
+            impl_->watchdog.stop();
+            impl_->watchdog_started = false;
+            return impl_->fail(
+                policy_status,
+                "required watchdog thread policy failed");
+        }
     }
 
-    const auto start_status = impl_->executor->start();
+    const auto start_status =
+        impl_->executor->start(&policy_transaction);
     if (start_status != Status::ok) {
+        policy_transaction.abort();
         if (impl_->watchdog_started) {
             impl_->watchdog.stop();
             impl_->watchdog_started = false;
         }
         return impl_->fail(start_status, "failed to start executor policy");
     }
+    auto policy_status = policy_transaction.failure();
+    if (policy_status != Status::ok) {
+        policy_transaction.abort();
+        impl_->executor->stop();
+        if (impl_->watchdog_started) {
+            impl_->watchdog.stop();
+            impl_->watchdog_started = false;
+        }
+        return impl_->fail(
+            policy_status,
+            "required executor thread policy failed");
+    }
     if (impl_->devices) {
         const auto device_status = impl_->devices->start(
             *impl_->executor,
             &Impl::observe_device_event,
-            impl_.get());
+            impl_.get(),
+            &policy_transaction);
         if (device_status != Status::ok) {
+            policy_transaction.abort();
             impl_->executor->stop();
             if (impl_->watchdog_started) {
                 impl_->watchdog.stop();
@@ -2822,7 +2894,24 @@ Status Runtime::start() noexcept {
                     ? "failed to start device service lane and rollback is pending; retry stop"
                     : "failed to start device service lane");
         }
+        policy_status = policy_transaction.failure();
+        if (policy_status != Status::ok) {
+            policy_transaction.abort();
+            const auto cleanup_status = impl_->devices->stop();
+            impl_->executor->stop();
+            if (impl_->watchdog_started) {
+                impl_->watchdog.stop();
+                impl_->watchdog_started = false;
+            }
+            impl_->stop_pending = cleanup_status != Status::ok;
+            return impl_->fail(
+                policy_status,
+                impl_->stop_pending
+                    ? "required device thread policy failed and rollback is pending; retry stop"
+                    : "required device thread policy failed");
+        }
     }
+    policy_transaction.commit();
     impl_->stop_pending = false;
     impl_->state = RuntimeState::running;
     impl_->clear_error();

@@ -1,5 +1,7 @@
 #include "device_manager.hpp"
 
+#include "thread_policy_transaction.hpp"
+
 #include "aligned_storage.hpp"
 
 #include <algorithm>
@@ -296,7 +298,8 @@ Status DeviceManager::shutdown_backends() noexcept {
 Status DeviceManager::start(
     Executor& executor,
     DeviceEventObserver observer,
-    void* observer_data) noexcept {
+    void* observer_data,
+    ThreadPolicyTransaction* transaction) noexcept {
     if (started_.load(std::memory_order_acquire) ||
         has_backend_ownership() ||
         service_thread_.joinable() ||
@@ -313,18 +316,30 @@ Status DeviceManager::start(
     executor_ = &executor;
     observer_ = observer;
     observer_data_ = observer_data;
+    startup_transaction_ = transaction;
     stopping_.store(false, std::memory_order_release);
     service_ready_.store(false, std::memory_order_relaxed);
     started_.store(true, std::memory_order_release);
     try {
         service_thread_ = std::thread([this] {
-            service_loop();
+            const ThreadResourceId id{ThreadRole::device_service, 0};
+            if (startup_transaction_) {
+                startup_transaction_->prepare_current_thread(id);
+            }
+            service_starts_.fetch_add(1, std::memory_order_release);
+            service_ready_.store(true, std::memory_order_release);
+            service_ready_.notify_all();
+            if (!startup_transaction_ ||
+                startup_transaction_->await_decision(id)) {
+                service_loop();
+            }
         });
     } catch (...) {
         started_.store(false, std::memory_order_release);
         executor_ = nullptr;
         observer_ = nullptr;
         observer_data_ = nullptr;
+        startup_transaction_ = nullptr;
         (void)shutdown_backends();
         return Status::resource_exhausted;
     }
@@ -362,6 +377,7 @@ Status DeviceManager::stop() noexcept {
         executor_ = nullptr;
         observer_ = nullptr;
         observer_data_ = nullptr;
+        startup_transaction_ = nullptr;
     }
     return shutdown_backends();
 }
@@ -677,8 +693,6 @@ void DeviceManager::record_failure(Status status) noexcept {
 }
 
 void DeviceManager::service_loop() noexcept {
-    service_starts_.fetch_add(1, std::memory_order_release);
-    service_ready_.store(true, std::memory_order_release);
     while (!stopping_.load(std::memory_order_acquire)) {
         if (outstanding_count_.load(std::memory_order_acquire) == 0) {
             const auto observed =

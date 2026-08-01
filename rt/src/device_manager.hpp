@@ -18,6 +18,8 @@
 
 namespace rt::detail {
 
+class ThreadPolicyTransaction;
+
 struct DeviceBackendSpec {
     std::string name;
     rtfw_device_backend_api api{};
@@ -84,7 +86,8 @@ public:
     [[nodiscard]] Status start(
         Executor& executor,
         DeviceEventObserver observer,
-        void* observer_data) noexcept;
+        void* observer_data,
+        ThreadPolicyTransaction* transaction = nullptr) noexcept;
     [[nodiscard]] Status stop() noexcept;
     [[nodiscard]] bool cleanup_pending() const noexcept;
 
@@ -174,6 +177,7 @@ private:
     std::atomic<std::uint64_t> outstanding_count_{0};
     std::atomic<std::uint64_t> service_starts_{0};
     std::atomic<std::uint64_t> wake_sequence_{0};
+    ThreadPolicyTransaction* startup_transaction_ = nullptr;
 };
 
 [[nodiscard]] Status device_status_to_runtime(

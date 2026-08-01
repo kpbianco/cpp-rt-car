@@ -76,6 +76,7 @@ if (SIM_GTEST_AVAILABLE)
         test_scheduler.cpp
         test_host_runtime.cpp
         test_cpu_memory_policy.cpp
+        test_thread_policy.cpp
         test_periodic_runtime.cpp
         test_platform_preflight.cpp
         test_compiled_graph.cpp
@@ -94,6 +95,7 @@ if (SIM_GTEST_AVAILABLE)
         set(TEST_SOURCES
             test_host_runtime.cpp
             test_cpu_memory_policy.cpp
+            test_thread_policy.cpp
             test_periodic_runtime.cpp
             test_platform_preflight.cpp
             test_compiled_graph.cpp

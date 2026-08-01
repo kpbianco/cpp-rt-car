@@ -1,10 +1,14 @@
 # CPU and memory policy model
 
 M15-01 adds the C++ policy and report model used by later M15 startup and
-memory-provider batches. It is portable RT0 configuration and introspection.
-It does not call affinity, scheduling, NUMA, stack, locking, pinning,
-huge-page, prefault, first-touch, or residency mutation APIs. Configuring a
-policy or passing portable tests does not establish RT1 or RT2.
+memory-provider batches. M15-02 applies the supported thread-only subset behind
+a startup transaction. It is RT0 configuration, application, and introspection;
+it does not establish RT1 or RT2. NUMA memory placement, custom stacks/guards,
+locking, pinning, huge pages, prefault, first touch, and residency remain
+M15-03.
+M15-01 does not call affinity, scheduling, NUMA, stack, locking, pinning,
+huge-page, prefault, first-touch, or residency mutation APIs; native thread
+application begins only in M15-02.
 
 The model is separate from runtime-config schema 7 and stable C ABI v8.
 `Runtime::set_cpu_memory_policy()` copies a bounded request while the runtime
@@ -37,12 +41,35 @@ priority, NUMA node, wait strategy, stack and guard byte requests, and a
 Names use the existing stable identifier character set and must be NUL
 terminated.
 
-M15-01 resolves defaults to the current behavior. A non-default best-effort
-request is retained as `requested` while `resolved` remains the portable
-default and the resolution state is `portable_fallback`. Application is
-`not_performed`. Host- and backend-owned roles report verification as
-`verify_only`; runtime-owned roles report verification as `not_performed`.
-Later M15 batches populate the already-distinct applied and verified stages.
+M15-02 resolves Linux current-thread CPU affinity, normal/FIFO/round-robin
+scheduling and priority, and names shorter than the native 16-byte buffer.
+Runtime-owned executor workers also support `spin` and `yield`; the unchanged
+default is `yield`. `park`, `adaptive`, NUMA-node, custom-stack, and guard
+requests are unsupported in this batch. Best-effort requests drop unsupported
+fields and report `portable_fallback`; required requests fail finalization.
+Windows and other providers without a supported native operation use the same
+fallback/strict rule.
+
+`ThreadPolicyProvider` is an additive C++ boundary for deterministic tests and
+host-specific current-thread providers. The default provider is native Linux
+where compiled and a portable unsupported provider elsewhere. Every
+runtime-owned executor, watchdog, and device-service lane invokes it on itself,
+publishes readiness, and blocks on the runtime's atomic startup decision.
+Commit releases all lanes only after required application and readback pass.
+Abort releases them only to exit, then existing reverse cleanup joins the lanes
+and shuts down initialized device backends before `start()` returns. A later
+successful `start()` begins with fresh report and barrier state.
+
+The frame lane is inspected on the calling thread and is never mutated.
+Host-adapter workers and declared backend/vendor lanes expose no owned native
+handle, so they remain `verify_only` and are never falsely reported as
+runtime-owned. A required non-default request for an inaccessible external lane
+fails finalization.
+
+Reports retain `requested`, `resolved`, `applied`, and `verified` policy,
+application/verification status, native system errors, and whether an applied
+policy was rolled back by thread termination. Best-effort native failure does
+not block startup but never reports a failed field as verified.
 
 ## Memory policy
 
@@ -93,21 +120,25 @@ Finalization rejects:
 - requests for roles or regions absent from the finalized inventory, except
   explicitly declared backend-owned XDMA/accelerator roles;
 - more than 1,024 thread or memory overrides;
-- `required` requests, because native application and verification are not
-  implemented in M15-01.
+- `required` thread fields unsupported for their owner or provider, including
+  M15-03 custom-stack/guard and NUMA requests;
+- `required` memory policy requests, because memory application and
+  verification remain M15-03.
 
-Rejection of a required policy is intentional fail-closed behavior. A later
-batch may accept it only after the named platform provider can apply, verify,
-and roll back the complete request before callbacks.
+Rejection of unsupported required policy is intentional fail-closed behavior.
+Supported M15-02 thread fields are accepted only when the selected provider can
+apply and read them back before callbacks.
 
 ## Compatibility and claim boundary
 
 The change is additive to the C++ source API. Runtime-config schema 7, profile
 parsing, stable C ABI v8, SONAME 8, device ABI v1, installed header inventory,
 package components/targets, compatibility aliases, and Apache-2.0 remain
-unchanged. No callback or steady-state path consults these reports in M15-01.
+unchanged. Callback dispatch does not consult the reports; only an executor
+worker's finalized spin/yield choice affects its idle loop.
 
-Portable tests validate model behavior, arithmetic, inventory, ownership, and
-runtime-instance isolation only. Native policy application, OS verification,
-memory residency, rollback, hardware behavior, latency, RT1, and RT2 remain
-unperformed.
+Portable and injected tests validate model behavior, inventory, ownership,
+startup exclusion, failure rollback/retry, and runtime-instance isolation. An
+unprivileged Linux test applies and reads back one worker's allowed affinity,
+normal scheduler, and name. Privileged FIFO/RR success, custom stacks, memory
+residency, hardware behavior, latency, RT1, and RT2 remain unperformed.

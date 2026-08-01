@@ -25,6 +25,7 @@ struct MemoryInventoryEntry {
 [[nodiscard]] Status resolve_thread_policies(
     std::span<const ThreadPolicyRequest> requests,
     std::span<const ThreadInventoryEntry> inventory,
+    const ThreadPolicyProviderCapabilities& capabilities,
     std::vector<ThreadPolicyReport>& reports,
     const char*& error) noexcept;
 

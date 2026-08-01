@@ -23,6 +23,13 @@ exactly the configured worker count. No executor thread is created after
 joins every worker. If the M5 watchdog is configured, `start()` also creates
 one separate service lane; it never executes graph or nested CPU work.
 
+M15-02 places every runtime-owned worker behind the runtime's startup
+transaction. Each worker applies and reads back its resolved policy on itself,
+reports readiness, and waits for one atomic commit/abort decision. It cannot
+dequeue graph or nested work before commit. A required failure aborts every
+created lane and `start()` joins it before returning; retry uses fresh barrier
+and report state.
+
 The `host_adapter` policy is the explicit exception to runtime-owned worker and
 queue storage. The host attaches a fixed callback table before finalization,
 declares capacities equal to the runtime configuration, and keeps its job
@@ -35,6 +42,11 @@ condition-variable service thread, emergency spawn, detached task, or
 unsubmitted inline fallback in this executor. A worker waiting for nested work
 may execute an already-enqueued task. That work-helping rule is part of normal
 execution and prevents nested-pool deadlock.
+
+The M15-02 per-worker wait override supports `spin` and `yield`. The default
+remains `yield`; `park` and `adaptive` fall back for best-effort requests and
+fail finalization when required until a bounded wake contract is approved.
+Wait selection is immutable after finalization and introduces no helper thread.
 
 ## Policies
 
@@ -147,6 +159,8 @@ state belongs in host-owned memory described by graph resource declarations.
   `tests/host_adapter_tests.cpp`;
 - policy, saturation, nested-work, reduction, stress, and steal tests:
   `tests/test_executor.cpp`;
+- injected/native apply, barrier, rollback, retry, and isolation tests:
+  `tests/test_thread_policy.cpp`;
 - plan, task-scratch, nested ownership, and overload tests:
   `tests/test_memory_plan.cpp`;
 - graph/reference and allocation regression tests:

@@ -1,5 +1,7 @@
 #include "executor.hpp"
 
+#include "thread_policy_transaction.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <limits>
@@ -350,7 +352,7 @@ bool Executor::estimate_control_storage(
     return true;
 }
 
-Status Executor::start() noexcept {
+Status Executor::start(ThreadPolicyTransaction* transaction) noexcept {
     if (started_.load(std::memory_order_acquire)) {
         return Status::invalid_state;
     }
@@ -363,6 +365,7 @@ Status Executor::start() noexcept {
     queue_full_rejections_.store(0, std::memory_order_relaxed);
     scratch_exhaustions_.store(0, std::memory_order_relaxed);
     worker_starts_.store(0, std::memory_order_relaxed);
+    startup_transaction_ = transaction;
     started_.store(true, std::memory_order_release);
 
     if (policy_ == ExecutorPolicy::host_adapter) {
@@ -383,6 +386,9 @@ Status Executor::start() noexcept {
             });
         }
     } catch (...) {
+        if (startup_transaction_) {
+            startup_transaction_->abort();
+        }
         stopping_.store(true, std::memory_order_release);
         for (auto& thread : threads_) {
             if (thread.joinable()) {
@@ -406,6 +412,7 @@ void Executor::stop() noexcept {
     }
     stopping_.store(true, std::memory_order_release);
     if (policy_ == ExecutorPolicy::host_adapter) {
+        startup_transaction_ = nullptr;
         return;
     }
     for (auto& thread : threads_) {
@@ -414,6 +421,7 @@ void Executor::stop() noexcept {
         }
     }
     threads_.clear();
+    startup_transaction_ = nullptr;
 }
 
 bool Executor::acquire_scratch_slot(
@@ -1104,10 +1112,26 @@ Status Executor::complete_external(
 
 void Executor::worker_loop(std::size_t worker_index) noexcept {
     rt::init_fp_env();
+    const ThreadResourceId policy_id{
+        ThreadRole::executor_worker,
+        static_cast<std::uint32_t>(worker_index),
+    };
+    if (startup_transaction_) {
+        startup_transaction_->prepare_current_thread(policy_id);
+    }
     worker_starts_.fetch_add(1, std::memory_order_release);
+    if (startup_transaction_ &&
+        !startup_transaction_->await_decision(policy_id)) {
+        return;
+    }
+    const auto wait_strategy = startup_transaction_
+        ? startup_transaction_->wait_strategy(policy_id)
+        : WaitStrategy::runtime_default;
     while (!stopping_.load(std::memory_order_acquire)) {
         if (!execute_one(worker_index)) {
-            std::this_thread::yield();
+            if (wait_strategy != WaitStrategy::spin) {
+                std::this_thread::yield();
+            }
         }
     }
 }

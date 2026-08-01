@@ -620,11 +620,13 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/host_runtime.cpp
     rt/src/mock_device.cpp
     rt/src/native_platform_preflight.cpp
+    rt/src/native_thread_policy.cpp
     rt/src/observability_export.cpp
     rt/src/runtime_compat.cpp
     rt/src/runtime_profile.cpp
     rt/src/snapshot_codec.cpp
     rt/src/telemetry.cpp
+    rt/src/thread_policy_transaction.cpp
     rt/src/watchdog_monitor.cpp
 )
 

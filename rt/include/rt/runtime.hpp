@@ -248,6 +248,35 @@ public:
         PlatformPreflightReport& report) noexcept = 0;
 };
 
+struct ThreadPolicyProviderCapabilities {
+    bool cpu_affinity = false;
+    bool scheduling = false;
+    bool thread_name = false;
+    // Includes the terminating NUL. Zero means names are unsupported.
+    std::size_t thread_name_capacity = 0;
+};
+
+// M15-02 providers operate only on the calling thread. Runtime-owned lanes
+// invoke these methods before leaving their startup barrier; the frame lane
+// is inspected but never mutated. A Runtime borrows an injected provider
+// through stop/destruction. Capabilities must remain immutable after the
+// provider is attached, and provider methods must not allocate or throw.
+class ThreadPolicyProvider {
+public:
+    virtual ~ThreadPolicyProvider() = default;
+    [[nodiscard]] virtual ThreadPolicyProviderCapabilities capabilities()
+        const noexcept = 0;
+    [[nodiscard]] virtual Status apply_current_thread(
+        ThreadResourceId id,
+        const ThreadPolicy& policy,
+        ThreadPolicy& applied,
+        int& system_error) noexcept = 0;
+    [[nodiscard]] virtual Status inspect_current_thread(
+        ThreadResourceId id,
+        ThreadPolicy& observed,
+        int& system_error) noexcept = 0;
+};
+
 class NumericalPolicy {
 public:
     explicit NumericalPolicy(
@@ -480,6 +509,7 @@ enum class PolicyStageState : std::uint8_t {
     not_requested,
     portable_default,
     portable_fallback,
+    native_resolved,
     not_performed,
     verify_only,
     applied,
@@ -499,9 +529,15 @@ struct ThreadPolicyReport {
     ThreadPolicy requested{};
     ThreadPolicy resolved{};
     ThreadPolicy applied{};
+    ThreadPolicy verified{};
     PolicyStageState resolution = PolicyStageState::not_requested;
     PolicyStageState application = PolicyStageState::not_performed;
     PolicyStageState verification = PolicyStageState::not_performed;
+    Status application_status = Status::ok;
+    Status verification_status = Status::ok;
+    int application_system_error = 0;
+    int verification_system_error = 0;
+    bool rolled_back = false;
 };
 
 struct MemoryRegionPolicyReport {
@@ -764,6 +800,11 @@ public:
     // transactionally during finalize(); schema-v7 and C ABI v8 are unchanged.
     [[nodiscard]] Status set_cpu_memory_policy(
         const CpuMemoryPolicyRequest& policy) noexcept;
+    // Replaces the default platform provider for deterministic integration
+    // tests or host-specific policy control. May be called only while
+    // configuring; the provider is borrowed through stop/destruction.
+    [[nodiscard]] Status set_thread_policy_provider(
+        ThreadPolicyProvider& provider) noexcept;
     // Copies the callback table and borrows adapter.user_data through stop().
     // May be called only while configuring.
     [[nodiscard]] Status set_host_executor(

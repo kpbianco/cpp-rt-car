@@ -301,6 +301,8 @@ def check_runtime_contract() -> None:
     aligned_storage = read("rt/src/aligned_storage.hpp")
     executor_source = read("rt/src/executor.cpp")
     policy_source = read("rt/src/cpu_memory_policy.cpp")
+    native_thread_policy = read("rt/src/native_thread_policy.cpp")
+    thread_policy_transaction = read("rt/src/thread_policy_transaction.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
     preflight_source = read("rt/src/native_platform_preflight.cpp")
     telemetry_source = read("rt/src/telemetry.cpp")
@@ -310,6 +312,7 @@ def check_runtime_contract() -> None:
     executor_test = read("tests/test_executor.cpp")
     memory_test = read("tests/test_memory_plan.cpp")
     policy_test = read("tests/test_cpu_memory_policy.cpp")
+    thread_policy_test = read("tests/test_thread_policy.cpp")
     periodic_test = read("tests/test_periodic_runtime.cpp")
     preflight_test = read("tests/test_platform_preflight.cpp")
     observability_test = read("tests/test_observability.cpp")
@@ -777,6 +780,73 @@ def check_runtime_contract() -> None:
     ):
         if test_name not in policy_test:
             fail(f"tests/test_cpu_memory_policy.cpp: missing M15-01 gate {test_name!r}")
+
+    for token in (
+        "class ThreadPolicyProvider",
+        "struct ThreadPolicyProviderCapabilities",
+        "set_thread_policy_provider(",
+        "ThreadPolicy verified",
+        "application_system_error",
+        "rolled_back",
+    ):
+        if token not in runtime_header:
+            fail(f"rt/runtime.hpp: missing M15-02 report/provider surface {token!r}")
+    for token in (
+        "pthread_setaffinity_np",
+        "pthread_getaffinity_np",
+        "pthread_setschedparam",
+        "pthread_getschedparam",
+        "pthread_setname_np",
+        "pthread_getname_np",
+    ):
+        if token not in native_thread_policy:
+            fail(f"native thread policy: missing M15-02 Linux operation {token!r}")
+    for token in (
+        "prepare_current_thread",
+        "await_decision",
+        "Decision::commit",
+        "Decision::abort",
+        "wait_for_released",
+    ):
+        if token not in thread_policy_transaction:
+            fail(f"thread policy transaction: missing M15-02 barrier {token!r}")
+    for source_name, source in (
+        ("executor", executor_source),
+        ("watchdog", watchdog_source),
+        ("device manager", device_manager),
+    ):
+        for token in ("prepare_current_thread", "await_decision"):
+            if token not in source:
+                fail(f"{source_name}: missing M15-02 startup gate {token!r}")
+    for token in (
+        "policy_transaction.verify_frame_thread",
+        "policy_transaction.failure",
+        "policy_transaction.commit",
+        "policy_transaction.abort",
+    ):
+        if token not in runtime_source:
+            fail(f"host runtime: missing M15-02 transaction step {token!r}")
+    for phrase in (
+        "startup transaction",
+        "never mutated",
+        "Best-effort native failure",
+        "does not establish RT1 or RT2",
+    ):
+        if phrase not in policy_doc:
+            fail(f"docs/cpu_memory_policy.md: missing M15-02 boundary {phrase!r}")
+    for test_name in (
+        "InjectedProviderCommitsEveryRuntimeOwnedRole",
+        "RequiredApplyFailureRollsBackAndRetryIsClean",
+        "RequiredVerificationMismatchAbortsBeforeRunning",
+        "DevicePolicyFailureReversesBackendStartupBeforeRetry",
+        "BestEffortFailureIsReportedWithoutBlockingStart",
+        "UnsupportedProviderFallsBackOrFailsClosed",
+        "ExternalOwnersRemainVerifyOnlyAndAreNeverApplied",
+        "TwoRuntimesUseIndependentProvidersAndReports",
+        "LinuxAppliesAndReadsBackUnprivilegedPolicy",
+    ):
+        if test_name not in thread_policy_test:
+            fail(f"tests/test_thread_policy.cpp: missing M15-02 gate {test_name!r}")
 
     for token in (
         "Runtime::run_periodic(",

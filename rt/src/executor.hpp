@@ -15,6 +15,8 @@
 
 namespace rt::detail {
 
+class ThreadPolicyTransaction;
+
 struct PhaseTaskDispatch {
     Status status = Status::callback_failed;
     bool pending = false;
@@ -43,7 +45,8 @@ public:
     Executor(const Executor&) = delete;
     Executor& operator=(const Executor&) = delete;
 
-    [[nodiscard]] Status start() noexcept;
+    [[nodiscard]] Status start(
+        ThreadPolicyTransaction* transaction = nullptr) noexcept;
     void stop() noexcept;
 
     [[nodiscard]] Status run(
@@ -207,6 +210,7 @@ private:
     std::atomic<std::uint64_t> scratch_exhaustions_{0};
     std::atomic<std::uint64_t> worker_starts_{0};
     std::atomic<std::uint64_t> host_completion_sequence_{4};
+    ThreadPolicyTransaction* startup_transaction_ = nullptr;
 };
 
 } // namespace rt::detail
