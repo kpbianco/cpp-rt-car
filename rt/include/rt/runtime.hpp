@@ -643,6 +643,34 @@ struct CpuMemoryPolicySummary {
     std::size_t informational_excluded_bytes = 0;
 };
 
+// M15-04 exact-once accounting derived from the immutable region inventory and
+// current lifecycle reports. "Payload" totals use reported usable bytes;
+// committed totals include provider rounding, padding, and guards. External
+// totals describe logical registrations, not deduplicated process RSS.
+struct MemoryAccountingSnapshot {
+    std::size_t region_count = 0;
+    std::size_t runtime_region_count = 0;
+    std::size_t host_region_count = 0;
+    std::size_t backend_region_count = 0;
+    std::size_t runtime_plan_bytes = 0;
+    std::size_t runtime_nonprovider_accounted_bytes = 0;
+    std::size_t runtime_persistent_provider_committed_bytes = 0;
+    std::size_t runtime_stack_committed_bytes = 0;
+    std::size_t runtime_live_committed_bytes = 0;
+    std::size_t runtime_informational_reported_bytes = 0;
+    std::size_t host_reported_bytes = 0;
+    std::size_t backend_reported_bytes = 0;
+    std::size_t informational_reported_bytes = 0;
+    std::size_t resident_payload_bytes = 0;
+    std::size_t locked_payload_bytes = 0;
+    std::size_t pinned_payload_bytes = 0;
+    std::size_t fallback_payload_bytes = 0;
+    std::size_t resident_region_count = 0;
+    std::size_t locked_region_count = 0;
+    std::size_t pinned_region_count = 0;
+    std::size_t fallback_region_count = 0;
+};
+
 struct MemoryPlan {
     // planned_bytes is the sum of the three control fields and the three
     // *_total/storage fields. It describes requested runtime storage, not RSS.
@@ -969,6 +997,8 @@ public:
     // accounting keys are stable within the M15 C++ source contract.
     [[nodiscard]] bool cpu_memory_policy_summary(
         CpuMemoryPolicySummary& summary) const noexcept;
+    [[nodiscard]] bool memory_accounting_snapshot(
+        MemoryAccountingSnapshot& snapshot) const noexcept;
     [[nodiscard]] bool thread_policy_report_at(
         std::size_t index,
         ThreadPolicyReport& report) const noexcept;

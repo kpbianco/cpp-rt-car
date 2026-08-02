@@ -1,74 +1,51 @@
 schema_version: 1
 batch:
-  id: M15-03
-  title: Create and verify policy-backed runtime memory regions transactionally
-  goal: Add an injectable/native memory-region provider, create the runtime's contiguous scratch, trace, and owned-stack regions through it, apply and verify supported residency policy before callbacks, and reverse partial commitments without absorbing M15-04 accounting closure or changing stable ABIs.
+  id: M15-04
+  title: Close exact memory accounting and compatibility gates
+  goal: Add an inspectable exact-once C++ accounting snapshot over the existing M15 inventory and live policy reports, reconcile provider commitments, runtime-owned stacks, backend storage, registered spans, residency, lock, pin, and fallback without changing the M4 budget equation or stable ABIs, and close the M15 compatibility and validation boundary.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
     - products/cpp-rt-car/PRD.md#cap-m15--cpu-and-memory-policy
     - products/cpp-rt-car/acceptance.yaml#CAP-M15
-  milestone: products/cpp-rt-car/milestones/M15.md#M15-03--memory-providers-and-region-residency
-  target_contracts:
-    - docs/product_contract.md
-    - docs/architecture.md
-    - docs/roadmap.md
-    - docs/memory_plan.md
-    - docs/cpu_memory_policy.md
-    - docs/executor.md
-    - docs/device_backend.md
-    - docs/time_platform.md
-    - docs/c_abi.md
-  baseline_commit: 146aa38f433649a74e925c6f4ea908c30dbd4b1f
+  milestone: products/cpp-rt-car/milestones/M15.md#M15-04--accounting-compatibility-and-closure
+  baseline_commit: eda82d59809a5b36f32a9864badb0706c4dc3124
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M15-03.yaml
+  control_plane_path: products/cpp-rt-car/batches/M15-04.yaml
 dependencies:
-  - M15-02
+  - M15-03
 scope:
   allowed_paths:
     - contracts/active-batch.yaml
-    - rt/include/rt/config.hpp
     - rt/include/rt/runtime.hpp
-    - rt/src/host_runtime.cpp
     - rt/src/cpu_memory_policy.cpp
     - rt/src/cpu_memory_policy.hpp
-    - rt/src/aligned_storage.hpp
+    - rt/src/host_runtime.cpp
     - rt/src/memory_region_provider.cpp
     - rt/src/memory_region_provider.hpp
     - rt/src/native_memory_region_provider.cpp
     - rt/src/native_memory_region_provider.hpp
     - rt/src/owned_thread.cpp
     - rt/src/owned_thread.hpp
-    - rt/src/executor.cpp
-    - rt/src/executor.hpp
-    - rt/src/watchdog_monitor.cpp
-    - rt/src/watchdog_monitor.hpp
-    - rt/src/device_manager.cpp
-    - rt/src/device_manager.hpp
-    - rt/src/telemetry.cpp
-    - rt/src/telemetry.hpp
     - tests/test_cpu_memory_policy.cpp
     - tests/test_memory_region_policy.cpp
     - tests/test_memory_plan.cpp
-    - tests/test_thread_policy.cpp
-    - tests/test_host_runtime.cpp
-    - tests/test_executor.cpp
-    - tests/test_periodic_runtime.cpp
-    - tests/test_device_runtime.cpp
-    - tests/test_trace_noalloc.cpp
-    - CMakeLists.txt
+    - tests/test_memory_accounting.cpp
+    - tests/test_runtime_noalloc.cpp
+    - tests/test_determinism.cpp
+    - tests/package_consumer/cpp_consumer.cpp
     - tests/CMakeLists.txt
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
-    - docs/cpu_memory_policy.md
-    - docs/memory_plan.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/executor.md
+    - docs/memory_plan.md
+    - docs/cpu_memory_policy.md
+    - docs/release_policy.md
+    - docs/c_abi.md
     - docs/device_backend.md
-    - docs/time_platform.md
-    - docs/evidence/M15-03-*.md
+    - docs/evidence/M15-04-*.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
     - tools/check_release_contract.py
@@ -77,84 +54,81 @@ scope:
     - rt/include/rt/c_api.h
     - rt/include/rt/device_abi.h
     - rt/include/rt/status.hpp
+    - rt/src/c_api.cpp
     - rt/src/cuda_backend.cpp
     - rt/src/cuda_driver.cpp
     - rt/src/xdma_backend.cpp
     - rt/src/xdma_linux.cpp
+    - CMakeLists.txt
+    - cmake/
+    - .github/workflows/
     - LICENSE
     - include/simcore/
     - rt/include/rt/scheduler.hpp
     - rt/include/rt/fiber_pool.hpp
     - rt/include/rt/plugin.hpp
-    - .github/workflows/
 acceptance:
-  - An additive C++ memory-region provider boundary exposes immutable capabilities and bounded allocate, verify, and release operations with opaque ownership handles; Runtime borrows an injected provider without changing runtime-config schema 7, stable C ABI v8, SONAME 8, or device ABI v1.
-  - Phase scratch, task scratch, trace storage, and non-default runtime-owned thread stacks are created through the selected provider with checked alignment, page rounding, before/after guards, prefault, lock, pin, huge-page preference/requirement and fallback, NUMA binding, first touch, residency verification, and rollback resolved only where provider capabilities support them.
-  - Existing logical runtime, executor, and device control aggregates remain exactly accounted and retain their 1.2.1 allocation topology; non-default creation-only policy on those aggregates falls back for best effort and fails closed when required rather than claiming provider ownership that does not exist.
-  - Host-owned registered state and device buffers plus backend-owned storage remain verify-only and are never allocated, guarded, locked, pinned, rebound, first-touched, or released by the runtime.
-  - Linux native memory creation uses checked page geometry and retains native system errors and actual huge-page fallback; unsupported platform, permission, NUMA, lock, pin, or residency operations never become qualification claims.
-  - Runtime-owned custom stacks are created only through a provider/platform path that can bind the supplied stack before thread entry; external frame, host-adapter, and backend/vendor stacks are never replaced or released by the runtime.
-  - Provider-created finalization regions commit only after every required application and verification succeeds; a partial failure releases allocations in deterministic reverse order and leaves Runtime configuring with inspectable failure reports and no leaked provider handles.
-  - Startup stack creation joins every started lane before releasing stack storage; a required stack apply or verification failure aborts before callbacks and reverses device/backend startup through existing checked cleanup, retaining failed and rolled-back report state.
-  - Best-effort failures retain requested, resolved, applied, verified, fallback, residency, native-error, and rollback state while portable defaults preserve the 1.2.1 aligned-new storage and implementation-owned thread-stack behavior.
-  - Repeated failed finalization/start and later success plus two concurrent runtimes do not retain stale handles, reports, stack storage, provider state, or cross-runtime memory policy state.
-  - Runtime callbacks and steady-state RT lanes add no allocation, file I/O, hidden thread creation, blocking mutex, unbounded wait, or spill execution.
-  - Documentation states that injected/native provider tests and unprivileged Linux inspection do not establish RT1, RT2, NUMA, huge-page, locked-memory, CUDA, XDMA, or combined-hardware qualification.
-  - Focused tests, full local verification, and required GitHub CI pass.
+  - An additive C++ memory-accounting snapshot is available after policy reports exist and contains checked exact-once totals derived from the stable accounting-key inventory; no runtime-config schema, stable C ABI v8, SONAME 8, device ABI v1, status, package component, installed-header, or license change occurs.
+  - The six runtime-plan regions still partition MemoryPlan::planned_bytes exactly once and the configured memory budget retains its M4 requested-byte meaning; M15-04 does not arena-migrate logical runtime, executor, or device control aggregates.
+  - Live runtime committed bytes count logical non-provider control storage once, replace phase/task/trace requested payload with provider committed bytes once, and add only currently committed runtime-owned custom stacks once; provider rounding, guards, and fallback allocations are neither omitted nor double counted.
+  - Host-owned registered state/device-buffer spans, host-owned stacks, backend-reported storage, and backend/vendor stacks are totaled separately by ownership from their unique logical registrations and remain informational verify-only resources that are never allocated, mutated, rebound, released, or promoted into the runtime memory budget.
+  - Provider-reported resident, locked, pinned, and fallback payload totals plus region counts are computed from each report at most once with documented payload semantics; a region that fell back in resolution, allocation, or huge-page selection contributes to one fallback region/contribution rather than one per fallback flag.
+  - "Accounting is lifecycle truthful: finalization reports persistent regions, successful start adds live custom stacks before callbacks, stop removes released stacks, failed start/finalization retains inspectable rollback/failure reports without counting released commitments, and two runtimes remain isolated."
+  - Provider-supplied sizes and every aggregate use checked arithmetic; an overflow or inconsistent exact-once invariant fails closed before callbacks and reverses any started lanes/provider allocations through existing cleanup rather than saturating, wrapping, or weakening validation.
+  - Portable defaults retain 1.2.1 behavior, allocation topology, no-allocation steady-state paths, deterministic behavior, and source compatibility for existing C++ callers; the installed runtime and compatibility consumers compile and execute the additive accounting surface.
+  - Exact C ABI v8 export/fingerprint, SONAME 8, device ABI v1, default SDK inventory, compatibility aliases, package relocation, release-contract, no-allocation, determinism, sanitizer, and documentation gates pass without claim promotion.
+  - Documentation marks M15 complete only at portable RT0 and states that accounting and policy tests do not establish physical RSS, NUMA placement, locked-memory, huge-page, CUDA, XDMA, RT1, RT2, latency, thermal, or hardware qualification.
+  - Focused tests and full local verification pass; required GitHub compiler/OS, sanitizer, determinism, package, archive, compatibility, documentation, release, and ABI gates remain mandatory before merge.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - ./scripts/agent-verify.sh full
   focused_tests_to_add:
-    - injected provider allocation, verification, and deterministic reverse release for scratch, trace, and owned stacks
-    - required allocation/apply/verification failure before callbacks with retry and no leaked handles
-    - best-effort unsupported and native failure fallback with retained requested, applied, verified, and system-error state
-    - checked alignment, page rounding, guard, and footprint overflow boundaries
-    - huge-page fallback versus require semantics and residency mismatch
-    - NUMA, first-touch, lock, pin, prefault, and residency capability resolution without privilege-dependent assertions
-    - external registered-state, device-buffer, backend-storage, host-adapter, frame-stack, and vendor-stack verify-only behavior
-    - runtime-owned custom-stack startup/abort/join/release ordering where supported
-    - repeated failure retry, two-runtime isolation, and no-allocation steady-state regression
+    - exact accounting-key uniqueness and six-key planned-byte partition under portable defaults
+    - provider rounding and guards replace requested scratch/trace payload with committed bytes without double counting
+    - live custom-stack commitment appears after start and disappears after stop or failed startup rollback
+    - host registered state/device buffers and backend storage/stacks total separately by ownership and never enter the runtime budget
+    - resident, locked, pinned, resolution fallback, allocation fallback, and huge-page fallback count each region and payload once
+    - zero-byte regions and aliasing logical registrations have documented exact-once behavior
+    - malicious provider committed-byte overflow fails before callbacks and releases all resources in reverse order
+    - repeated retry and two-runtime summaries do not retain stale or cross-instance totals
+    - installed C++ runtime consumer compiles and exercises the additive accounting snapshot while compatibility aliases remain intact
+    - complete no-allocation and determinism regression remains unchanged
   required_ci:
     - Linux GCC and Clang Debug/RelWithDebInfo
     - Windows MSVC Debug/RelWithDebInfo portable fallback
     - AddressSanitizer, UndefinedBehaviorSanitizer, and ThreadSanitizer
-    - determinism artifact exchange
-    - installed package and compatibility consumers
-    - documentation, release, and exact C ABI contracts
-  manual:
-    - Review the additive provider/allocation-handle C++ source compatibility before merge.
-    - Inspect representative Linux mapping, guard, residency, lock, huge-page fallback, and NUMA results without treating them as RT or hardware qualification.
+    - determinism artifact exchange and no-allocation gates
+    - installed package, archive, relocation, preferred-target, and compatibility-target consumers
+    - documentation, release, exact C ABI v8, SONAME 8, and device ABI v1 contracts
 risk:
   class: high
   hazards:
-    - mismatched allocation/release callback or release before the last thread leaves a custom stack
-    - guard and page-rounding arithmetic exposing or protecting the wrong pages
-    - best-effort fallback being reported as applied or verified
-    - partial finalization or startup leaking locked, pinned, NUMA-bound, or provider-owned mappings
-    - permission-dependent Linux behavior causing nondeterministic portable tests
-    - custom-stack thread creation diverging from existing lifecycle and cleanup ordering
-    - cross-platform or cross-runtime provider state leakage
+    - double counting requested payload and provider-rounded commitment for the same region
+    - treating an external logical registration as runtime-owned or physical-RSS deduplication
+    - stale live-stack totals after abort, stop, retry, or partial device cleanup
+    - adding totals that overflow only after provider allocation or stack creation
+    - fallback flags contributing multiple times or implying verified requested policy
+    - source/package compatibility drift while extending the C++ reporting surface
+    - documentation promoting portable accounting into memory-residency or RT qualification
   stop_conditions:
-    - stable C ABI v8, SONAME 8, device ABI v1, status codes, package inventory, or license changes become necessary
-    - existing control aggregates must be re-arena-allocated or M15-04 exact accounting must be absorbed to make a truthful claim
-    - a provider cannot return an ownership handle sufficient for exact reverse release
-    - an external host/vendor allocation or thread stack would need runtime mutation
-    - deterministic tests require privilege, hardware, weakened assertions, timing-only synchronization, or the experimental NUMA/SimCore path
+    - stable C ABI v8, SONAME 8, device ABI v1, status codes, package inventory, installed-header set, license, or support claims must change
+    - truthful closure requires provider migration or arena allocation of existing logical control aggregates
+    - exact physical RSS, external-span deduplication, or backend-private allocation inspection is required
+    - provider release semantics must broaden beyond the approved M15-03 ownership contract
+    - deterministic tests require privilege, physical hardware, weakened assertions, timing-only synchronization, or experimental SimCore/NUMA paths
     - source changes outside allowed paths are required
     - current repository contracts contradict this batch
 rollback:
-  strategy: Revert the M15-03 implementation and active-batch commit; M15-02 thread policy remains the baseline and all runtime storage returns to aligned-new and implementation-owned default stacks.
-  data_migration: none
-  release_action: Do not publish a release from this batch unless separately approved.
+  strategy: Revert the M15-04 implementation and active-batch commit; M15-03 provider-backed regions remain the baseline and its per-region reports remain available without aggregate closure.
 evidence:
   output:
-    - docs/evidence/M15-03-<date>.md
+    - docs/evidence/M15-04-<date>.md
     - exact commands and exit results
-    - acceptance mapping and provider capability matrix
-    - allocation, apply, verify, commit, and reverse-release ordering
+    - acceptance mapping and exact-once accounting equations
+    - finalization/start/stop/rollback accounting transitions
+    - stable ABI, package, source-compatibility, no-allocation, determinism, and sanitizer status
     - changed and preserved invariants
-    - native system errors and portable fallback coverage
-    - residual risks and unperformed privileged, hardware, NUMA, huge-page, locked-memory, and RT validation
-  claim_boundary: Evidence is static, unit, injected-provider, unprivileged local Linux where available, package-contract, and portable RT0 only; it does not qualify RT1, RT2, NUMA placement, locked memory, huge pages, CUDA, XDMA, or combined hardware.
+    - residual risks and unperformed privileged, physical-RSS, NUMA, huge-page, locked-memory, hardware, and RT validation
+  claim_boundary: Evidence is static, unit, injected-provider, unprivileged local Linux where available, package-contract, sanitizer, determinism, and portable RT0 only; it does not qualify physical RSS, NUMA placement, locked memory, huge pages, CUDA, XDMA, combined hardware, RT1, or RT2.

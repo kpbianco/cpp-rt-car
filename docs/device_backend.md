@@ -44,7 +44,9 @@ The target lifecycle is:
    M15-03 may create the service stack through the memory-region provider;
    failure joins the service before returning that stack and then preserves
    this same checked backend cleanup order. Backend storage, buffers, and
-   vendor I/O stacks remain external/verify-only.
+   vendor I/O stacks remain external/verify-only. M15-04 totals each
+   backend-reported storage entry and registered buffer logical key once by
+   ownership without inspecting or mutating backend-private allocation.
 6. `step()` invokes a command provider on a CPU worker. The provider fills one
    fixed-size submission and returns. Accepted device work retains the phase's
    graph completion token; independent CPU work remains runnable.

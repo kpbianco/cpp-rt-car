@@ -4,8 +4,9 @@ M15-01 adds the C++ policy and report model. M15-02 applies the supported
 thread subset behind a startup transaction. M15-03 creates and verifies the
 contiguous phase-scratch, task-scratch, trace, and requested runtime-owned
 stack regions through an injectable/native provider. These are RT0
-configuration, application, and introspection features; they do not establish
-RT1 or RT2. Exact committed/resident accounting closure remains M15-04.
+configuration, application, and introspection features. M15-04 adds an
+exact-once accounting snapshot over the immutable inventory and live reports;
+none of these features establish RT1 or RT2.
 Policy configuration does not establish RT1 or RT2.
 M15-01 itself does not call affinity, scheduling, NUMA, stack, locking,
 pinning, huge-page, prefault, first-touch, or residency mutation APIs.
@@ -84,7 +85,7 @@ entries, and an instance index. The inventory categories are:
 | `phase_scratch` | one aggregate | `phase_scratch_total_bytes` |
 | `task_scratch` | one aggregate | `task_scratch_total_bytes` |
 | `trace_storage` | one aggregate | `trace_storage_bytes` |
-| `thread_stack` | one per thread inventory entry | excluded/informational until stack ownership is implemented |
+| `thread_stack` | one per thread inventory entry | requested bytes remain informational; live provider commitment is accounted separately for runtime-owned custom stacks |
 | `backend_storage` | one per backend | backend-reported and excluded |
 | `registered_state` | one per borrowed state span | host-owned and excluded |
 | `registered_device_buffer` | one per borrowed buffer span | host-owned and excluded |
@@ -143,8 +144,48 @@ The runtime, executor, and device control categories remain exact logical M4
 accounting aggregates over their existing noncontiguous allocation topology.
 Non-default creation-only policy for those aggregates falls back or fails
 required resolution. M15-03 does not falsely treat a shadow allocation as
-their backing storage. M15-04 owns exact committed-byte/fallback accounting
-closure.
+their backing storage. M15-04 closes committed-byte/fallback accounting without
+changing those aggregates' allocation topology.
+
+## Exact-once accounting snapshot
+
+`Runtime::memory_accounting_snapshot()` derives a checked snapshot directly
+from the unique accounting-key reports. It performs no allocation and does not
+change `MemoryPlan` or the configured budget. The closure equation is:
+
+```text
+runtime_live_committed_bytes =
+    runtime_nonprovider_accounted_bytes +
+    runtime_persistent_provider_committed_bytes +
+    runtime_stack_committed_bytes
+```
+
+The non-provider term contains the existing logical runtime, executor, and
+device control aggregates once. The persistent-provider term replaces, rather
+than supplements, requested phase/task/trace payload with the provider's actual
+commitment, including rounding, padding, and guards. The stack term contains
+only currently live runtime-owned custom stacks and returns to zero after join,
+abort, or stop. `runtime_plan_bytes` independently remains the exact six-key
+M4 `planned_bytes` sum.
+
+Host and backend totals sum unique logical registrations by ownership.
+Aliasing the same host span as canonical state and as a device buffer therefore
+creates two ownership contracts and two contributions; the snapshot does not
+claim physical-RSS deduplication. External spans and stacks remain verify-only
+and never contribute to runtime commitment or the memory budget.
+
+Provider-reported resident, locked, pinned, and fallback totals use usable
+reported payload
+bytes, not guard/padding commitment. They include only live committed regions
+for resident/lock/pin state. Resolution fallback, allocation fallback, and
+huge-page fallback are collapsed to one fallback contribution per region even
+when more than one flag describes it. Zero-byte regions can contribute a region
+identity/count but add zero payload bytes.
+
+Finalization and startup re-run this closure before publishing the finalized
+runtime or releasing callbacks. Duplicate keys, impossible ownership/scope,
+stale rolled-back commitments, or arithmetic overflow fail closed and use the
+existing reverse provider/thread/device cleanup.
 
 ## Validation
 
@@ -182,7 +223,9 @@ worker's finalized spin/yield choice affects its idle loop.
 
 Portable and injected tests validate model behavior, inventory, ownership,
 startup exclusion, memory creation, failure rollback/retry, and
-runtime-instance isolation. Unprivileged Linux tests apply/read back one
+runtime-instance isolation. M15-04 additionally checks exact-once ownership,
+provider rounding, external aliases, fallback, live-stack transitions, and
+provider-size overflow. Unprivileged Linux tests apply/read back one
 worker's allowed affinity, normal scheduler, and name and exercise guarded,
 prefaulted resident scratch plus a custom-stack lifecycle. Privileged FIFO/RR
 success, privileged locked-memory success, real huge-page success, multi-node

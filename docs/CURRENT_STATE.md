@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-01
-Implementation baseline: `146aa38f433649a74e925c6f4ea908c30dbd4b1f` (`M15-02`)
+Implementation baseline: `eda82d59809a5b36f32a9864badb0706c4dc3124` (`M15-03`)
 
 ## Product state
 
@@ -14,9 +14,11 @@ Implementation baseline: `146aa38f433649a74e925c6f4ea908c30dbd4b1f` (`M15-02`)
 - M15-01 policy model and exact inventory: complete.
 - M15-02 thread application and verification: complete and published on its
   scoped branch.
-- M15-03 memory providers and region residency: implemented and verified
+- M15-03 memory providers and region residency: complete and published on its
+  scoped branch.
+- M15-04 exact accounting and compatibility closure: implemented and verified
   locally on its scoped branch; not yet committed or published.
-- Active batch: `contracts/active-batch.yaml` (`M15-03`).
+- Active batch: `contracts/active-batch.yaml` (`M15-04`).
 
 ## Repository health
 
@@ -29,13 +31,16 @@ The M15-03 implementation passed the repository contract, quick, and full
 local gates plus focused stress, AddressSanitizer/UndefinedBehaviorSanitizer,
 and ThreadSanitizer runs. Exact C ABI v8 remains 70 exports with fingerprint
 `0xd0e7a5a14bf35f97`. Required GitHub compiler/OS, sanitizer, determinism, and
-package CI has not run for this uncommitted branch and remains authoritative.
+package CI remains authoritative.
+The M15-04 implementation passed focused accounting/policy tests, 100 repeated
+lifecycle runs, a relocated 11-consumer install check, Debug ASan/UBSan and
+ThreadSanitizer runs, and the repository contract, quick, and full gates.
 
 ## Active objective
 
-Retain the completed M15-03 implementation and evidence for review. The next
-bounded milestone batch is M15-04 exact accounting and compatibility closure;
-do not begin it until a separate active-batch contract is approved.
+Retain the completed M15-04 implementation and evidence for review. M16 is the
+next milestone, but no M16 implementation begins until a separate bounded
+active-batch contract is planned and approved.
 
 ## Blockers and limitations
 
@@ -50,5 +55,5 @@ do not begin it until a separate active-batch contract is approved.
 
 ## Next action
 
-Review and, when explicitly authorized, commit and publish M15-03. Then plan
-M15-04 exact accounting and compatibility closure as a separate bounded batch.
+Review and, when explicitly authorized, commit and publish M15-04. Then plan
+the first bounded M16 multi-rate batch separately.

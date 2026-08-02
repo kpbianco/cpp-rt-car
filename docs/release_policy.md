@@ -38,6 +38,12 @@ disable unsafe behavior immediately, but the release notes must identify the
 exception. Incompatible C ABI changes require a new ABI number, SONAME,
 allowlist, fingerprint, and compatibility test; the v8 manifest is immutable.
 
+M15 extends the supported C++ source surface additively with CPU/memory policy
+providers, reports, and `MemoryAccountingSnapshot`. Installed preferred and
+compatibility consumers compile the new snapshot while the C ABI v8 headers,
+fingerprint, SONAME, package components, and installed-header inventory remain
+unchanged.
+
 `rtfw::runtime` is the preferred target beginning in 1.2. The
 `cpp_runtime` component and `rtfw::simcore_rt` target remain available
 throughout 1.x as compatibility names. The deprecated `tick_duration`,

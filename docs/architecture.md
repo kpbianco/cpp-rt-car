@@ -7,7 +7,7 @@ in [ADRs](adr/README.md).
 
 ## Current 1.2 implementation
 
-### M1–M15-03 host, device, distribution, SDK, and CPU/memory-policy runtime
+### M1–M15 host, device, distribution, SDK, and CPU/memory-policy runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -130,6 +130,16 @@ device control totals remain logical aggregates over their existing allocation
 topology; provider migration for those aggregates and exact committed-byte
 closure are not claimed before M15-04.
 
+M15-04 closes that reporting boundary with an additive C++ accounting snapshot.
+It derives checked totals from each unique memory accounting key: existing
+logical non-provider control storage, actual phase/task/trace provider
+commitments, currently live runtime-owned stacks, and host/backend-reported
+external registrations. Resident, locked, pinned, and fallback payload counts
+are folded once per report. Finalization and startup validate closure before
+publishing state or releasing callbacks; stop and rollback remove live stack
+commitments. This does not arena-migrate control objects, inspect backend-private
+allocations, deduplicate RSS, or change stable ABIs.
+
 ### Legacy simulation path
 
 `SimCore` owns a phase graph, an internal range-worker team, frame arenas,
@@ -211,6 +221,8 @@ identities. M15-02 populates thread applied/verified reports through the
 transactional startup barrier. M15-03 creates and verifies contiguous runtime
 regions and owned stacks through a memory provider without changing callback
 scheduling or stable ABIs.
+M15-04 adds exact-once accounting reconciliation and compatibility closure
+without changing callback scheduling, allocation topology, or stable ABIs.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
@@ -228,7 +240,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M15-03 host/device runtime, lifecycle-safety closure, and CPU/memory policy:
+- M1–M15 host/device runtime, lifecycle-safety closure, and CPU/memory policy:
   `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`

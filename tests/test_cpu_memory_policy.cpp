@@ -100,6 +100,13 @@ TEST(CpuMemoryPolicy, PortableDefaultsInventoryEveryCurrentResourceOnce) {
     rt::MemoryPlan plan;
     ASSERT_TRUE(runtime.memory_plan(plan));
     EXPECT_EQ(summary.runtime_accounted_bytes, plan.planned_bytes);
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.region_count, summary.memory_region_count);
+    EXPECT_EQ(accounting.runtime_plan_bytes, plan.planned_bytes);
+    EXPECT_EQ(accounting.runtime_live_committed_bytes, plan.planned_bytes);
+    EXPECT_EQ(accounting.runtime_stack_committed_bytes, 0u);
+    EXPECT_EQ(accounting.informational_reported_bytes, 0u);
 
     const auto threads = thread_reports(runtime, summary.thread_count);
     const auto memory = memory_reports(runtime, summary.memory_region_count);
@@ -408,6 +415,46 @@ TEST(CpuMemoryPolicy, DeviceAndBorrowedMemoryInventoryIsExact) {
     EXPECT_EQ(registered_state->reported_bytes, state.size());
     EXPECT_EQ(registered_buffer->reported_bytes, device_buffer.size());
     EXPECT_EQ(registered_buffer->accounted_bytes, 0u);
+
+    rt::MemoryPlan plan{};
+    ASSERT_TRUE(runtime.memory_plan(plan));
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.region_count, summary.memory_region_count);
+    EXPECT_EQ(
+        accounting.host_reported_bytes,
+        state.size() + device_buffer.size());
+    EXPECT_EQ(
+        accounting.backend_reported_bytes,
+        plan.device_backend_reported_bytes);
+    EXPECT_EQ(
+        accounting.informational_reported_bytes,
+        summary.informational_excluded_bytes);
+}
+
+TEST(CpuMemoryPolicy, AliasedExternalRegistrationsRemainDistinctLogicalKeys) {
+    rt::MockDeviceBackend mock;
+    rt::Runtime runtime;
+    rt::DeviceBackendHandle backend{};
+    ASSERT_EQ(
+        runtime.register_device_backend({"policy.mock", mock.api()}, backend),
+        rt::Status::ok);
+    std::array<std::byte, 128> shared{};
+    rt::DeviceBufferHandle buffer{};
+    ASSERT_EQ(
+        runtime.register_device_buffer(
+            {"policy.shared", backend, shared},
+            buffer),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_state({"policy.shared", 1, shared}),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok) << runtime.last_error();
+
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.host_reported_bytes, 2 * shared.size());
+    EXPECT_GE(accounting.host_region_count, 3u);
 }
 
 TEST(CpuMemoryPolicy, RuntimeInstancesKeepIndependentResolvedInventories) {

@@ -60,6 +60,8 @@ int main() {
     config.executor_queue_capacity = 8;
     config.task_scratch_slots = 8;
     std::size_t calls = 0;
+    rt::MemoryPlan memory_plan{};
+    rt::MemoryAccountingSnapshot accounting{};
 
     if (runtime.configure(config) != rt::Status::ok ||
         runtime.set_host_executor({
@@ -79,5 +81,11 @@ int main() {
         runtime.stop() != rt::Status::ok) {
         return 1;
     }
-    return calls == 1 ? 0 : 2;
+    if (!runtime.memory_plan(memory_plan) ||
+        !runtime.memory_accounting_snapshot(accounting) ||
+        accounting.runtime_plan_bytes != memory_plan.planned_bytes ||
+        accounting.region_count == 0) {
+        return 2;
+    }
+    return calls == 1 ? 0 : 3;
 }

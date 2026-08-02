@@ -87,6 +87,7 @@ Status RegionStorage::create(
         const bool valid =
             application_status == Status::ok &&
             allocation.data_bytes == bytes &&
+            allocation.committed_bytes >= allocation.data_bytes &&
             (bytes == 0 || allocation.data != nullptr) &&
             aligned_pointer(
                 allocation.data,

@@ -7,8 +7,10 @@ hard-real-time qualification.
 
 M15-01 adds an immutable policy inventory over this plan, and M15-03 creates
 the phase-scratch, task-scratch, trace, and requested runtime-owned stack
-regions through an injectable/native provider. Policy request and report
-storage remains included in `runtime_control_bytes`. See
+regions through an injectable/native provider. M15-04 closes exact-once live
+commitment, external ownership, residency, and fallback totals without changing
+the M4 budget equation. Policy request and report storage remains included in
+`runtime_control_bytes`. See
 [the CPU/memory policy model](cpu_memory_policy.md).
 
 The legacy `SimCore`, frame arenas, `WorkerPool`, `rt::Scheduler`, `FiberPool`,
@@ -59,8 +61,7 @@ unique keys with `informational_excluded` scope and never contribute to the
 runtime-plan sum. Default stack sizes remain reported as zero because the
 implementation-owned OS/host stack is not inspected. A non-default
 runtime-owned stack reports its usable and provider-committed bytes separately
-without entering the M4 `planned_bytes` sum; exact M15 accounting closure
-remains M15-04.
+without entering the M4 `planned_bytes` sum.
 
 Provider-committed bytes include page rounding, guards, and mapping padding and
 can therefore exceed the M4 requested payload. M15-03 retains this value and
@@ -69,6 +70,29 @@ applied residency/lock/pin/fallback state per report but does not redefine
 Logical runtime/executor/device control aggregates retain their existing
 noncontiguous allocation topology and do not receive shadow provider
 allocations.
+
+M15-04 exposes `MemoryAccountingSnapshot` as a separate live view:
+
+```text
+runtime_live_committed_bytes =
+    runtime_nonprovider_accounted_bytes +
+    runtime_persistent_provider_committed_bytes +
+    runtime_stack_committed_bytes
+```
+
+The first term is the logical runtime/executor/device control topology. The
+second uses actual provider commitments for phase/task/trace instead of their
+requested payload. The third contains only active runtime-owned custom stacks.
+`runtime_plan_bytes` remains equal to `planned_bytes`; provider rounding and
+stacks do not silently change `memory_budget_bytes` semantics.
+
+Host-owned registered state/device buffers and host stacks, plus backend-owned
+storage/vendor stacks, receive separate reported-byte totals. They describe
+unique logical registrations, not deduplicated physical pages or RSS. Verified
+Provider-reported resident/locked/pinned and fallback aggregates use usable
+reported payload and
+count each region at most once. They do not qualify placement, privilege,
+latency, or hardware behavior.
 
 `state_count` and `registered_state_bytes` report the frozen borrowed state.
 `snapshot_max_bytes`, `replay_input_capacity`, and `input_log_max_bytes` expose

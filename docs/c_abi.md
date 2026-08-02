@@ -6,6 +6,8 @@ declarations represented by
 `abi/rtfw_c_abi_v8.exports`, `rt/include/rt/c_api.h`, and
 `rt/include/rt/device_abi.h`. It does not turn the C++ API into a binary ABI,
 qualify a deployment for hard real time, or make hardware drivers portable.
+M15 CPU/memory policy and exact-once accounting are additive C++ source APIs;
+they do not append to or reinterpret any C ABI v8 structure or export.
 
 ## Compatibility handshake
 

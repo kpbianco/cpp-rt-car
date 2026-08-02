@@ -52,6 +52,12 @@ tests. Logical control aggregates retain their existing allocation topology,
 external regions remain verify-only, and exact accounting closure remains
 M15-04. Native memory policy is still RT0 behavior, not RT1 or RT2
 qualification.
+M15-04 adds a checked C++ accounting snapshot derived from the exact-once
+region inventory and live reports. It reconciles logical non-provider control
+bytes, actual persistent provider commitments, active custom stacks, external
+host/backend registrations, resident/locked/pinned payload, and fallback once
+per region. The M4 budget equation, allocation topology, stable C ABI v8,
+device ABI v1, package surface, and RT0 qualification boundary remain unchanged.
 
 ## Claim policy
 
@@ -279,7 +285,7 @@ callback expressions.
 | Portable release contract | Supported RT0 / M12 complete | Named support tuples, same-major CMake compatibility, cross-instance device isolation, CPack archives, and content-addressed release manifests |
 | JSON profiles/runtime autotune | Implemented RT0 host tooling | Complete resolved schema, bounded allocation-free transactional C++ parser, explicit runtime/schema compatibility, real target-runtime demo, and generated-profile CI round trip; no portable tuning or latency claim |
 | Product SDK boundary | Supported / M14 complete | Preferred `rtfw::runtime`, exact public-header inventory, isolated optional adapters, compatibility target names, and no exported project warning/feature policy |
-| CPU/memory policy | M15-03 implemented memory-policy RT0 surface | Additive thread and memory providers, requested/resolved/applied/verified reports, transactional scratch/trace and owned-stack creation, Linux mapping/residency support, external verify-only ownership, and rollback; M15-04 accounting closure remains planned |
+| CPU/memory policy | M15 implemented portable RT0 surface | Additive thread/memory providers and exact-once live accounting, transactional scratch/trace/owned-stack policy, Linux mapping/residency support, external verify-only ownership, checked rollback, and unchanged stable ABI/package boundaries |
 | GPU | CUDA candidate; no qualified tuple | Real Driver API adapter exists behind `RTFW_ENABLE_CUDA`; deterministic mock remains the portable gate and the legacy detached-thread stub is excluded |
 | Xilinx XDMA AXI-MM | Candidate; unqualified | Portable bounded backend and opt-in Linux character-device adapter exist for one named stack; the support matrix has no qualified tuple |
 | Portable hard real time | Non-goal | Only a named RT2 deployment can be qualified |

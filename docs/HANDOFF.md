@@ -4,9 +4,9 @@
 
 RTFW 1.2.1 is a portable RT0 C++20 runtime. M14 and M14.1 are merged. The
 repository has now been connected to the `portfolio-control` assurance workflow.
-M15-02 is the published implementation baseline. M15-03 is implemented and
-verified locally under the active bounded contract, but is not committed or
-published.
+M15-03 is the committed and published implementation baseline. M15-04 exact
+accounting and compatibility closure is implemented and verified locally under
+the active bounded contract, but is not committed or published.
 
 ## Read first
 
@@ -26,9 +26,9 @@ Control plane:
 
 ## Exact next objective
 
-Review and, when explicitly authorized, commit and publish M15-03. After that,
-plan M15-04 exact accounting and compatibility closure as a separate bounded
-batch. Do not absorb M15-04 into the active M15-03 work.
+Review and, when explicitly authorized, commit and publish M15-04. After that,
+plan the first M16 multi-rate batch separately; do not absorb M16 into the
+active M15-04 contract.
 
 ## Protected decisions
 
@@ -53,7 +53,7 @@ determinism, package, archive, and release-contract matrix.
 
 ## Completion output
 
-The local completion record is `docs/evidence/M15-03-2026-08-01.md`. It records
-acceptance mapping, commands, results, changed invariants, compatibility status,
-residual risks, and unperformed privileged, NUMA, huge-page, locked-memory,
-hardware, and RT validation.
+The local completion record is `docs/evidence/M15-04-2026-08-01.md`. It records
+exact equations, lifecycle transitions, acceptance mapping, commands,
+compatibility status, residual risk, and all unperformed physical-RSS,
+privileged, NUMA, huge-page, locked-memory, hardware, and RT validation.

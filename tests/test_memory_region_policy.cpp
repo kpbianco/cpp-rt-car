@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <new>
 #include <span>
 #include <vector>
@@ -80,7 +81,14 @@ public:
         allocation.data = static_cast<std::byte*>(handle->allocation);
         allocation.data_bytes = payload_bytes;
         allocation.allocation_handle = handle;
-        allocation.committed_bytes = payload_bytes;
+        allocation.committed_bytes =
+            (overflow_commitments &&
+             (id.category == rt::MemoryCategory::phase_scratch ||
+              id.category == rt::MemoryCategory::task_scratch)) ||
+                (overflow_stack_commitments &&
+                 id.category == rt::MemoryCategory::thread_stack)
+            ? std::numeric_limits<std::size_t>::max()
+            : payload_bytes + committed_overhead;
         allocation.alignment = alignment;
         allocation.page_rounded =
             policy.page_rounding == rt::MemoryPolicyToggle::enabled;
@@ -94,6 +102,8 @@ public:
             policy.pinning == rt::MemoryPolicyToggle::enabled;
         allocation.huge_pages =
             policy.huge_pages == rt::HugePagePolicy::require;
+        allocation.huge_page_fallback = force_huge_page_fallback &&
+            id.category == rt::MemoryCategory::phase_scratch;
         allocation.numa_bound = policy.numa_node >= 0;
         allocation.first_touched =
             policy.first_touch == rt::FirstTouchPolicy::frame_thread;
@@ -164,6 +174,10 @@ public:
     rt::MemoryCategory fail_category = static_cast<rt::MemoryCategory>(0);
     rt::MemoryCategory mismatch_category = static_cast<rt::MemoryCategory>(0);
     bool fail_only_nondefault = false;
+    bool overflow_commitments = false;
+    bool overflow_stack_commitments = false;
+    bool force_huge_page_fallback = false;
+    std::size_t committed_overhead = 0;
     std::vector<rt::MemoryRegionId> allocations;
     std::vector<rt::MemoryRegionId> releases;
 };
@@ -311,6 +325,7 @@ TEST(MemoryRegionPolicy, BestEffortNativeFailureUsesReportedFallback) {
     InjectedMemoryProvider provider;
     provider.fail_category = rt::MemoryCategory::phase_scratch;
     provider.fail_only_nondefault = true;
+    provider.force_huge_page_fallback = true;
     rt::Runtime runtime;
     ASSERT_EQ(runtime.set_memory_region_provider(provider), rt::Status::ok);
     ASSERT_EQ(runtime.register_callback({"phase", &count_callback, nullptr}),
@@ -329,6 +344,79 @@ TEST(MemoryRegionPolicy, BestEffortNativeFailureUsesReportedFallback) {
     EXPECT_EQ(report.application_system_error, 73);
     EXPECT_EQ(report.applied.prefault, rt::MemoryPolicyToggle::runtime_default);
     EXPECT_EQ(report.verification, rt::PolicyStageState::verified);
+
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.fallback_region_count, 1u);
+    EXPECT_EQ(accounting.fallback_payload_bytes, report.reported_bytes);
+}
+
+TEST(MemoryRegionPolicy, AccountingReplacesProviderPayloadWithoutDoubleCount) {
+    InjectedMemoryProvider provider;
+    provider.committed_overhead = 4096;
+    rt::Runtime runtime;
+    ASSERT_EQ(runtime.set_memory_region_provider(provider), rt::Status::ok);
+    ASSERT_EQ(runtime.register_callback({"phase", &count_callback, nullptr}),
+              rt::Status::ok);
+
+    rt::MemoryPolicyRequest request{};
+    request.id = {rt::MemoryCategory::phase_scratch,
+                  rt::ThreadRole::none, 0};
+    request.policy.requirement = rt::PolicyRequirement::required;
+    request.policy.locking = rt::MemoryPolicyToggle::enabled;
+    request.policy.pinning = rt::MemoryPolicyToggle::enabled;
+    request.policy.residency_verification =
+        rt::MemoryPolicyToggle::enabled;
+    const std::array requests{request};
+    ASSERT_EQ(runtime.set_cpu_memory_policy({{}, requests}), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok) << runtime.last_error();
+
+    rt::MemoryPlan plan{};
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_plan(plan));
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.runtime_plan_bytes, plan.planned_bytes);
+    EXPECT_EQ(
+        accounting.runtime_live_committed_bytes,
+        accounting.runtime_nonprovider_accounted_bytes +
+            accounting.runtime_persistent_provider_committed_bytes);
+    EXPECT_EQ(
+        accounting.runtime_persistent_provider_committed_bytes,
+        plan.phase_scratch_total_bytes + plan.task_scratch_total_bytes +
+            plan.trace_storage_bytes + 3 * provider.committed_overhead);
+    EXPECT_EQ(accounting.resident_region_count, 1u);
+    EXPECT_EQ(
+        accounting.resident_payload_bytes,
+        plan.phase_scratch_total_bytes);
+    EXPECT_EQ(accounting.locked_region_count, 1u);
+    EXPECT_EQ(accounting.locked_payload_bytes, plan.phase_scratch_total_bytes);
+    EXPECT_EQ(accounting.pinned_region_count, 1u);
+    EXPECT_EQ(accounting.pinned_payload_bytes, plan.phase_scratch_total_bytes);
+}
+
+TEST(MemoryRegionPolicy, ProviderCommitmentOverflowRollsBackBeforeCallbacks) {
+    InjectedMemoryProvider provider;
+    provider.overflow_commitments = true;
+    int callbacks = 0;
+    rt::Runtime runtime;
+    ASSERT_EQ(runtime.set_memory_region_provider(provider), rt::Status::ok);
+    ASSERT_EQ(runtime.register_callback({"phase", &count_callback, &callbacks}),
+              rt::Status::ok);
+
+    EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::configuring);
+    EXPECT_EQ(callbacks, 0);
+    ASSERT_EQ(provider.releases.size(), 3u);
+    EXPECT_EQ(provider.releases[0].category,
+              rt::MemoryCategory::trace_storage);
+    EXPECT_EQ(provider.releases[1].category,
+              rt::MemoryCategory::task_scratch);
+    EXPECT_EQ(provider.releases[2].category,
+              rt::MemoryCategory::phase_scratch);
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.runtime_persistent_provider_committed_bytes, 0u);
+    EXPECT_EQ(accounting.runtime_stack_committed_bytes, 0u);
 }
 
 TEST(MemoryRegionPolicy, RequiredVerificationMismatchReleasesAllRegions) {
@@ -383,6 +471,46 @@ TEST(MemoryRegionPolicy, RuntimeInstancesKeepProviderStateIsolated) {
 }
 
 #if defined(__linux__)
+TEST(MemoryRegionPolicy, StackCommitmentOverflowAbortsAndReleasesBeforeCallback) {
+    InjectedMemoryProvider provider;
+    provider.overflow_stack_commitments = true;
+    int callbacks = 0;
+    rt::Runtime runtime;
+    ASSERT_EQ(runtime.set_memory_region_provider(provider), rt::Status::ok);
+    rt::RuntimeConfig config{};
+    config.worker_count = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(runtime.register_callback({"phase", &count_callback, &callbacks}),
+              rt::Status::ok);
+
+    std::array<rt::ThreadPolicyRequest, 2> stack_requests{};
+    for (std::size_t index = 0; index < stack_requests.size(); ++index) {
+        stack_requests[index].id = {
+            rt::ThreadRole::executor_worker,
+            static_cast<std::uint32_t>(index)};
+        stack_requests[index].policy.requirement =
+            rt::PolicyRequirement::required;
+        stack_requests[index].policy.stack_bytes =
+            std::max<std::size_t>(64 * 1024, PTHREAD_STACK_MIN * 2);
+    }
+    ASSERT_EQ(runtime.set_cpu_memory_policy({stack_requests, {}}),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    EXPECT_EQ(runtime.start(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_EQ(callbacks, 0);
+    ASSERT_GE(provider.releases.size(), 2u);
+    EXPECT_EQ(provider.releases[0].category,
+              rt::MemoryCategory::thread_stack);
+    EXPECT_EQ(provider.releases[0].instance, 1u);
+    EXPECT_EQ(provider.releases[1].category,
+              rt::MemoryCategory::thread_stack);
+    EXPECT_EQ(provider.releases[1].instance, 0u);
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.runtime_stack_committed_bytes, 0u);
+}
+
 TEST(MemoryRegionPolicy, LinuxAppliesGuardPrefaultAndResidencyUnprivileged) {
     rt::Runtime runtime;
     ASSERT_EQ(runtime.register_callback({"phase", &count_callback, nullptr}),
@@ -491,8 +619,18 @@ TEST(MemoryRegionPolicy, OwnedWorkerStacksReleaseInReverseCreationOrder) {
     ASSERT_EQ(runtime.set_cpu_memory_policy({stack_requests, {}}),
               rt::Status::ok);
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    rt::MemoryAccountingSnapshot accounting{};
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.runtime_stack_committed_bytes, 0u);
     ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(
+        accounting.runtime_stack_committed_bytes,
+        stack_requests[0].policy.stack_bytes +
+            stack_requests[1].policy.stack_bytes);
     ASSERT_EQ(runtime.stop(), rt::Status::ok);
+    ASSERT_TRUE(runtime.memory_accounting_snapshot(accounting));
+    EXPECT_EQ(accounting.runtime_stack_committed_bytes, 0u);
     ASSERT_GE(provider.releases.size(), 2u);
     EXPECT_EQ(provider.releases[0].category,
               rt::MemoryCategory::thread_stack);

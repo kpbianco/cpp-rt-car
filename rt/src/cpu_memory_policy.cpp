@@ -821,4 +821,193 @@ Status resolve_memory_policies(
     return Status::ok;
 }
 
+Status summarize_memory_accounting(
+    std::span<const MemoryRegionPolicyReport> reports,
+    MemoryAccountingSnapshot& snapshot,
+    const char*& error) noexcept {
+    snapshot = {};
+    error = nullptr;
+    snapshot.region_count = reports.size();
+
+    const auto add = [&](std::size_t& total, std::size_t value) {
+        return checked_add(total, value, total);
+    };
+    const auto persistent_provider_category = [](MemoryCategory category) {
+        return category == MemoryCategory::phase_scratch ||
+               category == MemoryCategory::task_scratch ||
+               category == MemoryCategory::trace_storage;
+    };
+
+    for (std::size_t index = 0; index < reports.size(); ++index) {
+        const auto& report = reports[index];
+        if (std::any_of(
+                reports.begin(),
+                reports.begin() + static_cast<std::ptrdiff_t>(index),
+                [&](const auto& prior) {
+                    return prior.accounting_key == report.accounting_key;
+                })) {
+            error = "memory accounting key appears more than once";
+            return Status::invalid_config;
+        }
+        if (report.rolled_back && report.committed_bytes != 0) {
+            error = "rolled-back memory still reports committed bytes";
+            return Status::invalid_config;
+        }
+
+        switch (report.ownership) {
+        case MemoryProviderOwnership::runtime:
+            ++snapshot.runtime_region_count;
+            break;
+        case MemoryProviderOwnership::host:
+            ++snapshot.host_region_count;
+            if (!add(snapshot.host_reported_bytes, report.reported_bytes)) {
+                error = "host memory accounting overflows";
+                return Status::invalid_config;
+            }
+            break;
+        case MemoryProviderOwnership::backend:
+            ++snapshot.backend_region_count;
+            if (!add(snapshot.backend_reported_bytes, report.reported_bytes)) {
+                error = "backend memory accounting overflows";
+                return Status::invalid_config;
+            }
+            break;
+        case MemoryProviderOwnership::inherit:
+            error = "resolved memory ownership remains inherited";
+            return Status::invalid_config;
+        }
+
+        switch (report.accounting_scope) {
+        case MemoryAccountingScope::runtime_plan:
+            if (report.ownership != MemoryProviderOwnership::runtime ||
+                report.id.category == MemoryCategory::thread_stack ||
+                report.id.category == MemoryCategory::backend_storage ||
+                report.id.category == MemoryCategory::registered_state ||
+                report.id.category ==
+                    MemoryCategory::registered_device_buffer) {
+                error = "external or stack memory entered the runtime plan";
+                return Status::invalid_config;
+            }
+            if (!add(snapshot.runtime_plan_bytes, report.accounted_bytes)) {
+                error = "runtime-plan accounting overflows";
+                return Status::invalid_config;
+            }
+            if (persistent_provider_category(report.id.category)) {
+                if (!add(
+                        snapshot.runtime_persistent_provider_committed_bytes,
+                        report.committed_bytes)) {
+                    error = "persistent provider commitment overflows";
+                    return Status::invalid_config;
+                }
+            } else {
+                if (report.committed_bytes != 0) {
+                    error = "logical control aggregate has provider commitment";
+                    return Status::invalid_config;
+                }
+                if (!add(
+                        snapshot.runtime_nonprovider_accounted_bytes,
+                        report.accounted_bytes)) {
+                    error = "non-provider runtime accounting overflows";
+                    return Status::invalid_config;
+                }
+            }
+            break;
+        case MemoryAccountingScope::informational_excluded:
+            if (!add(
+                    snapshot.informational_reported_bytes,
+                    report.reported_bytes)) {
+                error = "informational memory accounting overflows";
+                return Status::invalid_config;
+            }
+            if (report.ownership == MemoryProviderOwnership::runtime) {
+                if (report.id.category != MemoryCategory::thread_stack) {
+                    error = "unexpected runtime-owned informational region";
+                    return Status::invalid_config;
+                }
+                if (!add(
+                        snapshot.runtime_informational_reported_bytes,
+                        report.reported_bytes) ||
+                    !add(
+                        snapshot.runtime_stack_committed_bytes,
+                        report.committed_bytes)) {
+                    error = "runtime stack accounting overflows";
+                    return Status::invalid_config;
+                }
+            } else if (report.committed_bytes != 0) {
+                error = "external memory reports runtime commitment";
+                return Status::invalid_config;
+            }
+            break;
+        default:
+            error = "memory accounting scope is invalid";
+            return Status::invalid_config;
+        }
+
+        const bool live = report.committed_bytes != 0 && !report.rolled_back;
+        if (live && report.resident) {
+            ++snapshot.resident_region_count;
+            if (!add(
+                    snapshot.resident_payload_bytes,
+                    report.reported_bytes)) {
+                error = "resident payload accounting overflows";
+                return Status::invalid_config;
+            }
+        }
+        if (live && report.locked) {
+            ++snapshot.locked_region_count;
+            if (!add(snapshot.locked_payload_bytes, report.reported_bytes)) {
+                error = "locked payload accounting overflows";
+                return Status::invalid_config;
+            }
+        }
+        if (live && report.pinned) {
+            ++snapshot.pinned_region_count;
+            if (!add(snapshot.pinned_payload_bytes, report.reported_bytes)) {
+                error = "pinned payload accounting overflows";
+                return Status::invalid_config;
+            }
+        }
+        const bool fell_back =
+            report.resolution == PolicyStageState::portable_fallback ||
+            report.application == PolicyStageState::portable_fallback ||
+            report.huge_page_fallback;
+        if (fell_back) {
+            ++snapshot.fallback_region_count;
+            if (!add(snapshot.fallback_payload_bytes, report.reported_bytes)) {
+                error = "fallback payload accounting overflows";
+                return Status::invalid_config;
+            }
+        }
+    }
+
+    std::size_t ownership_region_count = 0;
+    if (!add(ownership_region_count, snapshot.runtime_region_count) ||
+        !add(ownership_region_count, snapshot.host_region_count) ||
+        !add(ownership_region_count, snapshot.backend_region_count) ||
+        ownership_region_count != snapshot.region_count) {
+        error = "memory ownership counts do not close";
+        return Status::invalid_config;
+    }
+    std::size_t informational_total =
+        snapshot.runtime_informational_reported_bytes;
+    if (!add(informational_total, snapshot.host_reported_bytes) ||
+        !add(informational_total, snapshot.backend_reported_bytes) ||
+        informational_total != snapshot.informational_reported_bytes) {
+        error = "informational memory totals do not close";
+        return Status::invalid_config;
+    }
+    snapshot.runtime_live_committed_bytes =
+        snapshot.runtime_nonprovider_accounted_bytes;
+    if (!add(
+            snapshot.runtime_live_committed_bytes,
+            snapshot.runtime_persistent_provider_committed_bytes) ||
+        !add(
+            snapshot.runtime_live_committed_bytes,
+            snapshot.runtime_stack_committed_bytes)) {
+        error = "live runtime commitment overflows";
+        return Status::invalid_config;
+    }
+    return Status::ok;
+}
+
 } // namespace rt::detail

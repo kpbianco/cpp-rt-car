@@ -331,6 +331,7 @@ def check_runtime_contract() -> None:
         "tests/add_subdirectory_consumer/CMakeLists.txt"
     )
     package_consumer = read("tests/package_consumer/CMakeLists.txt")
+    package_cpp_consumer = read("tests/package_consumer/cpp_consumer.cpp")
     package_contract = read("tests/package_consumer/package_contract.cmake")
     package_config = read("cmake/rtfwConfig.cmake.in")
     snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
@@ -897,7 +898,7 @@ def check_runtime_contract() -> None:
         "opaque handle",
         "inspectable failure reports",
         "external and verify-only",
-        "M15-04 owns exact committed-byte/fallback accounting",
+        "M15-04 closes committed-byte/fallback accounting",
     ):
         if phrase not in policy_doc:
             fail(f"docs/cpu_memory_policy.md: missing M15-03 boundary {phrase!r}")
@@ -915,6 +916,63 @@ def check_runtime_contract() -> None:
     ):
         if test_name not in memory_region_policy_test:
             fail(f"tests/test_memory_region_policy.cpp: missing M15-03 gate {test_name!r}")
+
+    for token in (
+        "struct MemoryAccountingSnapshot",
+        "runtime_plan_bytes",
+        "runtime_nonprovider_accounted_bytes",
+        "runtime_persistent_provider_committed_bytes",
+        "runtime_stack_committed_bytes",
+        "runtime_live_committed_bytes",
+        "host_reported_bytes",
+        "backend_reported_bytes",
+        "resident_payload_bytes",
+        "fallback_region_count",
+        "memory_accounting_snapshot(",
+    ):
+        if token not in runtime_header:
+            fail(f"rt/runtime.hpp: missing M15-04 accounting surface {token!r}")
+    for token in (
+        "summarize_memory_accounting(",
+        "memory accounting key appears more than once",
+        "rolled-back memory still reports committed bytes",
+        "live runtime commitment overflows",
+    ):
+        if token not in policy_source:
+            fail(f"cpu memory policy: missing M15-04 closure {token!r}")
+    if "allocation.committed_bytes >= allocation.data_bytes" not in memory_region_provider:
+        fail("memory provider transaction: missing M15-04 commitment bound")
+    for token in (
+        "detail::summarize_memory_accounting(",
+        "finalized memory accounting does not close",
+        "startup memory accounting does not close",
+        "Runtime::memory_accounting_snapshot(",
+    ):
+        if token not in runtime_source:
+            fail(f"host runtime: missing M15-04 lifecycle gate {token!r}")
+    for phrase in (
+        "Exact-once accounting snapshot",
+        "runtime_live_committed_bytes =",
+        "physical-RSS deduplication",
+        "collapsed to one fallback contribution per region",
+    ):
+        if phrase not in policy_doc:
+            fail(f"docs/cpu_memory_policy.md: missing M15-04 boundary {phrase!r}")
+    for test_name in (
+        "AliasedExternalRegistrationsRemainDistinctLogicalKeys",
+        "AccountingReplacesProviderPayloadWithoutDoubleCount",
+        "ProviderCommitmentOverflowRollsBackBeforeCallbacks",
+        "StackCommitmentOverflowAbortsAndReleasesBeforeCallback",
+    ):
+        if test_name not in policy_test + memory_region_policy_test:
+            fail(f"policy tests: missing M15-04 gate {test_name!r}")
+    for token in (
+        "MemoryAccountingSnapshot",
+        "memory_accounting_snapshot(",
+        "runtime_plan_bytes",
+    ):
+        if token not in package_cpp_consumer:
+            fail(f"installed C++ consumer: missing M15-04 source gate {token!r}")
 
     for token in (
         "Runtime::run_periodic(",

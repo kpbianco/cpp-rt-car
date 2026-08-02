@@ -2844,6 +2844,32 @@ Status Runtime::finalize() noexcept {
             trace_storage_status,
             "trace memory policy application failed");
     }
+    MemoryAccountingSnapshot accounting_snapshot{};
+    const char* accounting_error = nullptr;
+    const auto accounting_status = detail::summarize_memory_accounting(
+        resolved_memory_policy_reports,
+        accounting_snapshot,
+        accounting_error);
+    if (accounting_status != Status::ok ||
+        accounting_snapshot.runtime_plan_bytes !=
+            memory_plan.planned_bytes ||
+        accounting_snapshot.informational_reported_bytes !=
+            policy_summary.informational_excluded_bytes) {
+        (void)trace_storage.reset(trace_report);
+        (void)task_scratch.reset(task_report);
+        (void)phase_scratch.reset(phase_report);
+        trace_report->rolled_back = true;
+        task_report->rolled_back = true;
+        phase_report->rolled_back = true;
+        retain_failed_policy_reports();
+        return impl_->fail(
+            accounting_status == Status::ok
+                ? Status::invalid_config
+                : accounting_status,
+            accounting_error != nullptr
+                ? accounting_error
+                : "finalized memory accounting does not close");
+    }
     try {
         executor = std::make_unique<detail::Executor>(
             impl_->config.executor_policy,
@@ -3124,6 +3150,37 @@ Status Runtime::start() noexcept {
                     ? "required device thread policy failed and rollback is pending; retry stop"
                     : "required device thread policy failed");
         }
+    }
+    MemoryAccountingSnapshot accounting_snapshot{};
+    const char* accounting_error = nullptr;
+    auto accounting_status = detail::summarize_memory_accounting(
+        impl_->memory_policy_reports,
+        accounting_snapshot,
+        accounting_error);
+    if (accounting_status == Status::ok &&
+        accounting_snapshot.runtime_plan_bytes !=
+            impl_->finalized_memory_plan.planned_bytes) {
+        accounting_status = Status::invalid_config;
+        accounting_error = "startup memory accounting does not close";
+    }
+    if (accounting_status != Status::ok) {
+        policy_transaction.abort();
+        Status cleanup_status = Status::ok;
+        if (impl_->devices) {
+            cleanup_status = impl_->devices->stop();
+        }
+        impl_->executor->stop();
+        if (impl_->watchdog_started) {
+            impl_->watchdog.stop();
+            impl_->watchdog_started = false;
+        }
+        mark_owned_stack_rollback();
+        impl_->stop_pending = cleanup_status != Status::ok;
+        return impl_->fail(
+            accounting_status,
+            impl_->stop_pending
+                ? "startup memory accounting failed and device rollback is pending; retry stop"
+                : accounting_error);
     }
     policy_transaction.commit();
     impl_->stop_pending = false;
@@ -3747,6 +3804,23 @@ bool Runtime::cpu_memory_policy_summary(
         return false;
     }
     summary = impl_->cpu_memory_policy_summary;
+    return true;
+}
+
+bool Runtime::memory_accounting_snapshot(
+    MemoryAccountingSnapshot& snapshot) const noexcept {
+    snapshot = {};
+    if (!impl_ || !impl_->cpu_memory_policy_reports_available) {
+        return false;
+    }
+    const char* error = nullptr;
+    if (detail::summarize_memory_accounting(
+            impl_->memory_policy_reports,
+            snapshot,
+            error) != Status::ok) {
+        snapshot = {};
+        return false;
+    }
     return true;
 }
 

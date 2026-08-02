@@ -39,4 +39,9 @@ struct MemoryInventoryEntry {
     CpuMemoryPolicySummary& summary,
     const char*& error) noexcept;
 
+[[nodiscard]] Status summarize_memory_accounting(
+    std::span<const MemoryRegionPolicyReport> reports,
+    MemoryAccountingSnapshot& snapshot,
+    const char*& error) noexcept;
+
 } // namespace rt::detail

@@ -33,7 +33,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
-| M15 | Active | M15-01 model/inventory, M15-02 thread apply/verify, and M15-03 memory providers/residency are complete locally; accounting closure remains |
+| M15 | Active | M15-01 through M15-03 are published; M15-04 exact accounting/compatibility closure is complete locally and awaiting review/publication/required CI |
 | M16 | Planned | Multi-rate deterministic simulation domains and release coordination |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
@@ -556,22 +556,30 @@ M15-03 delivered locally:
   retry, plus truthful best-effort fallback and external verify-only behavior;
 - injected-provider and unprivileged Linux guard/residency/custom-stack tests.
 
-Remaining outcome:
+M15-04 delivered and verified locally:
+
+- additive `MemoryAccountingSnapshot` totals the unique region inventory by
+  ownership and accounting scope;
+- live runtime commitment combines logical non-provider control bytes, actual
+  phase/task/trace provider commitment, and active custom stacks exactly once;
+- host/backend registrations, provider-reported resident/locked/pinned payload, and
+  resolution/allocation/huge-page fallback are separately totaled once;
+- finalization/startup overflow or closure mismatch fails before callbacks and
+  uses the existing reverse cleanup; stop and rollback remove live stacks;
+- installed C++ consumers compile the additive surface while C ABI v8, device
+  ABI v1, package targets, the M4 budget, and RT0 claims remain unchanged.
+
+Future extensions outside M15:
 
 - provider-backed verification handles for any future externally owned lane
   that elects to expose one; current host-adapter and vendor lanes remain
   verify-only without mutation;
 - `park` and `adaptive` executor wait implementations if later product work
-  accepts their wake/boundedness contract;
-- exact committed/resident/locked/pinned/fallback accounting closure across
-  stacks, backend storage, registered buffers, and the existing logical
-  control aggregates;
-- final portable/strict compatibility closure while externally owned
-  host-engine and vendor threads remain verify-only.
+  accepts their wake/boundedness contract.
 
 M15-01 performs no native mutation. M15-02 owns thread apply/verify and startup
 rollback. M15-03 owns provider-created contiguous regions, custom stacks, and
-residency behavior. Final accounting and compatibility closure remain M15-04.
+residency behavior. M15-04 owns exact accounting and compatibility closure.
 See [the policy model](cpu_memory_policy.md).
 
 Exit gates:
