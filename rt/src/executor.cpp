@@ -173,7 +173,8 @@ Executor::Executor(
     std::size_t scratch_alignment,
     OverloadPolicy overload_policy,
     std::span<const GraphDependency> dependencies,
-    const HostExecutorAdapter* host_adapter)
+    const HostExecutorAdapter* host_adapter,
+    RegionStorage task_scratch_storage)
     : policy_(policy),
       worker_count_(worker_count),
       queue_capacity_(queue_capacity),
@@ -182,6 +183,7 @@ Executor::Executor(
       task_scratch_slots_(task_scratch_slots),
       scratch_alignment_(scratch_alignment),
       overload_policy_(overload_policy),
+      task_scratch_storage_(std::move(task_scratch_storage)),
       initial_indegree_(phase_count, 0),
       current_indegree_(
           phase_count == 0
@@ -208,9 +210,9 @@ Executor::Executor(
             task_scratch_total)) {
         throw std::bad_alloc();
     }
-    task_scratch_storage_.allocate(
-        task_scratch_total,
-        scratch_alignment_);
+    if (task_scratch_storage_.size() != task_scratch_total) {
+        throw std::invalid_argument("task scratch storage size mismatch");
+    }
 
     free_scratch_word_count_ =
         1 + ((task_scratch_slots_ - 1) / kScratchWordBits);
@@ -331,7 +333,7 @@ bool Executor::estimate_control_storage(
             !add_product(
                 worker_count,
                 sizeof(std::unique_ptr<Queue>)) ||
-            !add_product(worker_count, sizeof(std::thread)) ||
+            !add_product(worker_count, sizeof(OwnedThread)) ||
             !add_product(worker_count, sizeof(Queue)) ||
             !add_product(queue_slots, Queue::cell_size())) {
             bytes = 0;
@@ -352,7 +354,10 @@ bool Executor::estimate_control_storage(
     return true;
 }
 
-Status Executor::start(ThreadPolicyTransaction* transaction) noexcept {
+Status Executor::start(
+    MemoryRegionProvider& memory_provider,
+    std::span<MemoryRegionPolicyReport> memory_reports,
+    ThreadPolicyTransaction* transaction) noexcept {
     if (started_.load(std::memory_order_acquire)) {
         return Status::invalid_state;
     }
@@ -381,18 +386,30 @@ Status Executor::start(ThreadPolicyTransaction* transaction) noexcept {
 
     try {
         for (std::size_t worker = 0; worker < worker_count_; ++worker) {
-            threads_.emplace_back([this, worker] {
-                worker_loop(worker);
-            });
+            threads_.emplace_back();
+            const auto status = threads_.back().start(
+                memory_provider,
+                memory_reports,
+                ThreadResourceId{
+                    ThreadRole::executor_worker,
+                    static_cast<std::uint32_t>(worker)},
+                &Executor::worker_entry,
+                this,
+                worker);
+            if (status != Status::ok) {
+                throw status;
+            }
         }
     } catch (...) {
         if (startup_transaction_) {
             startup_transaction_->abort();
         }
         stopping_.store(true, std::memory_order_release);
-        for (auto& thread : threads_) {
-            if (thread.joinable()) {
-                thread.join();
+        for (auto thread = threads_.rbegin();
+             thread != threads_.rend();
+             ++thread) {
+            if (thread->joinable()) {
+                thread->join();
             }
         }
         threads_.clear();
@@ -406,6 +423,12 @@ Status Executor::start(ThreadPolicyTransaction* transaction) noexcept {
     return Status::ok;
 }
 
+void Executor::worker_entry(
+    void* context,
+    std::size_t worker_index) noexcept {
+    static_cast<Executor*>(context)->worker_loop(worker_index);
+}
+
 void Executor::stop() noexcept {
     if (!started_.exchange(false, std::memory_order_acq_rel)) {
         return;
@@ -415,9 +438,11 @@ void Executor::stop() noexcept {
         startup_transaction_ = nullptr;
         return;
     }
-    for (auto& thread : threads_) {
-        if (thread.joinable()) {
-            thread.join();
+    for (auto thread = threads_.rbegin();
+         thread != threads_.rend();
+         ++thread) {
+        if (thread->joinable()) {
+            thread->join();
         }
     }
     threads_.clear();

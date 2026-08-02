@@ -1,10 +1,11 @@
 #pragma once
 
+#include "owned_thread.hpp"
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
-#include <thread>
 
 #include <rt/runtime.hpp>
 
@@ -25,6 +26,10 @@ public:
 
     [[nodiscard]] Status start(
         ThreadPolicyTransaction* transaction = nullptr) noexcept;
+    [[nodiscard]] Status start(
+        MemoryRegionProvider& memory_provider,
+        std::span<MemoryRegionPolicyReport> memory_reports,
+        ThreadPolicyTransaction* transaction = nullptr) noexcept;
     void stop() noexcept;
 
     [[nodiscard]] std::uint64_t arm(
@@ -39,12 +44,13 @@ private:
         std::uint64_t token,
         std::uint64_t now_ns) noexcept;
     void run() noexcept;
+    static void thread_entry(void* context, std::size_t) noexcept;
 
     static constexpr std::uint64_t kFiredBit =
         std::uint64_t{1} << 63;
     static constexpr std::uint64_t kTokenMask = ~kFiredBit;
 
-    std::thread thread_;
+    OwnedThread thread_;
     std::mutex service_mutex_;
     std::condition_variable service_cv_;
     std::atomic<bool> started_{false};

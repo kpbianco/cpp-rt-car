@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-01
-Implementation baseline: `03088b37e4321ccf5bd5e9efa2624a6179b4adf9` (`M15-01`)
+Implementation baseline: `146aa38f433649a74e925c6f4ea908c30dbd4b1f` (`M15-02`)
 
 ## Product state
 
@@ -11,8 +11,12 @@ Implementation baseline: `03088b37e4321ccf5bd5e9efa2624a6179b4adf9` (`M15-01`)
 - M14 professional SDK/package boundary: complete.
 - M14.1 recoverable device lifecycle: complete.
 - Active milestone: M15 explicit CPU and memory policy.
-- M15-01 policy model and exact inventory: complete locally.
-- Active batch: `contracts/active-batch.yaml` (`M15-02`).
+- M15-01 policy model and exact inventory: complete.
+- M15-02 thread application and verification: complete and published on its
+  scoped branch.
+- M15-03 memory providers and region residency: implemented and verified
+  locally on its scoped branch; not yet committed or published.
+- Active batch: `contracts/active-batch.yaml` (`M15-03`).
 
 ## Repository health
 
@@ -21,18 +25,17 @@ SDK inventory, compatibility aliases, portable compiler/OS matrix, deterministic
 and sanitizer coverage, package relocation, release contracts, candidate CUDA
 and XDMA adapters, and recoverable device cleanup.
 
-This harness change is infrastructure and documentation only. It does not rerun
-the repository build matrix and does not change source, ABI, package, release,
-or support claims. GitHub CI on the harness PR remains the authoritative
-repository validation.
+The M15-03 implementation passed the repository contract, quick, and full
+local gates plus focused stress, AddressSanitizer/UndefinedBehaviorSanitizer,
+and ThreadSanitizer runs. Exact C ABI v8 remains 70 exports with fingerprint
+`0xd0e7a5a14bf35f97`. Required GitHub compiler/OS, sanitizer, determinism, and
+package CI has not run for this uncommitted branch and remains authoritative.
 
 ## Active objective
 
-Apply and verify supported per-thread policy behind a startup transaction for
-the frame, executor, watchdog, and device-service lanes. Preserve portable
-fallback, external verify-only ownership, checked reverse rollback, stable
-ABIs, and the RT0 claim boundary. Memory providers and custom stack ownership
-remain M15-03.
+Retain the completed M15-03 implementation and evidence for review. The next
+bounded milestone batch is M15-04 exact accounting and compatibility closure;
+do not begin it until a separate active-batch contract is approved.
 
 ## Blockers and limitations
 
@@ -47,6 +50,5 @@ remain M15-03.
 
 ## Next action
 
-Complete `M15-02` on its isolated branch, run focused and full verification,
-record `docs/evidence/M15-02-<date>.md`, and retain the result for review. Do
-not begin memory-provider, residency, or custom-stack work; that is M15-03.
+Review and, when explicitly authorized, commit and publish M15-03. Then plan
+M15-04 exact accounting and compatibility closure as a separate bounded batch.

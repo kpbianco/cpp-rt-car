@@ -204,6 +204,8 @@ rt::ThreadPolicy resolve_thread_policy(
     const rt::ThreadResourceId& id,
     rt::ThreadOwnership ownership,
     const rt::ThreadPolicyProviderCapabilities& capabilities,
+    bool custom_thread_stacks,
+    std::size_t minimum_thread_stack_bytes,
     bool& fell_back) noexcept {
     rt::ThreadPolicy resolved{};
     resolved.requirement = requested.requirement;
@@ -248,9 +250,128 @@ rt::ThreadPolicy resolve_thread_policy(
             fell_back = true;
         }
     }
-    if (requested.numa_node != -1 || requested.stack_bytes != 0 ||
-        requested.guard_bytes != 0) {
+    if (requested.numa_node != -1) {
         fell_back = true;
+    }
+    if (requested.stack_bytes != 0 || requested.guard_bytes != 0) {
+        if (ownership == rt::ThreadOwnership::runtime &&
+            custom_thread_stacks &&
+            requested.stack_bytes >= minimum_thread_stack_bytes) {
+            resolved.stack_bytes = requested.stack_bytes;
+            resolved.guard_bytes = requested.guard_bytes;
+        } else {
+            fell_back = true;
+        }
+    }
+    return resolved;
+}
+
+bool runtime_created_region(const rt::detail::MemoryInventoryEntry& entry)
+    noexcept {
+    if (entry.ownership != rt::MemoryProviderOwnership::runtime) {
+        return false;
+    }
+    switch (entry.id.category) {
+    case rt::MemoryCategory::phase_scratch:
+    case rt::MemoryCategory::task_scratch:
+    case rt::MemoryCategory::trace_storage:
+        return true;
+    case rt::MemoryCategory::thread_stack:
+        return entry.reported_bytes != 0;
+    default:
+        return false;
+    }
+}
+
+rt::MemoryRegionPolicy resolve_memory_policy(
+    const rt::MemoryRegionPolicy& requested,
+    const rt::detail::MemoryInventoryEntry& entry,
+    const rt::MemoryRegionProviderCapabilities& capabilities,
+    bool& fell_back) noexcept {
+    rt::MemoryRegionPolicy resolved{};
+    resolved.requirement = requested.requirement;
+    resolved.provider = entry.ownership;
+    fell_back = false;
+    const bool created = runtime_created_region(entry);
+    const auto resolve_toggle = [&](rt::MemoryPolicyToggle requested_value,
+                                    bool supported,
+                                    rt::MemoryPolicyToggle& output) {
+        if (requested_value == rt::MemoryPolicyToggle::runtime_default) {
+            return;
+        }
+        if (created && supported) {
+            output = requested_value;
+        } else if (requested_value == rt::MemoryPolicyToggle::enabled) {
+            fell_back = true;
+        } else {
+            output = rt::MemoryPolicyToggle::disabled;
+        }
+    };
+
+    if (requested.alignment != 0) {
+        if (created) {
+            resolved.alignment = requested.alignment;
+        } else {
+            fell_back = true;
+        }
+    }
+    resolve_toggle(
+        requested.page_rounding,
+        capabilities.page_rounding,
+        resolved.page_rounding);
+    if (requested.guard_before_bytes != 0 ||
+        requested.guard_after_bytes != 0) {
+        if (created && capabilities.guards) {
+            resolved.guard_before_bytes = requested.guard_before_bytes;
+            resolved.guard_after_bytes = requested.guard_after_bytes;
+        } else {
+            fell_back = true;
+        }
+    }
+    resolve_toggle(requested.prefault, capabilities.prefault, resolved.prefault);
+    resolve_toggle(requested.locking, capabilities.locking, resolved.locking);
+    resolve_toggle(requested.pinning, capabilities.pinning, resolved.pinning);
+    if (requested.huge_pages != rt::HugePagePolicy::runtime_default) {
+        if (created && capabilities.huge_pages) {
+            resolved.huge_pages = requested.huge_pages;
+            resolved.allow_huge_page_fallback =
+                requested.allow_huge_page_fallback;
+        } else if (requested.huge_pages != rt::HugePagePolicy::disabled) {
+            fell_back = true;
+        } else {
+            resolved.huge_pages = rt::HugePagePolicy::disabled;
+        }
+    }
+    if (requested.numa_node >= 0) {
+        if (created && capabilities.numa_binding) {
+            resolved.numa_node = requested.numa_node;
+        } else {
+            fell_back = true;
+        }
+    }
+    if (requested.first_touch != rt::FirstTouchPolicy::runtime_default) {
+        const bool valid_owner_touch =
+            requested.first_touch != rt::FirstTouchPolicy::owner_thread ||
+            (entry.id.category == rt::MemoryCategory::thread_stack &&
+             capabilities.owner_thread_first_touch);
+        if (created && capabilities.first_touch && valid_owner_touch) {
+            resolved.first_touch = requested.first_touch;
+        } else if (requested.first_touch != rt::FirstTouchPolicy::disabled) {
+            fell_back = true;
+        } else {
+            resolved.first_touch = rt::FirstTouchPolicy::disabled;
+        }
+    }
+    resolve_toggle(
+        requested.residency_verification,
+        capabilities.residency,
+        resolved.residency_verification);
+    if (requested.rollback != rt::RollbackIntent::runtime_default) {
+        if (created && requested.rollback == rt::RollbackIntent::release) {
+            resolved.rollback = requested.rollback;
+        } else {
+            fell_back = true;
+        }
     }
     return resolved;
 }
@@ -417,6 +538,8 @@ Status resolve_thread_policies(
     std::span<const ThreadPolicyRequest> requests,
     std::span<const ThreadInventoryEntry> inventory,
     const ThreadPolicyProviderCapabilities& capabilities,
+    bool custom_thread_stacks,
+    std::size_t minimum_thread_stack_bytes,
     std::vector<ThreadPolicyReport>& reports,
     const char*& error) noexcept {
     error = nullptr;
@@ -474,6 +597,8 @@ Status resolve_thread_policies(
                         id,
                         ownership,
                         capabilities,
+                        custom_thread_stacks,
+                        minimum_thread_stack_bytes,
                         fell_back)
                     : ThreadPolicy{};
                 if (request && fell_back &&
@@ -533,6 +658,7 @@ Status resolve_thread_policies(
 Status resolve_memory_policies(
     std::span<const MemoryPolicyRequest> requests,
     std::span<const MemoryInventoryEntry> inventory,
+    const MemoryRegionProviderCapabilities& capabilities,
     std::vector<MemoryRegionPolicyReport>& reports,
     CpuMemoryPolicySummary& summary,
     const char*& error) noexcept {
@@ -550,10 +676,6 @@ Status resolve_memory_policies(
         if (!valid_memory_id(request.id) ||
             !valid_memory_policy(request.policy)) {
             error = "memory policy request is malformed or contradictory";
-            return Status::invalid_config;
-        }
-        if (request.policy.requirement == PolicyRequirement::required) {
-            error = "required memory policy is unsupported before native application";
             return Status::invalid_config;
         }
         if (std::find_if(
@@ -614,12 +736,27 @@ Status resolve_memory_policies(
             report.accounted_bytes = entry.accounted_bytes;
             report.requested =
                 request ? request->policy : MemoryRegionPolicy{};
-            report.resolved = MemoryRegionPolicy{};
+            bool fell_back = false;
+            report.resolved = request
+                ? resolve_memory_policy(
+                    request->policy,
+                    entry,
+                    capabilities,
+                    fell_back)
+                : MemoryRegionPolicy{};
             report.resolved.provider = entry.ownership;
-            report.resolution =
-                request && !memory_policy_is_default(request->policy)
-                ? PolicyStageState::portable_fallback
-                : PolicyStageState::portable_default;
+            if (request && fell_back &&
+                request->policy.requirement == PolicyRequirement::required) {
+                reports.clear();
+                error = "required memory policy contains a field unsupported for its region or provider";
+                return Status::invalid_config;
+            }
+            report.resolution = !request ||
+                    memory_policy_is_default(request->policy)
+                ? PolicyStageState::portable_default
+                : (fell_back
+                    ? PolicyStageState::portable_fallback
+                    : PolicyStageState::native_resolved);
             report.application = PolicyStageState::not_performed;
             report.verification =
                 entry.ownership == MemoryProviderOwnership::runtime

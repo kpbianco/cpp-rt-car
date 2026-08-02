@@ -3,6 +3,8 @@
 #include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
 #include "cpu_memory_policy.hpp"
+#include "memory_region_provider.hpp"
+#include "native_memory_region_provider.hpp"
 #include "native_thread_policy.hpp"
 #include "thread_policy_transaction.hpp"
 #include "device_manager.hpp"
@@ -776,6 +778,7 @@ struct Runtime::Impl {
                   ? injected_preflight
                   : &owned_preflight) {
         thread_policy_provider = &owned_thread_policy_provider;
+        memory_region_provider = &owned_memory_region_provider;
         error[0] = '\0';
     }
 
@@ -792,6 +795,13 @@ struct Runtime::Impl {
     void clear_error() noexcept {
         SpinGuard guard(error_lock);
         error[0] = '\0';
+        if (state == RuntimeState::configuring &&
+            cpu_memory_policy_reports_available) {
+            thread_policy_reports.clear();
+            memory_policy_reports.clear();
+            cpu_memory_policy_summary = {};
+            cpu_memory_policy_reports_available = false;
+        }
     }
 
     Status fail(Status status, const char* message) noexcept {
@@ -1367,6 +1377,8 @@ struct Runtime::Impl {
     PlatformPreflightProbe* preflight;
     detail::NativeThreadPolicyProvider owned_thread_policy_provider;
     ThreadPolicyProvider* thread_policy_provider = nullptr;
+    detail::NativeMemoryRegionProvider owned_memory_region_provider;
+    MemoryRegionProvider* memory_region_provider = nullptr;
     detail::ThreadPolicyTransaction thread_policy_transaction;
     RuntimeConfig config{};
     HostExecutorAdapter host_executor{};
@@ -1385,8 +1397,10 @@ struct Runtime::Impl {
     std::vector<ThreadPolicyReport> thread_policy_reports;
     std::vector<MemoryRegionPolicyReport> memory_policy_reports;
     CpuMemoryPolicySummary cpu_memory_policy_summary{};
+    bool cpu_memory_policy_reports_available = false;
     std::vector<PhaseHandle> compiled_order;
-    detail::AlignedStorage phase_scratch;
+    detail::RegionStorage phase_scratch;
+    std::unique_ptr<detail::Executor> executor;
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::TelemetryCounters telemetry_counters;
     ObservabilityMetadata observability{};
@@ -1395,7 +1409,6 @@ struct Runtime::Impl {
     std::uint64_t replay_id = 0;
     std::uint64_t telemetry_epoch_ns = 0;
     std::uint64_t metric_snapshot_sequence = 0;
-    std::unique_ptr<detail::Executor> executor;
     std::unique_ptr<detail::DeviceManager> devices;
     detail::WatchdogMonitor watchdog;
     MemoryPlan finalized_memory_plan{};
@@ -1499,6 +1512,39 @@ Status Runtime::set_thread_policy_provider(
             "thread policy provider capabilities are invalid");
     }
     impl_->thread_policy_provider = &provider;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_memory_region_provider(
+    MemoryRegionProvider& provider) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "memory region provider requires configuring state");
+    }
+    const auto capabilities = provider.capabilities();
+    if ((capabilities.page_bytes != 0 &&
+         (capabilities.page_bytes & (capabilities.page_bytes - 1)) != 0) ||
+        (capabilities.guards && !capabilities.page_rounding) ||
+        (capabilities.owner_thread_first_touch &&
+         !capabilities.first_touch) ||
+        ((capabilities.page_rounding || capabilities.guards ||
+          capabilities.huge_pages || capabilities.numa_binding ||
+          capabilities.residency || capabilities.custom_thread_stack) &&
+         capabilities.page_bytes == 0) ||
+        (capabilities.custom_thread_stack &&
+         capabilities.minimum_thread_stack_bytes == 0) ||
+        (!capabilities.custom_thread_stack &&
+         capabilities.minimum_thread_stack_bytes != 0)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "memory region provider page size is invalid");
+    }
+    impl_->memory_region_provider = &provider;
     impl_->clear_error();
     return Status::ok;
 }
@@ -2120,6 +2166,10 @@ Status Runtime::finalize() noexcept {
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "finalize requires configuring state");
     }
+    impl_->thread_policy_reports.clear();
+    impl_->memory_policy_reports.clear();
+    impl_->cpu_memory_policy_summary = {};
+    impl_->cpu_memory_policy_reports_available = false;
     if (validate_config(impl_->config) != Status::ok ||
         impl_->callbacks.size() > impl_->config.callback_capacity ||
         impl_->states.size() > impl_->config.state_capacity ||
@@ -2230,6 +2280,10 @@ Status Runtime::finalize() noexcept {
             impl_->thread_policy_requests,
             thread_inventory,
             impl_->thread_policy_provider->capabilities(),
+            impl_->memory_region_provider->capabilities()
+                .custom_thread_stack,
+            impl_->memory_region_provider->capabilities()
+                .minimum_thread_stack_bytes,
             resolved_thread_policy_reports,
             policy_error);
     if (thread_policy_status != Status::ok) {
@@ -2621,11 +2675,58 @@ Status Runtime::finalize() noexcept {
             detail::resolve_memory_policies(
                 impl_->memory_policy_requests,
                 memory_inventory,
+                impl_->memory_region_provider->capabilities(),
                 resolved_memory_policy_reports,
                 policy_summary,
                 policy_error);
         if (memory_policy_status != Status::ok) {
             return impl_->fail(memory_policy_status, policy_error);
+        }
+        for (auto& memory_report : resolved_memory_policy_reports) {
+            if (memory_report.id.category != MemoryCategory::thread_stack ||
+                memory_report.ownership != MemoryProviderOwnership::runtime ||
+                memory_report.reported_bytes == 0) {
+                continue;
+            }
+            const auto thread = std::find_if(
+                resolved_thread_policy_reports.begin(),
+                resolved_thread_policy_reports.end(),
+                [&](const auto& thread_report) {
+                    return thread_report.id.role ==
+                               memory_report.id.thread_role &&
+                           thread_report.id.instance ==
+                               memory_report.id.instance;
+                });
+            if (thread == resolved_thread_policy_reports.end()) {
+                return impl_->fail(
+                    Status::internal_error,
+                    "owned stack has no matching thread policy report");
+            }
+            memory_report.resolved.page_rounding =
+                MemoryPolicyToggle::enabled;
+            if (thread->resolved.requirement ==
+                PolicyRequirement::required) {
+                memory_report.resolved.requirement =
+                    PolicyRequirement::required;
+            }
+            memory_report.resolved.guard_before_bytes = std::max(
+                memory_report.resolved.guard_before_bytes,
+                thread->resolved.guard_bytes);
+            memory_report.resolved.rollback = RollbackIntent::release;
+            std::size_t stack_footprint = 0;
+            if (!detail::checked_add(
+                    memory_report.reported_bytes,
+                    memory_report.resolved.guard_before_bytes,
+                    stack_footprint) ||
+                !detail::checked_add(
+                    stack_footprint,
+                    memory_report.resolved.guard_after_bytes,
+                    stack_footprint)) {
+                return impl_->fail(
+                    Status::invalid_config,
+                    "runtime-owned stack footprint overflows");
+            }
+            memory_report.requested_footprint_bytes = stack_footprint;
         }
     }
 
@@ -2667,7 +2768,82 @@ Status Runtime::finalize() noexcept {
     std::unique_ptr<detail::Executor> executor;
     std::unique_ptr<detail::DeviceManager> devices;
     std::unique_ptr<detail::TelemetryRing> telemetry;
-    detail::AlignedStorage phase_scratch;
+    detail::RegionStorage phase_scratch;
+    detail::RegionStorage task_scratch;
+    detail::RegionStorage trace_storage;
+
+    const auto find_memory_report =
+        [&](MemoryCategory category) -> MemoryRegionPolicyReport* {
+            const auto found = std::find_if(
+                resolved_memory_policy_reports.begin(),
+                resolved_memory_policy_reports.end(),
+                [&](const auto& report) {
+                    return report.id.category == category &&
+                           report.id.thread_role == ThreadRole::none &&
+                           report.id.instance == 0;
+                });
+            return found == resolved_memory_policy_reports.end()
+                ? nullptr
+                : &*found;
+        };
+    auto* phase_report = find_memory_report(MemoryCategory::phase_scratch);
+    auto* task_report = find_memory_report(MemoryCategory::task_scratch);
+    auto* trace_report = find_memory_report(MemoryCategory::trace_storage);
+    if (phase_report == nullptr || task_report == nullptr ||
+        trace_report == nullptr) {
+        return impl_->fail(
+            Status::internal_error,
+            "policy-backed runtime region inventory is incomplete");
+    }
+    const auto retain_failed_policy_reports = [&] {
+        impl_->thread_policy_reports = resolved_thread_policy_reports;
+        impl_->memory_policy_reports = resolved_memory_policy_reports;
+        impl_->cpu_memory_policy_summary = policy_summary;
+        impl_->cpu_memory_policy_reports_available = true;
+    };
+
+    const auto phase_storage_status = phase_scratch.create(
+        *impl_->memory_region_provider,
+        phase_report->id,
+        memory_plan.phase_scratch_total_bytes,
+        memory_plan.scratch_alignment,
+        *phase_report);
+    if (phase_storage_status != Status::ok) {
+        retain_failed_policy_reports();
+        return impl_->fail(
+            phase_storage_status,
+            "phase scratch memory policy application failed");
+    }
+    const auto task_storage_status = task_scratch.create(
+        *impl_->memory_region_provider,
+        task_report->id,
+        memory_plan.task_scratch_total_bytes,
+        memory_plan.scratch_alignment,
+        *task_report);
+    if (task_storage_status != Status::ok) {
+        (void)phase_scratch.reset(phase_report);
+        phase_report->rolled_back = true;
+        retain_failed_policy_reports();
+        return impl_->fail(
+            task_storage_status,
+            "task scratch memory policy application failed");
+    }
+    const auto trace_storage_status = trace_storage.create(
+        *impl_->memory_region_provider,
+        trace_report->id,
+        memory_plan.trace_storage_bytes,
+        detail::TelemetryRing::slot_alignment(),
+        *trace_report);
+    if (trace_storage_status != Status::ok) {
+        (void)task_scratch.reset(task_report);
+        (void)phase_scratch.reset(phase_report);
+        task_report->rolled_back = true;
+        phase_report->rolled_back = true;
+        retain_failed_policy_reports();
+        return impl_->fail(
+            trace_storage_status,
+            "trace memory policy application failed");
+    }
     try {
         executor = std::make_unique<detail::Executor>(
             impl_->config.executor_policy,
@@ -2681,7 +2857,8 @@ Status Runtime::finalize() noexcept {
             impl_->dependencies,
             impl_->host_executor_set
                 ? &impl_->host_executor
-                : nullptr);
+                : nullptr,
+            std::move(task_scratch));
         if (!impl_->device_backends.empty()) {
             devices = std::make_unique<detail::DeviceManager>(
                 impl_->graph_owner,
@@ -2690,15 +2867,27 @@ Status Runtime::finalize() noexcept {
                 impl_->config.device_outstanding_capacity,
                 impl_->config.device_completion_batch);
         }
-        phase_scratch.allocate(
-            memory_plan.phase_scratch_total_bytes,
-            memory_plan.scratch_alignment);
         telemetry =
             std::make_unique<detail::TelemetryRing>(
-                impl_->config.trace_capacity);
+                impl_->config.trace_capacity,
+                std::move(trace_storage));
     } catch (const std::bad_alloc&) {
+        (void)phase_scratch.reset(phase_report);
+        phase_report->rolled_back = true;
+        task_report->rolled_back = true;
+        task_report->committed_bytes = 0;
+        trace_report->rolled_back = true;
+        trace_report->committed_bytes = 0;
+        retain_failed_policy_reports();
         return impl_->fail(Status::resource_exhausted, nullptr);
     } catch (...) {
+        (void)phase_scratch.reset(phase_report);
+        phase_report->rolled_back = true;
+        task_report->rolled_back = true;
+        task_report->committed_bytes = 0;
+        trace_report->rolled_back = true;
+        trace_report->committed_bytes = 0;
+        retain_failed_policy_reports();
         return impl_->fail(Status::internal_error, nullptr);
     }
 
@@ -2714,6 +2903,7 @@ Status Runtime::finalize() noexcept {
     impl_->memory_policy_reports =
         std::move(resolved_memory_policy_reports);
     impl_->cpu_memory_policy_summary = policy_summary;
+    impl_->cpu_memory_policy_reports_available = true;
     impl_->telemetry_counters.reset();
     impl_->metric_snapshot_sequence = 0;
     impl_->graph_id = impl_->compute_graph_id();
@@ -2773,6 +2963,16 @@ Status Runtime::start() noexcept {
     policy_transaction.begin(
         *impl_->thread_policy_provider,
         impl_->thread_policy_reports);
+    const auto mark_owned_stack_rollback = [&] {
+        for (auto& report : impl_->memory_policy_reports) {
+            if (report.id.category == MemoryCategory::thread_stack &&
+                report.ownership == MemoryProviderOwnership::runtime &&
+                report.application != PolicyStageState::not_performed) {
+                report.rolled_back = true;
+                report.committed_bytes = 0;
+            }
+        }
+    };
 
     impl_->preflight_report = {};
     impl_->preflight_report.mode =
@@ -2832,9 +3032,13 @@ Status Runtime::start() noexcept {
     impl_->degradation_level.store(0, std::memory_order_release);
     if (impl_->config.watchdog_timeout_ns != 0) {
         const auto watchdog_status =
-            impl_->watchdog.start(&policy_transaction);
+            impl_->watchdog.start(
+                *impl_->memory_region_provider,
+                impl_->memory_policy_reports,
+                &policy_transaction);
         if (watchdog_status != Status::ok) {
             policy_transaction.abort();
+            mark_owned_stack_rollback();
             return impl_->fail(
                 watchdog_status,
                 "failed to start watchdog service lane");
@@ -2845,6 +3049,7 @@ Status Runtime::start() noexcept {
             policy_transaction.abort();
             impl_->watchdog.stop();
             impl_->watchdog_started = false;
+            mark_owned_stack_rollback();
             return impl_->fail(
                 policy_status,
                 "required watchdog thread policy failed");
@@ -2852,13 +3057,17 @@ Status Runtime::start() noexcept {
     }
 
     const auto start_status =
-        impl_->executor->start(&policy_transaction);
+        impl_->executor->start(
+            *impl_->memory_region_provider,
+            impl_->memory_policy_reports,
+            &policy_transaction);
     if (start_status != Status::ok) {
         policy_transaction.abort();
         if (impl_->watchdog_started) {
             impl_->watchdog.stop();
             impl_->watchdog_started = false;
         }
+        mark_owned_stack_rollback();
         return impl_->fail(start_status, "failed to start executor policy");
     }
     auto policy_status = policy_transaction.failure();
@@ -2869,6 +3078,7 @@ Status Runtime::start() noexcept {
             impl_->watchdog.stop();
             impl_->watchdog_started = false;
         }
+        mark_owned_stack_rollback();
         return impl_->fail(
             policy_status,
             "required executor thread policy failed");
@@ -2878,6 +3088,8 @@ Status Runtime::start() noexcept {
             *impl_->executor,
             &Impl::observe_device_event,
             impl_.get(),
+            *impl_->memory_region_provider,
+            impl_->memory_policy_reports,
             &policy_transaction);
         if (device_status != Status::ok) {
             policy_transaction.abort();
@@ -2886,6 +3098,7 @@ Status Runtime::start() noexcept {
                 impl_->watchdog.stop();
                 impl_->watchdog_started = false;
             }
+            mark_owned_stack_rollback();
             impl_->stop_pending =
                 impl_->devices->cleanup_pending();
             return impl_->fail(
@@ -2903,6 +3116,7 @@ Status Runtime::start() noexcept {
                 impl_->watchdog.stop();
                 impl_->watchdog_started = false;
             }
+            mark_owned_stack_rollback();
             impl_->stop_pending = cleanup_status != Status::ok;
             return impl_->fail(
                 policy_status,
@@ -3529,8 +3743,7 @@ bool Runtime::memory_plan(MemoryPlan& plan) const noexcept {
 bool Runtime::cpu_memory_policy_summary(
     CpuMemoryPolicySummary& summary) const noexcept {
     summary = {};
-    if (!impl_ || impl_->state == RuntimeState::configuring ||
-        !impl_->executor) {
+    if (!impl_ || !impl_->cpu_memory_policy_reports_available) {
         return false;
     }
     summary = impl_->cpu_memory_policy_summary;
@@ -3541,7 +3754,7 @@ bool Runtime::thread_policy_report_at(
     std::size_t index,
     ThreadPolicyReport& report) const noexcept {
     report = {};
-    if (!impl_ || impl_->state == RuntimeState::configuring ||
+    if (!impl_ || !impl_->cpu_memory_policy_reports_available ||
         index >= impl_->thread_policy_reports.size()) {
         return false;
     }
@@ -3553,7 +3766,7 @@ bool Runtime::memory_policy_report_at(
     std::size_t index,
     MemoryRegionPolicyReport& report) const noexcept {
     report = {};
-    if (!impl_ || impl_->state == RuntimeState::configuring ||
+    if (!impl_ || !impl_->cpu_memory_policy_reports_available ||
         index >= impl_->memory_policy_reports.size()) {
         return false;
     }

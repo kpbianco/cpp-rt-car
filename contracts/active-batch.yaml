@@ -1,28 +1,29 @@
 schema_version: 1
 batch:
-  id: M15-02
-  title: Apply, verify, and roll back runtime thread policy transactionally
-  goal: Apply and verify supported thread policy for the frame lane and every runtime-owned executor, watchdog, and device-service thread before callbacks can execute, retain truthful portable and externally owned reports, and roll back partial startup without adding memory-provider behavior or changing stable ABIs.
+  id: M15-03
+  title: Create and verify policy-backed runtime memory regions transactionally
+  goal: Add an injectable/native memory-region provider, create the runtime's contiguous scratch, trace, and owned-stack regions through it, apply and verify supported residency policy before callbacks, and reverse partial commitments without absorbing M15-04 accounting closure or changing stable ABIs.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
     - products/cpp-rt-car/PRD.md#cap-m15--cpu-and-memory-policy
     - products/cpp-rt-car/acceptance.yaml#CAP-M15
-  milestone: products/cpp-rt-car/milestones/M15.md#M15-02--thread-application-and-verification
+  milestone: products/cpp-rt-car/milestones/M15.md#M15-03--memory-providers-and-region-residency
   target_contracts:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
+    - docs/memory_plan.md
+    - docs/cpu_memory_policy.md
     - docs/executor.md
     - docs/device_backend.md
     - docs/time_platform.md
-    - docs/cpu_memory_policy.md
     - docs/c_abi.md
-  baseline_commit: 03088b37e4321ccf5bd5e9efa2624a6179b4adf9
+  baseline_commit: 146aa38f433649a74e925c6f4ea908c30dbd4b1f
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M15-02.yaml
+  control_plane_path: products/cpp-rt-car/batches/M15-03.yaml
 dependencies:
-  - M15-01
+  - M15-02
 scope:
   allowed_paths:
     - contracts/active-batch.yaml
@@ -31,35 +32,43 @@ scope:
     - rt/src/host_runtime.cpp
     - rt/src/cpu_memory_policy.cpp
     - rt/src/cpu_memory_policy.hpp
+    - rt/src/aligned_storage.hpp
+    - rt/src/memory_region_provider.cpp
+    - rt/src/memory_region_provider.hpp
+    - rt/src/native_memory_region_provider.cpp
+    - rt/src/native_memory_region_provider.hpp
+    - rt/src/owned_thread.cpp
+    - rt/src/owned_thread.hpp
     - rt/src/executor.cpp
     - rt/src/executor.hpp
     - rt/src/watchdog_monitor.cpp
     - rt/src/watchdog_monitor.hpp
     - rt/src/device_manager.cpp
     - rt/src/device_manager.hpp
-    - rt/src/native_thread_policy.cpp
-    - rt/src/native_thread_policy.hpp
-    - rt/src/thread_policy_transaction.cpp
-    - rt/src/thread_policy_transaction.hpp
+    - rt/src/telemetry.cpp
+    - rt/src/telemetry.hpp
     - tests/test_cpu_memory_policy.cpp
+    - tests/test_memory_region_policy.cpp
+    - tests/test_memory_plan.cpp
     - tests/test_thread_policy.cpp
     - tests/test_host_runtime.cpp
     - tests/test_executor.cpp
     - tests/test_periodic_runtime.cpp
     - tests/test_device_runtime.cpp
-    - tests/host_adapter_tests.cpp
+    - tests/test_trace_noalloc.cpp
     - CMakeLists.txt
     - tests/CMakeLists.txt
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
     - docs/cpu_memory_policy.md
+    - docs/memory_plan.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
     - docs/executor.md
     - docs/device_backend.md
     - docs/time_platform.md
-    - docs/evidence/M15-02-*.md
+    - docs/evidence/M15-03-*.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
     - tools/check_release_contract.py
@@ -68,7 +77,6 @@ scope:
     - rt/include/rt/c_api.h
     - rt/include/rt/device_abi.h
     - rt/include/rt/status.hpp
-    - rt/src/aligned_storage.hpp
     - rt/src/cuda_backend.cpp
     - rt/src/cuda_driver.cpp
     - rt/src/xdma_backend.cpp
@@ -80,16 +88,18 @@ scope:
     - rt/include/rt/plugin.hpp
     - .github/workflows/
 acceptance:
-  - An additive C++ thread-policy provider boundary supports deterministic injection and a production provider without changing runtime-config schema 7, stable C ABI v8, SONAME 8, or device ABI v1.
-  - Linux applies and reads back supported current-thread CPU affinity, normal/FIFO/round-robin scheduling class and priority, and bounded thread names; platform or permission failures remain explicit and never become qualification claims.
-  - Unsupported NUMA-node, custom stack/guard, and unavailable wait-policy requests fall back for best-effort policy and fail closed for required policy; M15-03 retains ownership of stack and memory-provider work.
-  - The frame lane is externally owned and verify-only; borrowed host-adapter workers and declared backend/vendor lanes are never mutated or falsely reported as runtime-owned.
-  - Executor, watchdog, and device-service threads reach an allocation-free startup barrier, apply and verify their resolved policy on their own thread, and cannot execute callbacks or service work before the whole thread-policy transaction commits.
-  - A required apply or verification failure aborts start before callbacks, joins every created runtime thread, reverses device/backend startup through existing checked cleanup, retains inspectable failed and rolled-back report state, and leaves the runtime finalized unless existing device cleanup remains pending.
-  - Best-effort native failures retain the observed/applied fallback and system error in the report while portable defaults preserve the 1.2.1 yield/wait, stack, scheduling, affinity, and naming behavior.
-  - Repeated failed start and later successful start do not retain stale barriers, report state, thread ownership, or cross-runtime policy state.
+  - An additive C++ memory-region provider boundary exposes immutable capabilities and bounded allocate, verify, and release operations with opaque ownership handles; Runtime borrows an injected provider without changing runtime-config schema 7, stable C ABI v8, SONAME 8, or device ABI v1.
+  - Phase scratch, task scratch, trace storage, and non-default runtime-owned thread stacks are created through the selected provider with checked alignment, page rounding, before/after guards, prefault, lock, pin, huge-page preference/requirement and fallback, NUMA binding, first touch, residency verification, and rollback resolved only where provider capabilities support them.
+  - Existing logical runtime, executor, and device control aggregates remain exactly accounted and retain their 1.2.1 allocation topology; non-default creation-only policy on those aggregates falls back for best effort and fails closed when required rather than claiming provider ownership that does not exist.
+  - Host-owned registered state and device buffers plus backend-owned storage remain verify-only and are never allocated, guarded, locked, pinned, rebound, first-touched, or released by the runtime.
+  - Linux native memory creation uses checked page geometry and retains native system errors and actual huge-page fallback; unsupported platform, permission, NUMA, lock, pin, or residency operations never become qualification claims.
+  - Runtime-owned custom stacks are created only through a provider/platform path that can bind the supplied stack before thread entry; external frame, host-adapter, and backend/vendor stacks are never replaced or released by the runtime.
+  - Provider-created finalization regions commit only after every required application and verification succeeds; a partial failure releases allocations in deterministic reverse order and leaves Runtime configuring with inspectable failure reports and no leaked provider handles.
+  - Startup stack creation joins every started lane before releasing stack storage; a required stack apply or verification failure aborts before callbacks and reverses device/backend startup through existing checked cleanup, retaining failed and rolled-back report state.
+  - Best-effort failures retain requested, resolved, applied, verified, fallback, residency, native-error, and rollback state while portable defaults preserve the 1.2.1 aligned-new storage and implementation-owned thread-stack behavior.
+  - Repeated failed finalization/start and later success plus two concurrent runtimes do not retain stale handles, reports, stack storage, provider state, or cross-runtime memory policy state.
   - Runtime callbacks and steady-state RT lanes add no allocation, file I/O, hidden thread creation, blocking mutex, unbounded wait, or spill execution.
-  - Documentation states that native policy application and portable/injected tests do not establish RT1 or RT2.
+  - Documentation states that injected/native provider tests and unprivileged Linux inspection do not establish RT1, RT2, NUMA, huge-page, locked-memory, CUDA, XDMA, or combined-hardware qualification.
   - Focused tests, full local verification, and required GitHub CI pass.
 validation:
   local:
@@ -97,50 +107,54 @@ validation:
     - ./scripts/agent-verify.sh quick
     - ./scripts/agent-verify.sh full
   focused_tests_to_add:
-    - injected provider success for every runtime-owned thread role behind the startup barrier
-    - required apply failure and required verification mismatch with deterministic reverse rollback
-    - best-effort apply fallback with retained native error and observed policy
-    - frame, host-adapter, and backend-owned verify-only behavior
-    - Linux unprivileged affinity and bounded-name apply/readback where supported
-    - repeated failed-start retry and two-runtime isolation
-    - callback exclusion until transaction commit and no-allocation steady-state regression
+    - injected provider allocation, verification, and deterministic reverse release for scratch, trace, and owned stacks
+    - required allocation/apply/verification failure before callbacks with retry and no leaked handles
+    - best-effort unsupported and native failure fallback with retained requested, applied, verified, and system-error state
+    - checked alignment, page rounding, guard, and footprint overflow boundaries
+    - huge-page fallback versus require semantics and residency mismatch
+    - NUMA, first-touch, lock, pin, prefault, and residency capability resolution without privilege-dependent assertions
+    - external registered-state, device-buffer, backend-storage, host-adapter, frame-stack, and vendor-stack verify-only behavior
+    - runtime-owned custom-stack startup/abort/join/release ordering where supported
+    - repeated failure retry, two-runtime isolation, and no-allocation steady-state regression
   required_ci:
     - Linux GCC and Clang Debug/RelWithDebInfo
     - Windows MSVC Debug/RelWithDebInfo portable fallback
-    - ThreadSanitizer
+    - AddressSanitizer, UndefinedBehaviorSanitizer, and ThreadSanitizer
     - determinism artifact exchange
     - installed package and compatibility consumers
     - documentation, release, and exact C ABI contracts
   manual:
-    - Review additive C++ provider and report-state source compatibility before merge.
-    - Inspect representative Linux affinity, scheduler, and thread-name state without treating the result as RT qualification.
+    - Review the additive provider/allocation-handle C++ source compatibility before merge.
+    - Inspect representative Linux mapping, guard, residency, lock, huge-page fallback, and NUMA results without treating them as RT or hardware qualification.
 risk:
   class: high
   hazards:
-    - a startup barrier deadlock or missed wake during apply failure
-    - callbacks or device service work escaping before policy commit
-    - partial native mutation being reported as fully verified
-    - permission-dependent scheduling behavior causing nondeterministic tests
-    - rollback interfering with recoverable device teardown
-    - cross-platform or cross-runtime state leakage
+    - mismatched allocation/release callback or release before the last thread leaves a custom stack
+    - guard and page-rounding arithmetic exposing or protecting the wrong pages
+    - best-effort fallback being reported as applied or verified
+    - partial finalization or startup leaking locked, pinned, NUMA-bound, or provider-owned mappings
+    - permission-dependent Linux behavior causing nondeterministic portable tests
+    - custom-stack thread creation diverging from existing lifecycle and cleanup ordering
+    - cross-platform or cross-runtime provider state leakage
   stop_conditions:
-    - stable C ABI v8, SONAME 8, device ABI v1, or status-code changes become necessary
-    - custom pthread stack ownership or memory-provider behavior is required
-    - a supported native operation cannot be verified by readback
-    - a vendor-owned thread would need runtime mutation or an unowned native handle
+    - stable C ABI v8, SONAME 8, device ABI v1, status codes, package inventory, or license changes become necessary
+    - existing control aggregates must be re-arena-allocated or M15-04 exact accounting must be absorbed to make a truthful claim
+    - a provider cannot return an ownership handle sufficient for exact reverse release
+    - an external host/vendor allocation or thread stack would need runtime mutation
+    - deterministic tests require privilege, hardware, weakened assertions, timing-only synchronization, or the experimental NUMA/SimCore path
     - source changes outside allowed paths are required
-    - deterministic tests require privilege, hardware, weakened assertions, or timing-only synchronization
     - current repository contracts contradict this batch
 rollback:
-  strategy: Revert the M15-02 implementation and active-batch commit; M15-01 portable policy modeling remains the baseline and native thread mutation is removed.
+  strategy: Revert the M15-03 implementation and active-batch commit; M15-02 thread policy remains the baseline and all runtime storage returns to aligned-new and implementation-owned default stacks.
   data_migration: none
   release_action: Do not publish a release from this batch unless separately approved.
 evidence:
   output:
-    - docs/evidence/M15-02-<date>.md
+    - docs/evidence/M15-03-<date>.md
     - exact commands and exit results
-    - acceptance mapping and startup/rollback ordering
+    - acceptance mapping and provider capability matrix
+    - allocation, apply, verify, commit, and reverse-release ordering
     - changed and preserved invariants
     - native system errors and portable fallback coverage
-    - residual risks and unperformed privileged, hardware, and RT validation
-  claim_boundary: Evidence is static, unit, injected-native, unprivileged local Linux where available, package-contract, and portable RT0 only; it does not qualify RT1, RT2, CUDA, XDMA, or combined hardware.
+    - residual risks and unperformed privileged, hardware, NUMA, huge-page, locked-memory, and RT validation
+  claim_boundary: Evidence is static, unit, injected-provider, unprivileged local Linux where available, package-contract, and portable RT0 only; it does not qualify RT1, RT2, NUMA placement, locked memory, huge pages, CUDA, XDMA, or combined hardware.

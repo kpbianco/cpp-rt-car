@@ -41,6 +41,10 @@ The target lifecycle is:
    a checked reverse rollback. An initialization failure is
    ownership-uncertain until one `shutdown()` attempt returns `OK` or
    `INVALID_STATE`; any other cleanup result is retained for `stop()` retry.
+   M15-03 may create the service stack through the memory-region provider;
+   failure joins the service before returning that stack and then preserves
+   this same checked backend cleanup order. Backend storage, buffers, and
+   vendor I/O stacks remain external/verify-only.
 6. `step()` invokes a command provider on a CPU worker. The provider fills one
    fixed-size submission and returns. Accepted device work retains the phase's
    graph completion token; independent CPU work remains runnable.

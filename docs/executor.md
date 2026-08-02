@@ -30,6 +30,13 @@ dequeue graph or nested work before commit. A required failure aborts every
 created lane and `start()` joins it before returning; retry uses fresh barrier
 and report state.
 
+M15-03 optionally creates each runtime-owned worker stack through the selected
+memory-region provider before thread entry. Linux binds the supplied usable
+span with `pthread_attr_setstack`; provider guards remain outside that span.
+Abort and normal stop join the worker before returning the allocation. Default
+policy continues to use the implementation-owned `std::thread` stack, and
+host-adapter workers remain external/verify-only.
+
 The `host_adapter` policy is the explicit exception to runtime-owned worker and
 queue storage. The host attaches a fixed callback table before finalization,
 declares capacities equal to the runtime configuration, and keeps its job

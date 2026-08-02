@@ -1,14 +1,14 @@
 # CPU and memory policy model
 
-M15-01 adds the C++ policy and report model used by later M15 startup and
-memory-provider batches. M15-02 applies the supported thread-only subset behind
-a startup transaction. It is RT0 configuration, application, and introspection;
-it does not establish RT1 or RT2. NUMA memory placement, custom stacks/guards,
-locking, pinning, huge pages, prefault, first touch, and residency remain
-M15-03.
-M15-01 does not call affinity, scheduling, NUMA, stack, locking, pinning,
-huge-page, prefault, first-touch, or residency mutation APIs; native thread
-application begins only in M15-02.
+M15-01 adds the C++ policy and report model. M15-02 applies the supported
+thread subset behind a startup transaction. M15-03 creates and verifies the
+contiguous phase-scratch, task-scratch, trace, and requested runtime-owned
+stack regions through an injectable/native provider. These are RT0
+configuration, application, and introspection features; they do not establish
+RT1 or RT2. Exact committed/resident accounting closure remains M15-04.
+Policy configuration does not establish RT1 or RT2.
+M15-01 itself does not call affinity, scheduling, NUMA, stack, locking,
+pinning, huge-page, prefault, first-touch, or residency mutation APIs.
 
 The model is separate from runtime-config schema 7 and stable C ABI v8.
 `Runtime::set_cpu_memory_policy()` copies a bounded request while the runtime
@@ -104,7 +104,47 @@ not promote their informational byte sum into runtime-plan accounting.
 before/after guards, prefault, locking, pinning, huge-page preference and
 fallback, NUMA placement, first touch, residency verification, and rollback
 intent. The report keeps requested, resolved, applied, and verified fields
-separate. M15-01 does not change the allocator or committed region layout.
+separate and retains committed bytes, residency/lock/pin/fallback flags, native
+errors, and rollback state.
+
+`MemoryRegionProvider` is an additive C++ boundary with immutable capabilities
+and bounded allocate, verify, and release calls. A successful allocation
+returns an opaque handle plus an exact usable span; the runtime returns that
+handle after its last user, including after a custom-stack thread has joined.
+An injected provider supplies deterministic portable tests. The native
+provider preserves aligned-new storage for default policy. On Linux it uses
+checked anonymous mappings when page behavior is requested and supports:
+
+- power-of-two alignment and page rounding;
+- page-aligned inaccessible before/after guards;
+- existing zero-initialization as prefault/frame-thread first touch;
+- `mlock`-backed lock/pin requests;
+- `MAP_HUGETLB` preference or requirement with explicit allowed fallback;
+- `mbind` where the syscall is available; and
+- `mincore` residency readback.
+
+Native permission, resource, topology, or mapping failures are retained.
+Required policy fails closed. Best-effort policy releases the partial mapping,
+creates the default region, and reports `portable_fallback` rather than
+claiming the requested field was applied.
+
+Finalization creates phase scratch, task scratch, and trace storage in that
+order and publishes them only after all required verification passes. Failure
+releases trace/task/phase commitments in reverse order and leaves the runtime
+configuring with inspectable failure reports. Startup creates requested
+executor, watchdog, and device-service stacks before thread entry. Linux binds
+the supplied span with `pthread_attr_setstack`; abort joins the lane before
+returning the allocation. Frame, host-adapter, XDMA/vendor, registered-state,
+registered-device-buffer, and backend-storage entries remain external and
+verify-only.
+These resources are external and verify-only.
+
+The runtime, executor, and device control categories remain exact logical M4
+accounting aggregates over their existing noncontiguous allocation topology.
+Non-default creation-only policy for those aggregates falls back or fails
+required resolution. M15-03 does not falsely treat a shadow allocation as
+their backing storage. M15-04 owns exact committed-byte/fallback accounting
+closure.
 
 ## Validation
 
@@ -121,9 +161,12 @@ Finalization rejects:
   explicitly declared backend-owned XDMA/accelerator roles;
 - more than 1,024 thread or memory overrides;
 - `required` thread fields unsupported for their owner or provider, including
-  M15-03 custom-stack/guard and NUMA requests;
-- `required` memory policy requests, because memory application and
-  verification remain M15-03.
+  custom stacks below the provider/platform minimum and thread-NUMA requests;
+- `required` memory fields unsupported by the selected provider or region,
+  including creation-only policy on logical control aggregates or external
+  registrations;
+- owner-thread first touch when the provider cannot perform it before policy
+  commit.
 
 Rejection of unsupported required policy is intentional fail-closed behavior.
 Supported M15-02 thread fields are accepted only when the selected provider can
@@ -138,7 +181,9 @@ unchanged. Callback dispatch does not consult the reports; only an executor
 worker's finalized spin/yield choice affects its idle loop.
 
 Portable and injected tests validate model behavior, inventory, ownership,
-startup exclusion, failure rollback/retry, and runtime-instance isolation. An
-unprivileged Linux test applies and reads back one worker's allowed affinity,
-normal scheduler, and name. Privileged FIFO/RR success, custom stacks, memory
-residency, hardware behavior, latency, RT1, and RT2 remain unperformed.
+startup exclusion, memory creation, failure rollback/retry, and
+runtime-instance isolation. Unprivileged Linux tests apply/read back one
+worker's allowed affinity, normal scheduler, and name and exercise guarded,
+prefaulted resident scratch plus a custom-stack lifecycle. Privileged FIFO/RR
+success, privileged locked-memory success, real huge-page success, multi-node
+NUMA placement, hardware behavior, latency, RT1, and RT2 remain unperformed.

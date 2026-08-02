@@ -277,6 +277,71 @@ public:
         int& system_error) noexcept = 0;
 };
 
+struct MemoryRegionProviderCapabilities {
+    bool custom_thread_stack = false;
+    std::size_t minimum_thread_stack_bytes = 0;
+    bool page_rounding = false;
+    bool guards = false;
+    bool prefault = false;
+    bool locking = false;
+    bool pinning = false;
+    bool huge_pages = false;
+    bool numa_binding = false;
+    bool first_touch = false;
+    bool owner_thread_first_touch = false;
+    bool residency = false;
+    std::size_t page_bytes = 0;
+};
+
+struct MemoryRegionAllocation {
+    // data/data_bytes are the usable payload. allocation_handle and
+    // committed_bytes are provider-owned metadata copied back unchanged to
+    // verify/release. A successful zero-byte allocation may have null data.
+    std::byte* data = nullptr;
+    std::size_t data_bytes = 0;
+    void* allocation_handle = nullptr;
+    std::size_t committed_bytes = 0;
+    std::size_t alignment = 0;
+    bool page_rounded = false;
+    bool guarded = false;
+    bool prefaulted = false;
+    bool locked = false;
+    bool pinned = false;
+    bool huge_pages = false;
+    bool huge_page_fallback = false;
+    bool numa_bound = false;
+    bool first_touched = false;
+    bool resident = false;
+};
+
+// M15-03 providers are used only during finalization/startup and reverse
+// teardown. Runtime borrows an injected provider through destruction. Methods
+// must not throw; successful allocate calls transfer one opaque handle that
+// must be returned exactly once to release.
+class MemoryRegionProvider {
+public:
+    virtual ~MemoryRegionProvider() = default;
+    [[nodiscard]] virtual MemoryRegionProviderCapabilities capabilities()
+        const noexcept = 0;
+    [[nodiscard]] virtual Status allocate(
+        MemoryRegionId id,
+        std::size_t payload_bytes,
+        std::size_t minimum_alignment,
+        const MemoryRegionPolicy& policy,
+        MemoryRegionAllocation& allocation,
+        int& system_error) noexcept = 0;
+    [[nodiscard]] virtual Status verify(
+        MemoryRegionId id,
+        const MemoryRegionAllocation& allocation,
+        const MemoryRegionPolicy& policy,
+        MemoryRegionPolicy& observed,
+        int& system_error) noexcept = 0;
+    [[nodiscard]] virtual Status release(
+        MemoryRegionId id,
+        MemoryRegionAllocation& allocation,
+        int& system_error) noexcept = 0;
+};
+
 class NumericalPolicy {
 public:
     explicit NumericalPolicy(
@@ -553,9 +618,20 @@ struct MemoryRegionPolicyReport {
     MemoryRegionPolicy requested{};
     MemoryRegionPolicy resolved{};
     MemoryRegionPolicy applied{};
+    MemoryRegionPolicy verified{};
     PolicyStageState resolution = PolicyStageState::not_requested;
     PolicyStageState application = PolicyStageState::not_performed;
     PolicyStageState verification = PolicyStageState::not_performed;
+    Status application_status = Status::ok;
+    Status verification_status = Status::ok;
+    int application_system_error = 0;
+    int verification_system_error = 0;
+    std::size_t committed_bytes = 0;
+    bool resident = false;
+    bool locked = false;
+    bool pinned = false;
+    bool huge_page_fallback = false;
+    bool rolled_back = false;
 };
 
 struct CpuMemoryPolicySummary {
@@ -805,6 +881,10 @@ public:
     // configuring; the provider is borrowed through stop/destruction.
     [[nodiscard]] Status set_thread_policy_provider(
         ThreadPolicyProvider& provider) noexcept;
+    // Replaces the default platform memory provider. May be called only while
+    // configuring; the provider is borrowed through stop/destruction.
+    [[nodiscard]] Status set_memory_region_provider(
+        MemoryRegionProvider& provider) noexcept;
     // Copies the callback table and borrows adapter.user_data through stop().
     // May be called only while configuring.
     [[nodiscard]] Status set_host_executor(

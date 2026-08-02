@@ -118,6 +118,12 @@ Unsupported best-effort fields fall back and unsupported required fields fail
 closed. Neither successful application nor strict read-only preflight
 establishes RT1 or RT2.
 
+M15-03 can create the watchdog service stack through the memory-region
+provider before entry. Abort and stop join the service before returning that
+stack. Memory locking, huge-page fallback, NUMA placement, residency readback,
+and a successful strict preflight remain evidence inputs only; none
+independently establishes RT1 or RT2.
+
 ## C ABI
 
 Stable ABI version 8 retains the M5 surface:

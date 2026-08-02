@@ -18,33 +18,19 @@ Status WatchdogMonitor::start(
     if (started_.load(std::memory_order_acquire)) {
         return Status::invalid_state;
     }
-
     stop_requested_.store(false, std::memory_order_release);
     active_state_.store(0, std::memory_order_release);
     startup_ready_.store(false, std::memory_order_relaxed);
     startup_transaction_ = transaction;
     started_.store(true, std::memory_order_release);
-    try {
-        thread_ = std::thread([this] {
-            const ThreadResourceId id{ThreadRole::watchdog_service, 0};
-            if (startup_transaction_) {
-                startup_transaction_->prepare_current_thread(id);
-            }
-            startup_ready_.store(true, std::memory_order_release);
-            startup_ready_.notify_all();
-            if (!startup_transaction_ ||
-                startup_transaction_->await_decision(id)) {
-                run();
-            }
-        });
-    } catch (const std::bad_alloc&) {
+    const auto thread_status = thread_.start(
+        &WatchdogMonitor::thread_entry,
+        this,
+        0);
+    if (thread_status != Status::ok) {
         started_.store(false, std::memory_order_release);
         startup_transaction_ = nullptr;
-        return Status::resource_exhausted;
-    } catch (...) {
-        started_.store(false, std::memory_order_release);
-        startup_transaction_ = nullptr;
-        return Status::internal_error;
+        return thread_status;
     }
     auto ready = startup_ready_.load(std::memory_order_acquire);
     while (!ready) {
@@ -52,6 +38,55 @@ Status WatchdogMonitor::start(
         ready = startup_ready_.load(std::memory_order_acquire);
     }
     return Status::ok;
+}
+
+Status WatchdogMonitor::start(
+    MemoryRegionProvider& memory_provider,
+    std::span<MemoryRegionPolicyReport> memory_reports,
+    ThreadPolicyTransaction* transaction) noexcept {
+    if (started_.load(std::memory_order_acquire)) {
+        return Status::invalid_state;
+    }
+
+    stop_requested_.store(false, std::memory_order_release);
+    active_state_.store(0, std::memory_order_release);
+    startup_ready_.store(false, std::memory_order_relaxed);
+    startup_transaction_ = transaction;
+    started_.store(true, std::memory_order_release);
+    const auto thread_status = thread_.start(
+        memory_provider,
+        memory_reports,
+        ThreadResourceId{ThreadRole::watchdog_service, 0},
+        &WatchdogMonitor::thread_entry,
+        this,
+        0);
+    if (thread_status != Status::ok) {
+        started_.store(false, std::memory_order_release);
+        startup_transaction_ = nullptr;
+        return thread_status;
+    }
+    auto ready = startup_ready_.load(std::memory_order_acquire);
+    while (!ready) {
+        startup_ready_.wait(ready, std::memory_order_acquire);
+        ready = startup_ready_.load(std::memory_order_acquire);
+    }
+    return Status::ok;
+}
+
+void WatchdogMonitor::thread_entry(
+    void* context,
+    std::size_t) noexcept {
+    auto& self = *static_cast<WatchdogMonitor*>(context);
+    const ThreadResourceId id{ThreadRole::watchdog_service, 0};
+    if (self.startup_transaction_) {
+        self.startup_transaction_->prepare_current_thread(id);
+    }
+    self.startup_ready_.store(true, std::memory_order_release);
+    self.startup_ready_.notify_all();
+    if (!self.startup_transaction_ ||
+        self.startup_transaction_->await_decision(id)) {
+        self.run();
+    }
 }
 
 void WatchdogMonitor::stop() noexcept {

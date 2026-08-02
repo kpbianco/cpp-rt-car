@@ -82,6 +82,7 @@ if (SIM_GTEST_AVAILABLE)
         test_compiled_graph.cpp
         test_executor.cpp
         test_memory_plan.cpp
+        test_memory_region_policy.cpp
         test_observability.cpp
         test_determinism_replay.cpp
         test_device_runtime.cpp
@@ -101,6 +102,7 @@ if (SIM_GTEST_AVAILABLE)
             test_compiled_graph.cpp
             test_executor.cpp
             test_memory_plan.cpp
+            test_memory_region_policy.cpp
             test_observability.cpp
             test_determinism_replay.cpp
             test_device_runtime.cpp

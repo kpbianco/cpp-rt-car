@@ -1,5 +1,7 @@
 #pragma once
 
+#include "memory_region_provider.hpp"
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -29,6 +31,8 @@ static_assert(
 class TelemetryRing final {
 public:
     explicit TelemetryRing(std::size_t capacity);
+    TelemetryRing(std::size_t capacity, RegionStorage storage);
+    ~TelemetryRing();
 
     TelemetryRing(const TelemetryRing&) = delete;
     TelemetryRing& operator=(const TelemetryRing&) = delete;
@@ -61,6 +65,7 @@ public:
     }
 
     [[nodiscard]] static constexpr std::size_t slot_size() noexcept;
+    [[nodiscard]] static constexpr std::size_t slot_alignment() noexcept;
 
 private:
     static constexpr std::uint64_t invalid_sequence =
@@ -89,7 +94,8 @@ private:
         std::atomic<std::uint64_t> value{0};
     };
 
-    std::unique_ptr<Slot[]> slots_;
+    RegionStorage storage_;
+    Slot* slots_ = nullptr;
     std::size_t capacity_ = 0;
     alignas(64) std::atomic<std::uint64_t> next_sequence_{0};
     alignas(64) std::atomic<std::uint64_t> emitted_{0};
@@ -103,6 +109,10 @@ private:
 
 constexpr std::size_t TelemetryRing::slot_size() noexcept {
     return sizeof(Slot);
+}
+
+constexpr std::size_t TelemetryRing::slot_alignment() noexcept {
+    return alignof(Slot);
 }
 
 class TelemetryCounters final {

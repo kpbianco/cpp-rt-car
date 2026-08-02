@@ -26,12 +26,15 @@ struct MemoryInventoryEntry {
     std::span<const ThreadPolicyRequest> requests,
     std::span<const ThreadInventoryEntry> inventory,
     const ThreadPolicyProviderCapabilities& capabilities,
+    bool custom_thread_stacks,
+    std::size_t minimum_thread_stack_bytes,
     std::vector<ThreadPolicyReport>& reports,
     const char*& error) noexcept;
 
 [[nodiscard]] Status resolve_memory_policies(
     std::span<const MemoryPolicyRequest> requests,
     std::span<const MemoryInventoryEntry> inventory,
+    const MemoryRegionProviderCapabilities& capabilities,
     std::vector<MemoryRegionPolicyReport>& reports,
     CpuMemoryPolicySummary& summary,
     const char*& error) noexcept;

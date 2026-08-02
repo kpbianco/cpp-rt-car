@@ -123,7 +123,7 @@ bool DeviceManager::estimate_control_storage(
            add(buffer_count, sizeof(std::uint64_t)) &&
            add(outstanding_capacity, sizeof(Outstanding)) &&
            add(completion_batch, sizeof(rtfw_device_completion)) &&
-           add(1, sizeof(std::thread));
+           add(1, sizeof(OwnedThread));
 }
 
 Status DeviceManager::initialize_backends() noexcept {
@@ -299,6 +299,8 @@ Status DeviceManager::start(
     Executor& executor,
     DeviceEventObserver observer,
     void* observer_data,
+    MemoryRegionProvider& memory_provider,
+    std::span<MemoryRegionPolicyReport> memory_reports,
     ThreadPolicyTransaction* transaction) noexcept {
     if (started_.load(std::memory_order_acquire) ||
         has_backend_ownership() ||
@@ -320,33 +322,43 @@ Status DeviceManager::start(
     stopping_.store(false, std::memory_order_release);
     service_ready_.store(false, std::memory_order_relaxed);
     started_.store(true, std::memory_order_release);
-    try {
-        service_thread_ = std::thread([this] {
-            const ThreadResourceId id{ThreadRole::device_service, 0};
-            if (startup_transaction_) {
-                startup_transaction_->prepare_current_thread(id);
-            }
-            service_starts_.fetch_add(1, std::memory_order_release);
-            service_ready_.store(true, std::memory_order_release);
-            service_ready_.notify_all();
-            if (!startup_transaction_ ||
-                startup_transaction_->await_decision(id)) {
-                service_loop();
-            }
-        });
-    } catch (...) {
+    const auto thread_status = service_thread_.start(
+        memory_provider,
+        memory_reports,
+        ThreadResourceId{ThreadRole::device_service, 0},
+        &DeviceManager::service_entry,
+        this,
+        0);
+    if (thread_status != Status::ok) {
         started_.store(false, std::memory_order_release);
         executor_ = nullptr;
         observer_ = nullptr;
         observer_data_ = nullptr;
         startup_transaction_ = nullptr;
         (void)shutdown_backends();
-        return Status::resource_exhausted;
+        return thread_status;
     }
     while (!service_ready_.load(std::memory_order_acquire)) {
         std::this_thread::yield();
     }
     return Status::ok;
+}
+
+void DeviceManager::service_entry(
+    void* context,
+    std::size_t) noexcept {
+    auto& self = *static_cast<DeviceManager*>(context);
+    const ThreadResourceId id{ThreadRole::device_service, 0};
+    if (self.startup_transaction_) {
+        self.startup_transaction_->prepare_current_thread(id);
+    }
+    self.service_starts_.fetch_add(1, std::memory_order_release);
+    self.service_ready_.store(true, std::memory_order_release);
+    self.service_ready_.notify_all();
+    if (!self.startup_transaction_ ||
+        self.startup_transaction_->await_decision(id)) {
+        self.service_loop();
+    }
 }
 
 Status DeviceManager::stop() noexcept {

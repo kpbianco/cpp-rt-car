@@ -1,9 +1,13 @@
 #include "telemetry.hpp"
 
+#include "native_memory_region_provider.hpp"
+
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -182,12 +186,50 @@ const char* runtime_trace_event_name(
 
 namespace rt::detail {
 
+namespace {
+
+RegionStorage make_default_trace_storage(std::size_t capacity) {
+    static NativeMemoryRegionProvider provider;
+    MemoryRegionPolicyReport report{};
+    report.id = MemoryRegionId{MemoryCategory::trace_storage, ThreadRole::none, 0};
+    report.resolved.provider = MemoryProviderOwnership::runtime;
+    RegionStorage storage;
+    const auto status = storage.create(
+        provider,
+        report.id,
+        capacity * TelemetryRing::slot_size(),
+        TelemetryRing::slot_alignment(),
+        report);
+    if (status != Status::ok) {
+        throw std::bad_alloc();
+    }
+    return storage;
+}
+
+} // namespace
+
 TelemetryRing::TelemetryRing(std::size_t capacity)
-    : slots_(
-          capacity == 0
-              ? nullptr
-              : std::make_unique<Slot[]>(capacity)),
-      capacity_(capacity) {}
+    : TelemetryRing(capacity, make_default_trace_storage(capacity)) {}
+
+TelemetryRing::TelemetryRing(
+    std::size_t capacity,
+    RegionStorage storage)
+    : storage_(std::move(storage)),
+      slots_(reinterpret_cast<Slot*>(storage_.data())),
+      capacity_(capacity) {
+    if (storage_.size() != capacity * sizeof(Slot)) {
+        throw std::invalid_argument("trace storage size mismatch");
+    }
+    for (std::size_t index = 0; index < capacity_; ++index) {
+        std::construct_at(slots_ + index);
+    }
+}
+
+TelemetryRing::~TelemetryRing() {
+    for (std::size_t index = capacity_; index != 0; --index) {
+        std::destroy_at(slots_ + (index - 1));
+    }
+}
 
 bool TelemetryRing::emit(RuntimeTraceEvent event) noexcept {
     const auto sequence =

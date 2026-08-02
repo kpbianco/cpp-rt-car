@@ -33,7 +33,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
-| M15 | Active | M15-01 model/inventory and M15-02 thread apply/verify complete locally; memory residency, NUMA, and stack ownership remain |
+| M15 | Active | M15-01 model/inventory, M15-02 thread apply/verify, and M15-03 memory providers/residency are complete locally; accounting closure remains |
 | M16 | Planned | Multi-rate deterministic simulation domains and release coordination |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
@@ -543,6 +543,19 @@ M15-02 delivered locally:
 - retained apply/readback status, native system errors, rolled-back state,
   strict failure cleanup, retry, native Linux, and two-runtime tests.
 
+M15-03 delivered locally:
+
+- an additive injectable C++ memory-region provider with opaque allocation
+  handles, capability-based resolution, verification, and reverse release;
+- provider-created phase scratch, task scratch, trace storage, and requested
+  runtime-owned executor/watchdog/device-service stacks;
+- Linux page rounding, guards, prefault/frame first touch, lock/pin,
+  huge-page preference/requirement and fallback, NUMA binding where available,
+  residency readback, and supplied-stack thread creation;
+- strict failed-finalization/start rollback with inspectable reports and clean
+  retry, plus truthful best-effort fallback and external verify-only behavior;
+- injected-provider and unprivileged Linux guard/residency/custom-stack tests.
+
 Remaining outcome:
 
 - provider-backed verification handles for any future externally owned lane
@@ -550,15 +563,16 @@ Remaining outcome:
   verify-only without mutation;
 - `park` and `adaptive` executor wait implementations if later product work
   accepts their wake/boundedness contract;
-- explicit region and runtime-owned stack policy covering alignment, page
-  rounding, guards, prefaulting, locking, residency, huge-page fallback, NUMA
-  binding, first touch, and rollback;
-- requested/resolved/applied reports and complete byte accounting, while
-  externally owned host-engine and vendor threads remain verify-only.
+- exact committed/resident/locked/pinned/fallback accounting closure across
+  stacks, backend storage, registered buffers, and the existing logical
+  control aggregates;
+- final portable/strict compatibility closure while externally owned
+  host-engine and vendor threads remain verify-only.
 
 M15-01 performs no native mutation. M15-02 owns thread apply/verify and startup
-rollback only. Memory providers, custom stacks, residency, and final accounting
-closure remain M15-03/M15-04. See [the policy model](cpu_memory_policy.md).
+rollback. M15-03 owns provider-created contiguous regions, custom stacks, and
+residency behavior. Final accounting and compatibility closure remain M15-04.
+See [the policy model](cpu_memory_policy.md).
 
 Exit gates:
 

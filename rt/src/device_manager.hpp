@@ -1,6 +1,7 @@
 #pragma once
 
 #include "executor.hpp"
+#include "owned_thread.hpp"
 
 #include <array>
 #include <atomic>
@@ -10,7 +11,6 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <rt/device.hpp>
@@ -87,6 +87,8 @@ public:
         Executor& executor,
         DeviceEventObserver observer,
         void* observer_data,
+        MemoryRegionProvider& memory_provider,
+        std::span<MemoryRegionPolicyReport> memory_reports,
         ThreadPolicyTransaction* transaction = nullptr) noexcept;
     [[nodiscard]] Status stop() noexcept;
     [[nodiscard]] bool cleanup_pending() const noexcept;
@@ -134,6 +136,7 @@ private:
         std::size_t backend_index) const noexcept;
     [[nodiscard]] bool has_backend_ownership() const noexcept;
     void service_loop() noexcept;
+    static void service_entry(void* context, std::size_t) noexcept;
     void process_completion(
         std::size_t backend_index,
         const rtfw_device_completion& completion) noexcept;
@@ -157,7 +160,7 @@ private:
     std::size_t outstanding_capacity_ = 0;
     std::unique_ptr<rtfw_device_completion[]> completion_buffer_;
     std::size_t completion_batch_ = 0;
-    std::thread service_thread_;
+    OwnedThread service_thread_;
     Executor* executor_ = nullptr;
     DeviceEventObserver observer_ = nullptr;
     void* observer_data_ = nullptr;

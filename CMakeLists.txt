@@ -618,10 +618,13 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/device_manager.cpp
     rt/src/executor.cpp
     rt/src/host_runtime.cpp
+    rt/src/memory_region_provider.cpp
     rt/src/mock_device.cpp
+    rt/src/native_memory_region_provider.cpp
     rt/src/native_platform_preflight.cpp
     rt/src/native_thread_policy.cpp
     rt/src/observability_export.cpp
+    rt/src/owned_thread.cpp
     rt/src/runtime_compat.cpp
     rt/src/runtime_profile.cpp
     rt/src/snapshot_codec.cpp

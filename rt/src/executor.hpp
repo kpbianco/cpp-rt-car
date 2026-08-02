@@ -1,6 +1,8 @@
 #pragma once
 
 #include "aligned_storage.hpp"
+#include "memory_region_provider.hpp"
+#include "owned_thread.hpp"
 #include "compiled_graph.hpp"
 
 #include <atomic>
@@ -8,7 +10,6 @@
 #include <cstdint>
 #include <memory>
 #include <span>
-#include <thread>
 #include <vector>
 
 #include <rt/runtime.hpp>
@@ -39,13 +40,16 @@ public:
         std::size_t scratch_alignment,
         OverloadPolicy overload_policy,
         std::span<const GraphDependency> dependencies,
-        const HostExecutorAdapter* host_adapter);
+        const HostExecutorAdapter* host_adapter,
+        RegionStorage task_scratch_storage);
     ~Executor();
 
     Executor(const Executor&) = delete;
     Executor& operator=(const Executor&) = delete;
 
     [[nodiscard]] Status start(
+        MemoryRegionProvider& memory_provider,
+        std::span<MemoryRegionPolicyReport> memory_reports,
         ThreadPolicyTransaction* transaction = nullptr) noexcept;
     void stop() noexcept;
 
@@ -161,6 +165,7 @@ private:
         std::size_t phase_index,
         Status status) noexcept;
     void worker_loop(std::size_t worker_index) noexcept;
+    static void worker_entry(void* context, std::size_t worker_index) noexcept;
     void cancel_graph(Status status, std::size_t failed_phase) noexcept;
     [[nodiscard]] std::size_t static_worker(
         std::size_t phase_index,
@@ -176,10 +181,10 @@ private:
     std::size_t scratch_alignment_;
     OverloadPolicy overload_policy_;
     std::vector<std::unique_ptr<Queue>> queues_;
-    std::vector<std::thread> threads_;
+    std::vector<OwnedThread> threads_;
     HostExecutorAdapter host_adapter_{};
     std::unique_ptr<HostWorkSlot[]> host_work_slots_;
-    AlignedStorage task_scratch_storage_;
+    RegionStorage task_scratch_storage_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> free_scratch_words_;
     std::size_t free_scratch_word_count_ = 0;
     std::atomic<std::size_t> scratch_word_hint_{0};

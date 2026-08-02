@@ -302,6 +302,11 @@ def check_runtime_contract() -> None:
     executor_source = read("rt/src/executor.cpp")
     policy_source = read("rt/src/cpu_memory_policy.cpp")
     native_thread_policy = read("rt/src/native_thread_policy.cpp")
+    memory_region_provider = read("rt/src/memory_region_provider.cpp")
+    native_memory_region_provider = read(
+        "rt/src/native_memory_region_provider.cpp"
+    )
+    owned_thread = read("rt/src/owned_thread.cpp")
     thread_policy_transaction = read("rt/src/thread_policy_transaction.cpp")
     watchdog_source = read("rt/src/watchdog_monitor.cpp")
     preflight_source = read("rt/src/native_platform_preflight.cpp")
@@ -313,6 +318,7 @@ def check_runtime_contract() -> None:
     memory_test = read("tests/test_memory_plan.cpp")
     policy_test = read("tests/test_cpu_memory_policy.cpp")
     thread_policy_test = read("tests/test_thread_policy.cpp")
+    memory_region_policy_test = read("tests/test_memory_region_policy.cpp")
     periodic_test = read("tests/test_periodic_runtime.cpp")
     preflight_test = read("tests/test_platform_preflight.cpp")
     observability_test = read("tests/test_observability.cpp")
@@ -847,6 +853,68 @@ def check_runtime_contract() -> None:
     ):
         if test_name not in thread_policy_test:
             fail(f"tests/test_thread_policy.cpp: missing M15-02 gate {test_name!r}")
+
+    for token in (
+        "class MemoryRegionProvider",
+        "struct MemoryRegionProviderCapabilities",
+        "struct MemoryRegionAllocation",
+        "set_memory_region_provider(",
+        "MemoryRegionPolicy verified",
+        "committed_bytes",
+        "huge_page_fallback",
+    ):
+        if token not in runtime_header:
+            fail(f"rt/runtime.hpp: missing M15-03 provider/report surface {token!r}")
+    for token in (
+        "RegionStorage::create",
+        "provider.allocate(",
+        "provider.verify(",
+        "provider.release(",
+        "PolicyStageState::portable_fallback",
+    ):
+        if token not in memory_region_provider:
+            fail(f"memory provider transaction: missing M15-03 step {token!r}")
+    for token in (
+        "::mmap(",
+        "::mprotect(",
+        "::mlock(",
+        "MAP_HUGETLB",
+        "SYS_mbind",
+        "::mincore(",
+    ):
+        if token not in native_memory_region_provider:
+            fail(f"native memory provider: missing M15-03 Linux operation {token!r}")
+    for token in (
+        "pthread_attr_setstack",
+        "pthread_create",
+        "pthread_join",
+        "stack_storage_.reset",
+    ):
+        if token not in owned_thread:
+            fail(f"owned thread: missing M15-03 stack lifecycle {token!r}")
+    for phrase in (
+        "does not establish RT1 or RT2",
+        "opaque handle",
+        "inspectable failure reports",
+        "external and verify-only",
+        "M15-04 owns exact committed-byte/fallback accounting",
+    ):
+        if phrase not in policy_doc:
+            fail(f"docs/cpu_memory_policy.md: missing M15-03 boundary {phrase!r}")
+    for test_name in (
+        "InjectedProviderCreatesAndReleasesOwnedRegions",
+        "StrictFailureRollsBackInReverseAndRetryIsClean",
+        "BestEffortNativeFailureUsesReportedFallback",
+        "RequiredVerificationMismatchReleasesAllRegions",
+        "RuntimeInstancesKeepProviderStateIsolated",
+        "LinuxAppliesGuardPrefaultAndResidencyUnprivileged",
+        "LinuxHugePagePreferenceReportsSuccessOrFallback",
+        "RequiredStackFailureRollsBackBeforeCallbackAndRetries",
+        "OwnedWorkerStacksReleaseInReverseCreationOrder",
+        "LinuxOwnedWorkerUsesAndReleasesCustomStack",
+    ):
+        if test_name not in memory_region_policy_test:
+            fail(f"tests/test_memory_region_policy.cpp: missing M15-03 gate {test_name!r}")
 
     for token in (
         "Runtime::run_periodic(",

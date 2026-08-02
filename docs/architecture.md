@@ -7,7 +7,7 @@ in [ADRs](adr/README.md).
 
 ## Current 1.2 implementation
 
-### M1–M15-02 host, device, distribution, SDK, and thread-policy runtime
+### M1–M15-03 host, device, distribution, SDK, and CPU/memory-policy runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -115,7 +115,20 @@ the barrier in abort mode and existing reverse lifecycle cleanup joins threads
 and shuts down initialized backends. Linux provides affinity, normal/FIFO/RR
 scheduling, and bounded thread names; executor workers also consume resolved
 spin/yield wait policy. Unsupported best-effort fields remain explicit
-fallbacks. Stack/guard ownership and memory residency remain M15-03.
+fallbacks.
+
+M15-03 adds an injectable memory-region provider with opaque allocation
+handles and checked reverse release. Finalization creates phase scratch, task
+scratch, and trace slots through that provider before publishing the finalized
+runtime. Startup creates requested runtime-owned stacks before the relevant
+executor, watchdog, or device-service lane enters, and joins the lane before
+returning its stack. Linux uses aligned anonymous mappings when page policy is
+requested and can apply guards, prefault/first touch, lock/pin, huge-page
+preference/fallback, NUMA binding, and residency inspection. Portable defaults
+retain aligned-new storage and implementation-owned stacks. Runtime/executor/
+device control totals remain logical aggregates over their existing allocation
+topology; provider migration for those aggregates and exact committed-byte
+closure are not claimed before M15-04.
 
 ### Legacy simulation path
 
@@ -195,8 +208,9 @@ release archive, digest-manifest, and independent-device-isolation gates
 machine-verifiable.
 M15-01 adds immutable role/region policy reports and exact accounting
 identities. M15-02 populates thread applied/verified reports through the
-transactional startup barrier without changing callback scheduling or memory
-providers.
+transactional startup barrier. M15-03 creates and verifies contiguous runtime
+regions and owned stacks through a memory provider without changing callback
+scheduling or stable ABIs.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
@@ -214,7 +228,7 @@ that arbitrary host data is automatically optimized.
 
 ## Code anchors
 
-- M1–M15-02 host/device runtime, lifecycle-safety closure, and thread policy:
+- M1–M15-03 host/device runtime, lifecycle-safety closure, and CPU/memory policy:
   `rt::Runtime`; `rt/include/rt/runtime.hpp`,
   `rt/src/host_runtime.cpp`
 - M2 graph compiler: `rt/src/compiled_graph.cpp`
@@ -236,6 +250,8 @@ that arbitrary host data is automatically optimized.
   `cmake/rtfwConfig.cmake.in`, `tests/package_consumer/package_contract.cmake`
 - M15 CPU/memory policy: `rt/include/rt/config.hpp`,
   `rt/include/rt/runtime.hpp`, `rt/src/cpu_memory_policy.cpp`,
+  `rt/src/memory_region_provider.cpp`,
+  `rt/src/native_memory_region_provider.cpp`, `rt/src/owned_thread.cpp`,
   `rt/src/native_thread_policy.cpp`,
   `rt/src/thread_policy_transaction.cpp`,
   `tests/test_cpu_memory_policy.cpp`, `tests/test_thread_policy.cpp`,

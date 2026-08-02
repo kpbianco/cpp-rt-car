@@ -5,10 +5,11 @@ Release 1.2 retains the M4 memory closure for the target-path runtime,
 bounded storage and nonblocking overload behavior, but it is not a latency or
 hard-real-time qualification.
 
-M15-01 adds an immutable policy inventory over this plan. Policy request and
-report storage is included in `runtime_control_bytes`; the policy does not
-change allocation providers, residency, or steady-state behavior in this
-batch. See [the CPU/memory policy model](cpu_memory_policy.md).
+M15-01 adds an immutable policy inventory over this plan, and M15-03 creates
+the phase-scratch, task-scratch, trace, and requested runtime-owned stack
+regions through an injectable/native provider. Policy request and report
+storage remains included in `runtime_control_bytes`. See
+[the CPU/memory policy model](cpu_memory_policy.md).
 
 The legacy `SimCore`, frame arenas, `WorkerPool`, `rt::Scheduler`, `FiberPool`,
 detached-thread GPU stub, plugins, and legacy snapshots are outside this
@@ -55,9 +56,19 @@ runtime control, executor control/queues, device control/outstanding/completion,
 phase scratch, task scratch, and trace storage. Thread stacks, backend-reported
 storage, registered state, and registered device buffers receive separate
 unique keys with `informational_excluded` scope and never contribute to the
-runtime-plan sum. Current default stack sizes are reported as zero because
-1.2.1 neither creates custom stack allocations nor inspects OS/host stack
-storage.
+runtime-plan sum. Default stack sizes remain reported as zero because the
+implementation-owned OS/host stack is not inspected. A non-default
+runtime-owned stack reports its usable and provider-committed bytes separately
+without entering the M4 `planned_bytes` sum; exact M15 accounting closure
+remains M15-04.
+
+Provider-committed bytes include page rounding, guards, and mapping padding and
+can therefore exceed the M4 requested payload. M15-03 retains this value and
+applied residency/lock/pin/fallback state per report but does not redefine
+`planned_bytes`, the six-key partition, or the configured memory budget.
+Logical runtime/executor/device control aggregates retain their existing
+noncontiguous allocation topology and do not receive shadow provider
+allocations.
 
 `state_count` and `registered_state_bytes` report the frozen borrowed state.
 `snapshot_max_bytes`, `replay_input_capacity`, and `input_log_max_bytes` expose
@@ -172,7 +183,10 @@ leave all registered bytes unchanged.
 ## Running-state boundary
 
 `start()` creates the configured fixed worker team, an optional M5 watchdog
-lane, and one M8 device service lane when backends exist. After it returns, the
+lane, and one M8 device service lane when backends exist. Requested
+runtime-owned custom stacks are allocated and verified before thread entry,
+bound to the native thread where supported, and returned only after join.
+After start returns, the
 target CPU/device frame path uses preallocated graph, queue, scratch, trace,
 outstanding, and completion storage. It contains no file I/O, blocking mutex,
 hidden per-frame thread creation, heap fallback, or intentional heap
