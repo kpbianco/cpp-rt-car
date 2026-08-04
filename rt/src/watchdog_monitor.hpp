@@ -38,6 +38,7 @@ public:
     [[nodiscard]] bool complete(
         std::uint64_t token,
         std::uint64_t finish_ns) noexcept;
+    [[nodiscard]] bool has_fired(std::uint64_t token) const noexcept;
 
 private:
     [[nodiscard]] bool try_fire(

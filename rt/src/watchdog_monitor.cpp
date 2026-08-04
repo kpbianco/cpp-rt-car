@@ -9,6 +9,12 @@
 
 namespace rt::detail {
 
+namespace {
+
+constexpr auto kMaximumParkInterval = std::chrono::milliseconds(1);
+
+} // namespace
+
 WatchdogMonitor::~WatchdogMonitor() {
     stop();
 }
@@ -120,6 +126,12 @@ bool WatchdogMonitor::complete(
     return fired;
 }
 
+bool WatchdogMonitor::has_fired(std::uint64_t token) const noexcept {
+    return token != 0 &&
+        active_state_.load(std::memory_order_acquire) ==
+            (token | kFiredBit);
+}
+
 void WatchdogMonitor::run() noexcept {
     if (wait_strategy_ != WaitStrategy::park) {
         while (!stop_requested_.load(std::memory_order_acquire)) {
@@ -155,7 +167,7 @@ void WatchdogMonitor::run() noexcept {
             active_state_.load(std::memory_order_acquire);
         if (state == 0 || (state & kFiredBit) != 0) {
             observed_state = state;
-            service_cv_.wait(lock, [&] {
+            service_cv_.wait_for(lock, kMaximumParkInterval, [&] {
                 return stop_requested_.load(std::memory_order_acquire) ||
                     active_state_.load(std::memory_order_acquire) !=
                         observed_state;
@@ -183,7 +195,8 @@ void WatchdogMonitor::run() noexcept {
             std::min<std::uint64_t>(
                 remaining,
                 static_cast<std::uint64_t>(
-                    std::chrono::nanoseconds::max().count()));
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        kMaximumParkInterval).count()));
         service_cv_.wait_for(
             lock,
             std::chrono::nanoseconds(bounded),
