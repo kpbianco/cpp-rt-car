@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.local/contracts/evidence.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "batch_id", "status", "commands", "acceptance", "residual_risks", "unperformed_validation"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "batch_id": {"type": "string"},
+    "status": {"enum": ["pass", "fail", "blocked", "partial"]},
+    "commands": {"type": "array", "items": {"type": "object"}},
+    "acceptance": {"type": "array", "items": {"type": "object"}},
+    "changed_invariants": {"type": "array", "items": {"type": "string"}},
+    "residual_risks": {"type": "array", "items": {"type": "string"}},
+    "unperformed_validation": {"type": "array", "items": {"type": "string"}}
+  }
+}

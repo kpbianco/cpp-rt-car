@@ -6,7 +6,7 @@ control_plane:
   repository: kpbianco/portfolio-control
   profile_path: profiles/assurance.yaml
   product_path: products/cpp-rt-car
-  source_revision: 61504ea903578cafa9e7878ba582f1ecb08850cb
+  source_revision: 3754cab3114fdf276627bf1837f5abe41a2e921e
 audited_baseline: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
 autonomy:
   level: 2
@@ -37,3 +37,4 @@ source_of_truth:
     - release and support policy
     - actual current state
     - produced evidence
+source: portfolio-control/profiles/assurance.yaml

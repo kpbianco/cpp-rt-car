@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.local/contracts/planner-review.schema.json",
+  "title": "Independent portfolio planning review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "material_findings",
+    "duplication",
+    "incorrect_assumptions",
+    "missing_dependencies",
+    "unsafe_automation",
+    "weak_acceptance",
+    "unresolved_decisions",
+    "verdict"
+  ],
+  "properties": {
+    "material_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "finding", "evidence", "repair"],
+        "properties": {
+          "severity": {"enum": ["blocking", "high", "medium"]},
+          "finding": {"type": "string", "minLength": 1},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "repair": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "duplication": {"type": "array", "items": {"type": "string"}},
+    "incorrect_assumptions": {"type": "array", "items": {"type": "string"}},
+    "missing_dependencies": {"type": "array", "items": {"type": "string"}},
+    "unsafe_automation": {"type": "array", "items": {"type": "string"}},
+    "weak_acceptance": {"type": "array", "items": {"type": "string"}},
+    "unresolved_decisions": {"type": "array", "items": {"type": "string"}},
+    "verdict": {"enum": ["pass", "repair-required", "blocked"]}
+  }
+}

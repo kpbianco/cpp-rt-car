@@ -32,3 +32,8 @@ results/scaling/
 # Python tooling caches
 __pycache__/
 *.py[cod]
+
+# BEGIN PORTFOLIO-CONTROL MANAGED
+.codex-tmp/
+.agent-logs/
+# END PORTFOLIO-CONTROL MANAGED

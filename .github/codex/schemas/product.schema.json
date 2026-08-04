@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.local/contracts/product.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "product", "outcomes", "constraints", "quality", "release"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "profile", "repositories"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$"},
+        "name": {"type": "string", "minLength": 1},
+        "profile": {"enum": ["assurance", "product-data", "hardware-embedded", "rapid-prototype"]},
+        "repositories": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "outcomes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+    "users": {"type": "object"},
+    "non_goals": {"type": "array", "items": {"type": "string"}},
+    "constraints": {"type": "object"},
+    "quality": {"type": "object"},
+    "release": {"type": "object"}
+  }
+}

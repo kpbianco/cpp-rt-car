@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.local/contracts/intake.schema.json",
+  "title": "Immutable product intent intake",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "created_at",
+    "status",
+    "priority",
+    "source",
+    "submitter",
+    "target_product",
+    "planning_mode",
+    "labels",
+    "content_sha256",
+    "content_file",
+    "immutable"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "id": {
+      "type": "string",
+      "pattern": "^INT-[0-9]{8}T[0-9]{12}Z-[a-f0-9]{10}(?:-[a-z0-9]+)?$"
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "status": {"const": "pending"},
+    "priority": {"enum": ["low", "normal", "high", "urgent"]},
+    "source": {"type": "string", "minLength": 1},
+    "submitter": {"type": "string", "minLength": 1},
+    "target_product": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "planning_mode": {"enum": ["incremental", "full", "discovery", "initial"]},
+    "labels": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "content_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "content_file": {"const": "request.md"},
+    "interpretation_file": {"const": "interpretation.md"},
+    "immutable": {"const": true}
+  }
+}
