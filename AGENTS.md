@@ -59,3 +59,13 @@ Do not commit, push, open or merge a PR, release, deploy, change secrets, or
 modify repository settings unless explicitly instructed. When publication is
 authorized, use a scoped branch and draft PR; deterministic CI remains
 authoritative and no agent may waive a failing gate.
+
+## Governed continuous delivery
+
+Invoking `./scripts/product-autopilot.sh` is the explicit instruction to plan,
+implement, verify, publish, and merge only the bounded control/target PRs created
+by that run, then continue through dependency-ready software batches. The
+wrapper still cannot release, deploy, change secrets/settings, waive a gate, or
+manufacture hardware/RT qualification. It stops at a genuine product decision,
+mandatory hardware/RT evidence, signing, release, or deployment gate. See
+`docs/runbooks/continuous-autopilot.md`.
