@@ -1,9 +1,9 @@
 #include <rt/runtime.hpp>
 
-#include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
 #include "device_manager.hpp"
 #include "executor.hpp"
+#include "memory_policy.hpp"
 #include "native_platform_preflight.hpp"
 #include "resource_policy.hpp"
 #include "snapshot_codec.hpp"
@@ -785,6 +785,18 @@ struct Runtime::Impl {
             executor->stop();
         }
         watchdog.stop();
+        if (resident_regions) {
+            (void)resident_regions->rollback(cpu_memory_policy_report);
+        }
+        telemetry.reset();
+        executor.reset();
+        if (resident_regions) {
+            resident_regions->release();
+        }
+    }
+
+    [[nodiscard]] bool provider_callback_active() const noexcept {
+        return memory_provider_callback_active.load(std::memory_order_acquire);
     }
 
     void clear_error() noexcept {
@@ -1289,8 +1301,10 @@ struct Runtime::Impl {
 
         std::span<std::byte> phase_scratch;
         if (self.config.scratch_bytes != 0) {
+            auto backing = self.resident_regions->span(
+                memory_region_phase_scratch);
             phase_scratch = std::span<std::byte>(
-                self.phase_scratch.data() +
+                backing.data() +
                     (index *
                      self.finalized_memory_plan.phase_scratch_stride),
                 self.config.scratch_bytes);
@@ -1371,6 +1385,9 @@ struct Runtime::Impl {
     CpuMemoryPolicy cpu_memory_policy{};
     CpuMemoryPolicyReport cpu_memory_policy_report{};
     bool cpu_memory_policy_report_available = false;
+    MemoryProvider memory_provider{};
+    bool memory_provider_set = false;
+    std::atomic<bool> memory_provider_callback_active{false};
     HostExecutorAdapter host_executor{};
     bool host_executor_set = false;
     RuntimeState state = RuntimeState::configuring;
@@ -1383,7 +1400,7 @@ struct Runtime::Impl {
     std::vector<detail::GraphDependency> dependencies;
     std::vector<detail::GraphResourceAccess> resource_accesses;
     std::vector<PhaseHandle> compiled_order;
-    detail::AlignedStorage phase_scratch;
+    std::unique_ptr<detail::ResidentRegionSet> resident_regions;
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::TelemetryCounters telemetry_counters;
     ObservabilityMetadata observability{};
@@ -1440,6 +1457,9 @@ Status Runtime::configure(const RuntimeConfig& config) noexcept {
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "configure requires configuring state");
     }
@@ -1462,6 +1482,9 @@ Status Runtime::set_cpu_memory_policy(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(
             Status::invalid_state,
@@ -1477,10 +1500,34 @@ Status Runtime::set_cpu_memory_policy(
     return Status::ok;
 }
 
+Status Runtime::set_memory_provider(
+    const MemoryProvider& provider) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "memory provider attachment is frozen");
+    }
+    impl_->memory_provider = provider;
+    impl_->memory_provider_set = true;
+    impl_->cpu_memory_policy_report = {};
+    impl_->cpu_memory_policy_report_available = false;
+    impl_->clear_error();
+    return Status::ok;
+}
+
 Status Runtime::set_host_executor(
     const HostExecutorAdapter& adapter) noexcept {
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(
@@ -1509,6 +1556,9 @@ Status Runtime::configure_key(
     std::string_view value) noexcept {
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "configuration is frozen");
@@ -1542,6 +1592,9 @@ Status Runtime::register_callback(
     out_phase = {};
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "callback registration is frozen");
@@ -1589,6 +1642,9 @@ Status Runtime::register_device_backend(
     out_backend = {};
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(
@@ -1706,6 +1762,9 @@ Status Runtime::register_device_buffer(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(
             Status::invalid_state,
@@ -1800,6 +1859,9 @@ Status Runtime::register_device_phase(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(
             Status::invalid_state,
@@ -1860,6 +1922,9 @@ Status Runtime::register_resource(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "resource registration is frozen");
     }
@@ -1898,6 +1963,9 @@ Status Runtime::register_state(
     const StateRegistration& registration) noexcept {
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(
@@ -1999,6 +2067,9 @@ Status Runtime::add_dependency(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "graph topology is frozen");
     }
@@ -2046,6 +2117,9 @@ Status Runtime::declare_resource_access(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "graph topology is frozen");
     }
@@ -2090,6 +2164,9 @@ Status Runtime::declare_resource_access(
 Status Runtime::finalize() noexcept {
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "finalize requires configuring state");
@@ -2423,11 +2500,21 @@ Status Runtime::finalize() noexcept {
 
     CpuMemoryPolicyReport cpu_memory_policy_report;
     const char* policy_diagnostic = nullptr;
+    const MemoryProvider* selected_memory_provider =
+        impl_->memory_provider_set ? &impl_->memory_provider : nullptr;
+    const auto provider_status =
+        detail::ResidentRegionSet::validate_provider(
+            selected_memory_provider,
+            policy_diagnostic);
+    if (provider_status != Status::ok) {
+        return impl_->fail(provider_status, policy_diagnostic);
+    }
     const auto policy_status = detail::build_cpu_memory_policy_report(
         impl_->cpu_memory_policy,
         impl_->config,
         memory_plan,
         registered_device_buffer_bytes,
+        selected_memory_provider,
         *impl_->thread_policy,
         cpu_memory_policy_report,
         policy_diagnostic);
@@ -2435,10 +2522,26 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(policy_status, policy_diagnostic);
     }
 
+    std::unique_ptr<detail::ResidentRegionSet> resident_regions;
     std::unique_ptr<detail::Executor> executor;
     std::unique_ptr<detail::DeviceManager> devices;
     std::unique_ptr<detail::TelemetryRing> telemetry;
-    detail::AlignedStorage phase_scratch;
+    try {
+        resident_regions =
+            std::make_unique<detail::ResidentRegionSet>(
+                selected_memory_provider,
+                impl_->memory_provider_callback_active);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    const auto acquisition_status = resident_regions->acquire(
+        cpu_memory_policy_report,
+        policy_diagnostic);
+    if (acquisition_status != Status::ok) {
+        return impl_->fail(acquisition_status, policy_diagnostic);
+    }
     try {
         executor = std::make_unique<detail::Executor>(
             impl_->config.executor_policy,
@@ -2448,6 +2551,7 @@ Status Runtime::finalize() noexcept {
             impl_->config.task_scratch_bytes,
             impl_->config.task_scratch_slots,
             impl_->config.scratch_alignment,
+            resident_regions->span(memory_region_task_scratch),
             impl_->config.overload_policy,
             impl_->dependencies,
             impl_->host_executor_set
@@ -2461,12 +2565,10 @@ Status Runtime::finalize() noexcept {
                 impl_->config.device_outstanding_capacity,
                 impl_->config.device_completion_batch);
         }
-        phase_scratch.allocate(
-            memory_plan.phase_scratch_total_bytes,
-            memory_plan.scratch_alignment);
         telemetry =
             std::make_unique<detail::TelemetryRing>(
-                impl_->config.trace_capacity);
+                impl_->config.trace_capacity,
+                resident_regions->span(memory_region_trace_storage));
     } catch (const std::bad_alloc&) {
         return impl_->fail(Status::resource_exhausted, nullptr);
     } catch (...) {
@@ -2475,7 +2577,7 @@ Status Runtime::finalize() noexcept {
 
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
     impl_->compiled_order = std::move(compiled_order);
-    impl_->phase_scratch = std::move(phase_scratch);
+    impl_->resident_regions = std::move(resident_regions);
     impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
     impl_->devices = std::move(devices);
@@ -2522,6 +2624,9 @@ Status Runtime::finalize() noexcept {
 Status Runtime::start() noexcept {
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::finalized) {
         return impl_->fail(Status::invalid_state, "start requires finalized state");
@@ -2583,6 +2688,30 @@ Status Runtime::start() noexcept {
         impl_->preflight_report.passed = true;
     }
 
+    if (!impl_->resident_regions) {
+        return impl_->fail(
+            Status::internal_error,
+            "finalized runtime has no resident-region transaction");
+    }
+    if (impl_->resident_regions->has_pending_operations() &&
+        !impl_->resident_regions->rollback(
+            impl_->cpu_memory_policy_report)) {
+        return impl_->fail(
+            Status::internal_error,
+            "resident-memory rollback is pending; retry start or stop");
+    }
+    const char* memory_diagnostic = nullptr;
+    const auto memory_status = impl_->resident_regions->apply_and_verify(
+        impl_->cpu_memory_policy_report,
+        memory_diagnostic);
+    if (memory_status != Status::ok) {
+        return impl_->fail(memory_status, memory_diagnostic);
+    }
+    const auto rollback_memory = [&] {
+        return impl_->resident_regions->rollback(
+            impl_->cpu_memory_policy_report);
+    };
+
     const auto find_thread_report =
         [&](ThreadRoleId role) -> ThreadPolicyReport* {
             for (std::size_t index = 0;
@@ -2614,6 +2743,7 @@ Status Runtime::start() noexcept {
 
     auto* frame_report = find_thread_report(thread_role_frame);
     if (!frame_report) {
+        (void)rollback_memory();
         return impl_->fail(
             Status::internal_error,
             "finalized thread policy inventory has no frame role");
@@ -2630,9 +2760,12 @@ Status Runtime::start() noexcept {
         &impl_->frame_startup_result,
         1);
     if (strict_failed(*frame_report)) {
+        const bool memory_rollback_complete = rollback_memory();
         return impl_->fail(
             Status::internal_error,
-            "strict caller-frame policy did not match native readback");
+            memory_rollback_complete
+                ? "strict caller-frame policy did not match native readback"
+                : "strict caller-frame policy failed and resident-memory rollback is pending");
     }
 
     for (std::size_t index = 0;
@@ -2652,6 +2785,7 @@ Status Runtime::start() noexcept {
     auto* watchdog_report = find_thread_report(thread_role_watchdog);
     auto* device_report = find_thread_report(thread_role_device_service);
     if (!executor_report || !watchdog_report || !device_report) {
+        (void)rollback_memory();
         return impl_->fail(
             Status::internal_error,
             "finalized thread policy inventory is incomplete");
@@ -2681,14 +2815,19 @@ Status Runtime::start() noexcept {
             impl_->executor->stop();
             impl_->watchdog.stop();
             impl_->watchdog_started = false;
+            const bool memory_rollback_complete = rollback_memory();
             impl_->stop_pending = impl_->devices &&
                 (cleanup_status != Status::ok ||
                  impl_->devices->cleanup_pending());
             return impl_->fail(
-                failure,
+                memory_rollback_complete
+                    ? failure
+                    : Status::internal_error,
                 impl_->stop_pending
                     ? "thread-policy startup failed and device rollback is pending; retry stop"
-                    : diagnostic);
+                    : memory_rollback_complete
+                        ? diagnostic
+                        : "startup failed and resident-memory rollback is pending; retry start or stop");
         };
 
     if (impl_->config.watchdog_timeout_ns != 0) {
@@ -2793,6 +2932,9 @@ Status Runtime::step(
 
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::running) {
         return impl_->fail(Status::invalid_state, "step requires non-reentrant running state");
@@ -2945,6 +3087,9 @@ Status Runtime::run_periodic(
 
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::running) {
         return impl_->fail(
@@ -3168,6 +3313,9 @@ Status Runtime::stop() noexcept {
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
         impl_->in_replay.load(std::memory_order_acquire)) {
@@ -3207,6 +3355,20 @@ Status Runtime::stop() noexcept {
         Status::ok,
         impl_->clock_now(),
         0);
+    if (impl_->resident_regions) {
+        if (!impl_->resident_regions->rollback(
+                impl_->cpu_memory_policy_report)) {
+            impl_->stop_pending = true;
+            return impl_->fail(
+                Status::internal_error,
+                "resident-memory rollback failed; retry stop before releasing borrowed resources");
+        }
+        if (impl_->resident_regions->provider_backed()) {
+            impl_->telemetry.reset();
+            impl_->executor.reset();
+            impl_->resident_regions->release();
+        }
+    }
     impl_->state = RuntimeState::stopped;
     impl_->clear_error();
     return Status::ok;
@@ -3218,6 +3380,9 @@ Status Runtime::device_health(
     health = make_device_health();
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::running ||
         !impl_->devices) {
@@ -3257,6 +3422,9 @@ Status Runtime::reset_device(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state != RuntimeState::running ||
         !impl_->devices) {
         return impl_->fail(
@@ -3289,28 +3457,36 @@ Status Runtime::reset_device(
 }
 
 RuntimeState Runtime::state() const noexcept {
-    return impl_ ? impl_->state : RuntimeState::stopped;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->state
+        : RuntimeState::configuring;
 }
 
 const RuntimeConfig& Runtime::config() const noexcept {
     static const RuntimeConfig empty{};
-    return impl_ ? impl_->config : empty;
+    return impl_ && !impl_->provider_callback_active() ? impl_->config : empty;
 }
 
 std::size_t Runtime::callback_count() const noexcept {
-    return impl_ ? impl_->callbacks.size() : 0;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->callbacks.size()
+        : 0;
 }
 
 std::size_t Runtime::device_backend_count() const noexcept {
-    return impl_ ? impl_->device_backends.size() : 0;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->device_backends.size()
+        : 0;
 }
 
 std::size_t Runtime::device_buffer_count() const noexcept {
-    return impl_ ? impl_->device_buffers.size() : 0;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->device_buffers.size()
+        : 0;
 }
 
 std::size_t Runtime::device_phase_count() const noexcept {
-    if (!impl_) {
+    if (!impl_ || impl_->provider_callback_active()) {
         return 0;
     }
     return static_cast<std::size_t>(std::count_if(
@@ -3322,22 +3498,28 @@ std::size_t Runtime::device_phase_count() const noexcept {
 }
 
 std::size_t Runtime::resource_count() const noexcept {
-    return impl_ ? impl_->resources.size() : 0;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->resources.size()
+        : 0;
 }
 
 std::size_t Runtime::dependency_count() const noexcept {
-    return impl_ ? impl_->dependencies.size() : 0;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->dependencies.size()
+        : 0;
 }
 
 std::size_t Runtime::resource_access_count() const noexcept {
-    return impl_ ? impl_->resource_accesses.size() : 0;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->resource_accesses.size()
+        : 0;
 }
 
 bool Runtime::compiled_phase_at(
     std::size_t execution_index,
     PhaseHandle& phase) const noexcept {
     phase = {};
-    if (!impl_ ||
+    if (!impl_ || impl_->provider_callback_active() ||
         impl_->state == RuntimeState::configuring ||
         execution_index >= impl_->compiled_order.size()) {
         return false;
@@ -3350,7 +3532,7 @@ bool Runtime::static_phase_assignment_at(
     std::size_t registration_index,
     StaticPhaseAssignment& assignment) const noexcept {
     assignment = {};
-    if (!impl_ || !impl_->executor ||
+    if (!impl_ || impl_->provider_callback_active() || !impl_->executor ||
         impl_->state == RuntimeState::configuring ||
         registration_index >= impl_->callbacks.size()) {
         return false;
@@ -3370,7 +3552,7 @@ bool Runtime::static_phase_assignment_at(
 }
 
 ExecutorStats Runtime::executor_stats() const noexcept {
-    if (!impl_ || !impl_->executor) {
+    if (!impl_ || impl_->provider_callback_active() || !impl_->executor) {
         return {};
     }
     return impl_->executor->stats();
@@ -3378,9 +3560,8 @@ ExecutorStats Runtime::executor_stats() const noexcept {
 
 bool Runtime::memory_plan(MemoryPlan& plan) const noexcept {
     plan = {};
-    if (!impl_ ||
-        impl_->state == RuntimeState::configuring ||
-        !impl_->executor) {
+    if (!impl_ || impl_->provider_callback_active() ||
+        impl_->state == RuntimeState::configuring) {
         return false;
     }
     plan = impl_->finalized_memory_plan;
@@ -3390,7 +3571,8 @@ bool Runtime::memory_plan(MemoryPlan& plan) const noexcept {
 bool Runtime::cpu_memory_policy_report(
     CpuMemoryPolicyReport& report) const noexcept {
     report = {};
-    if (!impl_ || !impl_->cpu_memory_policy_report_available ||
+    if (!impl_ || impl_->provider_callback_active() ||
+        !impl_->cpu_memory_policy_report_available ||
         impl_->state == RuntimeState::configuring) {
         return false;
     }
@@ -3401,7 +3583,8 @@ bool Runtime::cpu_memory_policy_report(
 bool Runtime::platform_preflight_report(
     PlatformPreflightReport& report) const noexcept {
     report = {};
-    if (!impl_ || !impl_->preflight_report_available) {
+    if (!impl_ || impl_->provider_callback_active() ||
+        !impl_->preflight_report_available) {
         return false;
     }
     report = impl_->preflight_report;
@@ -3409,17 +3592,21 @@ bool Runtime::platform_preflight_report(
 }
 
 std::uint32_t Runtime::degradation_level() const noexcept {
-    return impl_
+    return impl_ && !impl_->provider_callback_active()
         ? impl_->degradation_level.load(std::memory_order_acquire)
         : 0;
 }
 
 std::uint64_t Runtime::now_ns() noexcept {
-    return impl_ ? impl_->clock_now() : 0;
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->clock_now()
+        : 0;
 }
 
 std::string_view Runtime::last_error() const noexcept {
-    return impl_ ? std::string_view(impl_->error.data()) : std::string_view{};
+    return impl_ && !impl_->provider_callback_active()
+        ? std::string_view(impl_->error.data())
+        : std::string_view{};
 }
 
 Status Runtime::observability_metadata(
@@ -3427,6 +3614,9 @@ Status Runtime::observability_metadata(
     metadata = {};
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state == RuntimeState::configuring ||
         !impl_->telemetry) {
@@ -3453,6 +3643,9 @@ Status Runtime::metrics_snapshot(
     snapshot = {};
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state == RuntimeState::configuring ||
         !impl_->telemetry) {
@@ -3567,6 +3760,9 @@ Status Runtime::read_trace(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state == RuntimeState::configuring ||
         !impl_->telemetry) {
         return impl_->fail(
@@ -3638,6 +3834,9 @@ Status Runtime::checkpoint_size(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state == RuntimeState::configuring) {
         return impl_->fail(
             Status::invalid_state,
@@ -3688,6 +3887,9 @@ Status Runtime::write_checkpoint(
     result = {};
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state == RuntimeState::configuring) {
         return impl_->fail(
@@ -3752,6 +3954,9 @@ Status Runtime::restore_checkpoint(
     }
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state == RuntimeState::configuring) {
         return impl_->fail(
@@ -3862,6 +4067,9 @@ Status Runtime::write_input_log(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state == RuntimeState::configuring) {
         return impl_->fail(
             Status::invalid_state,
@@ -3936,6 +4144,9 @@ Status Runtime::replay(
     output = {};
     if (!impl_) {
         return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
     }
     if (impl_->state != RuntimeState::running) {
         return impl_->fail(
@@ -4120,6 +4331,9 @@ Status Runtime::registered_state_hash(
     if (!impl_) {
         return Status::internal_error;
     }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
     if (impl_->state == RuntimeState::configuring) {
         return impl_->fail(
             Status::invalid_state,
@@ -4138,7 +4352,7 @@ Status Runtime::registered_state_hash(
 }
 
 std::size_t Runtime::trace_event_count() const noexcept {
-    if (!impl_ || !impl_->telemetry) {
+    if (!impl_ || impl_->provider_callback_active() || !impl_->telemetry) {
         return 0;
     }
     return impl_->telemetry->retained_count();
@@ -4147,7 +4361,7 @@ std::size_t Runtime::trace_event_count() const noexcept {
 bool Runtime::trace_event(
     std::size_t chronological_index,
     RuntimeTraceEvent& event) const noexcept {
-    if (!impl_ || !impl_->telemetry) {
+    if (!impl_ || impl_->provider_callback_active() || !impl_->telemetry) {
         return false;
     }
     return impl_->telemetry->event_at(

@@ -35,6 +35,7 @@ public:
         std::size_t task_scratch_bytes,
         std::size_t task_scratch_slots,
         std::size_t scratch_alignment,
+        std::span<std::byte> task_scratch_storage,
         OverloadPolicy overload_policy,
         std::span<const GraphDependency> dependencies,
         const HostExecutorAdapter* host_adapter);
@@ -193,7 +194,7 @@ private:
     WaitStrategy wait_strategy_ = WaitStrategy::yield;
     HostExecutorAdapter host_adapter_{};
     std::unique_ptr<HostWorkSlot[]> host_work_slots_;
-    AlignedStorage task_scratch_storage_;
+    std::span<std::byte> task_scratch_storage_{};
     std::unique_ptr<std::atomic<std::uint64_t>[]> free_scratch_words_;
     std::size_t free_scratch_word_count_ = 0;
     std::atomic<std::size_t> scratch_word_hint_{0};

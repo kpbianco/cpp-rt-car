@@ -33,7 +33,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
-| M15 | In progress | M15-01 policy inventory and M15-02 runtime-owned thread apply/readback complete; memory residency remains |
+| M15 | In progress | Policy inventory, runtime-owned thread application, and three-region provider/residency transaction implemented; M15-04 accounting/stack/control closure remains |
 | M16 | Planned | Multi-rate deterministic simulation domains and release coordination |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
@@ -532,13 +532,30 @@ Delivered in M15-02:
 - role-local spin, yield, and park idle behavior with bounded work/stop wakeups;
 - unchanged portable RT0, ABI, package, schema, release, and qualification claims.
 
+Implemented in M15-03, subject to the batch verification and review gates:
+
+- one copied size/versioned C++ provider table with five required callbacks,
+  borrowed user data, reentrancy rejection, and reverse exactly-once cleanup;
+- exact phase-scratch, task-scratch, and trace-storage acquisition in stable
+  order, pre-thread apply/observation, reverse rollback, and checked-stop token
+  release;
+- default aligned-new compatibility plus Linux process-local base-page/guard
+  mappings, explicit `MAP_HUGETLB` attempt and requested fallback,
+  caller/prefault touch, `mlock` application, and independent `mincore`
+  residency sampling;
+- requested/resolved/acquired/applied/verified region reporting without
+  double-counting the existing memory-plan equation;
+- truthful boundary that `mlock` is not independent lock readback or
+  device/DMA pinning, and provider-backed trace is unavailable after its token
+  is released at checked stop.
+
 Remaining milestone outcome:
 
-- explicit region and runtime-owned stack policy covering alignment, page
-  rounding, guards, prefaulting, locking, residency, huge-page fallback, NUMA
-  binding, first touch, and rollback;
-- requested/resolved/applied reports and complete byte accounting, while
-  externally owned host-engine and vendor threads remain verify-only.
+- M15-04 integration of fragmented runtime/executor/device control storage and
+  runtime-owned stack residency;
+- exact external/backend accounting and complete cross-category byte closure,
+  while borrowed memory and externally owned host/vendor resources remain
+  verify-only and unmodified.
 
 Exit gates:
 

@@ -609,6 +609,17 @@ struct MemoryPolicyReport {
         PolicyResolutionState::portable_default;
     PolicyOperationState applied = PolicyOperationState::not_attempted;
     PolicyOperationState verified = PolicyOperationState::not_attempted;
+    // M15-03 fields are appended so the pre-existing aggregate prefix remains
+    // source-compatible for 1.x callers that use positional initialization.
+    std::size_t actual_guard_bytes_before = 0;
+    std::size_t actual_guard_bytes_after = 0;
+    std::size_t actual_page_bytes = 0;
+    bool used_explicit_huge_pages = false;
+    PolicyOperationState acquired = PolicyOperationState::not_attempted;
+    std::int32_t provider_error = 0;
+    std::int32_t apply_error = 0;
+    std::int32_t verify_error = 0;
+    std::int32_t rollback_error = 0;
 };
 
 struct CpuMemoryPolicyReport {
@@ -815,6 +826,11 @@ public:
     // Validation and portable resolution occur transactionally in finalize().
     [[nodiscard]] Status set_cpu_memory_policy(
         const CpuMemoryPolicy& policy) noexcept;
+    // Copies the bounded callback table and borrows provider.user_data through
+    // checked stop. The provider is used only for active phase scratch, task
+    // scratch, and trace storage and may be attached only while configuring.
+    [[nodiscard]] Status set_memory_provider(
+        const MemoryProvider& provider) noexcept;
     // Copies the callback table and borrows adapter.user_data through stop().
     // May be called only while configuring.
     [[nodiscard]] Status set_host_executor(

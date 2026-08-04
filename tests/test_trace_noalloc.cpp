@@ -576,7 +576,85 @@ TEST(TraceNoAlloc, CheckpointAndInputCodecDoNotAllocate) {
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }
 
-void run_complete_cpu_frames_noalloc(rt::ExecutorPolicy policy) {
+struct NoAllocMemoryProvider {
+    struct alignas(64) Slot {
+        std::array<std::byte, 64 * 1024> bytes{};
+    };
+
+    rt::MemoryProvider table() noexcept {
+        rt::MemoryProvider provider;
+        provider.capabilities =
+            rt::memory_provider_capability_bit(
+                rt::MemoryProviderCapability::policy_operations) |
+            rt::memory_provider_capability_bit(
+                rt::MemoryProviderCapability::independent_observation);
+        provider.user_data = this;
+        provider.acquire = &acquire;
+        provider.apply = &apply;
+        provider.observe = &observe;
+        provider.rollback = &rollback;
+        provider.release = &release;
+        return provider;
+    }
+
+    std::array<Slot, 3> slots{};
+
+    static rt::Status acquire(
+        void* user_data,
+        const rt::MemoryProviderAcquireRequest& request,
+        rt::MemoryProviderAllocation& allocation) noexcept {
+        auto& self = *static_cast<NoAllocMemoryProvider*>(user_data);
+        const auto index = static_cast<std::size_t>(
+            request.region.value - rt::memory_region_phase_scratch.value);
+        if (index >= self.slots.size() ||
+            request.logical_bytes > self.slots[index].bytes.size() ||
+            request.required_alignment > alignof(Slot)) {
+            return rt::Status::resource_exhausted;
+        }
+        auto& slot = self.slots[index];
+        allocation.token = &slot;
+        allocation.allocation_base = slot.bytes.data();
+        allocation.allocation_bytes = request.logical_bytes;
+        allocation.usable_data = slot.bytes.data();
+        allocation.usable_bytes = request.logical_bytes;
+        allocation.committed_bytes = request.logical_bytes;
+        allocation.alignment = alignof(Slot);
+        return rt::Status::ok;
+    }
+
+    static rt::Status apply(
+        void*,
+        void*,
+        const rt::MemoryPolicy&,
+        rt::MemoryProviderObservation& applied) noexcept {
+        applied.independently_observed = true;
+        return rt::Status::ok;
+    }
+
+    static rt::Status observe(
+        void*,
+        void*,
+        const rt::MemoryPolicy&,
+        rt::MemoryProviderObservation& observed) noexcept {
+        observed.independently_observed = true;
+        return rt::Status::ok;
+    }
+
+    static rt::Status rollback(
+        void*,
+        void*,
+        const rt::MemoryPolicy&,
+        const rt::MemoryProviderObservation&) noexcept {
+        return rt::Status::ok;
+    }
+
+    static void release(void*, void*, rt::RollbackIntent) noexcept {}
+};
+
+void run_complete_cpu_frames_noalloc(
+    rt::ExecutorPolicy policy,
+    bool provider_backed = false) {
+    NoAllocMemoryProvider memory_provider;
     rt::Runtime runtime;
     rt::RuntimeConfig config;
     config.callback_capacity = 3;
@@ -594,6 +672,11 @@ void run_complete_cpu_frames_noalloc(rt::ExecutorPolicy policy) {
     config.watchdog_timeout_ns = 60'000'000'000ull;
     config.watchdog_max_degradation_level = 2;
     ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    if (provider_backed) {
+        ASSERT_EQ(
+            runtime.set_memory_provider(memory_provider.table()),
+            rt::Status::ok);
+    }
 
     FullFramePhaseState first;
     first.seed = 11;
@@ -667,6 +750,12 @@ TEST(TraceNoAlloc, StaticCompleteCpuFramesDoNotAllocate) {
         rt::ExecutorPolicy::static_deterministic);
 }
 
+TEST(TraceNoAlloc, ProviderBackedCompleteCpuFramesDoNotAllocate) {
+    run_complete_cpu_frames_noalloc(
+        rt::ExecutorPolicy::bounded_throughput,
+        true);
+}
+
 namespace {
 
 rt::CallbackResult submit_noalloc_device_command(
@@ -680,7 +769,8 @@ rt::CallbackResult submit_noalloc_device_command(
 
 } // namespace
 
-TEST(TraceNoAlloc, CompleteDeviceFramesDoNotAllocate) {
+void run_complete_device_frames_noalloc(bool provider_backed) {
+    NoAllocMemoryProvider memory_provider;
     rt::MockDeviceBackend backend({
         8,
         1,
@@ -698,6 +788,11 @@ TEST(TraceNoAlloc, CompleteDeviceFramesDoNotAllocate) {
     config.device_outstanding_capacity = 8;
     config.device_completion_batch = 4;
     ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    if (provider_backed) {
+        ASSERT_EQ(
+            runtime.set_memory_provider(memory_provider.table()),
+            rt::Status::ok);
+    }
 
     rt::DeviceBackendHandle backend_handle;
     ASSERT_EQ(
@@ -739,6 +834,14 @@ TEST(TraceNoAlloc, CompleteDeviceFramesDoNotAllocate) {
     EXPECT_EQ(status, rt::Status::ok);
     EXPECT_EQ(allocation_count(), 0u);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(TraceNoAlloc, CompleteDeviceFramesDoNotAllocate) {
+    run_complete_device_frames_noalloc(false);
+}
+
+TEST(TraceNoAlloc, ProviderBackedCompleteDeviceFramesDoNotAllocate) {
+    run_complete_device_frames_noalloc(true);
 }
 
 namespace {

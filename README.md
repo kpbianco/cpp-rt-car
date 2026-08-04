@@ -25,7 +25,7 @@ versioned observability/replay, and asynchronous device integration.
 | Host job-system adapter | Implemented RT0 surface | A third executor policy submits the same immutable graph/range/reduction jobs to a borrowed fixed-capacity engine queue with explicit runtime scratch and generation-tagged completion context |
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
-| CPU/memory policy model | Implemented through M15-02 at RT0 | Additive bounded C++ reports inventory every role/category; Linux runtime-owned lanes apply/read back policy behind fail-closed startup, while external roles remain verify-only and memory residency remains unapplied |
+| CPU/memory policy model | Implemented through M15-03 at RT0 | Additive bounded C++ reports inventory every role/category; Linux runtime-owned lanes apply/read back policy, and a copied provider or native path transactionally backs phase scratch, task scratch, and trace storage; external/deferred rows remain verify-only or unmodified |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -158,16 +158,18 @@ portable distribution, the M13 profile loader, and the M14 product SDK
 boundary in `<rt/runtime.hpp>`,
 `<rt/profile.hpp>`, and `<rt/c_api.h>`:
 
-1. configure a typed runtime and optionally attach a borrowed host job system;
+1. configure a typed runtime and optionally attach a borrowed host job system
+   and/or copied C++ memory-provider table;
 2. register callback/device phases, logical resources, canonical replay state,
    optional device backends, and borrowed device buffers while configuring;
 3. declare phase dependencies and read/write resource access;
 4. finalize to validate and compile the graph, reject an over-budget memory
-   plan, allocate aligned phase/task scratch, trace, and fixed queue storage,
-   and freeze topology and static assignments;
-5. optionally require strict read-only platform preflight, then start the fixed
-   runtime worker team or bind the already-running host team, plus configured
-   watchdog/device service lanes;
+   plan, acquire phase/task/trace backing in stable order, construct fixed
+   storage, and freeze topology and static assignments;
+5. optionally require strict read-only platform preflight, apply/observe
+   selected resident-memory policy, then start the fixed runtime worker team or
+   bind the already-running host team, plus configured watchdog/device service
+   lanes;
 6. submit host-owned frame index, simulation delta, and optional deadline to
    `step()`, or run a finite absolute-cadence loop with `run_periodic()`;
 7. inspect per-frame timing, watchdog/degradation, and preflight results;
@@ -175,8 +177,24 @@ boundary in `<rt/runtime.hpp>`,
 9. write/restore bounded checkpoints or replay a validated input log from a
    non-RT host lane;
 10. inspect/reset device health from a non-RT host lane when applicable;
-11. call `stop()` and require success before releasing borrowed backend,
-    buffer, callback, state, clock, or host-executor storage.
+11. call `stop()` and require success before releasing borrowed provider user
+    data, backend, buffer, callback, state, clock, or host-executor storage.
+
+The M15-03 memory provider is an exact size/versioned table with acquire,
+apply, observe, rollback, and nonthrowing release callbacks. It is used only on
+configure/finalize/start/stop control paths for active phase scratch, task
+scratch, and trace storage. The default path retains aligned-new behavior.
+Linux page policy uses process-local `mmap`, base-page-rounded inaccessible
+guards and aligned usable bases, explicit `MAP_HUGETLB` with requested
+fallback, caller/prefault page touch, `mlock`, and `mincore` residency
+observation. Live token and allocation extents cannot alias across runtime
+instances, and locking-only native storage uses independent page-backed
+mappings. `mlock` is not independent lock readback or device/DMA pinning.
+Native physical NUMA placement is not independently observed in M15-03, so a
+strict runtime-provider NUMA request is rejected and best effort falls back;
+an injected provider must advertise and independently observe NUMA binding.
+Checked provider-backed stop destroys trace/executor owners and releases tokens
+in reverse order; trace is unavailable afterward.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -232,9 +250,11 @@ claiming a qualified deployment. The existing
 path. M12 adds the named support matrix, cross-instance device-isolation gate,
 1.x compatibility policy, and checked package-manifest workflow. The
 [M15 CPU/memory policy model](docs/cpu_memory_policy.md) adds strict
-finalization validation, Linux runtime-owned thread apply/readback, stable role/category
-identities, and external verify-only ownership without applying native host
-policy or changing callbacks. The
+finalization validation, Linux runtime-owned thread apply/readback, stable
+role/category identities, external verify-only ownership, and the bounded
+three-region provider/resident transaction without changing steady-state
+callbacks. Fragmented control storage, stack residency, and complete byte
+closure remain M15-04 work. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.
 
@@ -262,7 +282,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M14 portable runtime, the 1.2.1 lifecycle-safety closure, the M15-01 CPU/memory policy model, and the M9 CUDA/M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M14 portable runtime, the 1.2.1 lifecycle-safety closure, M15 CPU/thread policy and selected resident regions, and the M9 CUDA/M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |

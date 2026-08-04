@@ -13,6 +13,7 @@ namespace rt::detail {
     const RuntimeConfig& config,
     const MemoryPlan& memory_plan,
     std::size_t registered_device_buffer_bytes,
+    const MemoryProvider* memory_provider,
     ThreadPolicyProvider& thread_policy_provider,
     CpuMemoryPolicyReport& report,
     const char*& diagnostic) noexcept;

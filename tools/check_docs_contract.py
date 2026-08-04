@@ -263,6 +263,8 @@ def check_runtime_contract() -> None:
     runtime_source = read("rt/src/host_runtime.cpp")
     resource_policy_header = read("rt/src/resource_policy.hpp")
     resource_policy_source = read("rt/src/resource_policy.cpp")
+    memory_policy_header = read("rt/src/memory_policy.hpp")
+    memory_policy_source = read("rt/src/memory_policy.cpp")
     thread_policy_header = read("rt/src/thread_policy.hpp")
     thread_policy_source = read("rt/src/thread_policy.cpp")
     profile_header = read("rt/include/rt/profile.hpp")
@@ -313,6 +315,7 @@ def check_runtime_contract() -> None:
     executor_test = read("tests/test_executor.cpp")
     memory_test = read("tests/test_memory_plan.cpp")
     cpu_memory_policy_test = read("tests/test_cpu_memory_policy.cpp")
+    memory_policy_test = read("tests/test_memory_policy.cpp")
     thread_policy_test = read("tests/test_thread_policy.cpp")
     periodic_test = read("tests/test_periodic_runtime.cpp")
     preflight_test = read("tests/test_platform_preflight.cpp")
@@ -878,6 +881,103 @@ def check_runtime_contract() -> None:
     ):
         if token not in cmake and token not in tests_cmake:
             fail(f"CMake M15-02 integration is missing {token!r}")
+
+    for token in (
+        "memory_provider_api_version = 1",
+        "struct MemoryProviderAcquireRequest",
+        "struct MemoryProviderAllocation",
+        "struct MemoryProviderObservation",
+        "struct MemoryProvider",
+    ):
+        if token not in config_header:
+            fail(f"rt/config.hpp: missing permanent M15-03 provider token {token!r}")
+    for token in (
+        "Status set_memory_provider(",
+        "actual_guard_bytes_before",
+        "actual_guard_bytes_after",
+        "used_explicit_huge_pages",
+        "rollback_error",
+    ):
+        if token not in runtime_header:
+            fail(f"rt/runtime.hpp: missing permanent M15-03 report token {token!r}")
+    for token in (
+        "class ResidentRegionSet",
+        "Status acquire(",
+        "Status apply_and_verify(",
+        "bool rollback(",
+        "void release(",
+    ):
+        if token not in memory_policy_header:
+            fail(f"rt/src/memory_policy.hpp: missing M15-03 transaction token {token!r}")
+    for token in (
+        "memory_region_phase_scratch",
+        "memory_region_task_scratch",
+        "memory_region_trace_storage",
+        "ResidentRegionSet::acquire(",
+        "ResidentRegionSet::apply_and_verify(",
+        "ResidentRegionSet::rollback(",
+        "ResidentRegionSet::release(",
+        "::mlock(",
+        "::mincore(",
+        "MAP_HUGETLB",
+    ):
+        if token not in memory_policy_source:
+            fail(f"rt/src/memory_policy.cpp: missing M15-03 implementation token {token!r}")
+    for token in (
+        "resident_regions->apply_and_verify(",
+        "resident_regions->rollback(",
+        "resident_regions->release(",
+    ):
+        if token not in runtime_source:
+            fail(f"rt/src/host_runtime.cpp: missing M15-03 lifecycle token {token!r}")
+    for test_name in (
+        "ProviderTableValidatesCopiesAndRejectsReentrancy",
+        "AcquiresStableOrderAndReleasesReverseExactlyOnce",
+        "ReleaseCallbackCannotReenterRuntime",
+        "RollbackFailureRetainsTokensUntilCheckedStopRetry",
+        "AcquisitionFailureReleasesCompletedTokensInReverse",
+        "FailedAcquireCannotReleaseAnotherRuntimesLiveToken",
+        "RejectsMalformedProviderAllocationsWithoutPublishing",
+        "RejectsMalformedPageAndHugeOutcomes",
+        "RejectsGuardClaimsOutsideAllocationExtent",
+        "RejectsCapabilityMismatchBeforePublishing",
+        "InactiveRowsDoNotInvokeProvider",
+        "StrictDeferredRegionFailsBeforeProviderCallbacks",
+        "NativeNumaRequiresIndependentProviderObservation",
+        "ReportsRequestedCommittedAndVerifiedProviderState",
+        "StrictApplyAndReadbackFailuresRollbackAndRetry",
+        "LaterThreadFailureRollsBackThreadsThenMemoryAndRetries",
+        "WatchdogFailureJoinsBeforeMemoryRollbackAndRetries",
+        "BestEffortApplyFailureIsReportedAndRuntimeContinues",
+        "RuntimeInstancesIsolateTokensBackingReportsAndRollback",
+        "RejectsHugeFallbackWhenRequestForbidsIt",
+        "SharedProviderCannotAliasTwoRuntimes",
+        "ProviderBackedNestedAndHostAdapterScratchRemainDistinct",
+        "ProviderBackedPeriodicWatchdogPreservesTraceLoss",
+        "FailedStartDestructionRollsBackBeforeRelease",
+        "NativeLinuxPageBackingIsRoundedGuardedAndObserved",
+        "NativeLockingUsesIsolatedPagesAndNeverReportsPinning",
+    ):
+        if test_name not in memory_policy_test:
+            fail(f"tests/test_memory_policy.cpp: missing permanent M15-03 gate {test_name!r}")
+    if "ReportRetainsPreM15_03AggregatePrefix" not in cpu_memory_policy_test:
+        fail("tests/test_cpu_memory_policy.cpp: missing C++ aggregate-prefix compatibility gate")
+    for token in (
+        "CleanupMemoryProvider",
+        "FailedRegistrationRollbackRemainsRecoverable",
+        "DeviceServicePolicyFailureRollsBackMemoryAfterJoinAndRetries",
+        "memory_provider.release_count",
+    ):
+        if token not in device_test:
+            fail(f"tests/test_device_runtime.cpp: missing M15-03 cleanup gate {token!r}")
+    for token in (
+        "rt/src/memory_policy.cpp",
+        "test_memory_policy.cpp",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"CMake M15-03 integration is missing {token!r}")
+    if "MemoryPolicy.*" not in ci_workflow:
+        fail(".github/workflows/ci.yml: TSan filter is missing MemoryPolicy.*")
 
     for token in (
         "Runtime::run_periodic(",
@@ -1770,6 +1870,8 @@ def main() -> int:
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
             "rt/src/host_runtime.cpp",
+            "rt/src/memory_policy.hpp",
+            "rt/src/memory_policy.cpp",
             "rt/src/resource_policy.hpp",
             "rt/src/resource_policy.cpp",
             "rt/src/runtime_profile.cpp",
@@ -1800,6 +1902,7 @@ def main() -> int:
             "tests/test_executor.cpp",
             "tests/test_memory_plan.cpp",
             "tests/test_cpu_memory_policy.cpp",
+            "tests/test_memory_policy.cpp",
             "tests/test_periodic_runtime.cpp",
             "tests/test_platform_preflight.cpp",
             "tests/test_observability.cpp",

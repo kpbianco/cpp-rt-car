@@ -78,6 +78,41 @@ void expect_invalid_policy(
 
 } // namespace
 
+TEST(CpuMemoryPolicy, ReportRetainsPreM15_03AggregatePrefix) {
+    rt::MemoryPolicy requested;
+    requested.prefault = rt::PolicyToggle::enabled;
+    rt::MemoryPolicy resolved;
+    resolved.prefault = rt::PolicyToggle::enabled;
+    const rt::MemoryPolicyReport row{
+        rt::memory_region_phase_scratch,
+        {17},
+        {},
+        rt::ResourceOwnership::runtime,
+        rt::MemoryAccountingScope::planned,
+        1,
+        true,
+        64,
+        64,
+        64,
+        0,
+        0,
+        false,
+        requested,
+        resolved,
+        rt::PolicyResolutionState::native_supported,
+        rt::PolicyOperationState::succeeded,
+        rt::PolicyOperationState::succeeded,
+    };
+
+    EXPECT_EQ(row.region, rt::memory_region_phase_scratch);
+    EXPECT_EQ(row.accounting_key.value, 17u);
+    EXPECT_EQ(row.requested.prefault, rt::PolicyToggle::enabled);
+    EXPECT_EQ(row.resolved.prefault, rt::PolicyToggle::enabled);
+    EXPECT_EQ(row.applied, rt::PolicyOperationState::succeeded);
+    EXPECT_EQ(row.verified, rt::PolicyOperationState::succeeded);
+    EXPECT_EQ(row.acquired, rt::PolicyOperationState::not_attempted);
+}
+
 TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
     rt::Runtime runtime;
     rt::RuntimeConfig config;
@@ -175,7 +210,13 @@ TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
         if (row.accounting_scope == rt::MemoryAccountingScope::planned) {
             planned_sum += row.accounted_bytes;
         }
-        EXPECT_EQ(row.committed_bytes, 0u);
+        const bool resident_region =
+            row.region == rt::memory_region_phase_scratch ||
+            row.region == rt::memory_region_task_scratch ||
+            row.region == rt::memory_region_trace_storage;
+        EXPECT_EQ(
+            row.committed_bytes,
+            resident_region ? row.accounted_bytes : 0u);
         EXPECT_EQ(row.resident_bytes, 0u);
         EXPECT_EQ(row.locked_bytes, 0u);
         EXPECT_EQ(row.pinned_bytes, 0u);
@@ -208,8 +249,14 @@ TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
     EXPECT_EQ(buffer_row->accounted_bytes, buffer.size());
     EXPECT_EQ(runtime_stacks->logical_region_count, 5u);
     EXPECT_EQ(runtime_stacks->accounting_scope, rt::MemoryAccountingScope::excluded);
+    EXPECT_EQ(
+        runtime_stacks->resolution,
+        rt::PolicyResolutionState::portable_default);
     EXPECT_EQ(external_stacks->logical_region_count, 1u);
     EXPECT_FALSE(external_stacks->cardinality_known);
+    EXPECT_EQ(
+        external_stacks->resolution,
+        rt::PolicyResolutionState::portable_default);
 }
 
 TEST(CpuMemoryPolicy, BestEffortRequestsResolveToExplicitPortableNoops) {
@@ -275,10 +322,10 @@ TEST(CpuMemoryPolicy, BestEffortRequestsResolveToExplicitPortableNoops) {
     EXPECT_FALSE(thread_row->cardinality_known);
     EXPECT_EQ(
         memory_row->resolution,
-        rt::PolicyResolutionState::unsupported_best_effort);
+        rt::PolicyResolutionState::native_best_effort_fallback);
     EXPECT_EQ(memory_row->requested.huge_pages, rt::HugePagePreference::prefer);
     EXPECT_EQ(memory_row->resolved.provider, rt::MemoryProviderOwnership::runtime);
-    EXPECT_EQ(memory_row->resolved.alignment, 64u);
+    EXPECT_EQ(memory_row->resolved.alignment, 4096u);
     EXPECT_EQ(memory_row->resolved.locking, rt::PolicyToggle::disabled);
 
     ASSERT_EQ(runtime.start(), rt::Status::ok);
@@ -377,10 +424,12 @@ TEST(CpuMemoryPolicy, RejectsUnsupportedStrictAndCheckedArithmeticOverflow) {
     rt::CpuMemoryPolicy strict_memory;
     strict_memory.memory_policy_count = 1;
     strict_memory.memory_policies[0].region =
-        rt::memory_region_task_scratch;
+        rt::memory_region_runtime_control;
     strict_memory.memory_policies[0].policy.requirement =
         rt::PolicyRequirement::strict;
-    expect_invalid_policy(strict_memory, "strict memory policy");
+    strict_memory.memory_policies[0].policy.prefault =
+        rt::PolicyToggle::enabled;
+    expect_invalid_policy(strict_memory, "deferred or borrowed");
 
     rt::Runtime stack_runtime;
     rt::RuntimeConfig stack_config;
