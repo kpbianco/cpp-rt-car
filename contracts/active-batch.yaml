@@ -19,7 +19,8 @@ sources:
   baseline_commit: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
   control_plane_repository: kpbianco/portfolio-control
   control_plane_path: products/cpp-rt-car/batches/M15-01.yaml
-  control_plane_revision: 50897876440a8fdb84a5c5942abb4339cfd792d6
+  control_plane_revision: 7a34494ca4cd4826c898270053864defc2183fa7
+dependencies: []
 scope:
   allowed_paths:
     - rt/include/rt/config.hpp

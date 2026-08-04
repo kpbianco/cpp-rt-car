@@ -512,7 +512,18 @@ Exit gates:
 
 ## M15 — CPU and memory policy
 
-Planned outcome:
+Delivered in M15-01:
+
+- additive bounded C++ thread and memory policy request types in the existing
+  installed SDK headers;
+- stable role/category identifiers and exact-once accounting keys;
+- strict finalization validation, portable no-op resolution, transactional
+  requested/resolved reports, external verify-only ownership, and two-runtime
+  isolation;
+- unchanged schema 7, C ABI v8, device ABI v1, package inventory, callbacks,
+  and runtime steady state.
+
+Remaining milestone outcome:
 
 - role-aware policy for frame, executor-worker, device-service, watchdog, and
   accelerator-I/O threads;

@@ -68,6 +68,17 @@ same-major package and target C++ source-compatibility policy, and checks
 strict CPack staging plus content-addressed package and hardware-evidence
 manifests. These gates do not promote RT1, RT2, CUDA, or XDMA qualification.
 
+M15-01 adds the policy/resource model without changing startup execution. A
+bounded request table is validated during finalization and resolved into an
+instance-owned immutable report. Stable role rows cover the caller frame lane,
+executor workers, watchdog, device service, XDMA I/O, and additive custom
+roles. Stable memory rows project the existing plan exactly once and separately
+report borrowed/backend bytes and excluded stacks/providers. External host and
+vendor roles are verify-only, and opaque XDMA cardinality is explicitly
+unknown rather than inferred through device ABI v1. Native apply/verify and
+memory residency transactions remain later M15 work. See the
+[CPU/memory policy contract](cpu_memory_policy.md).
+
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
 run on static-assignment, bounded-throughput, or borrowed-host policy.
@@ -172,6 +183,9 @@ M11 adds the borrowed host job-system policy and stable distribution boundary.
 M12 names the portable RT0 support tuples and makes the 1.x compatibility,
 release archive, digest-manifest, and independent-device-isolation gates
 machine-verifiable.
+M15-01 adds the immutable CPU/memory policy and inventory layer in front of
+those unchanged lifecycle components; it resolves portably without applying
+OS policy.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
@@ -209,6 +223,9 @@ that arbitrary host data is automatically optimized.
 - M14 SDK/package boundary: `rtfw::runtime`, `rt/include/rt/config.hpp`,
   `rt/include/rt/status.hpp`, `rt/include/rt/canonical_bytes.hpp`,
   `cmake/rtfwConfig.cmake.in`, `tests/package_consumer/package_contract.cmake`
+- M15-01 policy model/inventory: `rt/include/rt/config.hpp`,
+  `rt/include/rt/runtime.hpp`, `rt/src/resource_policy.cpp`,
+  `docs/cpu_memory_policy.md`, `tests/test_cpu_memory_policy.cpp`
 - M4 memory plan: `rt/src/aligned_storage.hpp`,
   `docs/memory_plan.md`
 - M5 time/platform controls: `rt/src/watchdog_monitor.cpp`,

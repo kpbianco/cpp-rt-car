@@ -508,6 +508,104 @@ struct MemoryPlan {
     OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
 };
 
+inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
+inline constexpr std::size_t thread_role_report_capacity =
+    5 + thread_policy_request_capacity;
+inline constexpr std::size_t memory_region_report_capacity = 12;
+inline constexpr std::size_t resource_accounting_name_capacity = 48;
+
+struct ResourceAccountingKey {
+    std::uint64_t value = 0;
+
+    [[nodiscard]] constexpr bool operator==(
+        const ResourceAccountingKey&) const noexcept = default;
+};
+
+enum class ResourceOwnership : std::uint8_t {
+    runtime,
+    caller,
+    host_executor,
+    backend,
+    vendor,
+};
+
+enum class PolicyApplicationMode : std::uint8_t {
+    apply_and_verify,
+    verify_only,
+};
+
+enum class PolicyResolutionState : std::uint8_t {
+    portable_default,
+    portable_noop,
+    unsupported_best_effort,
+    inactive,
+    external_verify_only,
+};
+
+enum class PolicyOperationState : std::uint8_t {
+    not_attempted,
+    succeeded,
+    failed,
+    unsupported,
+};
+
+enum class MemoryAccountingScope : std::uint8_t {
+    planned,
+    informational_external,
+    excluded,
+};
+
+struct ThreadPolicyReport {
+    ThreadRoleId role{};
+    ResourceAccountingKey accounting_key{};
+    std::array<char, resource_accounting_name_capacity> stable_name{};
+    ResourceOwnership ownership = ResourceOwnership::runtime;
+    PolicyApplicationMode application_mode =
+        PolicyApplicationMode::apply_and_verify;
+    std::size_t logical_instance_count = 0;
+    bool cardinality_known = true;
+    ThreadPolicy requested{};
+    ThreadPolicy resolved{};
+    PolicyResolutionState resolution =
+        PolicyResolutionState::portable_default;
+    PolicyOperationState applied = PolicyOperationState::not_attempted;
+    PolicyOperationState verified = PolicyOperationState::not_attempted;
+};
+
+struct MemoryPolicyReport {
+    MemoryRegionId region{};
+    ResourceAccountingKey accounting_key{};
+    std::array<char, resource_accounting_name_capacity> stable_name{};
+    ResourceOwnership ownership = ResourceOwnership::runtime;
+    MemoryAccountingScope accounting_scope =
+        MemoryAccountingScope::planned;
+    std::size_t logical_region_count = 0;
+    bool cardinality_known = true;
+    // accounted_bytes is the existing finalized-plan or informational payload
+    // identity assigned to this row. Planned rows sum exactly to
+    // MemoryPlan::planned_bytes; excluded rows never contribute to that sum.
+    std::size_t accounted_bytes = 0;
+    std::size_t committed_bytes = 0;
+    std::size_t resident_bytes = 0;
+    std::size_t locked_bytes = 0;
+    std::size_t pinned_bytes = 0;
+    bool used_huge_page_fallback = false;
+    MemoryPolicy requested{};
+    MemoryPolicy resolved{};
+    PolicyResolutionState resolution =
+        PolicyResolutionState::portable_default;
+    PolicyOperationState applied = PolicyOperationState::not_attempted;
+    PolicyOperationState verified = PolicyOperationState::not_attempted;
+};
+
+struct CpuMemoryPolicyReport {
+    std::uint32_t schema_version = cpu_memory_policy_schema_version;
+    std::size_t thread_count = 0;
+    std::array<ThreadPolicyReport, thread_role_report_capacity> threads{};
+    std::size_t memory_count = 0;
+    std::array<MemoryPolicyReport, memory_region_report_capacity> memory{};
+};
+
 enum class RuntimeTraceEventType : std::uint16_t {
     finalized = 1,
     started = 2,
@@ -699,6 +797,11 @@ public:
     Runtime& operator=(const Runtime&) = delete;
 
     [[nodiscard]] Status configure(const RuntimeConfig& config) noexcept;
+    // Copies the bounded C++ policy model. Schema-7 JSON profiles and stable
+    // C ABI v8 intentionally do not include this additive source API.
+    // Validation and portable resolution occur transactionally in finalize().
+    [[nodiscard]] Status set_cpu_memory_policy(
+        const CpuMemoryPolicy& policy) noexcept;
     // Copies the callback table and borrows adapter.user_data through stop().
     // May be called only while configuring.
     [[nodiscard]] Status set_host_executor(
@@ -779,6 +882,11 @@ public:
     // runtime payload/control storage and exclude allocator metadata and OS
     // thread stacks.
     [[nodiscard]] bool memory_plan(MemoryPlan& plan) const noexcept;
+    // Available after successful finalization. The report inventories every
+    // current role and memory accounting identity exactly once. M15-01 does
+    // not apply native policy, so applied/verified remain not_attempted.
+    [[nodiscard]] bool cpu_memory_policy_report(
+        CpuMemoryPolicyReport& report) const noexcept;
     // Available after start is attempted. Strict failures leave the runtime
     // finalized so the host can inspect every failed prerequisite.
     [[nodiscard]] bool platform_preflight_report(
