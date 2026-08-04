@@ -222,7 +222,7 @@
     "tests/runtime_profile_tests.cpp": "6a81d25172de67b60d676bfc5abefbaac333a26b485a6d4d2c324b68e6c39669",
     "tests/test_cpu_memory_policy.cpp": "c4f21914a9245b4be37b3e985a304695682c941dbab441056efa6d5392d22e89",
     "tests/test_determinism_replay.cpp": "e6152b9ac4540f5582f9a452f5fcaa08d7c7bfafd40e4f787f509ac3f049db27",
-    "tests/test_memory_policy.cpp": "c6925de2923a2b02614b53c4d6211d53d681a165a87bbae8a2fc24e9c91f4b89",
+    "tests/test_memory_policy.cpp": "c66eb29e451d7b3392327f9cec23d331db74bc57180e3334f567251ec13b5eff",
     "tests/test_periodic_runtime.cpp": "8121b33f3f18f58239d4ac53587532deafabb555cb3e8e2c7ab8c1ba3f070229",
     "tests/test_release_tools.py": "548341cb7b693b9a1c1981441383a302494c198f736f97182aa3c0f2f1af7d26",
     "tests/test_rt_pipeline.cpp": "1d0f6dc159572a580b5a2364ec3590bb393e1706189a0292970c55d0f9c93a3f",

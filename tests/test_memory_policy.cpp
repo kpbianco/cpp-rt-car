@@ -1512,6 +1512,9 @@ TEST(MemoryPolicy, NativeLinuxPageBackingIsRoundedGuardedAndObserved) {
         -1);
     EXPECT_EQ(errno, EFAULT);
 #elif GTEST_HAS_DEATH_TEST
+    const auto previous_death_test_style =
+        ::testing::GTEST_FLAG(death_test_style);
+    ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
     auto* before_guard = reinterpret_cast<volatile std::byte*>(
         usable_address - 1);
     auto* after_guard = reinterpret_cast<volatile std::byte*>(
@@ -1532,6 +1535,7 @@ TEST(MemoryPolicy, NativeLinuxPageBackingIsRoundedGuardedAndObserved) {
         },
         ::testing::KilledBySignal(SIGSEGV),
         "");
+    ::testing::GTEST_FLAG(death_test_style) = previous_death_test_style;
 #endif
     ASSERT_EQ(runtime.stop(), rt::Status::ok);
 #else
