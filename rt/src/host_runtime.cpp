@@ -5,6 +5,7 @@
 #include "device_manager.hpp"
 #include "executor.hpp"
 #include "native_platform_preflight.hpp"
+#include "resource_policy.hpp"
 #include "snapshot_codec.hpp"
 #include "telemetry.hpp"
 #include "watchdog_monitor.hpp"
@@ -1362,6 +1363,9 @@ struct Runtime::Impl {
     detail::NativePlatformPreflightProbe owned_preflight;
     PlatformPreflightProbe* preflight;
     RuntimeConfig config{};
+    CpuMemoryPolicy cpu_memory_policy{};
+    CpuMemoryPolicyReport cpu_memory_policy_report{};
+    bool cpu_memory_policy_report_available = false;
     HostExecutorAdapter host_executor{};
     bool host_executor_set = false;
     RuntimeState state = RuntimeState::configuring;
@@ -1435,6 +1439,26 @@ Status Runtime::configure(const RuntimeConfig& config) noexcept {
         return impl_->fail(Status::invalid_config, nullptr);
     }
     impl_->config = config;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_cpu_memory_policy(
+    const CpuMemoryPolicy& policy) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "CPU/memory policy is frozen");
+    }
+    // Counts and entries are validated together in finalize() so malformed,
+    // duplicate, contradictory, and unsupported-strict requests fail at the
+    // same pre-start transactional boundary as the compiled resource plan.
+    impl_->cpu_memory_policy = policy;
+    impl_->cpu_memory_policy_report = {};
+    impl_->cpu_memory_policy_report_available = false;
     impl_->clear_error();
     return Status::ok;
 }
@@ -2164,6 +2188,19 @@ Status Runtime::finalize() noexcept {
                 "registered state size overflows the snapshot format");
         }
     }
+    std::size_t registered_device_buffer_bytes = 0;
+    for (const auto& buffer : impl_->device_buffers) {
+        std::size_t total = 0;
+        if (!detail::checked_add(
+                registered_device_buffer_bytes,
+                buffer.storage.size(),
+                total)) {
+            return impl_->fail(
+                Status::invalid_config,
+                "registered device buffer bytes overflow accounting");
+        }
+        registered_device_buffer_bytes = total;
+    }
     std::size_t checkpoint_record_bytes = 0;
     std::size_t checkpoint_required_bytes = 0;
     if (!detail::checked_artifact_multiply(
@@ -2370,6 +2407,19 @@ Status Runtime::finalize() noexcept {
             "finalized memory plan exceeds memory_budget_bytes");
     }
 
+    CpuMemoryPolicyReport cpu_memory_policy_report;
+    const char* policy_diagnostic = nullptr;
+    const auto policy_status = detail::build_cpu_memory_policy_report(
+        impl_->cpu_memory_policy,
+        impl_->config,
+        memory_plan,
+        registered_device_buffer_bytes,
+        cpu_memory_policy_report,
+        policy_diagnostic);
+    if (policy_status != Status::ok) {
+        return impl_->fail(policy_status, policy_diagnostic);
+    }
+
     std::unique_ptr<detail::Executor> executor;
     std::unique_ptr<detail::DeviceManager> devices;
     std::unique_ptr<detail::TelemetryRing> telemetry;
@@ -2415,6 +2465,8 @@ Status Runtime::finalize() noexcept {
     impl_->executor = std::move(executor);
     impl_->devices = std::move(devices);
     impl_->finalized_memory_plan = memory_plan;
+    impl_->cpu_memory_policy_report = cpu_memory_policy_report;
+    impl_->cpu_memory_policy_report_available = true;
     impl_->telemetry_counters.reset();
     impl_->metric_snapshot_sequence = 0;
     impl_->graph_id = impl_->compute_graph_id();
@@ -3166,6 +3218,17 @@ bool Runtime::memory_plan(MemoryPlan& plan) const noexcept {
         return false;
     }
     plan = impl_->finalized_memory_plan;
+    return true;
+}
+
+bool Runtime::cpu_memory_policy_report(
+    CpuMemoryPolicyReport& report) const noexcept {
+    report = {};
+    if (!impl_ || !impl_->cpu_memory_policy_report_available ||
+        impl_->state == RuntimeState::configuring) {
+        return false;
+    }
+    report = impl_->cpu_memory_policy_report;
     return true;
 }
 

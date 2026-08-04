@@ -104,6 +104,10 @@ if (SIM_GTEST_AVAILABLE)
         )
     endif()
 
+    # M15-01 is part of the supported runtime and must remain in both the
+    # default and experimental-enabled GoogleTest configurations.
+    list(APPEND TEST_SOURCES test_cpu_memory_policy.cpp)
+
     if (RTFW_BUILD_EXPERIMENTAL AND
         ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
         list(APPEND TEST_SOURCES test_jobqueue_property.cpp)

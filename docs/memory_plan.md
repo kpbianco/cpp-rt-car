@@ -66,6 +66,24 @@ host-owned memory and are excluded for the same reason as backend-owned
 storage. The adapter must reserve the declared capacities before runtime
 start; the runtime does not allocate or resize a host queue.
 
+## M15-01 policy accounting projection
+
+M15-01 leaves `MemoryPlan` and its equation source-compatible and adds a
+separate immutable `CpuMemoryPolicyReport`. Its six planned accounting rows
+map one-for-one to `runtime_control_bytes`, `executor_control_bytes`,
+`device_control_bytes`, `phase_scratch_total_bytes`,
+`task_scratch_total_bytes`, and `trace_storage_bytes`; their sum must equal
+`planned_bytes`. Separate informational rows report registered state,
+backend-reported control, and the checked sum of registered device-buffer
+spans. Runtime/external thread stacks and future host-provider storage have
+stable excluded rows because their committed/resident bytes are not known in
+the current portable implementation.
+
+This is exact identity and requested-byte accounting, not physical allocator,
+RSS, page-residency, lock, pin, or huge-page accounting. Applied, verified,
+committed, resident, locked, and pinned values remain explicitly not attempted
+or zero in M15-01. See [the CPU/memory policy contract](cpu_memory_policy.md).
+
 ## Configuration
 
 | Key | Default | Contract |

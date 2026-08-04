@@ -32,6 +32,11 @@ changing C ABI v8 or device ABI v1.
 Release 1.2.1 closes the device lifecycle error path: failed initialization
 rollback, buffer unregistration, and backend shutdown retain explicit ownership
 state and are retried through checked `stop()` without changing either ABI.
+M15-01 adds a bounded additive C++ CPU/memory policy model, strict
+finalization-time structural validation, portable no-op resolution, and stable
+requested/resolved thread-role and memory-accounting reports. It performs no
+native host mutation and does not change schema 7, C ABI v8, device ABI v1, or
+runtime steady-state behavior.
 
 ## Claim policy
 
@@ -238,6 +243,7 @@ callback expressions.
 | Host-driven callbacks | Implemented RT0 surface | Synchronous host wait; dependency-ready callbacks may overlap without step-time pacing or worker creation |
 | Unified CPU executor | Implemented RT0 surface | Static assignments, bounded local-queue throughput, and a borrowed host job-system adapter share one graph/range/reduction representation |
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
+| CPU/memory policy model and inventory | Implemented M15-01 RT0 model | Bounded role/region requests, strict pre-start validation, portable no-op resolution, exact-once accounting keys, and external verify-only ownership; no native apply/verify or residency claim |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

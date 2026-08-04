@@ -11,6 +11,10 @@ namespace rt {
 
 inline constexpr std::uint32_t runtime_config_schema_version = 7;
 inline constexpr std::size_t observability_identifier_capacity = 64;
+inline constexpr std::size_t cpu_set_capacity = 256;
+inline constexpr std::size_t thread_name_capacity = 32;
+inline constexpr std::size_t thread_policy_request_capacity = 16;
+inline constexpr std::size_t memory_policy_request_capacity = 16;
 
 enum class NumericalMode : std::uint8_t {
     precise,
@@ -38,6 +42,166 @@ enum class DeterminismTier : std::uint8_t {
     schedule_independent = 1,
     reproducible_build = 2,
     portable_deterministic = 3,
+};
+
+// Stable, source-level role identifiers. Values at or above custom_first are
+// reserved for additive accelerator/service roles. A custom role remains
+// externally owned and verify-only until a later runtime version recognizes
+// and owns it.
+struct ThreadRoleId {
+    std::uint32_t value = 0;
+
+    [[nodiscard]] constexpr bool operator==(
+        const ThreadRoleId&) const noexcept = default;
+};
+
+inline constexpr ThreadRoleId thread_role_frame{1};
+inline constexpr ThreadRoleId thread_role_executor_worker{2};
+inline constexpr ThreadRoleId thread_role_watchdog{3};
+inline constexpr ThreadRoleId thread_role_device_service{4};
+inline constexpr ThreadRoleId thread_role_xdma_io{5};
+inline constexpr std::uint32_t thread_role_custom_first = 0x0001'0000u;
+
+// Stable memory accounting identities. Each resolved report contains exactly
+// one row for every identifier below, including zero-cardinality categories.
+struct MemoryRegionId {
+    std::uint32_t value = 0;
+
+    [[nodiscard]] constexpr bool operator==(
+        const MemoryRegionId&) const noexcept = default;
+};
+
+inline constexpr MemoryRegionId memory_region_runtime_control{1};
+inline constexpr MemoryRegionId memory_region_executor_control{2};
+inline constexpr MemoryRegionId memory_region_device_control{3};
+inline constexpr MemoryRegionId memory_region_phase_scratch{4};
+inline constexpr MemoryRegionId memory_region_task_scratch{5};
+inline constexpr MemoryRegionId memory_region_trace_storage{6};
+inline constexpr MemoryRegionId memory_region_registered_state{7};
+inline constexpr MemoryRegionId memory_region_backend_control{8};
+inline constexpr MemoryRegionId memory_region_registered_device_buffer{9};
+inline constexpr MemoryRegionId memory_region_runtime_thread_stack{10};
+inline constexpr MemoryRegionId memory_region_external_thread_stack{11};
+inline constexpr MemoryRegionId memory_region_host_provider{12};
+
+enum class PolicyRequirement : std::uint8_t {
+    best_effort,
+    strict,
+};
+
+enum class SchedulingClass : std::uint8_t {
+    inherit,
+    normal,
+    fifo,
+    round_robin,
+};
+
+enum class WaitStrategy : std::uint8_t {
+    inherit,
+    spin,
+    yield,
+    park,
+};
+
+struct CpuSetRequest {
+    std::size_t count = 0;
+    std::array<std::uint32_t, cpu_set_capacity> cpu_ids{};
+};
+
+struct ThreadPolicy {
+    PolicyRequirement requirement = PolicyRequirement::best_effort;
+    CpuSetRequest cpu_set{};
+    SchedulingClass scheduling_class = SchedulingClass::inherit;
+    std::int32_t scheduling_priority = 0;
+    // -1 inherits the current placement. Nonnegative values name a NUMA node.
+    std::int32_t numa_node = -1;
+    WaitStrategy wait_strategy = WaitStrategy::inherit;
+    // Zero retains the implementation/host default.
+    std::size_t stack_bytes = 0;
+    std::size_t guard_bytes = 0;
+    // Empty means unnamed/inherit. Nonempty values are NUL-terminated and use
+    // [A-Za-z0-9._-].
+    std::array<char, thread_name_capacity> name{};
+};
+
+struct ThreadPolicyRequest {
+    ThreadRoleId role{};
+    ThreadPolicy policy{};
+};
+
+enum class PolicyToggle : std::uint8_t {
+    inherit,
+    disabled,
+    enabled,
+};
+
+enum class MemoryProviderOwnership : std::uint8_t {
+    inherit,
+    runtime,
+    host,
+    backend,
+    borrowed,
+};
+
+enum class PageRounding : std::uint8_t {
+    inherit,
+    none,
+    base_page,
+};
+
+enum class HugePagePreference : std::uint8_t {
+    inherit,
+    disabled,
+    prefer,
+};
+
+enum class FirstTouchPolicy : std::uint8_t {
+    inherit,
+    none,
+    caller,
+    owner_thread,
+};
+
+enum class RollbackIntent : std::uint8_t {
+    inherit,
+    none,
+    release,
+};
+
+struct MemoryPolicy {
+    PolicyRequirement requirement = PolicyRequirement::best_effort;
+    MemoryProviderOwnership provider = MemoryProviderOwnership::inherit;
+    // Zero retains the category's current alignment.
+    std::size_t alignment = 0;
+    PageRounding page_rounding = PageRounding::inherit;
+    std::size_t guard_bytes_before = 0;
+    std::size_t guard_bytes_after = 0;
+    PolicyToggle prefault = PolicyToggle::inherit;
+    PolicyToggle locking = PolicyToggle::inherit;
+    PolicyToggle pinning = PolicyToggle::inherit;
+    HugePagePreference huge_pages = HugePagePreference::inherit;
+    PolicyToggle huge_page_fallback = PolicyToggle::inherit;
+    // -1 inherits the current placement. Nonnegative values name a NUMA node.
+    std::int32_t numa_node = -1;
+    FirstTouchPolicy first_touch = FirstTouchPolicy::inherit;
+    PolicyToggle residency_verification = PolicyToggle::inherit;
+    RollbackIntent rollback = RollbackIntent::inherit;
+};
+
+struct MemoryPolicyRequest {
+    MemoryRegionId region{};
+    MemoryPolicy policy{};
+};
+
+// This policy is intentionally separate from RuntimeConfig schema 7. It is a
+// C++ source API and is not a JSON/profile or stable-C-ABI field.
+struct CpuMemoryPolicy {
+    std::size_t thread_policy_count = 0;
+    std::array<ThreadPolicyRequest, thread_policy_request_capacity>
+        thread_policies{};
+    std::size_t memory_policy_count = 0;
+    std::array<MemoryPolicyRequest, memory_policy_request_capacity>
+        memory_policies{};
 };
 
 struct RuntimeConfig {

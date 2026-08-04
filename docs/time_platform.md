@@ -109,6 +109,19 @@ behavior, workload bounds, or measured deadline distributions. Those remain
 deployment qualification requirements in the
 [product contract](product_contract.md).
 
+## M15-01 thread policy model
+
+The additive C++ CPU/memory policy model inventories the caller frame lane,
+runtime-owned executor/watchdog/device-service lanes, and external XDMA/vendor
+roles. Portable resolution records current yield/park/inherited behavior but
+does not set affinity, scheduling, NUMA placement, stack/guard state, or thread
+names. Every strict request is rejected at finalization until the later M15
+startup transaction exists. Host-adapter and vendor lanes remain
+external and verify-only. See [the policy contract](cpu_memory_policy.md).
+
+Neither a requested/resolved policy report nor portable policy tests establish
+RT1 or RT2.
+
 ## C ABI
 
 Stable ABI version 8 retains the M5 surface:
