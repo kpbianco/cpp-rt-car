@@ -1,6 +1,6 @@
 {
   "control_repository": "kpbianco/portfolio-control",
-  "control_revision": "365b891802d0f6e2f0ea1e7a0ed9643066731f1e",
+  "control_revision": "7a34494ca4cd4826c898270053864defc2183fa7",
   "harness_version": 2,
   "managed_paths": {
     ".agents/skills/ci-diagnose/SKILL.md": "93a7ce825178685239d6f3f124e5670f648b7f6a242be7716e86fd8b10f653b0",
@@ -26,9 +26,9 @@
     ".github/codex/schemas/planner-review.schema.json": "0b6e73da860c4c6d9024f6e2c2889162f4d49813e4c5069187f68ef79183eba9",
     ".github/codex/schemas/product.schema.json": "0c01a565e795a00f9532a55bdc2fc1d51aa20d8b2af2f5941b8be11723fd4191",
     ".gitignore": "a55b599061dfcc0c7a818cf53ef865ee1d68dd9be83bffabf72143c18254dfa3",
-    "AGENTS.md": "015a8e3ddda74ee19f408fa237a310657ba91d61f7f115125c92f0681bc44eed",
+    "AGENTS.md": "84d71c588564d692f3c62b89ccb9fee8fa9bac8f95a5be8dae189a2a4a2b96f4",
     "contracts/profile-requirements.yaml": "36a421b853f0749695b773da201489f7b17e0d493baa4787482d9f49715d8bc1",
-    "contracts/repo-profile.yaml": "d5cc1f485c923f3bed2f77d8a7a911dced62e89c0ddff30113ec9ba54af2dc47"
+    "contracts/repo-profile.yaml": "9a677840e490a1d38e843c2a3982e3d73799a3fe1fb542d477175554c9614be4"
   },
   "product": "cpp-rt-car",
   "profile": "assurance",
