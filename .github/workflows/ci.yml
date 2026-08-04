@@ -220,17 +220,18 @@ jobs:
       - name: Build executor ThreadSanitizer gate
         run: |
           cmake --build build-tsan \
-            --target simcore_tests rtfw_host_adapter_tests \
+            --target simcore_tests rtfw_thread_policy_rollback_test \
+                     rtfw_host_adapter_tests \
                      rtfw_xdma_backend_tests \
             -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
-          GTEST_FILTER: UnifiedExecutor.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*
+          GTEST_FILTER: UnifiedExecutor.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*-ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover
           TSAN_OPTIONS: halt_on_error=1
         run: |
           ctest --test-dir build-tsan \
             --output-on-failure \
-            -R 'simcore_all|host_adapter|xdma_backend'
+            -R 'simcore_all|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
 
   build-windows:
     runs-on: windows-2022

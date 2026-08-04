@@ -201,7 +201,13 @@ if (SIM_GTEST_AVAILABLE)
         NAME thread_policy_rollback
         COMMAND rtfw_thread_policy_rollback_test
             --gtest_filter=ThreadPolicy.StrictFailureJoinsCreatedLanesInReverseBeforeReturning)
-    set_tests_properties(thread_policy_rollback PROPERTIES TIMEOUT 30)
+    add_test(
+        NAME thread_policy_recovery
+        COMMAND rtfw_thread_policy_rollback_test
+            --gtest_filter=ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover)
+    set_tests_properties(
+        thread_policy_rollback thread_policy_recovery
+        PROPERTIES TIMEOUT 30)
 
     if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
       add_compile_options(-mavx2 -mfma)
