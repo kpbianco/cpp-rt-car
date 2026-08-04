@@ -225,7 +225,7 @@ jobs:
             -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
-          GTEST_FILTER: UnifiedExecutor.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*
+          GTEST_FILTER: UnifiedExecutor.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*
           TSAN_OPTIONS: halt_on_error=1
         run: |
           ctest --test-dir build-tsan \

@@ -44,6 +44,14 @@ Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
 
+M15-02 startup verifies the caller frame without mutation, creates each
+runtime-owned service/worker lane in a held transaction, aggregates native
+apply/readback results, and commits `running` only after every required row is
+acceptable. Strict creation, apply, or mismatch failure aborts the shared gate
+and joins device service, executor workers in reverse index order, then
+watchdog. No phase, device provider, or periodic observer can run before
+commit. External host-adapter, XDMA, and vendor lanes remain verify-only.
+
 A failed backend initialization gets one checked shutdown attempt. Failed
 buffer unregistration and backend shutdown preserve their ownership markers,
 and later `stop()` calls retry only unresolved operations in reverse order.

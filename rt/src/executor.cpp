@@ -238,9 +238,16 @@ Executor::Executor(
             std::make_unique<HostWorkSlot[]>(task_scratch_slots_);
     } else {
         queues_.reserve(worker_count_);
-        threads_.reserve(worker_count_);
+        threads_ = std::make_unique<NativeThread[]>(worker_count_);
+        startup_results_ =
+            std::make_unique<ThreadStartupResult[]>(worker_count_);
+        worker_entries_ = std::make_unique<WorkerEntry[]>(worker_count_);
+        wake_sequences_ =
+            std::make_unique<std::atomic<std::uint64_t>[]>(worker_count_);
         for (std::size_t worker = 0; worker < worker_count_; ++worker) {
             queues_.push_back(std::make_unique<Queue>(queue_capacity_));
+            worker_entries_[worker] = {this, worker};
+            wake_sequences_[worker].store(0, std::memory_order_relaxed);
         }
     }
 
@@ -329,7 +336,12 @@ bool Executor::estimate_control_storage(
             !add_product(
                 worker_count,
                 sizeof(std::unique_ptr<Queue>)) ||
-            !add_product(worker_count, sizeof(std::thread)) ||
+            !add_product(worker_count, sizeof(NativeThread)) ||
+            !add_product(worker_count, sizeof(ThreadStartupResult)) ||
+            !add_product(worker_count, sizeof(WorkerEntry)) ||
+            !add_product(
+                worker_count,
+                sizeof(std::atomic<std::uint64_t>)) ||
             !add_product(worker_count, sizeof(Queue)) ||
             !add_product(queue_slots, Queue::cell_size())) {
             bytes = 0;
@@ -350,7 +362,10 @@ bool Executor::estimate_control_storage(
     return true;
 }
 
-Status Executor::start() noexcept {
+Status Executor::start(
+    ThreadPolicyProvider& provider,
+    ThreadStartupGate& gate,
+    const ThreadRolePlan& plan) noexcept {
     if (started_.load(std::memory_order_acquire)) {
         return Status::invalid_state;
     }
@@ -375,45 +390,46 @@ Status Executor::start() noexcept {
         }
         return Status::ok;
     }
-
-    try {
-        for (std::size_t worker = 0; worker < worker_count_; ++worker) {
-            threads_.emplace_back([this, worker] {
-                worker_loop(worker);
-            });
+    wait_strategy_ = plan.resolved.wait_strategy;
+    for (std::size_t worker = 0; worker < worker_count_; ++worker) {
+        wake_sequences_[worker].store(0, std::memory_order_relaxed);
+        const auto status = threads_[worker].start(
+            provider,
+            gate,
+            plan,
+            worker,
+            startup_results_[worker],
+            &Executor::worker_entry,
+            &worker_entries_[worker]);
+        if (status != Status::ok) {
+            return status;
         }
-    } catch (...) {
-        stopping_.store(true, std::memory_order_release);
-        for (auto& thread : threads_) {
-            if (thread.joinable()) {
-                thread.join();
-            }
-        }
-        threads_.clear();
-        started_.store(false, std::memory_order_release);
-        return Status::resource_exhausted;
-    }
-
-    while (worker_starts_.load(std::memory_order_acquire) < worker_count_) {
-        std::this_thread::yield();
     }
     return Status::ok;
 }
 
 void Executor::stop() noexcept {
-    if (!started_.exchange(false, std::memory_order_acq_rel)) {
-        return;
-    }
+    (void)started_.exchange(false, std::memory_order_acq_rel);
     stopping_.store(true, std::memory_order_release);
     if (policy_ == ExecutorPolicy::host_adapter) {
         return;
     }
-    for (auto& thread : threads_) {
-        if (thread.joinable()) {
-            thread.join();
-        }
+    for (std::size_t worker = 0; worker < worker_count_; ++worker) {
+        wake_sequences_[worker].fetch_add(1, std::memory_order_release);
+        wake_sequences_[worker].notify_all();
     }
-    threads_.clear();
+    for (std::size_t worker = worker_count_; worker != 0; --worker) {
+        threads_[worker - 1].join();
+    }
+}
+
+void Executor::wait_started() const noexcept {
+    if (policy_ == ExecutorPolicy::host_adapter) {
+        return;
+    }
+    for (std::size_t worker = 0; worker < worker_count_; ++worker) {
+        threads_[worker].wait_started();
+    }
 }
 
 bool Executor::acquire_scratch_slot(
@@ -577,6 +593,8 @@ Status Executor::submit(
             item.phase_index);
     }
     submitted_tasks_.fetch_add(1, std::memory_order_relaxed);
+    wake_sequences_[target_worker].fetch_add(1, std::memory_order_release);
+    wake_sequences_[target_worker].notify_one();
     return Status::ok;
 }
 
@@ -1106,10 +1124,31 @@ void Executor::worker_loop(std::size_t worker_index) noexcept {
     rt::init_fp_env();
     worker_starts_.fetch_add(1, std::memory_order_release);
     while (!stopping_.load(std::memory_order_acquire)) {
-        if (!execute_one(worker_index)) {
+        if (execute_one(worker_index)) {
+            continue;
+        }
+        if (wait_strategy_ == WaitStrategy::spin) {
+            rt::cpu_relax();
+        } else if (wait_strategy_ == WaitStrategy::yield) {
             std::this_thread::yield();
+        } else {
+            const auto observed = wake_sequences_[worker_index].load(
+                std::memory_order_acquire);
+            if (!stopping_.load(std::memory_order_acquire) &&
+                !execute_one(worker_index) &&
+                wake_sequences_[worker_index].load(
+                    std::memory_order_acquire) == observed) {
+                wake_sequences_[worker_index].wait(
+                    observed,
+                    std::memory_order_relaxed);
+            }
         }
     }
+}
+
+void Executor::worker_entry(void* entry) noexcept {
+    auto& worker = *static_cast<WorkerEntry*>(entry);
+    worker.executor->worker_loop(worker.worker_index);
 }
 
 std::size_t Executor::static_worker(

@@ -18,10 +18,13 @@ queue capacity. `finalize()` validates that configuration, compiles successor
 and indegree tables, precomputes static phase assignments, allocates the queue
 and aligned phase/task scratch storage, and commits the memory plan. `start()`
 creates
-exactly the configured worker count. No executor thread is created after
+exactly the configured worker count. Each worker applies and reads back its
+resolved M15-02 policy, publishes a startup result, and waits at the runtime
+commit gate before consuming work. No executor thread is created after
 `start()` returns. `stop()` rejects calls during a step, stops the team, and
-joins every worker. If the M5 watchdog is configured, `start()` also creates
-one separate service lane; it never executes graph or nested CPU work.
+joins workers in reverse index order. If the M5 watchdog is configured,
+`start()` also creates one separate service lane; it never executes graph or
+nested CPU work.
 
 The `host_adapter` policy is the explicit exception to runtime-owned worker and
 queue storage. The host attaches a fixed callback table before finalization,
@@ -30,8 +33,9 @@ system live through `stop()`. `start()` creates no CPU worker for that policy;
 the host owns worker threads, queue memory, affinity, priority, and shutdown.
 Runtime-owned graph state and aligned task scratch remain fully planned.
 
-Workers use bounded lock-free local rings. They yield when idle; there is no
-condition-variable service thread, emergency spawn, detached task, or
+Workers use bounded lock-free local rings. The resolved role policy selects
+spin, yield, or per-worker atomic park waiting, with queue publication and stop
+waking the matching worker. There is no emergency spawn, detached task, or
 unsubmitted inline fallback in this executor. A worker waiting for nested work
 may execute an already-enqueued task. That work-helping rule is part of normal
 execution and prevents nested-pool deadlock.

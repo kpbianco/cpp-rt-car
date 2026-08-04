@@ -33,7 +33,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
-| M15 | Next | Explicit CPU topology, thread policy, memory residency, NUMA, and stack ownership |
+| M15 | In progress | M15-01 policy inventory and M15-02 runtime-owned thread apply/readback complete; memory residency remains |
 | M16 | Planned | Multi-rate deterministic simulation domains and release coordination |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
@@ -523,12 +523,17 @@ Delivered in M15-01:
 - unchanged schema 7, C ABI v8, device ABI v1, package inventory, callbacks,
   and runtime steady state.
 
+Delivered in M15-02:
+
+- Linux native resolution, apply, and readback for runtime-owned executor,
+  watchdog, and device-service lanes, with caller/external verify-only ownership;
+- one startup barrier, strict fail-closed reverse rollback, truthful
+  best-effort aggregation, and retryable M14.1 device-cleanup preservation;
+- role-local spin, yield, and park idle behavior with bounded work/stop wakeups;
+- unchanged portable RT0, ABI, package, schema, release, and qualification claims.
+
 Remaining milestone outcome:
 
-- role-aware policy for frame, executor-worker, device-service, watchdog, and
-  accelerator-I/O threads;
-- deterministic CPU-set resolution, affinity, scheduler class/priority, and
-  spin/yield/park wait policy with apply-and-verify startup barriers;
 - explicit region and runtime-owned stack policy covering alignment, page
   rounding, guards, prefaulting, locking, residency, huge-page fallback, NUMA
   binding, first touch, and rollback;

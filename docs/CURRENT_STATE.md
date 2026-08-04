@@ -1,7 +1,7 @@
 # Current state
 
-Last audited: 2026-07-29  
-Audited repository state: `main@c5220de1ccfceca4d1584c3df5e0ddb17da171eb`
+Last audited: 2026-08-04
+Batch baseline: `b7e6ebcccef144f433950b66efb3866519de449b`
 
 ## Product state
 
@@ -11,7 +11,7 @@ Audited repository state: `main@c5220de1ccfceca4d1584c3df5e0ddb17da171eb`
 - M14 professional SDK/package boundary: complete.
 - M14.1 recoverable device lifecycle: complete.
 - Active milestone: M15 explicit CPU and memory policy.
-- Active batch: `contracts/active-batch.yaml` (`M15-01`).
+- Active batch: `contracts/active-batch.yaml` (`M15-02`).
 
 ## Repository health
 
@@ -20,16 +20,16 @@ SDK inventory, compatibility aliases, portable compiler/OS matrix, deterministic
 and sanitizer coverage, package relocation, release contracts, candidate CUDA
 and XDMA adapters, and recoverable device cleanup.
 
-This harness change is infrastructure and documentation only. It does not rerun
-the repository build matrix and does not change source, ABI, package, release,
-or support claims. GitHub CI on the harness PR remains the authoritative
-repository validation.
+M15-02 applies and reads back Linux policy for runtime-owned executor,
+watchdog, and device-service lanes through a startup barrier. Caller and
+external lanes remain verify-only. Stable ABI, package, release, and support
+claims are unchanged; mandatory GitHub CI remains authoritative.
 
 ## Active objective
 
-Define the additive C++ CPU/memory policy and report model, complete role/region
-inventory, portable no-op resolution, and strict validation without applying
-native OS policy or changing runtime steady-state behavior.
+Apply and verify per-role runtime-owned thread policy with truthful aggregate
+reports, fail-closed startup, reverse rollback, wait-strategy behavior, and
+preserved M14.1 cleanup recovery.
 
 ## Blockers and limitations
 
@@ -44,6 +44,6 @@ native OS policy or changing runtime steady-state behavior.
 
 ## Next action
 
-Implement `M15-01` on an isolated branch, add focused tests, run
-`./scripts/agent-verify.sh full`, record evidence, and open a draft PR. Stop
-before native policy application; that is M15-02/M15-03.
+Complete M15-02 verification, retain `docs/evidence/M15-02-2026-08-04.md`, and
+obtain mandatory CI plus human compatibility/concurrency review before merge.
+M15 memory application/residency remains later work.

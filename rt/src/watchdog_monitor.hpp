@@ -1,10 +1,11 @@
 #pragma once
 
+#include "thread_policy.hpp"
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
-#include <thread>
 
 #include <rt/runtime.hpp>
 
@@ -21,8 +22,15 @@ public:
     WatchdogMonitor(const WatchdogMonitor&) = delete;
     WatchdogMonitor& operator=(const WatchdogMonitor&) = delete;
 
-    [[nodiscard]] Status start() noexcept;
+    [[nodiscard]] Status start(
+        ThreadPolicyProvider& provider,
+        ThreadStartupGate& gate,
+        const ThreadRolePlan& plan) noexcept;
     void stop() noexcept;
+    void wait_started() const noexcept;
+    [[nodiscard]] const ThreadStartupResult& startup_result() const noexcept {
+        return startup_result_;
+    }
 
     [[nodiscard]] std::uint64_t arm(
         std::uint64_t absolute_deadline_ns,
@@ -36,12 +44,15 @@ private:
         std::uint64_t token,
         std::uint64_t now_ns) noexcept;
     void run() noexcept;
+    static void run_entry(void* monitor) noexcept;
 
     static constexpr std::uint64_t kFiredBit =
         std::uint64_t{1} << 63;
     static constexpr std::uint64_t kTokenMask = ~kFiredBit;
 
-    std::thread thread_;
+    NativeThread thread_;
+    ThreadStartupResult startup_result_{};
+    WaitStrategy wait_strategy_ = WaitStrategy::park;
     std::mutex service_mutex_;
     std::condition_variable service_cv_;
     std::atomic<bool> started_{false};

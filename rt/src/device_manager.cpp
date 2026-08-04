@@ -121,7 +121,8 @@ bool DeviceManager::estimate_control_storage(
            add(buffer_count, sizeof(std::uint64_t)) &&
            add(outstanding_capacity, sizeof(Outstanding)) &&
            add(completion_batch, sizeof(rtfw_device_completion)) &&
-           add(1, sizeof(std::thread));
+           add(1, sizeof(NativeThread)) &&
+           add(1, sizeof(ThreadStartupResult));
 }
 
 Status DeviceManager::initialize_backends() noexcept {
@@ -293,10 +294,13 @@ Status DeviceManager::shutdown_backends() noexcept {
     return first_failure;
 }
 
-Status DeviceManager::start(
+Status DeviceManager::start_lane(
     Executor& executor,
     DeviceEventObserver observer,
-    void* observer_data) noexcept {
+    void* observer_data,
+    ThreadPolicyProvider& provider,
+    ThreadStartupGate& gate,
+    const ThreadRolePlan& plan) noexcept {
     if (started_.load(std::memory_order_acquire) ||
         has_backend_ownership() ||
         service_thread_.joinable() ||
@@ -305,45 +309,50 @@ Status DeviceManager::start(
         backends_.empty()) {
         return Status::invalid_state;
     }
-    const auto initialize_status = initialize_backends();
-    if (initialize_status != Status::ok) {
-        return initialize_status;
-    }
-
     executor_ = &executor;
     observer_ = observer;
     observer_data_ = observer_data;
     stopping_.store(false, std::memory_order_release);
     service_ready_.store(false, std::memory_order_relaxed);
     started_.store(true, std::memory_order_release);
-    try {
-        service_thread_ = std::thread([this] {
-            service_loop();
-        });
-    } catch (...) {
+    wait_strategy_ = plan.resolved.wait_strategy;
+    const auto status = service_thread_.start(
+        provider,
+        gate,
+        plan,
+        0,
+        startup_result_,
+        &DeviceManager::service_entry,
+        this);
+    if (status != Status::ok) {
         started_.store(false, std::memory_order_release);
         executor_ = nullptr;
         observer_ = nullptr;
         observer_data_ = nullptr;
-        (void)shutdown_backends();
-        return Status::resource_exhausted;
-    }
-    while (!service_ready_.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
+        return status;
     }
     return Status::ok;
 }
 
-Status DeviceManager::stop() noexcept {
+Status DeviceManager::initialize() noexcept {
+    if (!started_.load(std::memory_order_acquire)) {
+        return Status::invalid_state;
+    }
+    return initialize_backends();
+}
+
+void DeviceManager::wait_started() const noexcept {
+    service_thread_.wait_started();
+}
+
+void DeviceManager::stop_lane() noexcept {
     const bool was_started =
         started_.exchange(false, std::memory_order_acq_rel);
     if (was_started || service_thread_.joinable()) {
         stopping_.store(true, std::memory_order_release);
         wake_sequence_.fetch_add(1, std::memory_order_release);
         wake_sequence_.notify_all();
-        if (service_thread_.joinable()) {
-            service_thread_.join();
-        }
+        service_thread_.join();
         for (std::size_t index = 0;
              index < outstanding_capacity_;
              ++index) {
@@ -363,6 +372,10 @@ Status DeviceManager::stop() noexcept {
         observer_ = nullptr;
         observer_data_ = nullptr;
     }
+}
+
+Status DeviceManager::stop() noexcept {
+    stop_lane();
     return shutdown_backends();
 }
 
@@ -681,6 +694,14 @@ void DeviceManager::service_loop() noexcept {
     service_ready_.store(true, std::memory_order_release);
     while (!stopping_.load(std::memory_order_acquire)) {
         if (outstanding_count_.load(std::memory_order_acquire) == 0) {
+            if (wait_strategy_ == WaitStrategy::spin) {
+                rt::cpu_relax();
+                continue;
+            }
+            if (wait_strategy_ == WaitStrategy::yield) {
+                std::this_thread::yield();
+                continue;
+            }
             const auto observed =
                 wake_sequence_.load(std::memory_order_acquire);
             if (!stopping_.load(std::memory_order_acquire) &&
@@ -729,6 +750,10 @@ void DeviceManager::service_loop() noexcept {
         }
         rt::cpu_relax();
     }
+}
+
+void DeviceManager::service_entry(void* manager) noexcept {
+    static_cast<DeviceManager*>(manager)->service_loop();
 }
 
 Status DeviceManager::health(

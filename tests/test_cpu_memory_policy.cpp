@@ -225,16 +225,8 @@ TEST(CpuMemoryPolicy, BestEffortRequestsResolveToExplicitPortableNoops) {
     rt::CpuMemoryPolicy policy;
     policy.thread_policy_count = 1;
     auto& thread = policy.thread_policies[0];
-    thread.role = rt::thread_role_executor_worker;
-    thread.policy.cpu_set.count = 2;
-    thread.policy.cpu_set.cpu_ids[0] = 7;
-    thread.policy.cpu_set.cpu_ids[1] = 3;
-    thread.policy.scheduling_class = rt::SchedulingClass::fifo;
-    thread.policy.scheduling_priority = 10;
-    thread.policy.numa_node = 1;
+    thread.role = {rt::thread_role_custom_first};
     thread.policy.wait_strategy = rt::WaitStrategy::spin;
-    thread.policy.stack_bytes = 64 * 1024;
-    thread.policy.guard_bytes = 4 * 1024;
     constexpr std::string_view requested_name = "rtfw.worker";
     std::copy(
         requested_name.begin(),
@@ -268,19 +260,19 @@ TEST(CpuMemoryPolicy, BestEffortRequestsResolveToExplicitPortableNoops) {
     rt::CpuMemoryPolicyReport report;
     ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
     const auto* thread_row =
-        find_thread(report, rt::thread_role_executor_worker);
+        find_thread(report, rt::ThreadRoleId{rt::thread_role_custom_first});
     const auto* memory_row =
         find_memory(report, rt::memory_region_phase_scratch);
     ASSERT_NE(thread_row, nullptr);
     ASSERT_NE(memory_row, nullptr);
     EXPECT_EQ(
         thread_row->resolution,
-        rt::PolicyResolutionState::unsupported_best_effort);
-    EXPECT_EQ(thread_row->requested.cpu_set.count, 2u);
-    EXPECT_EQ(thread_row->requested.scheduling_priority, 10);
+        rt::PolicyResolutionState::external_verify_only);
+    EXPECT_EQ(thread_row->requested.wait_strategy, rt::WaitStrategy::spin);
     EXPECT_EQ(thread_row->resolved.cpu_set.count, 0u);
     EXPECT_EQ(thread_row->resolved.scheduling_class, rt::SchedulingClass::inherit);
-    EXPECT_EQ(thread_row->resolved.wait_strategy, rt::WaitStrategy::yield);
+    EXPECT_EQ(thread_row->application_mode, rt::PolicyApplicationMode::verify_only);
+    EXPECT_FALSE(thread_row->cardinality_known);
     EXPECT_EQ(
         memory_row->resolution,
         rt::PolicyResolutionState::unsupported_best_effort);
@@ -376,11 +368,11 @@ TEST(CpuMemoryPolicy, RejectsDuplicateMalformedAndContradictoryRequests) {
 TEST(CpuMemoryPolicy, RejectsUnsupportedStrictAndCheckedArithmeticOverflow) {
     rt::CpuMemoryPolicy strict_thread;
     strict_thread.thread_policy_count = 1;
-    strict_thread.thread_policies[0].role =
-        rt::thread_role_executor_worker;
+    strict_thread.thread_policies[0].role = {
+        rt::thread_role_custom_first};
     strict_thread.thread_policies[0].policy.requirement =
         rt::PolicyRequirement::strict;
-    expect_invalid_policy(strict_thread, "strict thread policy");
+    expect_invalid_policy(strict_thread, "strict external custom thread policy");
 
     rt::CpuMemoryPolicy strict_memory;
     strict_memory.memory_policy_count = 1;
@@ -417,7 +409,8 @@ TEST(CpuMemoryPolicy, FailedFinalizationCanReplacePolicyAndRecover) {
     rt::Runtime runtime;
     rt::CpuMemoryPolicy rejected;
     rejected.thread_policy_count = 1;
-    rejected.thread_policies[0].role = rt::thread_role_frame;
+    rejected.thread_policies[0].role = {
+        rt::thread_role_custom_first};
     rejected.thread_policies[0].policy.requirement =
         rt::PolicyRequirement::strict;
     ASSERT_EQ(runtime.set_cpu_memory_policy(rejected), rt::Status::ok);
@@ -551,12 +544,23 @@ TEST(MemoryPlan, CpuMemoryPolicyTwoRuntimeReportsAreIsolated) {
     ASSERT_NE(second_watchdog, nullptr);
     EXPECT_EQ(first_executor->logical_instance_count, 1u);
     EXPECT_EQ(second_executor->logical_instance_count, 4u);
+#if defined(__linux__)
+    EXPECT_EQ(
+        first_executor->resolution,
+        rt::PolicyResolutionState::native_supported);
+#else
     EXPECT_EQ(
         first_executor->resolution,
         rt::PolicyResolutionState::portable_default);
+#endif
     EXPECT_EQ(
-        second_executor->resolution,
-        rt::PolicyResolutionState::unsupported_best_effort);
+        second_executor->requested.wait_strategy,
+        rt::WaitStrategy::spin);
+#if defined(__linux__)
+    EXPECT_EQ(second_executor->resolved.wait_strategy, rt::WaitStrategy::spin);
+#else
+    EXPECT_EQ(second_executor->resolved.wait_strategy, rt::WaitStrategy::yield);
+#endif
     EXPECT_EQ(first_watchdog->logical_instance_count, 0u);
     EXPECT_EQ(second_watchdog->logical_instance_count, 1u);
 

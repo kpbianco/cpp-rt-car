@@ -143,6 +143,7 @@ enum class TaskResult : std::uint8_t {
 
 namespace detail {
 class Executor;
+struct RuntimeThreadPolicyTestAccess;
 }
 
 class TaskContext;
@@ -540,6 +541,8 @@ enum class PolicyResolutionState : std::uint8_t {
     unsupported_best_effort,
     inactive,
     external_verify_only,
+    native_supported,
+    native_best_effort_fallback,
 };
 
 enum class PolicyOperationState : std::uint8_t {
@@ -547,6 +550,7 @@ enum class PolicyOperationState : std::uint8_t {
     succeeded,
     failed,
     unsupported,
+    mismatched,
 };
 
 enum class MemoryAccountingScope : std::uint8_t {
@@ -570,6 +574,15 @@ struct ThreadPolicyReport {
         PolicyResolutionState::portable_default;
     PolicyOperationState applied = PolicyOperationState::not_attempted;
     PolicyOperationState verified = PolicyOperationState::not_attempted;
+    ThreadPolicy applied_policy{};
+    ThreadPolicy read_back{};
+    std::size_t attempted_instance_count = 0;
+    std::size_t applied_instance_count = 0;
+    std::size_t verified_instance_count = 0;
+    std::size_t fallback_instance_count = 0;
+    std::int32_t resolution_error = 0;
+    std::int32_t apply_error = 0;
+    std::int32_t verify_error = 0;
 };
 
 struct MemoryPolicyReport {
@@ -950,6 +963,7 @@ public:
         RuntimeTraceEvent& event) const noexcept;
 
 private:
+    friend struct detail::RuntimeThreadPolicyTestAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

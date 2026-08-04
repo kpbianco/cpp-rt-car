@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M15-01
-  title: Add the CPU and memory policy model and exact runtime resource inventory
-  goal: Add an additive C++ policy and report model for all required thread roles and memory-region classes, integrate portable no-op resolution and strict finalization validation, and expose exact inventory/accounting identities without applying native OS policy yet.
+  id: M15-02
+  title: Apply and verify per-role thread policy
+  goal: Apply and read back the finalized per-role thread policy for each runtime-owned thread through a fail-closed startup transaction, retain truthful best-effort and external verify-only results, and roll back every created lane before any host callback can execute when a strict requirement fails.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -13,111 +13,164 @@ sources:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
+    - docs/cpu_memory_policy.md
+    - docs/executor.md
+    - docs/host_runtime.md
     - docs/memory_plan.md
     - docs/time_platform.md
     - docs/c_abi.md
-  baseline_commit: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
+    - docs/release_policy.md
+    - docs/evidence/M15-01-2026-08-04.md
+  baseline_commit: b7e6ebcccef144f433950b66efb3866519de449b
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M15-01.yaml
-  control_plane_revision: 7a34494ca4cd4826c898270053864defc2183fa7
-dependencies: []
+  control_plane_path: products/cpp-rt-car/batches/M15-02.yaml
+  control_plane_revision: f4f3f00a84f22c3e4c231b8707507aa160648401  # pragma: allowlist secret
+dependencies:
+  - M15-01
 scope:
   allowed_paths:
+    - .portfolio-harness.json
+    - AGENTS.md
+    - contracts/active-batch.yaml
+    - contracts/repo-profile.yaml
     - rt/include/rt/config.hpp
     - rt/include/rt/runtime.hpp
     - rt/include/rt/status.hpp
-    - rt/src/host_runtime.cpp
+    - rt/src/resource_policy.cpp
+    - rt/src/resource_policy.hpp
+    - rt/src/thread_policy.cpp
+    - rt/src/thread_policy.hpp
     - rt/src/executor.cpp
+    - rt/src/executor.hpp
     - rt/src/watchdog_monitor.cpp
+    - rt/src/watchdog_monitor.hpp
     - rt/src/device_manager.cpp
-    - rt/src/xdma_backend.cpp
-    - rt/src/native_platform_preflight.cpp
-    - rt/src/*policy*
-    - rt/src/*memory*
-    - tests/*policy*
-    - tests/*memory*
+    - rt/src/device_manager.hpp
+    - rt/src/host_runtime.cpp
+    - tests/test_cpu_memory_policy.cpp
+    - tests/test_thread_policy.cpp
     - tests/test_host_runtime.cpp
+    - tests/test_executor.cpp
+    - tests/test_periodic_runtime.cpp
     - tests/test_device_runtime.cpp
-    - tests/host_adapter_tests.cpp
-    - CMakeLists.txt
-    - rt/CMakeLists.txt
+    - tests/test_trace_noalloc.cpp
     - tests/CMakeLists.txt
+    - CMakeLists.txt
+    - .github/workflows/ci.yml
+    - docs/CURRENT_STATE.md
+    - docs/HANDOFF.md
     - docs/cpu_memory_policy.md
+    - docs/executor.md
+    - docs/host_runtime.md
+    - docs/memory_plan.md
+    - docs/time_platform.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/memory_plan.md
-    - docs/time_platform.md
-    - docs/evidence/M15-01-*.md
+    - docs/evidence/M15-02-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
     - tools/check_release_contract.py
   forbidden_paths:
     - abi/rtfw_c_abi_v8.exports
+    - abi/rtfw_c_abi_v8.sha256
     - rt/include/rt/c_api.h
     - rt/include/rt/device_abi.h
+    - src/c_abi.cpp
+    - rt/src/aligned_storage.hpp
+    - rt/src/cuda_backend.cpp
+    - rt/src/cuda_driver.cpp
+    - rt/src/xdma_backend.cpp
+    - rt/src/xdma_linux.cpp
+    - docs/cuda_support_matrix.json
+    - docs/xdma_support_matrix.json
+    - docs/portable_support_matrix.json
+    - docs/evidence/M15-01-2026-08-04.md
+    - .github/workflows/cuda-qualification.yml
+    - .github/workflows/xdma-qualification.yml
+    - .github/workflows/release.yml
+    - tools/rt_harden.sh
+    - tools/rt_harden.ps1
     - LICENSE
-    - include/simcore/
+    - VERSION.txt
+    - include/simcore/**
     - rt/include/rt/scheduler.hpp
     - rt/include/rt/fiber_pool.hpp
-    - rt/include/rt/plugin.hpp
-    - .github/workflows/
+    - rt/include/rt/plugin_api.h
+    - rt/src/scheduler.cpp
+    - rt/src/fiber_pool.cpp
+    - rt/src/plugin_manager.cpp
 acceptance:
-  - Public C++ types cover frame, executor-worker, watchdog, device-service, and XDMA-I/O roles, plus CPU set, scheduling class/priority, NUMA node, wait strategy, stack/guard, and bounded name requests.
-  - Memory policy types cover provider ownership, alignment, page rounding, guards, prefault, locking, pinning, huge-page preference/fallback, NUMA placement, first touch, residency verification, and rollback intent.
-  - Finalization rejects malformed, contradictory, unsupported-strict, duplicate-role, overflow, and capacity-invalid policy inputs before start.
-  - Portable defaults resolve to the current 1.2.1 behavior and do not call native mutation APIs.
-  - Requested and resolved reports inventory every current runtime-owned thread role and runtime memory category with stable identifiers and exact-once accounting keys.
-  - Host-adapter and vendor-owned threads are represented as externally owned and verify-only.
-  - No runtime callback or steady-state behavior changes in this batch.
-  - Stable C ABI v8, SONAME 8, device ABI v1, SDK header inventory, package targets, compatibility aliases, schemas unrelated to this additive C++ contract, and Apache-2.0 remain unchanged.
-  - Documentation states that policy configuration and portable tests do not establish RT1 or RT2.
-  - Focused tests, full local verification, and required GitHub CI pass.
+  - Finalization preserves M15-01 structural validation and deterministically resolves each thread request against the selected platform without applying policy or creating a thread; a strict request that the platform or ownership boundary cannot support fails before startup mutation.
+  - On Linux, non-default policy for runtime-owned executor workers, the optional watchdog, and the optional device-service lane covers CPU affinity, scheduling class and priority, NUMA-constrained CPU resolution, wait strategy, stack and guard creation attributes, and bounded thread names; applied state is read back from the native thread rather than inferred from a successful setter call.
+  - Empty CPU sets and inherited fields preserve the effective host defaults, unavailable CPUs or NUMA nodes and platform name or stack limits are represented explicitly in resolution, and strict mode never silently narrows, truncates, or downgrades a request.
+  - Every created runtime-owned lane applies and verifies its resolved policy, then publishes exactly one ready or failed result at a startup barrier before Runtime::start can commit running state; no user phase, device-phase provider, periodic observer, or other host callback executes before all required rows are verified.
+  - A thread-role report is marked applied or verified as succeeded only when every known instance in that role succeeded; best-effort unsupported, apply-failed, and verify-mismatched outcomes remain observable without being promoted to success, while any strict failure fails start and leaves the report inspectable.
+  - The caller-owned frame lane is verify-only and is never mutated; host-adapter workers, XDMA I/O workers, custom vendor roles, and other externally owned threads remain verify-only, and an unobservable external request is reported unsupported rather than assigned invented cardinality or state.
+  - The resolved wait strategy controls only the matching runtime-owned service or executor idle loop, preserves the current yield and park defaults, wakes reliably for work and stop, and introduces no emergency, detached, spill, or per-frame thread.
+  - A failed creation, apply, or readback transaction stops and joins every created runtime-owned lane in deterministic reverse startup order; if existing device-backend cleanup cannot complete, M14.1 ownership markers and retryable stop semantics are preserved instead of claiming rollback succeeded.
+  - Portable non-Linux builds preserve current default behavior; non-default best-effort fields that lack a native implementation report unsupported and continue safely, while strict unsupported fields fail before runtime threads start.
+  - Successful default-policy start, step, stop, periodic watchdog behavior, device completion, host-adapter execution, two-runtime isolation, and the post-start allocation boundary remain compatible with release 1.2.1.
+  - Stable C ABI v8 with 70 exports and SONAME 8, device ABI v1, runtime configuration schema 7 and its 25 keys, installed SDK headers and targets, support matrices, qualification claims, release version, and Apache-2.0 remain unchanged.
+  - Target AGENTS, active-batch, current-state, handoff, roadmap, policy documentation, and retained M15-02 evidence describe the actual baseline and distinguish native functional apply/readback from RT1, RT2, hardware, HIL, field, deployment, and production evidence.
+  - Focused tests, full deterministic local verification, mandatory GitHub CI, and human compatibility and concurrency review pass before merge.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
+    - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
+    - cmake --build build/agent-full --parallel 2
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.CpuMemoryPolicyTwoRuntimeReportsAreIsolated'
     - ./scripts/agent-verify.sh full
   focused_tests_to_add:
-    - policy default and boundary validation
-    - duplicate and contradictory request rejection
-    - exact thread-role and memory-category inventory
-    - external ownership and verify-only representation
-    - checked arithmetic and capacity rejection
-    - two-runtime isolation
+    - injected native-provider sequencing for every executor-worker instance and optional watchdog and device-service role
+    - Linux affinity, ordinary scheduling, native name, stack, and guard apply/readback using only CPUs and privileges already available to the test process
+    - deterministic CPU-set and NUMA resolution plus strict rejection of unavailable or silently narrowed requests
+    - strict apply failure and readback mismatch at each startup stage with reverse join and zero callback execution
+    - best-effort unsupported and failed operations with truthful aggregate report states and successful default fallback
+    - caller frame verification and host-adapter, XDMA, and custom-role verify-only behavior with no external mutation or invented worker count
+    - spin, yield, and park work arrival and stop wakeups without lost wakeups, detached threads, or allocation after startup
+    - default-policy lifecycle, watchdog, device-service, cleanup-pending retry, host-adapter, and two-runtime isolation regressions
   required_ci:
-    - Linux GCC and Clang Debug/RelWithDebInfo
-    - Windows MSVC Debug/RelWithDebInfo
-    - ThreadSanitizer
-    - determinism artifact exchange
-    - installed package and compatibility consumers
-    - documentation and release contracts
+    - Documentation contract workflow including quick-start, release-contract, and frozen C ABI checks
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix exercising portable unsupported and default behavior
+    - Unified executor GCC ThreadSanitizer job with the focused thread-policy suites included in its filter
+    - determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange
+    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK inventory, and compatibility consumers
   manual:
-    - Review the public C++ source-compatibility shape before implementation merge.
+    - Human review must confirm Linux native-call error handling, startup-barrier ordering, reverse rollback, public C++ source compatibility, and preservation of C ABI v8 and device ABI v1 before merge.
+    - Any representative Linux privilege-assisted scheduling inspection must record the exact kernel, process privileges, requested/resolved/applied/read-back values, and command results as functional evidence only; its absence blocks only a stronger native tuple claim, never creates one by documentation.
 risk:
   class: high
   hazards:
-    - public C++ surface churn before native behavior exists
-    - incomplete resource inventory that forces incompatible redesign
-    - accidental ABI, package, or release-contract drift
-    - conflating requested/resolved data with applied or qualified state
+    - a setter can return success while the kernel applies a different CPU mask, scheduler state, stack, guard, or name
+    - startup can expose a partially configured worker or allow callbacks before all role instances are verified
+    - failure rollback can deadlock, leak a joinable thread, or erase M14.1 device ownership uncertainty
+    - wait-strategy changes can lose work or stop notifications, spin unexpectedly, or add a blocking path to a declared executor lane
+    - privileged scheduling and container CPU or NUMA restrictions can make host-specific behavior nondeterministic if they are not resolved and reported explicitly
+    - a role-level aggregate can falsely report success when one worker failed or when an external worker was never observable
+    - changes to common lifecycle or public report types can drift stable ABI, package, determinism, allocation, or multi-runtime invariants
   stop_conditions:
-    - a stable C ABI or device ABI change becomes necessary
-    - a required thread or memory owner cannot be represented without a product decision
-    - native policy mutation is required to satisfy this batch
-    - source changes outside allowed paths are required
-    - current repository contracts contradict the control-plane batch
+    - the exact baseline commit is unavailable or M15-01 policy types, evidence, or merged behavior are absent from it
+    - a stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema, support-matrix, or release-version change becomes necessary
+    - implementation requires mutating the caller frame thread, host-adapter workers, XDMA workers, vendor threads, host limits, IRQ placement, kernel settings, or machine-wide policy
+    - strict success would require claiming state that cannot be read back, inventing opaque external cardinality, or silently narrowing or truncating the request
+    - a startup failure cannot leave the runtime finalized with every created runtime-owned thread joined, except for already-governed M14.1 device cleanup that remains explicitly pending and retryable
+    - a required source, test, workflow, documentation, or evidence change falls outside allowed paths or enters a forbidden path
+    - deterministic Linux functional tests cannot avoid dependence on root privilege, a particular CPU number, a multi-node machine, or timing-only assertions
+    - the target repository contracts at the exact baseline contradict this scope or require a new product decision
 rollback:
-  strategy: Revert the batch commit; portable runtime behavior and ABI remain unchanged.
+  strategy: Revert the M15-02 implementation, tests, documentation, governance refresh, CI filter, and release-contract digest updates as one batch; native policy is process-local and every runtime-owned thread is joined during normal or failed startup, so no data migration or persistent host rollback is permitted or required.
   data_migration: none
-  release_action: Do not publish a release from this batch unless separately approved.
+  release_action: Do not publish a release, promote a support tuple, or change a qualification record from this batch.
 evidence:
   output:
-    - docs/evidence/M15-01-<date>.md
-    - exact commands and exit results
-    - acceptance mapping
-    - changed invariants
-    - residual risks
-    - unperformed native and hardware validation
-  claim_boundary: Evidence is static, unit, simulated, package, and portable RT0 only.
+    - docs/evidence/M15-02-<date>.md
+    - exact baseline, changed files, commands, exit codes, focused test counts, and required CI run identifiers
+    - per-acceptance implementation mapping and requested, resolved, applied, and read-back report examples for success, best-effort degradation, and strict rollback
+    - startup and reverse-rollback ordering, callback non-execution, changed and preserved invariants, and compatibility review result
+    - Linux kernel and privilege context for native functional tests, plus every skipped or unavailable native path
+    - residual risks and all unperformed hardware, HIL, field, latency, RT1, RT2, signing, release, deployment, and production validation
+  claim_boundary: Evidence may establish static, unit, injected, sanitizer, package, portable RT0, and named-host Linux functional policy apply/readback behavior only; it does not establish physical hardware behavior, HIL, field validation, worst-case latency, RT1, RT2, signing, release, deployment, or production readiness.
