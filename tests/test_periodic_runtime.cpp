@@ -302,7 +302,13 @@ TEST(PeriodicRuntime, WatchdogServiceDetectsExpiryWithoutRuntimeClockAdvance) {
         std::numeric_limits<std::uint64_t>::max(),
         5'000'000);
     ASSERT_NE(token, 0u);
-    std::this_thread::sleep_for(50ms);
+    const auto observation_deadline =
+        std::chrono::steady_clock::now() + 5s;
+    while (!watchdog.has_fired(token) &&
+           std::chrono::steady_clock::now() < observation_deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_TRUE(watchdog.has_fired(token));
     EXPECT_TRUE(watchdog.complete(token, 0));
     EXPECT_FALSE(watchdog.complete(token, 0));
     watchdog.stop();
