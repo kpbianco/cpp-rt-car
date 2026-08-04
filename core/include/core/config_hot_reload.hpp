@@ -14,15 +14,32 @@
 namespace core {
 
 namespace detail {
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
 inline std::shared_ptr<Config>
-atomic_load_cfg(const std::atomic<std::shared_ptr<Config>> *ptr) noexcept {
-  return ptr->load();
+atomic_load_cfg(const std::shared_ptr<Config> *ptr) noexcept {
+  return std::atomic_load(ptr);
 }
 
-inline void atomic_store_cfg(std::atomic<std::shared_ptr<Config>> *ptr,
+inline void atomic_store_cfg(std::shared_ptr<Config> *ptr,
                              std::shared_ptr<Config> value) {
-  ptr->store(std::move(value));
+  std::atomic_store(ptr, std::move(value));
 }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 } // namespace detail
 
 // Simple hot-reloading wrapper around the Config structure.
@@ -93,7 +110,7 @@ private:
   }
 
   std::string path_;
-  std::atomic<std::shared_ptr<Config>> config_;
+  std::shared_ptr<Config> config_;
   std::filesystem::file_time_type last_write_;
 };
 

@@ -69,3 +69,18 @@ wrapper still cannot release, deploy, change secrets/settings, waive a gate, or
 manufacture hardware/RT qualification. It stops at a genuine product decision,
 mandatory hardware/RT evidence, signing, release, or deployment gate. See
 `docs/runbooks/continuous-autopilot.md`.
+
+<!-- BEGIN PORTFOLIO-CONTROL MANAGED -->
+## Governed agentic delivery
+
+- Product: `cpp-rt-car`; delivery profile: `assurance`.
+- Control revision: `3754cab3114fdf276627bf1837f5abe41a2e921e`; harness version: `2`.
+- Read `contracts/profile-requirements.yaml` and the approved
+  `contracts/active-batch.yaml` before implementation.
+- Stay inside active-batch allowed paths and preserve every forbidden path.
+- Run the repository-local verification contract before claiming completion.
+- Record exact evidence and distinguish static, simulated, protocol, bench,
+  field, playtest, staging, and production validation.
+- Do not claim physical, release, deployment, or production evidence that was
+  not actually produced.
+<!-- END PORTFOLIO-CONTROL MANAGED -->

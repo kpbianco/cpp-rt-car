@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.local/contracts/intake-disposition.schema.json",
+  "title": "Planned intake disposition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "intake_id",
+    "status",
+    "planned_at",
+    "planning_branch",
+    "milestones",
+    "batches"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "intake_id": {
+      "type": "string",
+      "pattern": "^INT-[0-9]{8}T[0-9]{12}Z-[a-f0-9]{10}(?:-[a-z0-9]+)?$"
+    },
+    "status": {"const": "planned"},
+    "planned_at": {"type": "string", "format": "date-time"},
+    "planning_branch": {"type": "string", "minLength": 1},
+    "planning_pr": {"type": "string", "minLength": 1},
+    "milestones": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "batches": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  }
+}

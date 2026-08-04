@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.local/contracts/batch.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "batch", "sources", "dependencies", "scope", "acceptance", "validation", "risk", "rollback", "evidence"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "goal"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "title": {"type": "string", "minLength": 1},
+        "goal": {"type": "string", "minLength": 1}
+      }
+    },
+    "sources": {
+      "type": "object",
+      "required": ["product", "requirements", "milestone", "baseline_commit"],
+      "properties": {
+        "product": {"type": "string", "minLength": 1},
+        "requirements": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+        "milestone": {"type": "string", "minLength": 1},
+        "baseline_commit": {"type": "string", "pattern": "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"},
+        "control_plane_repository": {"type": "string", "minLength": 3},
+        "control_plane_path": {"type": "string", "minLength": 1},
+        "control_plane_revision": {"type": "string", "pattern": "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"}
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+      },
+      "uniqueItems": true
+    },
+    "scope": {
+      "type": "object",
+      "required": ["allowed_paths", "forbidden_paths"],
+      "properties": {
+        "allowed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.git(?:/|$))(?!\\*\\*?(?:/)?$).+"
+          },
+          "minItems": 1
+        },
+        "forbidden_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.git(?:/|$))(?!\\*\\*?(?:/)?$).+"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "acceptance": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+    "validation": {
+      "type": "object",
+      "required": ["local", "focused_tests_to_add", "required_ci"],
+      "properties": {
+        "local": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+        "focused_tests_to_add": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+        "required_ci": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}
+      }
+    },
+    "risk": {
+      "type": "object",
+      "required": ["class", "hazards", "stop_conditions"],
+      "properties": {
+        "class": {"enum": ["low", "moderate", "high", "critical", "blocking"]},
+        "hazards": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+        "stop_conditions": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {"type": "string", "minLength": 1}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["output", "claim_boundary"],
+      "properties": {
+        "output": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+        "claim_boundary": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
