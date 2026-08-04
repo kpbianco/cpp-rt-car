@@ -15,14 +15,19 @@ worst-case-latency claim.
 
 Configuration selects an executor policy, worker count, and fixed per-worker
 queue capacity. `finalize()` validates that configuration, compiles successor
-and indegree tables, precomputes static phase assignments, allocates the queue
-and aligned phase/task scratch storage, and commits the memory plan. `start()`
-creates
+and indegree tables, precomputes static phase assignments, allocates control
+storage, and commits the memory plan. M15-03 obtains phase scratch, task
+scratch, and trace backing in stable order before constructing the executor;
+ordinary defaults preserve aligned-new behavior, while an attached provider
+supplies only those three backing spans. `start()` applies and observes their
+resident-memory policy before it creates
 exactly the configured worker count. Each worker applies and reads back its
 resolved M15-02 policy, publishes a startup result, and waits at the runtime
 commit gate before consuming work. No executor thread is created after
 `start()` returns. `stop()` rejects calls during a step, stops the team, and
-joins workers in reverse index order. If the M5 watchdog is configured,
+joins workers in reverse index order before resident-memory rollback. With a
+provider-backed task-scratch span, it destroys the executor before releasing
+the token. If the M5 watchdog is configured,
 `start()` also creates one separate service lane; it never executes graph or
 nested CPU work.
 
@@ -32,6 +37,9 @@ declares capacities equal to the runtime configuration, and keeps its job
 system live through `stop()`. `start()` creates no CPU worker for that policy;
 the host owns worker threads, queue memory, affinity, priority, and shutdown.
 Runtime-owned graph state and aligned task scratch remain fully planned.
+The host adapter does not change the M15-03 provider boundary: task scratch can
+use the selected provider, but host-owned queues, workers, stacks, affinity,
+and job-system state are never adopted or mutated.
 
 Workers use bounded lock-free local rings. The resolved role policy selects
 spin, yield, or per-worker atomic park waiting, with queue publication and stop
@@ -141,11 +149,18 @@ scratch through `TaskContext::scratch()`. Its slot remains owned through nested
 helping and is released only after that callback returns. Contents are
 unspecified on entry and pointers must not escape the invocation. Cross-phase
 state belongs in host-owned memory described by graph resource declarations.
+Provider backing changes neither exposed payload bytes nor ownership: the
+runtime constructs and uses the same phase/task spans and never invokes a
+provider callback from a phase, range, reduction, device, or helping path.
+Provider acquire occurs at finalization, apply/observation before the thread
+startup gate, and rollback/release only on failure, checked stop, or
+best-effort destruction.
 
 ## Evidence
 
 - implementation: `rt/src/executor.cpp`, `rt/src/executor.hpp`;
 - runtime integration: `rt/src/host_runtime.cpp`;
+- resident phase/task backing: `rt/src/memory_policy.cpp`;
 - C/C++ host-adapter, prestarted host-team concurrency, saturation,
   stale-completion, and post-start allocation gates:
   `tests/host_adapter_tests.cpp`;
@@ -153,6 +168,8 @@ state belongs in host-owned memory described by graph resource declarations.
   `tests/test_executor.cpp`;
 - plan, task-scratch, nested ownership, and overload tests:
   `tests/test_memory_plan.cpp`;
+- provider-backed executor lifecycle and rollback tests:
+  `tests/test_memory_policy.cpp`;
 - graph/reference and allocation regression tests:
   `tests/test_compiled_graph.cpp`, `tests/test_trace_noalloc.cpp`;
 - dynamic C ABI coverage: `tests/test_cabi_dlopen.c`;

@@ -108,6 +108,7 @@ if (SIM_GTEST_AVAILABLE)
     # default and experimental-enabled GoogleTest configurations.
     list(APPEND TEST_SOURCES
         test_cpu_memory_policy.cpp
+        test_memory_policy.cpp
         test_thread_policy.cpp)
 
     if (RTFW_BUILD_EXPERIMENTAL AND

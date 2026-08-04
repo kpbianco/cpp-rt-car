@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M15-02
-  title: Apply and verify per-role thread policy
-  goal: Apply and read back the finalized per-role thread policy for each runtime-owned thread through a fail-closed startup transaction, retain truthful best-effort and external verify-only results, and roll back every created lane before any host callback can execute when a strict requirement fails.
+  id: M15-03
+  title: Add memory providers and resident regions
+  goal: Add an additive bounded C++ host memory-provider contract and use it to create, apply, verify, report, and reverse policy for the runtime-owned phase-scratch, task-scratch, and trace backing regions, while preserving truthful unsupported or verify-only results for fragmented control storage, stacks, borrowed memory, and backend-owned memory pending M15-04 closure.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -14,19 +14,21 @@ sources:
     - docs/architecture.md
     - docs/roadmap.md
     - docs/cpu_memory_policy.md
-    - docs/executor.md
     - docs/host_runtime.md
+    - docs/executor.md
     - docs/memory_plan.md
     - docs/time_platform.md
     - docs/c_abi.md
     - docs/release_policy.md
     - docs/evidence/M15-01-2026-08-04.md
-  baseline_commit: b7e6ebcccef144f433950b66efb3866519de449b
+    - docs/evidence/M15-02-2026-08-04.md
+  baseline_commit: 088b84edcb3099743ed9aee1c2df2371e5618b7f
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M15-02.yaml
-  control_plane_revision: f4f3f00a84f22c3e4c231b8707507aa160648401  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M15-03.yaml
+  control_plane_revision: c7dd248a2899a61a2be5cbbc4ca196bd2d499b23  # pragma: allowlist secret
 dependencies:
   - M15-01
+  - M15-02
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -36,21 +38,27 @@ scope:
     - rt/include/rt/config.hpp
     - rt/include/rt/runtime.hpp
     - rt/include/rt/status.hpp
+    - rt/src/aligned_storage.hpp
+    - rt/src/memory_policy.cpp
+    - rt/src/memory_policy.hpp
     - rt/src/resource_policy.cpp
     - rt/src/resource_policy.hpp
-    - rt/src/thread_policy.cpp
-    - rt/src/thread_policy.hpp
+    - rt/src/host_runtime.cpp
     - rt/src/executor.cpp
     - rt/src/executor.hpp
+    - rt/src/telemetry.cpp
+    - rt/src/telemetry.hpp
+    - rt/src/thread_policy.cpp
+    - rt/src/thread_policy.hpp
     - rt/src/watchdog_monitor.cpp
     - rt/src/watchdog_monitor.hpp
     - rt/src/device_manager.cpp
     - rt/src/device_manager.hpp
-    - rt/src/host_runtime.cpp
+    - tests/test_memory_policy.cpp
     - tests/test_cpu_memory_policy.cpp
+    - tests/test_memory_plan.cpp
     - tests/test_thread_policy.cpp
     - tests/test_host_runtime.cpp
-    - tests/test_executor.cpp
     - tests/test_periodic_runtime.cpp
     - tests/test_device_runtime.cpp
     - tests/test_trace_noalloc.cpp
@@ -60,14 +68,15 @@ scope:
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
     - docs/cpu_memory_policy.md
-    - docs/executor.md
     - docs/host_runtime.md
+    - docs/executor.md
     - docs/memory_plan.md
     - docs/time_platform.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/evidence/M15-02-*.md
+    - docs/real_time_readiness_checklist.md
+    - docs/evidence/M15-03-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -78,15 +87,14 @@ scope:
     - rt/include/rt/c_api.h
     - rt/include/rt/device_abi.h
     - src/c_abi.cpp
-    - rt/src/aligned_storage.hpp
-    - rt/src/cuda_backend.cpp
-    - rt/src/cuda_driver.cpp
-    - rt/src/xdma_backend.cpp
-    - rt/src/xdma_linux.cpp
+    - core/include/core/config.hpp
+    - core/include/core/config_hot_reload.hpp
+    - configs/*.json
+    - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
-    - docs/portable_support_matrix.json
     - docs/evidence/M15-01-2026-08-04.md
+    - docs/evidence/M15-02-2026-08-04.md
     - .github/workflows/cuda-qualification.yml
     - .github/workflows/xdma-qualification.yml
     - .github/workflows/release.yml
@@ -95,82 +103,99 @@ scope:
     - LICENSE
     - VERSION.txt
     - include/simcore/**
+    - rt/include/rt/cuda_backend.hpp
+    - rt/include/rt/xdma_backend.hpp
     - rt/include/rt/scheduler.hpp
     - rt/include/rt/fiber_pool.hpp
     - rt/include/rt/plugin_api.h
+    - rt/src/cuda_backend.cpp
+    - rt/src/cuda_driver.cpp
+    - rt/src/xdma_backend.cpp
+    - rt/src/xdma_linux.cpp
     - rt/src/scheduler.cpp
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - Finalization preserves M15-01 structural validation and deterministically resolves each thread request against the selected platform without applying policy or creating a thread; a strict request that the platform or ownership boundary cannot support fails before startup mutation.
-  - On Linux, non-default policy for runtime-owned executor workers, the optional watchdog, and the optional device-service lane covers CPU affinity, scheduling class and priority, NUMA-constrained CPU resolution, wait strategy, stack and guard creation attributes, and bounded thread names; applied state is read back from the native thread rather than inferred from a successful setter call.
-  - Empty CPU sets and inherited fields preserve the effective host defaults, unavailable CPUs or NUMA nodes and platform name or stack limits are represented explicitly in resolution, and strict mode never silently narrows, truncates, or downgrades a request.
-  - Every created runtime-owned lane applies and verifies its resolved policy, then publishes exactly one ready or failed result at a startup barrier before Runtime::start can commit running state; no user phase, device-phase provider, periodic observer, or other host callback executes before all required rows are verified.
-  - A thread-role report is marked applied or verified as succeeded only when every known instance in that role succeeded; best-effort unsupported, apply-failed, and verify-mismatched outcomes remain observable without being promoted to success, while any strict failure fails start and leaves the report inspectable.
-  - The caller-owned frame lane is verify-only and is never mutated; host-adapter workers, XDMA I/O workers, custom vendor roles, and other externally owned threads remain verify-only, and an unobservable external request is reported unsupported rather than assigned invented cardinality or state.
-  - The resolved wait strategy controls only the matching runtime-owned service or executor idle loop, preserves the current yield and park defaults, wakes reliably for work and stop, and introduces no emergency, detached, spill, or per-frame thread.
-  - A failed creation, apply, or readback transaction stops and joins every created runtime-owned lane in deterministic reverse startup order; if existing device-backend cleanup cannot complete, M14.1 ownership markers and retryable stop semantics are preserved instead of claiming rollback succeeded.
-  - Portable non-Linux builds preserve current default behavior; non-default best-effort fields that lack a native implementation report unsupported and continue safely, while strict unsupported fields fail before runtime threads start.
-  - Successful default-policy start, step, stop, periodic watchdog behavior, device completion, host-adapter execution, two-runtime isolation, and the post-start allocation boundary remain compatible with release 1.2.1.
-  - Stable C ABI v8 with 70 exports and SONAME 8, device ABI v1, runtime configuration schema 7 and its 25 keys, installed SDK headers and targets, support matrices, qualification claims, release version, and Apache-2.0 remain unchanged.
-  - Target AGENTS, active-batch, current-state, handoff, roadmap, policy documentation, and retained M15-02 evidence describe the actual baseline and distinguish native functional apply/readback from RT1, RT2, hardware, HIL, field, deployment, and production evidence.
-  - Focused tests, full deterministic local verification, mandatory GitHub CI, and human compatibility and concurrency review pass before merge.
+  - The installed C++ source API adds one bounded, size/versioned memory-provider callback table that can be attached only while configuring; the runtime copies the table, borrows its user data through final cleanup, forbids reentrant runtime calls from provider callbacks, and requires a nonthrowing release callback for every successfully acquired provider token.
+  - Finalization validates provider completeness and capabilities before mutation, resolves policy only for active regions, and selects exactly the phase-scratch, task-scratch, and trace-storage backing regions as M15-03 provider-capable regions; a non-default strict request for any fragmented control row, runtime or external stack row, registered-state or registered-device-buffer row, backend-control row, or reserved host-provider row fails truthfully instead of claiming application.
+  - Default policy uses the existing runtime allocation behavior and preserves current payload sizes, scratch alignment, trace semantics, and zero-capacity behavior; best-effort unsupported fields retain a usable default allocation and an explicit fallback or unsupported result, while strict unsupported fields fail before callbacks or runtime threads can execute.
+  - Provider acquisition receives the stable region identity, logical payload bytes, required alignment, page-rounding and guard request, huge-page preference and fallback rule, NUMA request, and rollback intent; success is accepted only for a non-overflowing, sufficiently sized and aligned usable span with a unique live token that does not overlap another runtime-owned region.
+  - Provisional phase-scratch, task-scratch, and trace acquisitions occur in deterministic stable-region order during finalization; any allocation, construction, validation, or later finalization failure destroys constructed objects and invokes release exactly once per acquired token in reverse order, publishes no partial policy report, and leaves the runtime configuring and replaceable.
+  - Startup applies prefault, caller first touch, in-process memory locking, provider-confirmed pinning, NUMA binding, and residency verification for the three provider-capable regions before the M15-02 thread startup gate commits; guard and huge-page allocation outcomes established during acquisition are included in the same transaction and no phase, device provider, or periodic observer runs first.
+  - Native Linux behavior uses process-local allocation and policy operations with independent observation where the kernel exposes it; setter success alone is not verification, transparent-huge-page advice is not reported as explicit huge-page success, mlock is not reported as CUDA, DMA, or device pinning, and owner-thread first touch or another unobservable request is rejected in strict mode rather than inferred.
+  - A strict startup apply, readback, or residency mismatch prevents callbacks, reverses every completed memory-policy operation in deterministic reverse region/operation order, integrates with M15-02 reverse thread rollback when a later thread or device-start stage fails, retains an inspectable failed report, and leaves the runtime finalized and retryable unless already-governed M14.1 device cleanup remains explicitly pending; acquisition failures retain the finalization-time configuring-state behavior above.
+  - Successful stop first quiesces device, executor, and watchdog lanes, then reverses memory residency operations and releases provider tokens in reverse acquisition order; destruction is a best-effort fallback, and documented host lifetime rules require checked stop before provider user data or borrowed memory can be released.
+  - Each selected memory row distinguishes requested, resolved, acquired/applied, and independently verified state and reports logical accounted bytes separately from page-rounded committed usable bytes, sampled resident bytes, verified locked bytes, provider-confirmed pinned bytes, actual guard/large-page outcome, fallback, and native/provider errors without double counting MemoryPlan::planned_bytes.
+  - Inactive zero-byte rows remain observable without invoking a provider, two Runtime instances never share provider tokens, mutable reports, native state, rollback state, or backing storage, and provider callbacks are confined to configure/finalize/start/stop control paths rather than steady-state RT-lane execution.
+  - Fragmented runtime, executor, and device control allocations, runtime-owned stack residency, exact external/backend accounting, and complete cross-category byte closure remain explicitly deferred to M15-04; borrowed registered state/buffers and backend-owned storage are never mutated or promoted by M15-03.
+  - Successful default and provider-backed start, step, periodic/watchdog, device-service, stop, failed-start retry, host-adapter, two-runtime isolation, and post-start allocation behavior remain compatible with release 1.2.1.
+  - Stable C ABI v8 with 70 exports and SONAME 8, device ABI v1, runtime configuration schema 7 and its 25 keys, installed target/header inventory, support matrices, qualification claims, release version, and Apache-2.0 remain unchanged; the additive C++ API remains source-compatible and requires recompilation under the existing 1.x policy.
+  - Target AGENTS, active-batch, current-state, handoff, roadmap, policy/memory documentation, release digest ledger, and retained M15-03 evidence describe the actual implementation and never convert injected providers, hosted CI, preflight, documentation, or named-host Linux functional observations into hardware, HIL, field, latency, RT1, RT2, signing, release, deployment, or production evidence.
+  - Focused tests, complete deterministic local verification, mandatory GitHub CI, and human API, ownership, native-call, concurrency, rollback, and compatibility review pass before merge.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.CpuMemoryPolicyTwoRuntimeReportsAreIsolated'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='MemoryPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:TraceNoAlloc.CompleteCpuFramesDoNotAllocate:TraceNoAlloc.StaticCompleteCpuFramesDoNotAllocate:TraceNoAlloc.CompleteDeviceFramesDoNotAllocate'
     - ./scripts/agent-verify.sh full
   focused_tests_to_add:
-    - injected native-provider sequencing for every executor-worker instance and optional watchdog and device-service role
-    - Linux affinity, ordinary scheduling, native name, stack, and guard apply/readback using only CPUs and privileges already available to the test process
-    - deterministic CPU-set and NUMA resolution plus strict rejection of unavailable or silently narrowed requests
-    - strict apply failure and readback mismatch at each startup stage with reverse join and zero callback execution
-    - best-effort unsupported and failed operations with truthful aggregate report states and successful default fallback
-    - caller frame verification and host-adapter, XDMA, and custom-role verify-only behavior with no external mutation or invented worker count
-    - spin, yield, and park work arrival and stop wakeups without lost wakeups, detached threads, or allocation after startup
-    - default-policy lifecycle, watchdog, device-service, cleanup-pending retry, host-adapter, and two-runtime isolation regressions
+    - additive provider-table validation, copied callback metadata, borrowed user-data lifetime, reentrancy rejection, and source-level default construction
+    - exact phase-scratch then task-scratch then trace acquisition plus reverse exactly-once release after each injected failure point
+    - rejection of undersized, misaligned, overflowed, aliased, duplicate-token, or capability-mismatched provider results without a partial finalized report
+    - default allocator compatibility and zero-byte or inactive region behavior without provider invocation
+    - Linux base-page rounding, inaccessible guards, prefault and caller first touch, huge-page success or explicit fallback, NUMA request resolution, lock and residency observation using only capabilities and topology available to the test process
+    - strict unsupported, apply-failed, readback-mismatched, residency-mismatched, and rollback sequencing with zero callback execution and successful retry
+    - best-effort degradation with truthful committed, resident, locked, pinned, guard, huge-page fallback, provider error, applied, and verified report fields
+    - proof that mlock is never reported as device or DMA pinning and that borrowed registered state, registered device buffers, backend storage, fragmented control rows, and all stack rows are not mutated
+    - memory rollback followed by M15-02 reverse thread rollback when executor, watchdog, device-service, or device initialization fails, including preserved M14.1 cleanup-pending retry
+    - provider-backed phase/task scratch alignment and trace wrap/loss semantics through default, host-adapter, watchdog, device, and nested-work execution
+    - two-runtime provider-token, backing-span, report, and rollback isolation plus destruction after failed start
+    - complete CPU and mock-device steady-state frames with provider-backed regions and zero ordinary heap allocation after successful start
   required_ci:
-    - Documentation contract workflow including quick-start, release-contract, and frozen C ABI checks
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix exercising portable unsupported and default behavior
-    - Unified executor GCC ThreadSanitizer job with the focused thread-policy suites included in its filter
+    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, and exact SDK inventory checks
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of provider acquisition, guards, construction, rollback, and lifecycle
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix exercising unchanged defaults and truthful unsupported best-effort and strict behavior
+    - Unified executor GCC ThreadSanitizer job with MemoryPolicy, CpuMemoryPolicy, MemoryPlan, provider-lifetime, failed-start, and combined memory/thread rollback scenarios executed
     - determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange
-    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK inventory, and compatibility consumers
+    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, and compatibility consumers
+    - Existing no-allocation and bounded-memory-plan regression gates; no controlled-hardware latency or residency-performance claim is authorized
   manual:
-    - Human review must confirm Linux native-call error handling, startup-barrier ordering, reverse rollback, public C++ source compatibility, and preservation of C ABI v8 and device ABI v1 before merge.
-    - Any representative Linux privilege-assisted scheduling inspection must record the exact kernel, process privileges, requested/resolved/applied/read-back values, and command results as functional evidence only; its absence blocks only a stronger native tuple claim, never creates one by documentation.
+    - Human review must confirm the additive C++ provider ABI shape, callback and user-data lifetime, region eligibility boundary, checked arithmetic, object construction/destruction, native-call error handling, independent verification, reverse rollback, and preservation of C ABI v8 and device ABI v1 before merge.
+    - Any privilege-assisted Linux lock, huge-page, or NUMA inspection must record the exact kernel, page configuration, limits/capabilities, requested/resolved/applied/observed values, commands, and fallback; its absence blocks only that stronger named-host functional observation and never creates hardware or RT evidence.
 risk:
   class: high
   hazards:
-    - a setter can return success while the kernel applies a different CPU mask, scheduler state, stack, guard, or name
-    - startup can expose a partially configured worker or allow callbacks before all role instances are verified
-    - failure rollback can deadlock, leak a joinable thread, or erase M14.1 device ownership uncertainty
-    - wait-strategy changes can lose work or stop notifications, spin unexpectedly, or add a blocking path to a declared executor lane
-    - privileged scheduling and container CPU or NUMA restrictions can make host-specific behavior nondeterministic if they are not resolved and reported explicitly
-    - a role-level aggregate can falsely report success when one worker failed or when an external worker was never observable
-    - changes to common lifecycle or public report types can drift stable ABI, package, determinism, allocation, or multi-runtime invariants
+    - a host provider can return an undersized, misaligned, aliased, stale, or multiply released allocation and corrupt runtime-owned objects
+    - page rounding and guard arithmetic can overflow, expose a guard as usable memory, or construct trace objects outside their valid lifetime
+    - huge-page advice, a successful setter, mlock, or sampled residency can be mislabeled as explicit huge-page allocation, durable lock verification, device pinning, or qualification
+    - NUMA availability, container policy, lock limits, page size, sanitizers, and transparent-huge-page configuration can make native observations host-specific
+    - a memory failure or later thread/device failure can leak provider ownership, leave pages locked or protections changed, release in the wrong order, or erase M14.1 cleanup uncertainty
+    - provider callbacks can reenter the runtime, outlive user data, block a startup lane, or accidentally execute after steady-state start
+    - committed, resident, locked, pinned, guard, padding, and payload bytes can be conflated or double counted against the existing MemoryPlan equation
+    - refactoring phase/task/trace storage can drift scratch alignment, trace construction/wrap behavior, allocation boundaries, determinism, package compatibility, or multi-runtime isolation
   stop_conditions:
-    - the exact baseline commit is unavailable or M15-01 policy types, evidence, or merged behavior are absent from it
-    - a stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema, support-matrix, or release-version change becomes necessary
-    - implementation requires mutating the caller frame thread, host-adapter workers, XDMA workers, vendor threads, host limits, IRQ placement, kernel settings, or machine-wide policy
-    - strict success would require claiming state that cannot be read back, inventing opaque external cardinality, or silently narrowing or truncating the request
-    - a startup failure cannot leave the runtime finalized with every created runtime-owned thread joined, except for already-governed M14.1 device cleanup that remains explicitly pending and retryable
-    - a required source, test, workflow, documentation, or evidence change falls outside allowed paths or enters a forbidden path
-    - deterministic Linux functional tests cannot avoid dependence on root privilege, a particular CPU number, a multi-node machine, or timing-only assertions
-    - the target repository contracts at the exact baseline contradict this scope or require a new product decision
+    - the exact baseline commit is unavailable or the merged M15-01/M15-02 types, startup barrier, rollback behavior, and retained evidence are absent
+    - a stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema, support-matrix, release-version, license, or default installed-header/target change becomes necessary
+    - provider-backed phase, task, or trace storage cannot preserve exact object lifetime, alignment, bounded size, unique ownership, and reverse exactly-once release
+    - strict success would require inferring huge-page, NUMA, lock, pin, guard, or residency state that neither the native platform nor provider can independently observe
+    - implementation requires treating mlock as device/DMA pinning, mutating borrowed registered memory or backend-owned storage, changing CUDA/XDMA adapters, or inventing opaque external cardinality
+    - implementation requires provider callbacks from a phase/task/device callback or other post-start steady-state path, hidden allocation or threads after start, privileged machine-wide mutation, or a test dependent on root, a fixed CPU/node, a configured huge-page pool, or timing alone
+    - any failure path cannot retain or release every allocation and native effect deterministically while leaving the runtime recoverable, except for already-governed M14.1 device cleanup that remains explicit and retryable
+    - a required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
+    - target repository contracts at the exact baseline contradict the selected three-region vertical scope or require a new product/architecture decision
 rollback:
-  strategy: Revert the M15-02 implementation, tests, documentation, governance refresh, CI filter, and release-contract digest updates as one batch; native policy is process-local and every runtime-owned thread is joined during normal or failed startup, so no data migration or persistent host rollback is permitted or required.
+  strategy: Revert the M15-03 provider API, three-region storage integration, native/injected policy implementation, tests, CI filter, documentation, governance refresh, and release-contract digest updates as one batch. Before discarding a live test or host integration, call checked stop so runtime lanes quiesce, memory effects reverse, and provider tokens release in reverse order; provider operations are process-local and this batch permits no persistent host configuration, data migration, support promotion, release, or deployment action.
   data_migration: none
-  release_action: Do not publish a release, promote a support tuple, or change a qualification record from this batch.
+  release_action: Do not publish a release, promote a support or qualification tuple, or alter hardware/RT records from this batch.
 evidence:
   output:
-    - docs/evidence/M15-02-<date>.md
-    - exact baseline, changed files, commands, exit codes, focused test counts, and required CI run identifiers
-    - per-acceptance implementation mapping and requested, resolved, applied, and read-back report examples for success, best-effort degradation, and strict rollback
-    - startup and reverse-rollback ordering, callback non-execution, changed and preserved invariants, and compatibility review result
-    - Linux kernel and privilege context for native functional tests, plus every skipped or unavailable native path
-    - residual risks and all unperformed hardware, HIL, field, latency, RT1, RT2, signing, release, deployment, and production validation
-  claim_boundary: Evidence may establish static, unit, injected, sanitizer, package, portable RT0, and named-host Linux functional policy apply/readback behavior only; it does not establish physical hardware behavior, HIL, field validation, worst-case latency, RT1, RT2, signing, release, deployment, or production readiness.
+    - docs/evidence/M15-03-<date>.md
+    - exact baseline, changed files, commands, exit codes, focused test counts, required CI run identifiers, and human review result
+    - provider capability and lifetime contract plus acquisition, construction, apply, observation, rollback, destruction, and release ordering for success and every injected failure stage
+    - per-region requested, resolved, committed, resident, locked, provider-confirmed pinned, guard, page/huge fallback, applied, verified, and error examples without double counting
+    - Linux kernel, page size, huge-page mode, affinity/NUMA visibility, lock limits, and process capability context for each native functional observation and every skipped or unavailable path
+    - callback non-execution, failed-start retry, M14.1 cleanup-pending preservation, two-runtime isolation, changed and preserved invariants, compatibility status, and rollback result
+    - residual risks and all unperformed physical hardware, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish static, unit, injected-provider, sanitizer, package, portable RT0, and explicitly named-host Linux functional allocation and OS-observed residency behavior for the selected regions only. Hosted CI, mocks, preflight, documentation, or one host observation do not establish physical accelerator behavior, HIL, field performance, worst-case latency, RT1, RT2, signing, release, deployment, production readiness, device/DMA pinning, or completion of M15 accounting closure.

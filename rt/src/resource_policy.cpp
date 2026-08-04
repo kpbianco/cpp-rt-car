@@ -233,7 +233,7 @@ bool valid_memory_policy(const rt::MemoryPolicy& policy) noexcept {
         policy.huge_pages != rt::HugePagePreference::prefer) {
         return false;
     }
-    if (policy.numa_node < -1) {
+    if (policy.numa_node < -1 || policy.numa_node > 1023) {
         return false;
     }
     switch (policy.first_touch) {
@@ -340,6 +340,8 @@ rt::MemoryPolicy resolved_memory_policy(
     if (region == rt::memory_region_phase_scratch ||
         region == rt::memory_region_task_scratch) {
         policy.alignment = plan.scratch_alignment;
+    } else if (region == rt::memory_region_trace_storage) {
+        policy.alignment = 64;
     }
     return policy;
 }
@@ -370,18 +372,176 @@ const rt::MemoryPolicyRequest* find_memory_request(
     return nullptr;
 }
 
-void finish_memory_report(
+bool provider_has(
+    const rt::MemoryProvider* provider,
+    rt::MemoryProviderCapability capability) noexcept {
+    return provider &&
+        (provider->capabilities &
+         rt::memory_provider_capability_bit(capability)) != 0;
+}
+
+bool provider_capabilities_support(
+    const rt::MemoryProvider* provider,
+    const rt::MemoryPolicy& requested) noexcept {
+    if (!provider) {
+        return false;
+    }
+    if ((requested.guard_bytes_before != 0 ||
+         requested.guard_bytes_after != 0) &&
+        !provider_has(provider, rt::MemoryProviderCapability::guard_pages)) {
+        return false;
+    }
+    if (requested.huge_pages == rt::HugePagePreference::prefer &&
+        !provider_has(
+            provider,
+            rt::MemoryProviderCapability::explicit_huge_pages) &&
+        requested.huge_page_fallback != rt::PolicyToggle::enabled) {
+        return false;
+    }
+    if (requested.pinning == rt::PolicyToggle::enabled &&
+        !provider_has(provider, rt::MemoryProviderCapability::pinning)) {
+        return false;
+    }
+    if (requested.numa_node >= 0 &&
+        !provider_has(provider, rt::MemoryProviderCapability::numa_binding)) {
+        return false;
+    }
+    return provider_has(
+               provider,
+               rt::MemoryProviderCapability::policy_operations) &&
+           provider_has(
+               provider,
+               rt::MemoryProviderCapability::independent_observation);
+}
+
+rt::Status finish_memory_report(
     const rt::MemoryPolicyRequest* request,
-    rt::MemoryPolicyReport& report) noexcept {
-    if (request) {
-        report.requested = request->policy;
+    const rt::MemoryProvider* provider,
+    rt::MemoryPolicyReport& report,
+    const char*& diagnostic) noexcept {
+    const bool selected =
+        report.region == rt::memory_region_phase_scratch ||
+        report.region == rt::memory_region_task_scratch ||
+        report.region == rt::memory_region_trace_storage;
+    const bool active = selected
+        ? report.accounted_bytes != 0
+        : report.logical_region_count != 0 || report.accounted_bytes != 0;
+    if (!request) {
+        if (!active) {
+            report.resolution = rt::PolicyResolutionState::inactive;
+        } else if (selected && provider) {
+            report.resolved.provider = rt::MemoryProviderOwnership::host;
+            report.resolution = rt::PolicyResolutionState::native_supported;
+        }
+        return rt::Status::ok;
+    }
+
+    report.requested = request->policy;
+    if (!active) {
+        report.resolution = rt::PolicyResolutionState::inactive;
+        if (!memory_policy_is_noop(request->policy) &&
+            request->policy.requirement == rt::PolicyRequirement::strict) {
+            diagnostic = "strict memory policy targets an inactive region";
+            return rt::Status::invalid_config;
+        }
+        return rt::Status::ok;
+    }
+    if (!selected) {
         report.resolution = memory_policy_is_noop(request->policy)
             ? rt::PolicyResolutionState::portable_noop
             : rt::PolicyResolutionState::unsupported_best_effort;
-    } else if (report.logical_region_count == 0 &&
-               report.accounted_bytes == 0) {
-        report.resolution = rt::PolicyResolutionState::inactive;
+        if (!memory_policy_is_noop(request->policy) &&
+            request->policy.requirement == rt::PolicyRequirement::strict) {
+            diagnostic = "strict memory policy targets a deferred or borrowed region";
+            return rt::Status::invalid_config;
+        }
+        return rt::Status::ok;
     }
+
+    auto resolved = report.resolved;
+    resolved.requirement = request->policy.requirement;
+    resolved.provider = provider
+        ? rt::MemoryProviderOwnership::host
+        : rt::MemoryProviderOwnership::runtime;
+    if (request->policy.alignment != 0) {
+        resolved.alignment = std::max(
+            resolved.alignment,
+            request->policy.alignment);
+    }
+    if (request->policy.page_rounding != rt::PageRounding::inherit) {
+        resolved.page_rounding = request->policy.page_rounding;
+    }
+    resolved.guard_bytes_before = request->policy.guard_bytes_before;
+    resolved.guard_bytes_after = request->policy.guard_bytes_after;
+    if (request->policy.prefault != rt::PolicyToggle::inherit) {
+        resolved.prefault = request->policy.prefault;
+    }
+    if (request->policy.locking != rt::PolicyToggle::inherit) {
+        resolved.locking = request->policy.locking;
+    }
+    if (request->policy.pinning != rt::PolicyToggle::inherit) {
+        resolved.pinning = request->policy.pinning;
+    }
+    if (request->policy.huge_pages != rt::HugePagePreference::inherit) {
+        resolved.huge_pages = request->policy.huge_pages;
+    }
+    if (request->policy.huge_page_fallback != rt::PolicyToggle::inherit) {
+        resolved.huge_page_fallback = request->policy.huge_page_fallback;
+    }
+    resolved.numa_node = request->policy.numa_node;
+    if (request->policy.first_touch != rt::FirstTouchPolicy::inherit) {
+        resolved.first_touch = request->policy.first_touch;
+    }
+    if (request->policy.residency_verification != rt::PolicyToggle::inherit) {
+        resolved.residency_verification =
+            request->policy.residency_verification;
+    }
+    resolved.rollback = rt::RollbackIntent::release;
+
+    bool unsupported = false;
+    if (request->policy.provider != rt::MemoryProviderOwnership::inherit &&
+        request->policy.provider != resolved.provider) {
+        unsupported = true;
+    }
+    if (request->policy.provider == rt::MemoryProviderOwnership::backend ||
+        request->policy.provider == rt::MemoryProviderOwnership::borrowed ||
+        request->policy.first_touch == rt::FirstTouchPolicy::owner_thread ||
+        request->policy.rollback == rt::RollbackIntent::none) {
+        unsupported = true;
+    }
+    if (provider) {
+        unsupported = unsupported ||
+            !provider_capabilities_support(provider, request->policy);
+    } else {
+        if (request->policy.pinning == rt::PolicyToggle::enabled ||
+            request->policy.numa_node >= 0 ||
+            (request->policy.locking == rt::PolicyToggle::enabled &&
+             request->policy.requirement == rt::PolicyRequirement::strict)) {
+            unsupported = true;
+        }
+#if !defined(__linux__)
+        unsupported = unsupported || !memory_policy_is_noop(request->policy);
+#endif
+    }
+    if (unsupported) {
+        if (request->policy.requirement == rt::PolicyRequirement::strict) {
+            diagnostic = "strict memory policy capability is unsupported or unobservable";
+            return rt::Status::invalid_config;
+        }
+        report.resolution =
+            rt::PolicyResolutionState::native_best_effort_fallback;
+        report.resolved = resolved_memory_policy(report.region, rt::MemoryPlan{});
+        report.resolved.alignment = resolved.alignment;
+        report.resolved.provider = provider
+            ? rt::MemoryProviderOwnership::host
+            : rt::MemoryProviderOwnership::runtime;
+        return rt::Status::ok;
+    }
+    report.resolved = resolved;
+    report.resolution = memory_policy_is_noop(request->policy)
+        ? rt::PolicyResolutionState::portable_noop
+        : rt::PolicyResolutionState::native_supported;
+    return rt::Status::ok;
 }
 
 } // namespace
@@ -393,6 +553,7 @@ Status build_cpu_memory_policy_report(
     const RuntimeConfig& config,
     const MemoryPlan& memory_plan,
     std::size_t registered_device_buffer_bytes,
+    const MemoryProvider* memory_provider,
     ThreadPolicyProvider& thread_policy_provider,
     CpuMemoryPolicyReport& report,
     const char*& diagnostic) noexcept {
@@ -433,10 +594,6 @@ Status build_cpu_memory_policy_report(
                 diagnostic = "memory policy contains a duplicate region";
                 return Status::invalid_config;
             }
-        }
-        if (request.policy.requirement == PolicyRequirement::strict) {
-            diagnostic = "strict memory policy is unsupported before native application";
-            return Status::invalid_config;
         }
     }
 
@@ -650,107 +807,110 @@ Status build_cpu_memory_policy_report(
             row.cardinality_known = cardinality_known;
             row.accounted_bytes = bytes;
             row.resolved = resolved_memory_policy(region, memory_plan);
-            finish_memory_report(
+            const auto status = finish_memory_report(
                 find_memory_request(policy, region),
-                row);
+                memory_provider,
+                row,
+                diagnostic);
+            return status;
         };
 
-    add_memory(
+    if (add_memory(
         memory_region_runtime_control,
         "memory.runtime-control",
         ResourceOwnership::runtime,
         MemoryAccountingScope::planned,
         1,
         true,
-        memory_plan.runtime_control_bytes);
-    add_memory(
+        memory_plan.runtime_control_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_executor_control,
         "memory.executor-control",
         ResourceOwnership::runtime,
         MemoryAccountingScope::planned,
         1,
         true,
-        memory_plan.executor_control_bytes);
-    add_memory(
+        memory_plan.executor_control_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_device_control,
         "memory.device-control",
         ResourceOwnership::runtime,
         MemoryAccountingScope::planned,
         memory_plan.device_backend_count == 0 ? 0 : 1,
         true,
-        memory_plan.device_control_bytes);
-    add_memory(
+        memory_plan.device_control_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_phase_scratch,
         "memory.phase-scratch",
         ResourceOwnership::runtime,
         MemoryAccountingScope::planned,
         memory_plan.phase_count,
         true,
-        memory_plan.phase_scratch_total_bytes);
-    add_memory(
+        memory_plan.phase_scratch_total_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_task_scratch,
         "memory.task-scratch",
         ResourceOwnership::runtime,
         MemoryAccountingScope::planned,
         memory_plan.task_scratch_slots,
         true,
-        memory_plan.task_scratch_total_bytes);
-    add_memory(
+        memory_plan.task_scratch_total_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_trace_storage,
         "memory.trace-storage",
         ResourceOwnership::runtime,
         MemoryAccountingScope::planned,
         memory_plan.trace_capacity,
         true,
-        memory_plan.trace_storage_bytes);
-    add_memory(
+        memory_plan.trace_storage_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_registered_state,
         "memory.registered-state",
         ResourceOwnership::caller,
         MemoryAccountingScope::informational_external,
         memory_plan.state_count,
         true,
-        memory_plan.registered_state_bytes);
-    add_memory(
+        memory_plan.registered_state_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_backend_control,
         "memory.backend-control",
         ResourceOwnership::backend,
         MemoryAccountingScope::informational_external,
         memory_plan.device_backend_count,
         true,
-        memory_plan.device_backend_reported_bytes);
-    add_memory(
+        memory_plan.device_backend_reported_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_registered_device_buffer,
         "memory.registered-device-buffer",
         ResourceOwnership::caller,
         MemoryAccountingScope::informational_external,
         memory_plan.device_buffer_count,
         true,
-        registered_device_buffer_bytes);
-    add_memory(
+        registered_device_buffer_bytes) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_runtime_thread_stack,
         "memory.runtime-thread-stack",
         ResourceOwnership::runtime,
         MemoryAccountingScope::excluded,
         runtime_stack_count,
         true,
-        0);
-    add_memory(
+        0) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_external_thread_stack,
         "memory.external-thread-stack",
         ResourceOwnership::caller,
         MemoryAccountingScope::excluded,
         external_stack_count,
         external_stack_cardinality_known,
-        0);
-    add_memory(
+        0) != Status::ok) return Status::invalid_config;
+    if (add_memory(
         memory_region_host_provider,
         "memory.host-provider",
         ResourceOwnership::caller,
         MemoryAccountingScope::excluded,
         0,
         true,
-        0);
+        0) != Status::ok) return Status::invalid_config;
 
     std::size_t planned_sum = 0;
     for (std::size_t index = 0; index < report.memory_count; ++index) {

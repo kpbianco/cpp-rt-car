@@ -7,7 +7,7 @@ in [ADRs](adr/README.md).
 
 ## Current 1.2 implementation
 
-### M1–M14 host, device, distribution, and SDK runtime plus 1.2.1 safety closure
+### Target host, device, distribution, SDK, and M15 policy runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -68,15 +68,29 @@ same-major package and target C++ source-compatibility policy, and checks
 strict CPack staging plus content-addressed package and hardware-evidence
 manifests. These gates do not promote RT1, RT2, CUDA, or XDMA qualification.
 
-M15-01 added the policy/resource model. M15-02 resolves platform policy during
-finalization, then creates runtime-owned watchdog, executor, and device lanes
-in a held startup transaction. Each lane applies and reads back native state,
-publishes one result, and waits for a global commit or abort. Device backend
-initialization follows successful lane verification. Strict failure aborts and
-joins in reverse startup order before host work can run. Caller, host-adapter,
-XDMA, and vendor roles remain verify-only, with opaque cardinality left unknown.
-Stable memory rows still project the plan exactly once; memory residency
-transactions remain later M15 work. See the
+M15-01 added the policy/resource model, and M15-02 added native runtime-owned
+thread application/readback behind a held startup gate. M15-03 adds one copied,
+size/versioned provider table with acquire/apply/observe/rollback/release
+callbacks. It can back exactly phase scratch, task scratch, and trace storage.
+Finalization acquires active regions in that order and constructs executor and
+telemetry owners in validated usable spans. Startup applies and observes memory
+before the thread gate. Strict failure and later thread/device-start failure
+quiesce lanes and reverse memory operations; checked stop destroys owners and
+releases provider tokens in reverse order.
+Live tokens and allocation extents are registered across runtime instances so
+a shared provider cannot alias ownership or storage between runtimes.
+
+The default path retains aligned-new behavior. Linux page policy uses
+process-local `mmap` with rounded inaccessible guards and aligned usable bases,
+an explicit `MAP_HUGETLB` attempt with requested fallback, caller/prefault page
+touch, `mlock`, and `mincore` residency observation. Locking-only allocations
+are page-backed independently so page-granular unlock cannot affect another
+runtime. `mlock` is not independent lock readback or device/DMA pinning. Caller,
+host-adapter, XDMA, and vendor
+roles remain verify-only, with opaque cardinality left unknown. Stable memory
+rows still project the plan exactly once; fragmented control allocations,
+stack residency, exact external/backend accounting, and full byte closure
+remain M15-04 work. See the
 [CPU/memory policy contract](cpu_memory_policy.md).
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
@@ -184,8 +198,10 @@ M12 names the portable RT0 support tuples and makes the 1.x compatibility,
 release archive, digest-manifest, and independent-device-isolation gates
 machine-verifiable.
 M15-02 extends the immutable CPU/memory inventory with per-role native thread
-apply/readback and a fail-closed startup barrier without changing the C or
-device ABI. Memory policy remains resolution/reporting only.
+apply/readback and a fail-closed startup barrier. M15-03 adds the isolated
+three-region memory transaction without changing the C or device ABI. Provider
+callbacks remain control-path-only; provider-backed checked stop makes trace
+unavailable after its backing token is released.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
@@ -226,6 +242,8 @@ that arbitrary host data is automatically optimized.
 - M15-01 policy model/inventory: `rt/include/rt/config.hpp`,
   `rt/include/rt/runtime.hpp`, `rt/src/resource_policy.cpp`,
   `docs/cpu_memory_policy.md`, `tests/test_cpu_memory_policy.cpp`
+- M15-03 resident-region transaction: `rt/src/memory_policy.cpp`,
+  `rt/src/memory_policy.hpp`, `tests/test_memory_policy.cpp`
 - M4 memory plan: `rt/src/aligned_storage.hpp`,
   `docs/memory_plan.md`
 - M5 time/platform controls: `rt/src/watchdog_monitor.cpp`,

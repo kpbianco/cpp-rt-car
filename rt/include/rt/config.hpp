@@ -15,6 +15,7 @@ inline constexpr std::size_t cpu_set_capacity = 256;
 inline constexpr std::size_t thread_name_capacity = 32;
 inline constexpr std::size_t thread_policy_request_capacity = 16;
 inline constexpr std::size_t memory_policy_request_capacity = 16;
+inline constexpr std::uint32_t memory_provider_api_version = 1;
 
 enum class NumericalMode : std::uint8_t {
     precise,
@@ -191,6 +192,105 @@ struct MemoryPolicy {
 struct MemoryPolicyRequest {
     MemoryRegionId region{};
     MemoryPolicy policy{};
+};
+
+enum class MemoryProviderCapability : std::uint64_t {
+    none = 0,
+    guard_pages = std::uint64_t{1} << 0,
+    explicit_huge_pages = std::uint64_t{1} << 1,
+    policy_operations = std::uint64_t{1} << 2,
+    independent_observation = std::uint64_t{1} << 3,
+    pinning = std::uint64_t{1} << 4,
+    numa_binding = std::uint64_t{1} << 5,
+};
+
+[[nodiscard]] constexpr std::uint64_t memory_provider_capability_bit(
+    MemoryProviderCapability capability) noexcept {
+    return static_cast<std::uint64_t>(capability);
+}
+
+struct MemoryProviderAcquireRequest {
+    MemoryRegionId region{};
+    std::size_t logical_bytes = 0;
+    std::size_t required_alignment = 0;
+    PageRounding page_rounding = PageRounding::none;
+    std::size_t guard_bytes_before = 0;
+    std::size_t guard_bytes_after = 0;
+    HugePagePreference huge_pages = HugePagePreference::disabled;
+    PolicyToggle huge_page_fallback = PolicyToggle::disabled;
+    std::int32_t numa_node = -1;
+    RollbackIntent rollback = RollbackIntent::release;
+};
+
+struct MemoryProviderAllocation {
+    void* token = nullptr;
+    std::byte* allocation_base = nullptr;
+    std::size_t allocation_bytes = 0;
+    std::byte* usable_data = nullptr;
+    std::size_t usable_bytes = 0;
+    std::size_t committed_bytes = 0;
+    std::size_t alignment = 0;
+    std::size_t actual_page_bytes = 0;
+    std::size_t guard_bytes_before = 0;
+    std::size_t guard_bytes_after = 0;
+    bool explicit_huge_pages = false;
+    bool used_huge_page_fallback = false;
+    std::int32_t provider_error = 0;
+};
+
+struct MemoryProviderObservation {
+    std::size_t resident_bytes = 0;
+    std::size_t locked_bytes = 0;
+    std::size_t pinned_bytes = 0;
+    std::int32_t numa_node = -1;
+    bool prefaulted = false;
+    bool caller_first_touched = false;
+    bool independently_observed = false;
+    std::int32_t system_error = 0;
+};
+
+using MemoryProviderAcquire = Status (*)(
+    void* user_data,
+    const MemoryProviderAcquireRequest& request,
+    MemoryProviderAllocation& allocation) noexcept;
+using MemoryProviderApply = Status (*)(
+    void* user_data,
+    void* token,
+    const MemoryPolicy& resolved,
+    MemoryProviderObservation& applied) noexcept;
+using MemoryProviderObserve = Status (*)(
+    void* user_data,
+    void* token,
+    const MemoryPolicy& resolved,
+    MemoryProviderObservation& observed) noexcept;
+// Once apply is invoked for a token, rollback is invoked once for that attempt
+// before retry or release, including when apply reports failure. Implementations
+// must therefore make rollback safe for a partially applied operation and
+// retryable when rollback itself reports failure.
+using MemoryProviderRollback = Status (*)(
+    void* user_data,
+    void* token,
+    const MemoryPolicy& resolved,
+    const MemoryProviderObservation& applied) noexcept;
+using MemoryProviderRelease = void (*)(
+    void* user_data,
+    void* token,
+    RollbackIntent intent) noexcept;
+
+// The runtime copies this bounded callback table while configuring and borrows
+// user_data until checked stop (or best-effort destruction) has released every
+// acquired token. Provider callbacks must not reenter the Runtime.
+struct MemoryProvider {
+    std::uint32_t struct_size = sizeof(MemoryProvider);
+    std::uint32_t api_version = memory_provider_api_version;
+    std::uint64_t capabilities = 0;
+    void* user_data = nullptr;
+    MemoryProviderAcquire acquire = nullptr;
+    MemoryProviderApply apply = nullptr;
+    MemoryProviderObserve observe = nullptr;
+    MemoryProviderRollback rollback = nullptr;
+    MemoryProviderRelease release = nullptr;
+    std::array<std::uint64_t, 4> reserved{};
 };
 
 // This policy is intentionally separate from RuntimeConfig schema 7. It is a

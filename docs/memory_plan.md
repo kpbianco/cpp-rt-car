@@ -16,8 +16,11 @@ but not allocated by the runtime.
 
 `Runtime::finalize()` compiles the graph, calculates a `MemoryPlan`, compares
 `planned_bytes` with `memory_budget_bytes`, and allocates the committed
-storage. An overflow in any size calculation or a plan above the configured
-budget returns `invalid_config` while the runtime remains configurable.
+storage. M15-03 obtains phase scratch, task scratch, and trace storage through
+the default allocator or a configured provider before constructing their
+owners. An overflow, invalid provider span/token/capability, allocation or
+construction failure, or plan above budget returns an error while the runtime
+remains configurable; provisional ownership is released in reverse order.
 
 After successful finalization, `Runtime::memory_plan()` returns the immutable
 plan. C hosts initialize `rtfw_memory_plan` with `rtfw_memory_plan_init()` and
@@ -66,26 +69,39 @@ host-owned memory and are excluded for the same reason as backend-owned
 storage. The adapter must reserve the declared capacities before runtime
 start; the runtime does not allocate or resize a host queue.
 
-## M15 policy accounting projection
+## M15 policy and resident-region projection
 
-M15-01 leaves `MemoryPlan` and its equation source-compatible and adds a
-separate immutable `CpuMemoryPolicyReport`. Its six planned accounting rows
-map one-for-one to `runtime_control_bytes`, `executor_control_bytes`,
-`device_control_bytes`, `phase_scratch_total_bytes`,
-`task_scratch_total_bytes`, and `trace_storage_bytes`; their sum must equal
-`planned_bytes`. Separate informational rows report registered state,
-backend-reported control, and the checked sum of registered device-buffer
-spans. Runtime/external thread stacks and future host-provider storage have
-stable excluded rows because their committed/resident bytes are not known.
-M15-02 resolves pthread stack/guard creation attributes and reads them back on
-each runtime-owned Linux lane, but does not convert virtual stack size into
-committed or resident memory evidence.
+M15 leaves `MemoryPlan` and its equation source-compatible and adds a separate
+`CpuMemoryPolicyReport`. Its six planned accounting rows map one-for-one to
+`runtime_control_bytes`, `executor_control_bytes`, `device_control_bytes`,
+`phase_scratch_total_bytes`, `task_scratch_total_bytes`, and
+`trace_storage_bytes`; their `accounted_bytes` sum must equal `planned_bytes`.
+Separate informational rows report registered state, backend-reported control,
+and the checked sum of registered device-buffer spans. Stack and reserved
+provider rows remain excluded.
 
-This is exact identity and requested-byte accounting, not physical allocator,
-RSS, page-residency, lock, pin, or huge-page accounting. Memory-row applied
-and verified values remain not attempted, and committed, resident, locked, and
-pinned values remain zero through M15-02. See
-[the CPU/memory policy contract](cpu_memory_policy.md).
+M15-03 makes exactly the active phase-scratch, task-scratch, and trace-storage
+rows provider-capable. They are acquired in that order with the logical plan
+bytes and existing alignment, then used as backing for the same scratch slices
+and telemetry slots. A zero-byte selected row remains observable and does not
+invoke a provider. The default path preserves aligned-new allocation unless
+requested Linux page rounding, guards, or explicit huge pages require a
+process-local mapping.
+
+`accounted_bytes` remains the requested plan identity. `committed_bytes`
+reports validated usable commitment after page rounding and therefore may
+exceed the logical payload without changing `planned_bytes`. Resident,
+verified-locked, and provider-confirmed pinned bytes are separate observations;
+actual guard spans, actual page bytes, explicit huge-page outcome, fallback,
+and provider/native errors are separate too. No physical field is added to the
+plan equation or counted again in `memory.host-provider`.
+
+M15-02 thread stack/guard creation attributes remain per-thread readback, not
+committed or resident stack evidence. Fragmented runtime/executor/device
+control allocation, runtime-owned stack residency, exact external/backend
+accounting, and complete cross-category byte closure remain deferred to
+M15-04. Borrowed registered state/device buffers and backend-owned storage are
+not mutated. See [the CPU/memory policy contract](cpu_memory_policy.md).
 
 ## Configuration
 
@@ -133,6 +149,14 @@ This ownership rule prevents active parent, child, and grandchild contexts
 from aliasing even when one worker helps all three. Task-scratch contents are
 unspecified on entry and must not be retained after the callback returns.
 
+Provider-backed storage preserves these payload sizes, strides, alignment,
+lifetime, and non-aliasing rules. The runtime validates each provider usable
+span before object construction. Checked stop first quiesces all execution
+lanes, then destroys executor/trace objects and releases trace, task, and phase
+tokens in reverse acquisition order. If rollback fails, checked stop retains
+the owners and tokens and fails until a retry completes rollback. A
+provider-backed trace ring is unavailable after its token is released.
+
 ## Bounded overload behavior
 
 Queue reservation and scratch-slot reservation use bounded compare/exchange
@@ -178,8 +202,10 @@ leave all registered bytes unchanged.
 
 ## Running-state boundary
 
-`start()` creates the configured fixed worker team, an optional M5 watchdog
-lane, and one M8 device service lane when backends exist. After it returns, the
+Before `start()` creates a thread, M15-03 applies and observes resident-memory
+policy for phase scratch, task scratch, and trace storage. It then creates the
+configured fixed worker team, an optional M5 watchdog lane, and one M8 device
+service lane when backends exist. After it returns, the
 target CPU/device frame path uses preallocated graph, queue, scratch, trace,
 outstanding, and completion storage. It contains no file I/O, blocking mutex,
 hidden per-frame thread creation, heap fallback, or intentional heap
@@ -210,6 +236,8 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
   `tests/test_determinism_replay.cpp`;
 - allocation/deallocation pairing:
   `rt/src/aligned_storage.hpp`;
+- provider/native resident-region acquisition, observation, rollback, and
+  release: `rt/src/memory_policy.cpp`, `tests/test_memory_policy.cpp`;
 - implementation:
   `rt/src/host_runtime.cpp`, `rt/src/executor.cpp`,
   `rt/src/device_manager.cpp`.

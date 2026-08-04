@@ -109,7 +109,7 @@ behavior, workload bounds, or measured deadline distributions. Those remain
 deployment qualification requirements in the
 [product contract](product_contract.md).
 
-## M15-02 thread policy application
+## M15 policy application
 
 The additive C++ CPU/memory policy model inventories the caller frame lane,
 runtime-owned executor/watchdog/device-service lanes, and external XDMA/vendor
@@ -120,8 +120,28 @@ gate commits. The caller frame is read back only; host-adapter and vendor lanes
 remain external and verify-only. Strict unsupported or mismatched policy fails
 closed before callbacks. See [the policy contract](cpu_memory_policy.md).
 
-Neither a requested/resolved/applied/read-back report nor named-host functional
-tests establish RT1 or RT2.
+M15-03 adds a process-local resident-memory transaction after preflight and
+before the thread gate. Exactly phase scratch, task scratch, and trace storage
+are applied and observed. Linux can base-page-round mappings and guards,
+attempt explicit `MAP_HUGETLB` with only the requested fallback, touch pages on
+the caller for prefault/first-touch requests, apply `mlock`, and sample
+residency using `mincore`. The existing preflight remains read-only; these
+operations occur only after it passes or when it is disabled.
+
+An `mmap`, `mprotect`, touch, `mlock`, or `mincore` result describes only this
+process and named host. `mlock` success is not independent lock readback and
+never proves CUDA, device, or DMA pinning. Transparent huge-page behavior is
+not explicit huge-page allocation. Unsupported owner-thread first touch or
+native physical NUMA observation is reported or rejected under strict policy
+rather than inferred. In M15-03, a strict runtime-provider NUMA request is
+rejected and best effort retains default placement; provider results require
+advertised capabilities and independent observation.
+
+Neither requested/resolved/acquired/applied/verified reports, preflight, nor
+named-host functional tests establish hardware/HIL behavior, latency, field
+results, RT1, RT2, signing, release, deployment, or production validation.
+Fragmented control/stack residency and complete byte closure remain M15-04
+work.
 
 ## C ABI
 
@@ -141,6 +161,7 @@ covered by the M11 compatibility and export policy.
 ## Evidence and boundaries
 
 - implementation: `rt/src/host_runtime.cpp`,
+  `rt/src/memory_policy.cpp`,
   `rt/src/watchdog_monitor.cpp`,
   `rt/src/native_platform_preflight.cpp`;
 - fake-clock, no-drift, deadline, watchdog, and degradation tests:

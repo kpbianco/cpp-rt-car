@@ -25,7 +25,7 @@ independent support matrices and evidence gates.
 
 | Current state | Allowed operation | Resulting state |
 | --- | --- | --- |
-| `configuring` | typed configuration, optional host-executor attachment, graph/state/device registration and declarations | `configuring` |
+| `configuring` | typed configuration, optional host-executor or memory-provider attachment, graph/state/device registration and declarations | `configuring` |
 | `configuring` | `finalize()` | `finalized` |
 | `finalized` | `start()`, preflight, and create configured runtime-owned lanes or bind the already-running host team | `running` |
 | `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
@@ -44,13 +44,17 @@ Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
 
-M15-02 startup verifies the caller frame without mutation, creates each
-runtime-owned service/worker lane in a held transaction, aggregates native
-apply/readback results, and commits `running` only after every required row is
-acceptable. Strict creation, apply, or mismatch failure aborts the shared gate
-and joins device service, executor workers in reverse index order, then
-watchdog. No phase, device provider, or periodic observer can run before
-commit. External host-adapter, XDMA, and vendor lanes remain verify-only.
+M15-03 finalization transactionally acquires active phase-scratch,
+task-scratch, and trace-storage backing in that order. Startup applies and
+independently observes their memory policy before M15-02 verifies the caller
+frame or creates a runtime-owned lane. Strict memory failure reverses completed
+operations and leaves the runtime finalized and retryable. The held thread
+transaction then aggregates native apply/readback and commits `running` only
+after every required row is acceptable. A later creation, apply, mismatch, or
+device-start failure quiesces device service, executor workers in reverse index
+order, and watchdog before reversing memory policy. No phase, device command
+provider, or periodic observer can run before commit. External host-adapter,
+XDMA, and vendor lanes remain verify-only.
 
 A failed backend initialization gets one checked shutdown attempt. Failed
 buffer unregistration and backend shutdown preserve their ownership markers,
@@ -107,6 +111,16 @@ there is no ignored-key path.
 declare capacities exactly equal to the typed configuration. The detailed
 submission, scratch, completion, helping, and ownership rules are in the
 [executor contract](executor.md).
+
+`Runtime::set_memory_provider()` is another configuring-only C++ attachment.
+The runtime copies its exact size/versioned table and borrows `user_data`. All
+five callbacks (`acquire`, `apply`, `observe`, `rollback`, and nonthrowing
+`release`) are required, must not throw, and must not reenter the runtime. The
+provider is consulted only for active phase scratch, task scratch, and trace
+storage. Reentrant status calls fail closed and observation accessors return
+safe empty/default values while any provider callback is active. Live token and
+allocation-extent uniqueness is enforced across runtime instances. See the
+[CPU/memory policy contract](cpu_memory_policy.md).
 
 `<rt/profile.hpp>` maps the complete schema into `RuntimeConfig` through a
 bounded, allocation-free, transactional JSON parser. It rejects missing,
@@ -208,6 +222,9 @@ Each runtime owns:
 - its watchdog state and degradation level;
 - its fixed-capacity platform-preflight report;
 - its copied canonical-state registry metadata and replay identities.
+- its copied memory-provider table, live region tokens, backing spans, policy
+  observations, and rollback state, while provider `user_data` remains
+  borrowed;
 - its copied backend tables, device registration metadata, outstanding slots,
   completion batch, service lane, and device telemetry counters.
 
@@ -222,6 +239,17 @@ caller-owned and need exist only for the duration of the relevant call.
 Backend instances, registered device-buffer bytes, and device command
 `user_data` are borrowed through backend shutdown. The service lane is joined
 before buffers are unregistered and backend shutdown returns.
+
+The memory provider and its `user_data` must remain valid until checked
+`stop()` succeeds. Stop quiesces device, executor, and watchdog lanes before
+resident-memory rollback. For provider-backed storage it then destroys the
+trace/executor owners and releases trace, task, and phase tokens in reverse
+acquisition order. A rollback failure leaves the operation and tokens pending,
+makes stop fail, and requires a checked stop retry before provider state may be
+released. Because the trace backing has been released after successful stop,
+trace access is unavailable after such a stop; the memory plan and CPU/memory
+policy report remain inspectable. C++ destruction attempts the same cleanup
+only as a best-effort fallback.
 
 The new surface does not modify the legacy process-global `HighResClock`,
 `bintrace` registration, or `rt::set_use_fma` flag used by `SimCore`. This is
@@ -299,7 +327,10 @@ traversal.
 ## Current boundary
 
 M4 finalizes aligned phase/task scratch, queue/control, and trace storage under
-a configured memory budget. The target CPU frame path has a multi-frame
+a configured memory budget. M15-03 can supply exactly the phase/task/trace
+backing through a bounded provider or a Linux resident mapping transaction;
+fragmented control allocations, stack residency, and complete external/backend
+accounting remain deferred. The target CPU frame path has a multi-frame
 zero-allocation gate and explicit queue/scratch overload behavior. Plan scope
 and exclusions are specified in the
 [memory-plan contract](memory_plan.md); policy, queue, and nesting details are
@@ -321,11 +352,13 @@ fault-injectable mock; see the
 - Implementation: `rt/src/host_runtime.cpp`
 - Graph compiler: `rt/src/compiled_graph.cpp`
 - Unified executor: `rt/src/executor.cpp`
+- Resident-region policy: `rt/src/memory_policy.cpp`
 - C ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - C++ lifecycle tests: `tests/test_host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Executor tests: `tests/test_executor.cpp`
 - Memory-plan tests: `tests/test_memory_plan.cpp`
+- Memory-provider/policy tests: `tests/test_memory_policy.cpp`
 - Time/watchdog tests: `tests/test_periodic_runtime.cpp`
 - Platform-preflight tests: `tests/test_platform_preflight.cpp`
 - Observability tests: `tests/test_observability.cpp`

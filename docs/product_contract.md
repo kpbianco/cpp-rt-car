@@ -32,11 +32,14 @@ changing C ABI v8 or device ABI v1.
 Release 1.2.1 closes the device lifecycle error path: failed initialization
 rollback, buffer unregistration, and backend shutdown retain explicit ownership
 state and are retried through checked `stop()` without changing either ABI.
-M15-01 adds a bounded additive C++ CPU/memory policy model. M15-02 adds Linux
-native resolution, application, and readback for runtime-owned thread roles,
-plus a fail-closed startup barrier and reverse rollback. Caller and external
-roles remain verify-only, memory policy remains unapplied, and schema 7, C ABI
-v8, device ABI v1, release, package, and qualification claims remain unchanged.
+M15-01 adds a bounded additive C++ CPU/memory policy model, and M15-02 adds
+Linux native resolution, application, and readback for runtime-owned thread
+roles plus a fail-closed startup barrier. M15-03 adds one copied,
+size/versioned, five-callback C++ memory provider and a resident transaction for
+exactly phase scratch, task scratch, and trace storage. Caller/external roles
+remain verify-only, deferred and borrowed memory is not mutated, and schema 7,
+C ABI v8, device ABI v1, release, package, and qualification claims remain
+unchanged.
 
 ## Claim policy
 
@@ -62,17 +65,19 @@ not a portable latency guarantee. No document may use an unqualified
 The 1.2 lifecycle is:
 
 1. **Configure** — parse configuration, register phases, resources, callbacks,
-   canonical state, executor policy, and device backends. Ordinary allocation
-   is allowed.
+   canonical state, executor policy, memory provider, and device backends.
+   Ordinary allocation is allowed.
 2. **Finalize** — validate and freeze the graph/state schema, compute replay
    identities, intern telemetry identifiers, calculate memory and queue
    capacities, and allocate bounded storage.
-3. **Start** — run platform preflight checks, create the fixed thread set,
-   establish execution contexts, register device buffers, and warm memory.
+3. **Start** — run platform preflight checks, apply and observe selected
+   resident-memory policy, create the fixed thread set, establish execution
+   contexts, register device buffers, and warm memory.
 4. **Run** — execute host-driven steps or a self-paced loop without graph
    mutation, hidden thread creation, or unbounded submission on an RT lane.
 5. **Stop** — reject new submissions, drain or cancel according to policy,
-   stop service lanes, and release resources. A device cleanup failure keeps
+   stop service lanes, reverse resident-memory operations, release provider
+   tokens, and release other resources. A device cleanup failure keeps
    the prior public lifecycle state, gates execution and state mutation, and
    requires `stop()` retry before the host releases borrowed storage.
 
@@ -149,6 +154,17 @@ and completion-batch storage. Bounded CPU queue/scratch and device submission
 paths reject overload instead of spilling. Representative complete CPU and
 mock-device frames observe no heap allocation after start. The plan's exact
 accounting scope and exclusions are in [the memory contract](memory_plan.md).
+
+M15-03 preserves the memory-plan equation while allowing exactly phase
+scratch, task scratch, and trace storage to use a copied C++ provider table.
+Finalization acquires them in stable order; startup applies and independently
+observes policy before threads commit; failure and checked stop reverse
+operations and token ownership. Default allocations retain aligned-new
+behavior. Linux page policy uses process-local mappings with rounded guards,
+explicit `MAP_HUGETLB` attempt/fallback, caller/prefault touch, `mlock`, and
+`mincore` residency sampling. `mlock` is not lock readback or device/DMA
+pinning. Fragmented controls, stack residency, and complete external/backend
+byte closure remain M15-04 work.
 
 ### Observability
 
@@ -243,7 +259,7 @@ callback expressions.
 | Host-driven callbacks | Implemented RT0 surface | Synchronous host wait; dependency-ready callbacks may overlap without step-time pacing or worker creation |
 | Unified CPU executor | Implemented RT0 surface | Static assignments, bounded local-queue throughput, and a borrowed host job-system adapter share one graph/range/reduction representation |
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
-| CPU/memory policy and thread application | Implemented through M15-02 at RT0 | Bounded role/region requests, Linux runtime-owned thread apply/readback, startup rollback, exact-once accounting keys, and external verify-only ownership; no memory-residency, RT1, or RT2 claim |
+| CPU/memory policy and resident backing | Implemented through M15-03 at RT0 | Bounded role/region requests, Linux runtime-owned thread apply/readback, copied provider callbacks, three-region acquisition/application/observation/reverse cleanup, exact-once accounting keys, and external verify-only ownership; no complete byte-closure, hardware, latency, RT1, or RT2 claim |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |
@@ -294,7 +310,8 @@ The portable 1.2 contract is complete because the following gates are required:
 5. A complete finalized CPU frame performs zero heap allocation, hidden thread
    creation, file I/O, or blocking lock on declared RT lanes.
 6. Host-driven steps never sleep; self-paced releases use absolute deadlines.
-7. Clock, trace, numerical policy, and allocator state are isolated per runtime.
+7. Clock, trace, numerical policy, provider tokens/backing, reports, rollback,
+   and allocator state are isolated per runtime.
 8. Telemetry definitions and schemas are versioned and invariant-tested.
 9. D1 passes representative dependency/reduction workloads.
 10. The mock device backend passes saturation, timeout, loss, reset, and

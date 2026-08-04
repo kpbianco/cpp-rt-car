@@ -169,6 +169,7 @@ Executor::Executor(
     std::size_t task_scratch_bytes,
     std::size_t task_scratch_slots,
     std::size_t scratch_alignment,
+    std::span<std::byte> task_scratch_storage,
     OverloadPolicy overload_policy,
     std::span<const GraphDependency> dependencies,
     const HostExecutorAdapter* host_adapter)
@@ -180,6 +181,7 @@ Executor::Executor(
       task_scratch_slots_(task_scratch_slots),
       scratch_alignment_(scratch_alignment),
       overload_policy_(overload_policy),
+      task_scratch_storage_(task_scratch_storage),
       initial_indegree_(phase_count, 0),
       current_indegree_(
           phase_count == 0
@@ -206,9 +208,12 @@ Executor::Executor(
             task_scratch_total)) {
         throw std::bad_alloc();
     }
-    task_scratch_storage_.allocate(
-        task_scratch_total,
-        scratch_alignment_);
+    if (task_scratch_storage_.size() < task_scratch_total ||
+        (task_scratch_total != 0 &&
+         (reinterpret_cast<std::uintptr_t>(task_scratch_storage_.data()) &
+          (scratch_alignment_ - 1)) != 0)) {
+        throw std::invalid_argument("task scratch backing span is invalid");
+    }
 
     free_scratch_word_count_ =
         1 + ((task_scratch_slots_ - 1) / kScratchWordBits);

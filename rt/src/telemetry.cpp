@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <new>
+#include <stdexcept>
 #include <string_view>
 
 namespace {
@@ -183,11 +185,44 @@ const char* runtime_trace_event_name(
 namespace rt::detail {
 
 TelemetryRing::TelemetryRing(std::size_t capacity)
-    : slots_(
-          capacity == 0
-              ? nullptr
-              : std::make_unique<Slot[]>(capacity)),
-      capacity_(capacity) {}
+    : capacity_(capacity) {
+    if (capacity > std::numeric_limits<std::size_t>::max() / sizeof(Slot)) {
+        throw std::invalid_argument("trace backing size overflows");
+    }
+    const std::size_t required = capacity * sizeof(Slot);
+    owned_.allocate(required, alignof(Slot));
+    slots_ = reinterpret_cast<Slot*>(owned_.data());
+    for (std::size_t index = 0; index < capacity_; ++index) {
+        ::new (static_cast<void*>(slots_ + index)) Slot{};
+    }
+}
+
+TelemetryRing::TelemetryRing(
+    std::size_t capacity,
+    std::span<std::byte> storage)
+    : capacity_(capacity) {
+    if (capacity > std::numeric_limits<std::size_t>::max() / sizeof(Slot)) {
+        throw std::invalid_argument("trace backing size overflows");
+    }
+    const std::size_t required = capacity * sizeof(Slot);
+    if (
+        storage.size() < required ||
+        (required != 0 &&
+         (reinterpret_cast<std::uintptr_t>(storage.data()) &
+          (alignof(Slot) - 1)) != 0)) {
+        throw std::invalid_argument("trace backing span is invalid");
+    }
+    slots_ = reinterpret_cast<Slot*>(storage.data());
+    for (std::size_t index = 0; index < capacity_; ++index) {
+        ::new (static_cast<void*>(slots_ + index)) Slot{};
+    }
+}
+
+TelemetryRing::~TelemetryRing() {
+    for (std::size_t index = capacity_; index != 0; --index) {
+        slots_[index - 1].~Slot();
+    }
+}
 
 bool TelemetryRing::emit(RuntimeTraceEvent event) noexcept {
     const auto sequence =

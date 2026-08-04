@@ -617,6 +617,7 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/device_manager.cpp
     rt/src/executor.cpp
     rt/src/host_runtime.cpp
+    rt/src/memory_policy.cpp
     rt/src/mock_device.cpp
     rt/src/native_platform_preflight.cpp
     rt/src/observability_export.cpp

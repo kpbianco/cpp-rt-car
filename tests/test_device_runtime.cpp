@@ -15,6 +15,8 @@
 #include <rt/mock_device.hpp>
 #include <rt/runtime.hpp>
 
+#include "rt/src/thread_policy.hpp"
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -36,6 +38,160 @@ rt::RuntimeConfig device_config(
         std::min<std::size_t>(outstanding_capacity, 4);
     return config;
 }
+
+struct CleanupMemoryProvider {
+    static constexpr std::size_t slot_bytes = 128 * 1024;
+    struct alignas(64) Slot {
+        std::array<std::byte, slot_bytes> bytes{};
+    };
+
+    rt::MemoryProvider table() noexcept {
+        rt::MemoryProvider provider;
+        provider.capabilities =
+            rt::memory_provider_capability_bit(
+                rt::MemoryProviderCapability::policy_operations) |
+            rt::memory_provider_capability_bit(
+                rt::MemoryProviderCapability::independent_observation);
+        provider.user_data = this;
+        provider.acquire = &acquire;
+        provider.apply = &apply;
+        provider.observe = &observe;
+        provider.rollback = &rollback;
+        provider.release = &release;
+        return provider;
+    }
+
+    std::array<Slot, 3> slots{};
+    std::size_t rollback_count = 0;
+    std::size_t release_count = 0;
+
+    static rt::Status acquire(
+        void* user_data,
+        const rt::MemoryProviderAcquireRequest& request,
+        rt::MemoryProviderAllocation& allocation) noexcept {
+        auto& self = *static_cast<CleanupMemoryProvider*>(user_data);
+        const auto index = static_cast<std::size_t>(
+            request.region.value - rt::memory_region_phase_scratch.value);
+        if (index >= self.slots.size() ||
+            request.logical_bytes > self.slots[index].bytes.size() ||
+            request.required_alignment > 64) {
+            return rt::Status::resource_exhausted;
+        }
+        auto& slot = self.slots[index];
+        allocation.token = &slot;
+        allocation.allocation_base = slot.bytes.data();
+        allocation.allocation_bytes = request.logical_bytes;
+        allocation.usable_data = slot.bytes.data();
+        allocation.usable_bytes = request.logical_bytes;
+        allocation.committed_bytes = request.logical_bytes;
+        allocation.alignment = 64;
+        return rt::Status::ok;
+    }
+
+    static rt::Status apply(
+        void*,
+        void*,
+        const rt::MemoryPolicy&,
+        rt::MemoryProviderObservation& applied) noexcept {
+        applied.independently_observed = true;
+        return rt::Status::ok;
+    }
+
+    static rt::Status observe(
+        void*,
+        void*,
+        const rt::MemoryPolicy&,
+        rt::MemoryProviderObservation& observed) noexcept {
+        observed.independently_observed = true;
+        return rt::Status::ok;
+    }
+
+    static rt::Status rollback(
+        void* user_data,
+        void*,
+        const rt::MemoryPolicy&,
+        const rt::MemoryProviderObservation&) noexcept {
+        ++static_cast<CleanupMemoryProvider*>(user_data)->rollback_count;
+        return rt::Status::ok;
+    }
+
+    static void release(
+        void* user_data,
+        void*,
+        rt::RollbackIntent) noexcept {
+        ++static_cast<CleanupMemoryProvider*>(user_data)->release_count;
+    }
+};
+
+class FailingDeviceServiceThreadProvider final
+    : public rt::detail::ThreadPolicyProvider {
+public:
+    [[nodiscard]] rt::Status resolve(
+        rt::ThreadRoleId,
+        rt::PolicyApplicationMode,
+        bool active,
+        bool,
+        bool,
+        const rt::ThreadPolicy& requested,
+        const rt::ThreadPolicy& role_default,
+        rt::ThreadPolicy& resolved,
+        rt::PolicyResolutionState& resolution,
+        std::int32_t& system_error) noexcept override {
+        resolved = role_default;
+        resolved.requirement = requested.requirement;
+        resolution = active
+            ? rt::PolicyResolutionState::native_supported
+            : rt::PolicyResolutionState::inactive;
+        system_error = 0;
+        return rt::Status::ok;
+    }
+
+    [[nodiscard]] rt::Status before_create(
+        rt::ThreadRoleId,
+        std::size_t,
+        const rt::detail::ThreadRolePlan&,
+        std::int32_t& system_error) noexcept override {
+        system_error = 0;
+        return rt::Status::ok;
+    }
+
+    void apply_and_verify_current(
+        rt::ThreadRoleId role,
+        std::size_t,
+        const rt::detail::ThreadRolePlan& plan,
+        rt::detail::ThreadStartupResult& result) noexcept override {
+        result.read_back = plan.resolved;
+        result.applied = rt::PolicyOperationState::succeeded;
+        result.verified = rt::PolicyOperationState::succeeded;
+        if (role == rt::thread_role_device_service && fail) {
+            result.verified = rt::PolicyOperationState::mismatched;
+            result.verify_error = 91;
+        }
+    }
+
+    void verify_current(
+        rt::ThreadRoleId,
+        const rt::detail::ThreadRolePlan& plan,
+        rt::detail::ThreadStartupResult& result) noexcept override {
+        result.read_back = plan.resolved;
+        result.verified = rt::PolicyOperationState::succeeded;
+    }
+
+    void after_join(rt::ThreadRoleId role, std::size_t) noexcept override {
+        if (role == rt::thread_role_device_service) {
+            rollback_count_seen_at_join = memory_provider
+                ? memory_provider->rollback_count
+                : std::numeric_limits<std::size_t>::max();
+            ++device_join_count;
+        }
+    }
+
+    CleanupMemoryProvider* memory_provider = nullptr;
+    bool fail = true;
+    std::size_t device_join_count = 0;
+    std::size_t rollback_count_seen_at_join =
+        std::numeric_limits<std::size_t>::max();
+};
 
 rt::CallbackResult submit_noop(
     void*,
@@ -653,6 +809,7 @@ TEST(DeviceRuntime, FailedInitializeWithoutOwnershipCanRestart) {
 
 TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
     std::vector<std::uint32_t> calls;
+    CleanupMemoryProvider memory_provider;
     TeardownProbe probe;
     probe.calls = &calls;
     probe.register_failure = RTFW_DEVICE_STATUS_ERROR;
@@ -665,6 +822,9 @@ TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
     config.device_backend_capacity = 1;
     config.device_buffer_capacity = 2;
     ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.set_memory_provider(memory_provider.table()),
+        rt::Status::ok);
     ASSERT_EQ(
         runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
         rt::Status::ok);
@@ -695,6 +855,8 @@ TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
     EXPECT_EQ(probe.registered_buffers, 1u);
     EXPECT_EQ(probe.unregister_calls, 1u);
     EXPECT_EQ(probe.shutdown_calls, 0u);
+    EXPECT_EQ(memory_provider.rollback_count, 3u);
+    EXPECT_EQ(memory_provider.release_count, 0u);
     EXPECT_EQ(
         calls,
         (std::vector<std::uint32_t>{
@@ -712,12 +874,56 @@ TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
     EXPECT_EQ(probe.registered_buffers, 0u);
     EXPECT_EQ(probe.unregister_calls, 2u);
     EXPECT_EQ(probe.shutdown_calls, 1u);
+    EXPECT_EQ(memory_provider.release_count, 3u);
     EXPECT_EQ(
         calls,
         (std::vector<std::uint32_t>{
             TeardownProbe::unregister_event,
             TeardownProbe::shutdown_event,
         }));
+}
+
+TEST(DeviceRuntime, DeviceServicePolicyFailureRollsBackMemoryAfterJoinAndRetries) {
+    rt::MockDeviceBackend backend({4, 1, 1, 1'000});
+    CleanupMemoryProvider memory_provider;
+    FailingDeviceServiceThreadProvider thread_provider;
+    thread_provider.memory_provider = &memory_provider;
+    rt::Runtime runtime;
+    rt::detail::RuntimeThreadPolicyTestAccess::set_provider(
+        runtime,
+        thread_provider);
+    ASSERT_EQ(runtime.configure(device_config(1, 1, 4)), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.set_memory_provider(memory_provider.table()),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
+        rt::Status::ok);
+    rt::CpuMemoryPolicy policy;
+    policy.thread_policy_count = 1;
+    policy.thread_policies[0].role = rt::thread_role_device_service;
+    policy.thread_policies[0].policy.requirement =
+        rt::PolicyRequirement::strict;
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+    rt::DeviceBackendHandle backend_handle;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"device-service-policy", backend.api()},
+            backend_handle),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.start(), rt::Status::internal_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_GE(thread_provider.device_join_count, 1u);
+    EXPECT_EQ(thread_provider.rollback_count_seen_at_join, 0u);
+    EXPECT_EQ(memory_provider.rollback_count, 3u);
+    EXPECT_EQ(memory_provider.release_count, 0u);
+
+    thread_provider.fail = false;
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(memory_provider.release_count, 3u);
 }
 
 TEST(DeviceMock, BoundedQueueSaturatesWithoutBlocking) {
