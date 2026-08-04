@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
@@ -14,7 +15,24 @@
 #include "rt/src/thread_policy.hpp"
 
 #if defined(__linux__)
+#include <sys/uio.h>
 #include <unistd.h>
+#endif
+
+#if defined(__SANITIZE_ADDRESS__)
+#define RTFW_TEST_ADDRESS_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define RTFW_TEST_ADDRESS_SANITIZER 1
+#endif
+#endif
+
+#if defined(__SANITIZE_THREAD__)
+#define RTFW_TEST_THREAD_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define RTFW_TEST_THREAD_SANITIZER 1
+#endif
 #endif
 
 namespace {
@@ -93,12 +111,19 @@ enum class MalformedAllocation {
 
 class FixedProvider final {
 public:
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
     struct alignas(kPageBytes) Slot {
         std::array<std::byte, kProviderBytes> bytes{};
         rt::MemoryRegionId region{};
         std::size_t committed = 0;
         std::byte* usable = nullptr;
     };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
     rt::MemoryProvider table() noexcept {
         rt::MemoryProvider provider;
@@ -1448,13 +1473,52 @@ TEST(MemoryPolicy, NativeLinuxPageBackingIsRoundedGuardedAndObserved) {
     EXPECT_EQ(observed->resident_bytes, observed->committed_bytes);
     EXPECT_EQ(observed->locked_bytes, 0u);
     EXPECT_EQ(observed->pinned_bytes, 0u);
-    ASSERT_EQ(runtime.stop(), rt::Status::ok);
-#if GTEST_HAS_DEATH_TEST
+    ASSERT_EQ(
+        runtime.step({0, std::chrono::nanoseconds(1), std::nullopt}),
+        rt::Status::ok);
+    ASSERT_EQ(callback.calls, 1u);
+    ASSERT_NE(callback.phase_scratch, nullptr);
     auto* usable = callback.phase_scratch;
     const auto committed = observed->committed_bytes;
+    const auto usable_address = reinterpret_cast<std::uintptr_t>(usable);
+#if defined(RTFW_TEST_THREAD_SANITIZER) || \
+    defined(RTFW_TEST_ADDRESS_SANITIZER)
+    std::byte readable{};
+    ::iovec local{&readable, sizeof(readable)};
+    ::iovec usable_remote{usable, sizeof(readable)};
+    errno = 0;
+    ASSERT_EQ(
+        ::process_vm_readv(
+            ::getpid(), &local, 1, &usable_remote, 1, 0),
+        1);
+
+    ::iovec before_guard_remote{
+        reinterpret_cast<void*>(usable_address - 1),
+        sizeof(readable)};
+    errno = 0;
+    EXPECT_EQ(
+        ::process_vm_readv(
+            ::getpid(), &local, 1, &before_guard_remote, 1, 0),
+        -1);
+    EXPECT_EQ(errno, EFAULT);
+
+    ::iovec after_guard_remote{
+        reinterpret_cast<void*>(usable_address + committed),
+        sizeof(readable)};
+    errno = 0;
+    EXPECT_EQ(
+        ::process_vm_readv(
+            ::getpid(), &local, 1, &after_guard_remote, 1, 0),
+        -1);
+    EXPECT_EQ(errno, EFAULT);
+#elif GTEST_HAS_DEATH_TEST
+    auto* before_guard = reinterpret_cast<volatile std::byte*>(
+        usable_address - 1);
+    auto* after_guard = reinterpret_cast<volatile std::byte*>(
+        usable_address + committed);
     EXPECT_EXIT(
         {
-            volatile auto value = *(usable - 1);
+            volatile auto value = *before_guard;
             (void)value;
             std::_Exit(0);
         },
@@ -1462,13 +1526,14 @@ TEST(MemoryPolicy, NativeLinuxPageBackingIsRoundedGuardedAndObserved) {
         "");
     EXPECT_EXIT(
         {
-            volatile auto value = *(usable + committed);
+            volatile auto value = *after_guard;
             (void)value;
             std::_Exit(0);
         },
         ::testing::KilledBySignal(SIGSEGV),
         "");
 #endif
+    ASSERT_EQ(runtime.stop(), rt::Status::ok);
 #else
     EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
     EXPECT_EQ(runtime.state(), rt::RuntimeState::configuring);
