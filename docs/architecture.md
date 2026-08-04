@@ -68,15 +68,15 @@ same-major package and target C++ source-compatibility policy, and checks
 strict CPack staging plus content-addressed package and hardware-evidence
 manifests. These gates do not promote RT1, RT2, CUDA, or XDMA qualification.
 
-M15-01 adds the policy/resource model without changing startup execution. A
-bounded request table is validated during finalization and resolved into an
-instance-owned immutable report. Stable role rows cover the caller frame lane,
-executor workers, watchdog, device service, XDMA I/O, and additive custom
-roles. Stable memory rows project the existing plan exactly once and separately
-report borrowed/backend bytes and excluded stacks/providers. External host and
-vendor roles are verify-only, and opaque XDMA cardinality is explicitly
-unknown rather than inferred through device ABI v1. Native apply/verify and
-memory residency transactions remain later M15 work. See the
+M15-01 added the policy/resource model. M15-02 resolves platform policy during
+finalization, then creates runtime-owned watchdog, executor, and device lanes
+in a held startup transaction. Each lane applies and reads back native state,
+publishes one result, and waits for a global commit or abort. Device backend
+initialization follows successful lane verification. Strict failure aborts and
+joins in reverse startup order before host work can run. Caller, host-adapter,
+XDMA, and vendor roles remain verify-only, with opaque cardinality left unknown.
+Stable memory rows still project the plan exactly once; memory residency
+transactions remain later M15 work. See the
 [CPU/memory policy contract](cpu_memory_policy.md).
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
@@ -183,9 +183,9 @@ M11 adds the borrowed host job-system policy and stable distribution boundary.
 M12 names the portable RT0 support tuples and makes the 1.x compatibility,
 release archive, digest-manifest, and independent-device-isolation gates
 machine-verifiable.
-M15-01 adds the immutable CPU/memory policy and inventory layer in front of
-those unchanged lifecycle components; it resolves portably without applying
-OS policy.
+M15-02 extends the immutable CPU/memory inventory with per-role native thread
+apply/readback and a fail-closed startup barrier without changing the C or
+device ABI. Memory policy remains resolution/reporting only.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),

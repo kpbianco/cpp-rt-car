@@ -10,7 +10,6 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <rt/device.hpp>
@@ -81,10 +80,16 @@ public:
     DeviceManager(const DeviceManager&) = delete;
     DeviceManager& operator=(const DeviceManager&) = delete;
 
-    [[nodiscard]] Status start(
+    [[nodiscard]] Status start_lane(
         Executor& executor,
         DeviceEventObserver observer,
-        void* observer_data) noexcept;
+        void* observer_data,
+        ThreadPolicyProvider& provider,
+        ThreadStartupGate& gate,
+        const ThreadRolePlan& plan) noexcept;
+    [[nodiscard]] Status initialize() noexcept;
+    void wait_started() const noexcept;
+    void stop_lane() noexcept;
     [[nodiscard]] Status stop() noexcept;
     [[nodiscard]] bool cleanup_pending() const noexcept;
 
@@ -101,6 +106,9 @@ public:
     [[nodiscard]] Status reset(std::size_t backend_index) noexcept;
 
     [[nodiscard]] DeviceManagerStats stats() const noexcept;
+    [[nodiscard]] const ThreadStartupResult& startup_result() const noexcept {
+        return startup_result_;
+    }
     [[nodiscard]] std::size_t backend_count() const noexcept {
         return backends_.size();
     }
@@ -131,6 +139,7 @@ private:
         std::size_t backend_index) const noexcept;
     [[nodiscard]] bool has_backend_ownership() const noexcept;
     void service_loop() noexcept;
+    static void service_entry(void* manager) noexcept;
     void process_completion(
         std::size_t backend_index,
         const rtfw_device_completion& completion) noexcept;
@@ -154,7 +163,9 @@ private:
     std::size_t outstanding_capacity_ = 0;
     std::unique_ptr<rtfw_device_completion[]> completion_buffer_;
     std::size_t completion_batch_ = 0;
-    std::thread service_thread_;
+    NativeThread service_thread_;
+    ThreadStartupResult startup_result_{};
+    WaitStrategy wait_strategy_ = WaitStrategy::park;
     Executor* executor_ = nullptr;
     DeviceEventObserver observer_ = nullptr;
     void* observer_data_ = nullptr;

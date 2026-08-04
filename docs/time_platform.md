@@ -109,18 +109,19 @@ behavior, workload bounds, or measured deadline distributions. Those remain
 deployment qualification requirements in the
 [product contract](product_contract.md).
 
-## M15-01 thread policy model
+## M15-02 thread policy application
 
 The additive C++ CPU/memory policy model inventories the caller frame lane,
 runtime-owned executor/watchdog/device-service lanes, and external XDMA/vendor
-roles. Portable resolution records current yield/park/inherited behavior but
-does not set affinity, scheduling, NUMA placement, stack/guard state, or thread
-names. Every strict request is rejected at finalization until the later M15
-startup transaction exists. Host-adapter and vendor lanes remain
-external and verify-only. See [the policy contract](cpu_memory_policy.md).
+roles. Linux finalization resolves only process-available affinity, scheduler,
+NUMA CPU selection, stack/guard, bounded name, and wait behavior without
+mutation. Startup applies and reads back runtime-owned lanes before a shared
+gate commits. The caller frame is read back only; host-adapter and vendor lanes
+remain external and verify-only. Strict unsupported or mismatched policy fails
+closed before callbacks. See [the policy contract](cpu_memory_policy.md).
 
-Neither a requested/resolved policy report nor portable policy tests establish
-RT1 or RT2.
+Neither a requested/resolved/applied/read-back report nor named-host functional
+tests establish RT1 or RT2.
 
 ## C ABI
 

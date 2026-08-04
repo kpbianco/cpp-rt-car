@@ -625,6 +625,7 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/runtime_profile.cpp
     rt/src/snapshot_codec.cpp
     rt/src/telemetry.cpp
+    rt/src/thread_policy.cpp
     rt/src/watchdog_monitor.cpp
 )
 

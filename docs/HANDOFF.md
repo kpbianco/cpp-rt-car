@@ -3,8 +3,8 @@
 ## Restart context
 
 RTFW 1.2.1 is a portable RT0 C++20 runtime. M14 and M14.1 are merged. The
-repository has now been connected to the `portfolio-control` assurance workflow,
-and M15-01 is the active bounded implementation contract.
+repository is connected to the `portfolio-control` assurance workflow, and
+M15-02 is the active bounded implementation contract.
 
 ## Read first
 
@@ -24,11 +24,11 @@ Control plane:
 
 ## Exact next objective
 
-Implement M15-01: additive C++ policy/report types, complete thread and
-memory-category inventories, strict finalization validation, portable no-op
-resolution, and exact accounting identities. Do not apply native affinity,
-scheduling, NUMA, locking, pinning, huge pages, or custom-provider allocation in
-this batch.
+Complete M15-02: resolve policy without mutation at finalization, apply and
+read back runtime-owned Linux lanes behind a startup barrier, keep caller and
+external lanes verify-only, and preserve reverse rollback and M14.1 cleanup
+recovery. Do not add memory locking, pinning, huge pages, memory binding, or a
+custom memory provider.
 
 ## Protected decisions
 
@@ -53,6 +53,6 @@ determinism, package, archive, and release-contract matrix.
 
 ## Completion output
 
-Create `docs/evidence/M15-01-<date>.md` with acceptance mapping, commands,
+Create `docs/evidence/M15-02-<date>.md` with acceptance mapping, commands,
 results, changed invariants, compatibility status, residual risks, and all
-unperformed native/hardware validation.
+unperformed hardware and qualification validation.

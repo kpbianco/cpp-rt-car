@@ -772,7 +772,8 @@ struct Runtime::Impl {
           preflight(
               injected_preflight
                   ? injected_preflight
-                  : &owned_preflight) {
+                  : &owned_preflight),
+          thread_policy(&owned_thread_policy) {
         error[0] = '\0';
     }
 
@@ -1362,6 +1363,10 @@ struct Runtime::Impl {
     RuntimeClock* clock;
     detail::NativePlatformPreflightProbe owned_preflight;
     PlatformPreflightProbe* preflight;
+    detail::NativeThreadPolicyProvider owned_thread_policy;
+    detail::ThreadPolicyProvider* thread_policy;
+    detail::ThreadStartupGate thread_startup_gate;
+    detail::ThreadStartupResult frame_startup_result;
     RuntimeConfig config{};
     CpuMemoryPolicy cpu_memory_policy{};
     CpuMemoryPolicyReport cpu_memory_policy_report{};
@@ -1417,6 +1422,15 @@ Runtime::Runtime(
     RuntimeClock& clock,
     PlatformPreflightProbe& preflight)
     : impl_(std::make_unique<Impl>(&clock, &preflight)) {}
+
+void detail::RuntimeThreadPolicyTestAccess::set_provider(
+    Runtime& runtime,
+    detail::ThreadPolicyProvider& provider) noexcept {
+    if (runtime.impl_ &&
+        runtime.impl_->state == RuntimeState::configuring) {
+        runtime.impl_->thread_policy = &provider;
+    }
+}
 
 Runtime::~Runtime() = default;
 Runtime::Runtime(Runtime&&) noexcept = default;
@@ -2414,6 +2428,7 @@ Status Runtime::finalize() noexcept {
         impl_->config,
         memory_plan,
         registered_device_buffer_bytes,
+        *impl_->thread_policy,
         cpu_memory_policy_report,
         policy_diagnostic);
     if (policy_status != Status::ok) {
@@ -2568,44 +2583,195 @@ Status Runtime::start() noexcept {
         impl_->preflight_report.passed = true;
     }
 
-    impl_->degradation_level.store(0, std::memory_order_release);
-    if (impl_->config.watchdog_timeout_ns != 0) {
-        const auto watchdog_status = impl_->watchdog.start();
-        if (watchdog_status != Status::ok) {
-            return impl_->fail(
-                watchdog_status,
-                "failed to start watchdog service lane");
+    const auto find_thread_report =
+        [&](ThreadRoleId role) -> ThreadPolicyReport* {
+            for (std::size_t index = 0;
+                 index < impl_->cpu_memory_policy_report.thread_count;
+                 ++index) {
+                auto& row = impl_->cpu_memory_policy_report.threads[index];
+                if (row.role == role) {
+                    return &row;
+                }
+            }
+            return nullptr;
+        };
+    const auto strict_failed = [](const ThreadPolicyReport& row) {
+        if (row.requested.requirement != PolicyRequirement::strict) {
+            return false;
         }
-        impl_->watchdog_started = true;
+        if (row.application_mode == PolicyApplicationMode::verify_only) {
+            return row.verified != PolicyOperationState::succeeded;
+        }
+        return row.applied != PolicyOperationState::succeeded ||
+               row.verified != PolicyOperationState::succeeded;
+    };
+    for (std::size_t index = 0;
+         index < impl_->cpu_memory_policy_report.thread_count;
+         ++index) {
+        detail::reset_thread_report_operations(
+            impl_->cpu_memory_policy_report.threads[index]);
     }
 
-    const auto start_status = impl_->executor->start();
-    if (start_status != Status::ok) {
-        if (impl_->watchdog_started) {
+    auto* frame_report = find_thread_report(thread_role_frame);
+    if (!frame_report) {
+        return impl_->fail(
+            Status::internal_error,
+            "finalized thread policy inventory has no frame role");
+    }
+    const auto frame_plan = detail::make_thread_role_plan(*frame_report);
+    impl_->frame_startup_result.reset();
+    impl_->thread_policy->verify_current(
+        thread_role_frame,
+        frame_plan,
+        impl_->frame_startup_result);
+    impl_->frame_startup_result.publish();
+    detail::aggregate_thread_startup_results(
+        *frame_report,
+        &impl_->frame_startup_result,
+        1);
+    if (strict_failed(*frame_report)) {
+        return impl_->fail(
+            Status::internal_error,
+            "strict caller-frame policy did not match native readback");
+    }
+
+    for (std::size_t index = 0;
+         index < impl_->cpu_memory_policy_report.thread_count;
+         ++index) {
+        auto& row = impl_->cpu_memory_policy_report.threads[index];
+        if (row.role == thread_role_frame ||
+            row.application_mode != PolicyApplicationMode::verify_only ||
+            row.resolution_error == 0) {
+            continue;
+        }
+        row.verified = PolicyOperationState::unsupported;
+        row.verify_error = row.resolution_error;
+    }
+
+    auto* executor_report = find_thread_report(thread_role_executor_worker);
+    auto* watchdog_report = find_thread_report(thread_role_watchdog);
+    auto* device_report = find_thread_report(thread_role_device_service);
+    if (!executor_report || !watchdog_report || !device_report) {
+        return impl_->fail(
+            Status::internal_error,
+            "finalized thread policy inventory is incomplete");
+    }
+    const auto executor_plan =
+        detail::make_thread_role_plan(*executor_report);
+    const auto watchdog_plan =
+        detail::make_thread_role_plan(*watchdog_report);
+    const auto device_plan =
+        detail::make_thread_role_plan(*device_report);
+
+    impl_->thread_startup_gate.reset();
+    impl_->degradation_level.store(0, std::memory_order_release);
+    const auto rollback_startup =
+        [&](Status failure,
+            const char* diagnostic,
+            bool retry_device_cleanup = true) {
+            impl_->thread_startup_gate.abort();
+            Status cleanup_status = Status::ok;
+            if (impl_->devices) {
+                if (retry_device_cleanup) {
+                    cleanup_status = impl_->devices->stop();
+                } else {
+                    impl_->devices->stop_lane();
+                }
+            }
+            impl_->executor->stop();
             impl_->watchdog.stop();
             impl_->watchdog_started = false;
+            impl_->stop_pending = impl_->devices &&
+                (cleanup_status != Status::ok ||
+                 impl_->devices->cleanup_pending());
+            return impl_->fail(
+                failure,
+                impl_->stop_pending
+                    ? "thread-policy startup failed and device rollback is pending; retry stop"
+                    : diagnostic);
+        };
+
+    if (impl_->config.watchdog_timeout_ns != 0) {
+        const auto status = impl_->watchdog.start(
+            *impl_->thread_policy,
+            impl_->thread_startup_gate,
+            watchdog_plan);
+        detail::aggregate_thread_startup_results(
+            *watchdog_report,
+            &impl_->watchdog.startup_result(),
+            1);
+        if (status != Status::ok) {
+            return rollback_startup(
+                status,
+                "failed to create watchdog service lane");
         }
-        return impl_->fail(start_status, "failed to start executor policy");
+        impl_->watchdog_started = true;
+        if (strict_failed(*watchdog_report)) {
+            return rollback_startup(
+                Status::internal_error,
+                "strict watchdog thread policy failed apply or readback");
+        }
     }
+
+    const auto executor_status = impl_->executor->start(
+        *impl_->thread_policy,
+        impl_->thread_startup_gate,
+        executor_plan);
+    if (impl_->config.executor_policy != ExecutorPolicy::host_adapter) {
+        detail::aggregate_thread_startup_results(
+            *executor_report,
+            impl_->executor->startup_results(),
+            impl_->config.worker_count);
+    }
+    if (executor_status != Status::ok) {
+        return rollback_startup(
+            executor_status,
+            "failed to create executor worker lane");
+    }
+    if (strict_failed(*executor_report)) {
+        return rollback_startup(
+            Status::internal_error,
+            "strict executor thread policy failed apply or readback");
+    }
+
     if (impl_->devices) {
-        const auto device_status = impl_->devices->start(
+        const auto device_lane_status = impl_->devices->start_lane(
             *impl_->executor,
             &Impl::observe_device_event,
-            impl_.get());
-        if (device_status != Status::ok) {
-            impl_->executor->stop();
-            if (impl_->watchdog_started) {
-                impl_->watchdog.stop();
-                impl_->watchdog_started = false;
-            }
-            impl_->stop_pending =
-                impl_->devices->cleanup_pending();
-            return impl_->fail(
-                device_status,
-                impl_->stop_pending
-                    ? "failed to start device service lane and rollback is pending; retry stop"
-                    : "failed to start device service lane");
+            impl_.get(),
+            *impl_->thread_policy,
+            impl_->thread_startup_gate,
+            device_plan);
+        detail::aggregate_thread_startup_results(
+            *device_report,
+            &impl_->devices->startup_result(),
+            1);
+        if (device_lane_status != Status::ok) {
+            return rollback_startup(
+                device_lane_status,
+                "failed to create device service lane");
         }
+        if (strict_failed(*device_report)) {
+            return rollback_startup(
+                Status::internal_error,
+                "strict device-service thread policy failed apply or readback");
+        }
+        const auto initialize_status = impl_->devices->initialize();
+        if (initialize_status != Status::ok) {
+            return rollback_startup(
+                initialize_status,
+                "failed to initialize device backends after thread-policy verification",
+                false);
+        }
+    }
+
+    impl_->thread_startup_gate.commit();
+    if (impl_->watchdog_started) {
+        impl_->watchdog.wait_started();
+    }
+    impl_->executor->wait_started();
+    if (impl_->devices) {
+        impl_->devices->wait_started();
     }
     impl_->stop_pending = false;
     impl_->state = RuntimeState::running;

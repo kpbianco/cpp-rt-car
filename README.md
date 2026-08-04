@@ -25,7 +25,7 @@ versioned observability/replay, and asynchronous device integration.
 | Host job-system adapter | Implemented RT0 surface | A third executor policy submits the same immutable graph/range/reduction jobs to a borrowed fixed-capacity engine queue with explicit runtime scratch and generation-tagged completion context |
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
-| CPU/memory policy model | Implemented M15-01 RT0 model | Additive bounded C++ requests and immutable requested/resolved reports inventory every current thread role and memory accounting category; portable resolution performs no native mutation and makes no RT1/RT2 claim |
+| CPU/memory policy model | Implemented through M15-02 at RT0 | Additive bounded C++ reports inventory every role/category; Linux runtime-owned lanes apply/read back policy behind fail-closed startup, while external roles remain verify-only and memory residency remains unapplied |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -231,8 +231,8 @@ claiming a qualified deployment. The existing
 `SimCore` demo and legacy scheduler components remain outside that target
 path. M12 adds the named support matrix, cross-instance device-isolation gate,
 1.x compatibility policy, and checked package-manifest workflow. The
-[M15-01 CPU/memory policy model](docs/cpu_memory_policy.md) adds strict
-finalization validation, portable no-op resolution, stable role/category
+[M15 CPU/memory policy model](docs/cpu_memory_policy.md) adds strict
+finalization validation, Linux runtime-owned thread apply/readback, stable role/category
 identities, and external verify-only ownership without applying native host
 policy or changing callbacks. The
 [architecture guide](docs/architecture.md) distinguishes supported and

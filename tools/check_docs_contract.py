@@ -263,6 +263,8 @@ def check_runtime_contract() -> None:
     runtime_source = read("rt/src/host_runtime.cpp")
     resource_policy_header = read("rt/src/resource_policy.hpp")
     resource_policy_source = read("rt/src/resource_policy.cpp")
+    thread_policy_header = read("rt/src/thread_policy.hpp")
+    thread_policy_source = read("rt/src/thread_policy.cpp")
     profile_header = read("rt/include/rt/profile.hpp")
     profile_source = read("rt/src/runtime_profile.cpp")
     profile_test = read("tests/runtime_profile_tests.cpp")
@@ -311,6 +313,7 @@ def check_runtime_contract() -> None:
     executor_test = read("tests/test_executor.cpp")
     memory_test = read("tests/test_memory_plan.cpp")
     cpu_memory_policy_test = read("tests/test_cpu_memory_policy.cpp")
+    thread_policy_test = read("tests/test_thread_policy.cpp")
     periodic_test = read("tests/test_periodic_runtime.cpp")
     preflight_test = read("tests/test_platform_preflight.cpp")
     observability_test = read("tests/test_observability.cpp")
@@ -639,6 +642,9 @@ def check_runtime_contract() -> None:
         if token not in graph_source:
             fail(f"rt/src/compiled_graph.cpp: missing M2 compiler evidence {token!r}")
 
+    normalized_cpu_memory_policy_doc = " ".join(
+        cpu_memory_policy_doc.lower().split()
+    )
     for phrase in (
         "registration index",
         "Read | Read",
@@ -802,14 +808,14 @@ def check_runtime_contract() -> None:
                 f"native mutation {forbidden!r}"
             )
     for phrase in (
-        "portable RT0 modeling and validation only",
+        "fail-closed startup transaction",
         "exactly one row for each stable category",
         "externally owned and verify-only",
-        "do not establish native policy application",
+        "named-host Linux native functional application/readback only",
         "RT1",
         "RT2",
     ):
-        if phrase.lower() not in cpu_memory_policy_doc.lower():
+        if phrase.lower() not in normalized_cpu_memory_policy_doc:
             fail(f"docs/cpu_memory_policy.md: missing M15-01 phrase {phrase!r}")
     for test_name in (
         "DefaultsInventoryEveryStableRoleAndMemoryIdentity",
@@ -829,6 +835,49 @@ def check_runtime_contract() -> None:
     ):
         if token not in cmake and token not in tests_cmake:
             fail(f"CMake M15-01 integration is missing {token!r}")
+
+    for token in (
+        "class ThreadStartupGate",
+        "class ThreadPolicyProvider",
+        "class NativeThread",
+        "aggregate_thread_startup_results(",
+    ):
+        if token not in thread_policy_header and token not in thread_policy_source:
+            fail(f"M15-02 thread policy implementation is missing {token!r}")
+    for token in (
+        "pthread_setaffinity_np(",
+        "pthread_setschedparam(",
+        "pthread_setname_np(",
+        "pthread_getaffinity_np(",
+        "pthread_getschedparam(",
+        "pthread_getattr_np(",
+        "PolicyOperationState::mismatched",
+    ):
+        if token not in thread_policy_source:
+            fail(f"M15-02 native apply/readback is missing {token!r}")
+    for token in (
+        "thread_startup_gate.commit()",
+        "thread_startup_gate.abort()",
+        "failed to initialize device backends after thread-policy verification",
+    ):
+        if token not in runtime_source:
+            fail(f"M15-02 startup transaction is missing {token!r}")
+    for test_name in (
+        "AppliesEveryRuntimeOwnedInstanceBeforeCommitAndJoinsReverse",
+        "StrictFailuresRollbackWithoutCallbacksAndCanRecover",
+        "BestEffortFailureRemainsObservableAndContinues",
+        "SpinYieldAndParkWakeForWorkAndStop",
+        "StrictExternalAndUnavailableRequestsFailDuringFinalize",
+        "LinuxAppliesAndReadsBackAvailableNativeFields",
+    ):
+        if test_name not in thread_policy_test:
+            fail(f"tests/test_thread_policy.cpp: missing M15-02 gate {test_name!r}")
+    for token in (
+        "rt/src/thread_policy.cpp",
+        "test_thread_policy.cpp",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"CMake M15-02 integration is missing {token!r}")
 
     for token in (
         "Runtime::run_periodic(",

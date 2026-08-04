@@ -2,13 +2,13 @@
 
 #include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
+#include "thread_policy.hpp"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
-#include <thread>
 #include <vector>
 
 #include <rt/runtime.hpp>
@@ -43,8 +43,15 @@ public:
     Executor(const Executor&) = delete;
     Executor& operator=(const Executor&) = delete;
 
-    [[nodiscard]] Status start() noexcept;
+    [[nodiscard]] Status start(
+        ThreadPolicyProvider& provider,
+        ThreadStartupGate& gate,
+        const ThreadRolePlan& plan) noexcept;
     void stop() noexcept;
+    void wait_started() const noexcept;
+    [[nodiscard]] const ThreadStartupResult* startup_results() const noexcept {
+        return startup_results_.get();
+    }
 
     [[nodiscard]] Status run(
         PhaseTaskCallback callback,
@@ -126,6 +133,11 @@ private:
 
     class Queue;
 
+    struct WorkerEntry {
+        Executor* executor = nullptr;
+        std::size_t worker_index = 0;
+    };
+
     [[nodiscard]] Status submit(
         WorkItem item,
         std::size_t target_worker) noexcept;
@@ -158,6 +170,7 @@ private:
         std::size_t phase_index,
         Status status) noexcept;
     void worker_loop(std::size_t worker_index) noexcept;
+    static void worker_entry(void* entry) noexcept;
     void cancel_graph(Status status, std::size_t failed_phase) noexcept;
     [[nodiscard]] std::size_t static_worker(
         std::size_t phase_index,
@@ -173,7 +186,11 @@ private:
     std::size_t scratch_alignment_;
     OverloadPolicy overload_policy_;
     std::vector<std::unique_ptr<Queue>> queues_;
-    std::vector<std::thread> threads_;
+    std::unique_ptr<NativeThread[]> threads_;
+    std::unique_ptr<ThreadStartupResult[]> startup_results_;
+    std::unique_ptr<WorkerEntry[]> worker_entries_;
+    std::unique_ptr<std::atomic<std::uint64_t>[]> wake_sequences_;
+    WaitStrategy wait_strategy_ = WaitStrategy::yield;
     HostExecutorAdapter host_adapter_{};
     std::unique_ptr<HostWorkSlot[]> host_work_slots_;
     AlignedStorage task_scratch_storage_;

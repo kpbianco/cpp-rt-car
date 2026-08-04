@@ -268,8 +268,36 @@ TEST(PeriodicRuntime, WatchdogIsOneShotAndDegradesOnTheFrameThread) {
 }
 
 TEST(PeriodicRuntime, WatchdogServiceDetectsExpiryWithoutRuntimeClockAdvance) {
+    rt::detail::NativeThreadPolicyProvider provider;
+    rt::detail::ThreadStartupGate gate;
+    rt::ThreadPolicy requested;
+    rt::ThreadPolicy role_default;
+    role_default.wait_strategy = rt::WaitStrategy::park;
+    rt::ThreadPolicy resolved;
+    rt::PolicyResolutionState resolution{};
+    std::int32_t system_error = 0;
+    ASSERT_EQ(
+        provider.resolve(
+            rt::thread_role_watchdog,
+            rt::PolicyApplicationMode::apply_and_verify,
+            true,
+            true,
+            false,
+            requested,
+            role_default,
+            resolved,
+            resolution,
+            system_error),
+        rt::Status::ok);
+    rt::detail::ThreadRolePlan plan{
+        rt::thread_role_watchdog,
+        requested,
+        resolved,
+        resolution};
     rt::detail::WatchdogMonitor watchdog;
-    ASSERT_EQ(watchdog.start(), rt::Status::ok);
+    ASSERT_EQ(watchdog.start(provider, gate, plan), rt::Status::ok);
+    gate.commit();
+    watchdog.wait_started();
     const auto token = watchdog.arm(
         std::numeric_limits<std::uint64_t>::max(),
         5'000'000);

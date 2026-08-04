@@ -104,9 +104,11 @@ if (SIM_GTEST_AVAILABLE)
         )
     endif()
 
-    # M15-01 is part of the supported runtime and must remain in both the
+    # M15 CPU/memory policy is part of the supported runtime and must remain in both the
     # default and experimental-enabled GoogleTest configurations.
-    list(APPEND TEST_SOURCES test_cpu_memory_policy.cpp)
+    list(APPEND TEST_SOURCES
+        test_cpu_memory_policy.cpp
+        test_thread_policy.cpp)
 
     if (RTFW_BUILD_EXPERIMENTAL AND
         ENABLE_RAPIDCHECK AND TARGET rapidcheck_gtest)
@@ -179,6 +181,33 @@ if (SIM_GTEST_AVAILABLE)
 
     add_test(NAME simcore_all COMMAND simcore_tests)
     set_tests_properties(simcore_all PROPERTIES TIMEOUT 180)
+
+    add_executable(
+        rtfw_thread_policy_rollback_test test_thread_policy.cpp)
+    target_link_libraries(
+        rtfw_thread_policy_rollback_test
+        PRIVATE rtfw_runtime ${SIM_GTEST_LIBRARIES})
+    target_include_directories(
+        rtfw_thread_policy_rollback_test
+        PRIVATE
+            ${RTFW_PROJECT_SOURCE_DIR}/include
+            ${RTFW_PROJECT_SOURCE_DIR}/tests
+            ${RTFW_PROJECT_SOURCE_DIR})
+    target_compile_definitions(
+        rtfw_thread_policy_rollback_test
+        PRIVATE RTFW_STANDALONE_ROLLBACK_TEST=1)
+    rtfw_enable_project_warnings(rtfw_thread_policy_rollback_test)
+    add_test(
+        NAME thread_policy_rollback
+        COMMAND rtfw_thread_policy_rollback_test
+            --gtest_filter=ThreadPolicy.StrictFailureJoinsCreatedLanesInReverseBeforeReturning)
+    add_test(
+        NAME thread_policy_recovery
+        COMMAND rtfw_thread_policy_rollback_test
+            --gtest_filter=ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover)
+    set_tests_properties(
+        thread_policy_rollback thread_policy_recovery
+        PROPERTIES TIMEOUT 30)
 
     if (SIM_ENABLE_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
       add_compile_options(-mavx2 -mfma)

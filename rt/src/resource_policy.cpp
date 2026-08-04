@@ -256,17 +256,6 @@ bool valid_memory_policy(const rt::MemoryPolicy& policy) noexcept {
     return true;
 }
 
-bool thread_policy_is_noop(const rt::ThreadPolicy& policy) noexcept {
-    return policy.cpu_set.count == 0 &&
-           policy.scheduling_class == rt::SchedulingClass::inherit &&
-           policy.scheduling_priority == 0 &&
-           policy.numa_node == -1 &&
-           policy.wait_strategy == rt::WaitStrategy::inherit &&
-           policy.stack_bytes == 0 &&
-           policy.guard_bytes == 0 &&
-           policy.name.front() == '\0';
-}
-
 bool memory_policy_is_noop(const rt::MemoryPolicy& policy) noexcept {
     return policy.provider == rt::MemoryProviderOwnership::inherit &&
            policy.alignment == 0 &&
@@ -381,25 +370,6 @@ const rt::MemoryPolicyRequest* find_memory_request(
     return nullptr;
 }
 
-void finish_thread_report(
-    const rt::ThreadPolicyRequest* request,
-    rt::ThreadPolicyReport& report) noexcept {
-    if (request) {
-        report.requested = request->policy;
-        report.resolution = thread_policy_is_noop(request->policy)
-            ? (report.application_mode == rt::PolicyApplicationMode::verify_only
-                ? rt::PolicyResolutionState::external_verify_only
-                : rt::PolicyResolutionState::portable_noop)
-            : rt::PolicyResolutionState::unsupported_best_effort;
-    } else if (report.logical_instance_count == 0 &&
-               report.cardinality_known) {
-        report.resolution = rt::PolicyResolutionState::inactive;
-    } else if (report.application_mode ==
-               rt::PolicyApplicationMode::verify_only) {
-        report.resolution = rt::PolicyResolutionState::external_verify_only;
-    }
-}
-
 void finish_memory_report(
     const rt::MemoryPolicyRequest* request,
     rt::MemoryPolicyReport& report) noexcept {
@@ -423,6 +393,7 @@ Status build_cpu_memory_policy_report(
     const RuntimeConfig& config,
     const MemoryPlan& memory_plan,
     std::size_t registered_device_buffer_bytes,
+    ThreadPolicyProvider& thread_policy_provider,
     CpuMemoryPolicyReport& report,
     const char*& diagnostic) noexcept {
     report = {};
@@ -446,10 +417,6 @@ Status build_cpu_memory_policy_report(
                 diagnostic = "thread policy contains a duplicate role";
                 return Status::invalid_config;
             }
-        }
-        if (request.policy.requirement == PolicyRequirement::strict) {
-            diagnostic = "strict thread policy is unsupported before native application";
-            return Status::invalid_config;
         }
     }
     for (std::size_t index = 0;
@@ -531,6 +498,7 @@ Status build_cpu_memory_policy_report(
         }
     }
 
+    Status thread_resolution_status = Status::ok;
     const auto add_thread =
         [&](ThreadRoleId role,
             std::string_view name,
@@ -548,12 +516,22 @@ Status build_cpu_memory_policy_report(
             row.application_mode = mode;
             row.logical_instance_count = count;
             row.cardinality_known = cardinality_known;
-            row.resolved = resolved_thread_policy(
+            const auto role_default = resolved_thread_policy(
                 role,
                 mode == PolicyApplicationMode::apply_and_verify);
-            finish_thread_report(
-                find_thread_request(policy, role),
-                row);
+            const auto* request = find_thread_request(policy, role);
+            row.requested = request ? request->policy : ThreadPolicy{};
+            thread_resolution_status = thread_policy_provider.resolve(
+                role,
+                mode,
+                count != 0 || !cardinality_known,
+                role == thread_role_frame,
+                request != nullptr,
+                row.requested,
+                role_default,
+                row.resolved,
+                row.resolution,
+                row.resolution_error);
         };
 
     add_thread(
@@ -563,6 +541,10 @@ Status build_cpu_memory_policy_report(
         PolicyApplicationMode::verify_only,
         1,
         true);
+    if (thread_resolution_status != Status::ok) {
+        diagnostic = "strict frame thread policy is unsupported or unavailable";
+        return thread_resolution_status;
+    }
     add_thread(
         thread_role_executor_worker,
         "thread.executor-worker",
@@ -574,6 +556,10 @@ Status build_cpu_memory_policy_report(
             : PolicyApplicationMode::verify_only,
         config.worker_count,
         true);
+    if (thread_resolution_status != Status::ok) {
+        diagnostic = "strict executor thread policy is unsupported or unavailable";
+        return thread_resolution_status;
+    }
     add_thread(
         thread_role_watchdog,
         "thread.watchdog",
@@ -581,6 +567,10 @@ Status build_cpu_memory_policy_report(
         PolicyApplicationMode::apply_and_verify,
         config.watchdog_timeout_ns == 0 ? 0 : 1,
         true);
+    if (thread_resolution_status != Status::ok) {
+        diagnostic = "strict watchdog thread policy is unsupported or inactive";
+        return thread_resolution_status;
+    }
     add_thread(
         thread_role_device_service,
         "thread.device-service",
@@ -588,6 +578,10 @@ Status build_cpu_memory_policy_report(
         PolicyApplicationMode::apply_and_verify,
         memory_plan.device_backend_count == 0 ? 0 : 1,
         true);
+    if (thread_resolution_status != Status::ok) {
+        diagnostic = "strict device-service thread policy is unsupported or inactive";
+        return thread_resolution_status;
+    }
     add_thread(
         thread_role_xdma_io,
         "thread.xdma-io",
@@ -595,6 +589,10 @@ Status build_cpu_memory_policy_report(
         PolicyApplicationMode::verify_only,
         0,
         false);
+    if (thread_resolution_status != Status::ok) {
+        diagnostic = "strict external XDMA thread policy is unsupported";
+        return thread_resolution_status;
+    }
 
     for (std::size_t index = 0;
          index < policy.thread_policy_count;
@@ -613,8 +611,23 @@ Status build_cpu_memory_policy_report(
         row.application_mode = PolicyApplicationMode::verify_only;
         row.logical_instance_count = 0;
         row.cardinality_known = false;
-        row.resolved = resolved_thread_policy(request.role, false);
-        finish_thread_report(&request, row);
+        row.requested = request.policy;
+        const auto role_default = resolved_thread_policy(request.role, false);
+        thread_resolution_status = thread_policy_provider.resolve(
+            request.role,
+            PolicyApplicationMode::verify_only,
+            true,
+            false,
+            true,
+            request.policy,
+            role_default,
+            row.resolved,
+            row.resolution,
+            row.resolution_error);
+        if (thread_resolution_status != Status::ok) {
+            diagnostic = "strict external custom thread policy is unsupported";
+            return thread_resolution_status;
+        }
     }
 
     const auto add_memory =
