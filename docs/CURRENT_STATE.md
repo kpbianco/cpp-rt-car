@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-05
-Batch baseline: `8dabeb3747a20717ce02c99a3d3c0d9deb1a3532`
+Batch baseline: `34f0752596d84ef1f98a8a0d544861bda4935f3f`
 
 ## Product state
 
@@ -12,7 +12,7 @@ Batch baseline: `8dabeb3747a20717ce02c99a3d3c0d9deb1a3532`
 - License: Apache-2.0.
 - M14, M14.1, and M15 are complete at the audited baseline.
 - M16 is active and remains incomplete. The current approved implementation
-  contract is `contracts/active-batch.yaml` (`M16-02`).
+  contract is `contracts/active-batch.yaml` (`M16-03`).
 
 ## M16-01 and M16-02 implementation
 
@@ -52,14 +52,39 @@ return typed capacity, not-ready, stale, or malformed results without waiting,
 allocation, searching, or substituting another generation. Runtime dispatch
 does not invoke these stores yet.
 
+## M16-03 implementation
+
+M16-03 adds an opt-in configuring-only C++ `RateExecutionPolicy`. Without that
+policy, the M16-01/M16-02 model retains exact reference-only identity and
+complete-graph once-per-frame dispatch. With it, finalization accepts only D0,
+mandatory CPU domains with positive feasible budgets/deadlines and same-domain
+ordinary dependencies. A conservative serialized integer admission pass checks
+every reference record and the idle supercycle boundary before runtime-side
+provider, thread, device, callback, or checkpoint effects.
+
+Active steps require positive half-open `[cursor, cursor + delta)` windows and
+contiguous nominal timestamps. Due reference records repeat by checked
+supercycle arithmetic and execute serially through the existing executor.
+Per-domain skip, bounded catch-up, hold, degrade, and fail actions are explicit;
+aggregate counting handles large omitted prefixes, and the positive global
+record cap rejects overflow without backlog or spill execution. Periodic mode
+passes its absolute release as the nominal timestamp.
+
+Active callbacks receive a nullable rate-release view. Producers stage one
+exact-size payload per outgoing channel, and successful releases publish
+complete generations through the existing two-slot stores. Consumers copy the
+exact current initial, produced, or held generation with age/freshness results.
+The cursor, nominal epoch, degradation/fault state, generation aliases, and
+committed channel bytes are retained in one internal canonical state record
+through the unchanged checkpoint schema-1 generic record mechanism. Active
+schema-1 input-log export and replay are rejected explicitly.
+
 ## Boundary and remaining work
 
-M16-02 remains a compiled-data-contract batch. `step()` and `run_periodic()` still
-execute the complete compiled graph once per host frame. The reference plan
-does not dispatch domains or transfer channel payloads, and it does not implement
-admission feasibility, late skip/catch-up/hold/degrade/fail policy,
-optional-work shedding/recovery, or new trace/metric fields. Those remain M16
-work, so M16 and CAP-M16 are incomplete.
+M16-03 establishes portable RT0 functional admission, active CPU dispatch,
+cross-rate payload transfer, and late-frame actions. It does not add optional
+work, shedding/recovery, action replay, or versioned per-release telemetry;
+those remain M16-04 work, so M16 and CAP-M16 are incomplete.
 
 Local deterministic verification can establish exact integer compilation,
 functional lifecycle, package compatibility, bounded storage, replay identity,
@@ -70,6 +95,6 @@ signing, release, staging, deployment, or production validation is claimed.
 
 ## Next action
 
-Complete the M16-02 local verification contract, retain
-`docs/evidence/M16-02-2026-08-05.md`, and submit the bounded diff for mandatory
+Complete the M16-03 local verification contract, retain
+`docs/evidence/M16-03-2026-08-05.md`, and submit the bounded diff for mandatory
 CI and human review. Do not mark M16 or CAP-M16 complete from this batch.

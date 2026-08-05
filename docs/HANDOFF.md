@@ -3,10 +3,10 @@
 ## Restart context
 
 RTFW 1.2.1 is a portable RT0 C++20 runtime. M14, M14.1, and M15 are complete
-at baseline `8dabeb3747a20717ce02c99a3d3c0d9deb1a3532`. M16 is active, and this
-worktree implements approved batch M16-02: deterministic cross-rate data
-semantics over the M16-01 reference timeline. `contracts/active-batch.yaml` is
-binding.
+at baseline `34f0752596d84ef1f98a8a0d544861bda4935f3f`. M16 is active, and this
+worktree implements approved batch M16-03: opt-in CPU rate admission, dispatch,
+cross-rate transfer, and late-frame policy over the M16-01/M16-02 plans.
+`contracts/active-batch.yaml` is binding.
 
 ## Read first
 
@@ -49,7 +49,7 @@ The plan changes graph/replay identity only when explicit rate metadata exists.
 Checkpoint/input-log schemas remain version 1. Dynamic rate storage is acquired
 only during configuration/finalization, accounted once within runtime control,
 and never mutated by inspection. Host and periodic dispatch remain complete-
-graph, once-per-frame behavior.
+graph, once-per-frame behavior when the additive execution policy is absent.
 
 M16-02 copies fixed-payload sample-and-hold channels between CPU phases in
 different explicit domains. It compiles two immutable selections per consumer
@@ -57,8 +57,19 @@ release: first-supercycle selection, including the copied initial sample, and
 repeating-supercycle selection, including exact prior-cycle provenance. Each
 record exposes endpoint/reference/substep identities, signed cycle offset,
 integer age, held state, provenance, and inclusive freshness classification.
-One two-slot exact-generation SPSC store is preallocated per channel. Store
-operations are bounded single attempts and are not connected to execution.
+One two-slot exact-generation SPSC store is preallocated per channel. M16-03
+connects those stores only for explicitly active CPU plans. Active finalization
+performs conservative serialized admission and rejects D1, device/optional
+domains, invalid budgets/deadlines, cross-domain ordinary dependencies, and
+skip producers. Positive contiguous logical/nominal windows dispatch the exact
+reference order through the existing executor, with bounded skip, catch-up,
+hold, degrade, or fail decisions and exact functional summaries.
+
+Active producers stage one exact-size payload for each outgoing channel before
+commit; consumers copy only the exact initial, produced, or held generation.
+The active cursor, epoch, action/fault state, aliases, generations, and bytes
+are one reserved generic checkpoint record. Schema numbers stay unchanged, and
+active schema-1 input logs/replay are rejected.
 
 ## Protected decisions
 
@@ -66,8 +77,8 @@ operations are bounded single attempts and are not connected to execution.
 - Runtime schema 7/25 keys, observability and artifact schemas, installed
   headers/targets, aliases, support matrices, 1.2.1, and Apache-2.0 are unchanged.
 - The M15 six-row MemoryPlan and provider boundary remain unchanged.
-- Active cross-rate transfer, admission, late/catch-up, shedding/recovery, and
-  telemetry evolution remain outside M16-02.
+- Optional shedding/recovery, action replay, and versioned per-release
+  telemetry remain outside M16-03 and are owned by M16-04.
 - No compiled plan, mock, hosted CI, or local run is hardware, latency, RT1,
   RT2, signing, release, deployment, or production evidence.
 
@@ -75,6 +86,6 @@ operations are bounded single attempts and are not connected to execution.
 
 Run every local command in the active batch, ending with
 `./scripts/agent-verify.sh full`. Retain exact results and acceptance mapping in
-`docs/evidence/M16-02-2026-08-05.md`. Mandatory GitHub CI and human public-API,
-selection, store lifetime/memory-ordering, identity, accounting, determinism, lifecycle, and
+`docs/evidence/M16-03-2026-08-05.md`. Mandatory GitHub CI and human public-API,
+admission, dispatch, store lifetime/memory-ordering, identity, accounting, determinism, lifecycle, and
 compatibility review remain external gates. M16 and CAP-M16 remain incomplete.

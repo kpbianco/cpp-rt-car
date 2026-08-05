@@ -6,6 +6,7 @@
 #include "executor.hpp"
 #include "memory_policy.hpp"
 #include "native_platform_preflight.hpp"
+#include "rate_dispatch.hpp"
 #include "rate_timeline.hpp"
 #include "resource_policy.hpp"
 #include "snapshot_codec.hpp"
@@ -62,6 +63,11 @@ constexpr std::size_t kNoCallback = std::numeric_limits<std::size_t>::max();
 constexpr std::size_t kNoWorker = std::numeric_limits<std::size_t>::max();
 constexpr std::uint64_t kFnvOffset = 14'695'981'039'346'656'037ull;
 constexpr std::uint64_t kFnvPrime = 1'099'511'628'211ull;
+constexpr std::string_view kRateDispatchStateName = "rtfw.rate-dispatch";
+constexpr std::uint32_t kRateDispatchStateSchema = 1;
+constexpr std::uint64_t kRateDispatchStateMagic = 0x3154534457465452ull;
+constexpr std::size_t kRateDispatchStateHeaderBytes = 96;
+constexpr std::size_t kRateDispatchChannelStateBytes = 64;
 
 #ifndef RTFW_BUILD_ID_STRING
 #define RTFW_BUILD_ID_STRING "rtfw-" RTFW_VERSION_STRING
@@ -767,6 +773,16 @@ struct Runtime::Impl {
         std::span<std::byte> storage{};
     };
 
+    struct ActiveChannelState {
+        std::size_t payload_offset = 0;
+        std::uint64_t generation = 1;
+        std::uint64_t next_generation = 2;
+        std::uint64_t source_logical_release_ns = 0;
+        CrossRateSampleProvenance provenance =
+            CrossRateSampleProvenance::initial_sample;
+        bool held = false;
+    };
+
     explicit Impl(
         RuntimeClock* injected_clock,
         PlatformPreflightProbe* injected_preflight)
@@ -976,6 +992,20 @@ struct Runtime::Impl {
                         channel.initial_sample.size()));
             }
         }
+        if (rate_execution_policy_set) {
+            // Conditional marker preserves exact M16-01/M16-02 identities for
+            // reference-only plans.
+            hash_u64(hash, 0x4d31362d64697370ull);
+            hash_u64(
+                hash,
+                rate_execution_policy.maximum_dispatch_records_per_step);
+            for (const auto& domain : rate_domains) {
+                hash_u64(
+                    hash,
+                    static_cast<std::uint64_t>(domain.late_action));
+                hash_u64(hash, domain.bounded_catch_up_limit);
+            }
+        }
         return hash;
     }
 
@@ -983,11 +1013,16 @@ struct Runtime::Impl {
     compute_state_schema_id() const noexcept {
         std::uint64_t hash = kFnvOffset;
         hash_u64(hash, checkpoint_schema_version);
-        hash_u64(hash, states.size());
+        hash_u64(hash, checkpoint_state_count());
         for (const auto& registered_state : states) {
             hash_string(hash, identifier_view(registered_state.name));
             hash_u64(hash, registered_state.schema_version);
             hash_u64(hash, registered_state.storage.size());
+        }
+        if (rate_execution_policy_set) {
+            hash_string(hash, kRateDispatchStateName);
+            hash_u64(hash, kRateDispatchStateSchema);
+            hash_u64(hash, active_checkpoint_state.size());
         }
         return hash;
     }
@@ -1026,23 +1061,341 @@ struct Runtime::Impl {
         return hash;
     }
 
+    [[nodiscard]] std::size_t checkpoint_state_count() const noexcept {
+        return states.size() + (rate_execution_policy_set ? 1u : 0u);
+    }
+
+    void sync_active_checkpoint_state() noexcept {
+        if (!rate_execution_policy_set || active_checkpoint_state.empty()) {
+            return;
+        }
+        std::fill(
+            active_checkpoint_state.begin(),
+            active_checkpoint_state.end(),
+            std::byte{0});
+        auto bytes = std::span<std::byte>(active_checkpoint_state);
+        std::uint32_t flags = 0;
+        flags |= active_epoch_mapped ? 1u : 0u;
+        flags |= active_faulted ? 2u : 0u;
+        (void)store_u64_le(bytes, 0, kRateDispatchStateMagic);
+        (void)store_u32_le(bytes, 8, kRateDispatchStateSchema);
+        (void)store_u32_le(bytes, 12, flags);
+        (void)store_u64_le(bytes, 16, active_logical_cursor_ns);
+        (void)store_u64_le(bytes, 24, active_nominal_epoch_ns);
+        (void)store_u32_le(
+            bytes,
+            32,
+            degradation_level.load(std::memory_order_acquire));
+        (void)store_u32_le(
+            bytes,
+            36,
+            static_cast<std::uint32_t>(compiled_rate_plan.domains.size()));
+        (void)store_u32_le(
+            bytes,
+            40,
+            static_cast<std::uint32_t>(active_channel_states.size()));
+        (void)store_u64_le(
+            bytes,
+            48,
+            active_faulted
+                ? active_fault_domain.index()
+                : std::numeric_limits<std::uint64_t>::max());
+        (void)store_u64_le(bytes, 56, active_fault_sequence);
+        (void)store_u32_le(bytes, 64, active_fault_substep);
+        (void)store_u64_le(
+            bytes,
+            72,
+            active_committed_payloads.size());
+        (void)store_u64_le(
+            bytes,
+            80,
+            active_checkpoint_state.size());
+        for (std::size_t index = 0;
+             index < active_channel_states.size();
+             ++index) {
+            const auto& channel_state = active_channel_states[index];
+            const auto& channel = cross_rate_channels[index];
+            const auto offset = kRateDispatchStateHeaderBytes +
+                index * kRateDispatchChannelStateBytes;
+            (void)store_u64_le(bytes, offset, channel_state.generation);
+            (void)store_u64_le(
+                bytes,
+                offset + 8,
+                channel_state.next_generation);
+            (void)store_u64_le(
+                bytes,
+                offset + 16,
+                channel_state.source_logical_release_ns);
+            (void)store_u64_le(
+                bytes,
+                offset + 24,
+                channel_state.payload_offset);
+            (void)store_u64_le(bytes, offset + 32, channel.payload_size);
+            bytes[offset + 40] =
+                static_cast<std::byte>(channel_state.provenance);
+            bytes[offset + 41] =
+                static_cast<std::byte>(channel_state.held ? 1 : 0);
+        }
+        const auto payload_offset = kRateDispatchStateHeaderBytes +
+            active_channel_states.size() * kRateDispatchChannelStateBytes;
+        std::copy(
+            active_committed_payloads.begin(),
+            active_committed_payloads.end(),
+            active_checkpoint_state.begin() +
+                static_cast<std::ptrdiff_t>(payload_offset));
+    }
+
+    [[nodiscard]] bool validate_active_checkpoint_state(
+        std::span<const std::byte> bytes) const noexcept {
+        if (!rate_execution_policy_set ||
+            bytes.size() != active_checkpoint_state.size()) {
+            return false;
+        }
+        std::uint64_t magic = 0;
+        std::uint32_t schema = 0;
+        std::uint32_t flags = 0;
+        std::uint32_t degradation = 0;
+        std::uint32_t domain_count = 0;
+        std::uint32_t channel_count = 0;
+        std::uint64_t logical_cursor = 0;
+        std::uint64_t nominal_epoch = 0;
+        std::uint64_t payload_bytes = 0;
+        std::uint64_t total_bytes = 0;
+        std::uint64_t fault_domain = 0;
+        std::uint64_t fault_sequence = 0;
+        std::uint32_t fault_substep = 0;
+        if (!load_u64_le(bytes, 0, magic) ||
+            !load_u32_le(bytes, 8, schema) ||
+            !load_u32_le(bytes, 12, flags) ||
+            !load_u64_le(bytes, 16, logical_cursor) ||
+            !load_u64_le(bytes, 24, nominal_epoch) ||
+            !load_u32_le(bytes, 32, degradation) ||
+            !load_u32_le(bytes, 36, domain_count) ||
+            !load_u32_le(bytes, 40, channel_count) ||
+            !load_u64_le(bytes, 48, fault_domain) ||
+            !load_u64_le(bytes, 56, fault_sequence) ||
+            !load_u32_le(bytes, 64, fault_substep) ||
+            !load_u64_le(bytes, 72, payload_bytes) ||
+            !load_u64_le(bytes, 80, total_bytes) ||
+            magic != kRateDispatchStateMagic ||
+            schema != kRateDispatchStateSchema || (flags & ~3u) != 0 ||
+            degradation > config.watchdog_max_degradation_level ||
+            domain_count != compiled_rate_plan.domains.size() ||
+            channel_count != active_channel_states.size() ||
+            payload_bytes != active_committed_payloads.size() ||
+            total_bytes != bytes.size() ||
+            (((flags & 2u) != 0) !=
+             (fault_domain < compiled_rate_plan.domains.size())) ||
+            ((flags & 1u) == 0 &&
+             (logical_cursor != 0 || nominal_epoch != 0 ||
+              (flags & 2u) != 0))) {
+            return false;
+        }
+        std::uint64_t nominal_cursor = 0;
+        if ((flags & 1u) != 0 &&
+            !checked_time_add(
+                nominal_epoch,
+                logical_cursor,
+                nominal_cursor)) {
+            return false;
+        }
+        (void)nominal_cursor;
+        if ((flags & 2u) == 0) {
+            if (fault_domain != std::numeric_limits<std::uint64_t>::max() ||
+                fault_sequence != 0 || fault_substep != 0) {
+                return false;
+            }
+        } else {
+            const auto& faulted_domain = compiled_rate_plan.domains[
+                static_cast<std::size_t>(fault_domain)];
+            std::uint64_t fault_release_ns = 0;
+            if (fault_substep >= faulted_domain.substep_count ||
+                !checked_time_multiply(
+                    fault_sequence,
+                    faulted_domain.period_ns,
+                    fault_release_ns) ||
+                fault_release_ns != logical_cursor) {
+                return false;
+            }
+        }
+        for (std::size_t offset = 44; offset < 48; ++offset) {
+            if (bytes[offset] != std::byte{0}) {
+                return false;
+            }
+        }
+        for (std::size_t offset = 68; offset < 72; ++offset) {
+            if (bytes[offset] != std::byte{0}) {
+                return false;
+            }
+        }
+        for (std::size_t offset = 88;
+             offset < kRateDispatchStateHeaderBytes;
+             ++offset) {
+            if (bytes[offset] != std::byte{0}) {
+                return false;
+            }
+        }
+        std::size_t expected_payload_offset = 0;
+        for (std::size_t index = 0;
+             index < active_channel_states.size();
+             ++index) {
+            const auto offset = kRateDispatchStateHeaderBytes +
+                index * kRateDispatchChannelStateBytes;
+            std::uint64_t generation = 0;
+            std::uint64_t next_generation = 0;
+            std::uint64_t source_logical_release_ns = 0;
+            std::uint64_t payload_offset = 0;
+            std::uint64_t payload_size = 0;
+            if (!load_u64_le(bytes, offset, generation) ||
+                !load_u64_le(bytes, offset + 8, next_generation) ||
+                !load_u64_le(
+                    bytes,
+                    offset + 16,
+                    source_logical_release_ns) ||
+                !load_u64_le(bytes, offset + 24, payload_offset) ||
+                !load_u64_le(bytes, offset + 32, payload_size) ||
+                generation == 0 ||
+                generation > detail::SnapshotStore::maximum_generation() ||
+                (generation == detail::SnapshotStore::maximum_generation()
+                     ? next_generation != 0
+                     : next_generation != generation + 1) ||
+                source_logical_release_ns > logical_cursor ||
+                payload_offset != expected_payload_offset ||
+                payload_size != cross_rate_channels[index].payload_size ||
+                (static_cast<std::uint8_t>(bytes[offset + 40]) !=
+                     static_cast<std::uint8_t>(
+                         CrossRateSampleProvenance::initial_sample) &&
+                 static_cast<std::uint8_t>(bytes[offset + 40]) !=
+                     static_cast<std::uint8_t>(
+                         CrossRateSampleProvenance::produced)) ||
+                static_cast<std::uint8_t>(bytes[offset + 41]) > 1) {
+                return false;
+            }
+            const auto provenance =
+                static_cast<CrossRateSampleProvenance>(
+                    static_cast<std::uint8_t>(bytes[offset + 40]));
+            if ((generation == 1) !=
+                    (provenance ==
+                     CrossRateSampleProvenance::initial_sample) ||
+                (provenance ==
+                     CrossRateSampleProvenance::initial_sample &&
+                 source_logical_release_ns != 0)) {
+                return false;
+            }
+            for (std::size_t reserved = offset + 42;
+                 reserved < offset + kRateDispatchChannelStateBytes;
+                 ++reserved) {
+                if (bytes[reserved] != std::byte{0}) {
+                    return false;
+                }
+            }
+            expected_payload_offset += cross_rate_channels[index].payload_size;
+        }
+        return expected_payload_offset == active_committed_payloads.size();
+    }
+
+    [[nodiscard]] bool apply_active_checkpoint_state(
+        std::span<const std::byte> bytes) noexcept {
+        std::uint32_t flags = 0;
+        std::uint32_t degradation = 0;
+        std::uint64_t fault_domain = 0;
+        (void)load_u32_le(bytes, 12, flags);
+        (void)load_u64_le(bytes, 16, active_logical_cursor_ns);
+        (void)load_u64_le(bytes, 24, active_nominal_epoch_ns);
+        (void)load_u32_le(bytes, 32, degradation);
+        (void)load_u64_le(bytes, 48, fault_domain);
+        (void)load_u64_le(bytes, 56, active_fault_sequence);
+        (void)load_u32_le(bytes, 64, active_fault_substep);
+        active_epoch_mapped = (flags & 1u) != 0;
+        active_faulted = (flags & 2u) != 0;
+        active_fault_domain = active_faulted
+            ? RateDomainHandle{
+                  graph_owner,
+                  static_cast<std::uint32_t>(fault_domain)}
+            : RateDomainHandle{};
+        degradation_level.store(degradation, std::memory_order_release);
+        const auto payload_begin = kRateDispatchStateHeaderBytes +
+            active_channel_states.size() * kRateDispatchChannelStateBytes;
+        std::copy(
+            bytes.begin() + static_cast<std::ptrdiff_t>(payload_begin),
+            bytes.end(),
+            active_committed_payloads.begin());
+        std::copy(
+            active_committed_payloads.begin(),
+            active_committed_payloads.end(),
+            active_staging_payloads.begin());
+        for (std::size_t index = 0;
+             index < active_channel_states.size();
+             ++index) {
+            auto& channel_state = active_channel_states[index];
+            const auto& channel = cross_rate_channels[index];
+            const auto offset = kRateDispatchStateHeaderBytes +
+                index * kRateDispatchChannelStateBytes;
+            (void)load_u64_le(bytes, offset, channel_state.generation);
+            (void)load_u64_le(
+                bytes,
+                offset + 8,
+                channel_state.next_generation);
+            (void)load_u64_le(
+                bytes,
+                offset + 16,
+                channel_state.source_logical_release_ns);
+            std::uint64_t payload_offset = 0;
+            (void)load_u64_le(bytes, offset + 24, payload_offset);
+            channel_state.payload_offset =
+                static_cast<std::size_t>(payload_offset);
+            channel_state.provenance =
+                static_cast<CrossRateSampleProvenance>(
+                static_cast<std::uint8_t>(bytes[offset + 40]));
+            channel_state.held =
+                static_cast<std::uint8_t>(bytes[offset + 41]) != 0;
+            active_publication_claims[index].store(
+                0,
+                std::memory_order_relaxed);
+            if (compiled_cross_rate_plan.stores[index].restore_committed(
+                    channel_state.generation,
+                    channel_state.next_generation,
+                    std::span<const std::byte>(
+                        active_committed_payloads.data() +
+                            channel_state.payload_offset,
+                        channel.payload_size)) !=
+                detail::SnapshotStoreResult::ok) {
+                return false;
+            }
+        }
+        std::copy(
+            bytes.begin(),
+            bytes.end(),
+            active_checkpoint_state.begin());
+        return true;
+    }
+
     static bool provide_state(
         void* context,
         std::size_t index,
         detail::StateWriteView& output) noexcept {
         auto& self = *static_cast<Impl*>(context);
-        if (index >= self.states.size()) {
+        if (index < self.states.size()) {
+            const auto& state = self.states[index];
+            output.name = identifier_view(state.name);
+            output.schema_version = state.schema_version;
+            output.payload = std::as_bytes(state.storage);
+            return true;
+        }
+        if (self.rate_execution_policy_set && index == self.states.size()) {
+            self.sync_active_checkpoint_state();
+            output.name = kRateDispatchStateName;
+            output.schema_version = kRateDispatchStateSchema;
+            output.payload = self.active_checkpoint_state;
+            return true;
+        }
+        {
             output = {};
             return false;
         }
-        const auto& state = self.states[index];
-        output.name = identifier_view(state.name);
-        output.schema_version = state.schema_version;
-        output.payload = std::as_bytes(state.storage);
-        return true;
     }
 
-    [[nodiscard]] std::uint64_t state_hash() const noexcept {
+    [[nodiscard]] std::uint64_t state_hash() noexcept {
         std::uint64_t hash = kFnvOffset;
         const auto append =
             [&hash](std::span<const std::byte> bytes) {
@@ -1075,6 +1428,24 @@ struct Runtime::Impl {
                     std::as_bytes(registered_state.storage)));
             append(header);
             append(std::as_bytes(registered_state.storage));
+        }
+        if (rate_execution_policy_set) {
+            sync_active_checkpoint_state();
+            std::array<
+                std::byte,
+                detail::checkpoint_record_header_size> header{};
+            std::memcpy(
+                header.data(),
+                kRateDispatchStateName.data(),
+                kRateDispatchStateName.size());
+            store_u32_le(header, 64, kRateDispatchStateSchema);
+            store_u64_le(header, 72, active_checkpoint_state.size());
+            store_u64_le(
+                header,
+                80,
+                detail::artifact_checksum(active_checkpoint_state));
+            append(header);
+            append(active_checkpoint_state);
         }
         return hash;
     }
@@ -1349,6 +1720,788 @@ struct Runtime::Impl {
                 : event.submission_id);
     }
 
+    static Status publish_active_channel(
+        void* opaque,
+        CrossRateChannelHandle channel,
+        std::span<const std::byte> payload) noexcept {
+        auto& self = *static_cast<Impl*>(opaque);
+        if (self.active_reference_index ==
+            invalid_reference_release_index) {
+            return Status::invalid_state;
+        }
+        if (!channel.valid() || channel.owner() != self.graph_owner) {
+            return Status::invalid_handle;
+        }
+        if (channel.index() >= self.cross_rate_channels.size()) {
+            return Status::invalid_handle;
+        }
+        const auto index = static_cast<std::size_t>(channel.index());
+        const auto& spec = self.cross_rate_channels[index];
+        if (spec.producer != self.active_rate_view.phase) {
+            return Status::invalid_handle;
+        }
+        if (payload.size() != spec.payload_size) {
+            return Status::invalid_argument;
+        }
+        std::uint8_t expected = 0;
+        if (!self.active_publication_claims[index].compare_exchange_strong(
+                expected,
+                1,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            self.active_publication_claims[index].store(
+                3,
+                std::memory_order_release);
+            return Status::invalid_state;
+        }
+        const auto offset = self.active_channel_states[index].payload_offset;
+        std::copy(
+            payload.begin(),
+            payload.end(),
+            self.active_staging_payloads.begin() +
+                static_cast<std::ptrdiff_t>(offset));
+        expected = 1;
+        if (!self.active_publication_claims[index].compare_exchange_strong(
+                expected,
+                2,
+                std::memory_order_release,
+                std::memory_order_acquire)) {
+            return Status::invalid_state;
+        }
+        return Status::ok;
+    }
+
+    static CrossRateReadStatus copy_active_channel(
+        void* opaque,
+        CrossRateChannelHandle channel,
+        std::span<std::byte> output,
+        CrossRateReadResult& result) noexcept {
+        auto& self = *static_cast<Impl*>(opaque);
+        result = {};
+        if (self.active_reference_index ==
+            invalid_reference_release_index) {
+            result.status = CrossRateReadStatus::not_ready;
+            return result.status;
+        }
+        if (!channel.valid() || channel.owner() != self.graph_owner) {
+            result.status = CrossRateReadStatus::wrong_owner;
+            return result.status;
+        }
+        if (channel.index() >= self.cross_rate_channels.size()) {
+            result.status = CrossRateReadStatus::invalid_channel;
+            return result.status;
+        }
+        const auto index = static_cast<std::size_t>(channel.index());
+        const auto& spec = self.cross_rate_channels[index];
+        if (spec.consumer != self.active_rate_view.phase) {
+            result.status = CrossRateReadStatus::wrong_owner;
+            return result.status;
+        }
+        if (output.size() != spec.payload_size) {
+            result.status = CrossRateReadStatus::size_mismatch;
+            return result.status;
+        }
+        const auto& active_release = self.compiled_rate_plan.releases[
+            self.active_reference_index];
+        const auto& descriptor =
+            self.compiled_cross_rate_plan.channels[index];
+        std::uint64_t consumer_ordinal = 0;
+        std::uint64_t selection_offset = 0;
+        if (!checked_time_multiply(
+                active_release.domain_release_sequence,
+                active_release.substep_count,
+                consumer_ordinal) ||
+            !checked_time_add(
+                consumer_ordinal,
+                active_release.substep_ordinal,
+                consumer_ordinal) ||
+            !checked_time_multiply(
+                consumer_ordinal,
+                2,
+                selection_offset) ||
+            !checked_time_add(
+                descriptor.first_selection_index,
+                selection_offset,
+                selection_offset) ||
+            !checked_time_add(
+                selection_offset,
+                self.active_supercycle_cycle == 0 ? 0u : 1u,
+                selection_offset) ||
+            selection_offset >=
+                self.compiled_cross_rate_plan.selections.size()) {
+            result.status = CrossRateReadStatus::not_ready;
+            return result.status;
+        }
+        const auto& selection =
+            self.compiled_cross_rate_plan.selections[
+                static_cast<std::size_t>(selection_offset)];
+        if (selection.channel != channel ||
+            selection.consumer_reference_index !=
+                self.active_reference_index ||
+            selection.horizon !=
+                (self.active_supercycle_cycle == 0
+                     ? CrossRateSelectionHorizon::first_supercycle
+                     : CrossRateSelectionHorizon::repeating_supercycle)) {
+            result.status = CrossRateReadStatus::not_ready;
+            return result.status;
+        }
+        const auto& state = self.active_channel_states[index];
+        if (!state.held) {
+            if (selection.provenance != state.provenance) {
+                result.status = CrossRateReadStatus::stale_generation;
+                return result.status;
+            }
+            if (selection.provenance ==
+                    CrossRateSampleProvenance::produced) {
+                if (selection.producer_reference_index >=
+                    self.compiled_rate_plan.releases.size()) {
+                    result.status = CrossRateReadStatus::not_ready;
+                    return result.status;
+                }
+                std::uint64_t source_cycle = self.active_supercycle_cycle;
+                if (selection.source_cycle_offset == -1) {
+                    if (source_cycle == 0) {
+                        result.status = CrossRateReadStatus::not_ready;
+                        return result.status;
+                    }
+                    --source_cycle;
+                } else if (selection.source_cycle_offset != 0) {
+                    result.status = CrossRateReadStatus::not_ready;
+                    return result.status;
+                }
+                std::uint64_t source_cycle_base = 0;
+                std::uint64_t expected_source = 0;
+                if (!checked_time_multiply(
+                        source_cycle,
+                        self.compiled_rate_plan.supercycle_ns,
+                        source_cycle_base) ||
+                    !checked_time_add(
+                        source_cycle_base,
+                        self.compiled_rate_plan
+                            .releases[selection.producer_reference_index]
+                            .release_time_ns,
+                        expected_source) ||
+                    expected_source !=
+                        state.source_logical_release_ns) {
+                    result.status = CrossRateReadStatus::stale_generation;
+                    return result.status;
+                }
+            }
+        }
+        const auto store_status =
+            self.compiled_cross_rate_plan.stores[index].copy(
+                state.generation,
+                output,
+                detail::SnapshotRetention::retain);
+        if (store_status != detail::SnapshotStoreResult::ok) {
+            result.status =
+                store_status == detail::SnapshotStoreResult::stale_generation
+                ? CrossRateReadStatus::stale_generation
+                : CrossRateReadStatus::not_ready;
+            return result.status;
+        }
+        result.status = CrossRateReadStatus::ok;
+        result.provenance = state.provenance;
+        result.generation = state.generation;
+        result.held = state.held || selection.held;
+        result.age_ns = self.active_logical_release_ns >=
+                state.source_logical_release_ns
+            ? self.active_logical_release_ns -
+                state.source_logical_release_ns
+            : std::numeric_limits<std::uint64_t>::max();
+        result.freshness =
+            spec.maximum_age_ns ==
+                    std::numeric_limits<std::uint64_t>::max() ||
+                result.age_ns <= spec.maximum_age_ns
+            ? CrossRateFreshness::fresh
+            : CrossRateFreshness::stale;
+        if (result.freshness == CrossRateFreshness::stale) {
+            self.active_stale_reads.fetch_add(1, std::memory_order_relaxed);
+        }
+        return result.status;
+    }
+
+    static void record_active_failure(
+        StepResult::RateSummary& summary,
+        const ReferenceRelease& release,
+        std::uint64_t domain_release_sequence) noexcept {
+        if (!summary.has_first_failure) {
+            summary.has_first_failure = true;
+            summary.first_failing_domain = release.domain;
+            summary.first_failing_sequence = domain_release_sequence;
+            summary.first_failing_substep = release.substep_ordinal;
+        }
+    }
+
+    void set_active_failure(
+        const ReferenceRelease& release,
+        std::uint64_t domain_release_sequence) noexcept {
+        active_faulted = true;
+        active_fault_domain = release.domain;
+        active_fault_sequence = domain_release_sequence;
+        active_fault_substep = release.substep_ordinal;
+        if (active_rate_summary) {
+            record_active_failure(
+                *active_rate_summary,
+                release,
+                domain_release_sequence);
+        }
+    }
+
+    Status execute_active_group(
+        const detail::RateReleaseGroup& group,
+        std::uint64_t supercycle_cycle,
+        std::uint64_t domain_release_sequence,
+        std::uint64_t logical_release_ns,
+        std::uint64_t nominal_release_ns,
+        std::uint64_t absolute_deadline_ns,
+        StepResult::RateSummary& summary,
+        std::size_t& failed_phase) noexcept {
+        for (std::size_t record_offset = 0;
+             record_offset < group.reference_count;
+             ++record_offset) {
+            const auto reference_index =
+                group.first_reference_index + record_offset;
+            const auto& release =
+                compiled_rate_plan.releases[reference_index];
+            for (std::size_t channel_index = 0;
+                 channel_index < cross_rate_channels.size();
+                 ++channel_index) {
+                if (cross_rate_channels[channel_index].producer !=
+                    release.phase) {
+                    continue;
+                }
+                if (active_channel_states[channel_index].next_generation ==
+                    0) {
+                    active_rate_summary = &summary;
+                    set_active_failure(release, domain_release_sequence);
+                    active_rate_summary = nullptr;
+                    active_reference_index =
+                        invalid_reference_release_index;
+                    return Status::capacity_exceeded;
+                }
+                active_publication_claims[channel_index].store(
+                    0,
+                    std::memory_order_relaxed);
+            }
+            active_reference_index = reference_index;
+            active_supercycle_cycle = supercycle_cycle;
+            active_logical_release_ns = logical_release_ns;
+            active_nominal_release_ns = nominal_release_ns;
+            active_absolute_deadline_ns = absolute_deadline_ns;
+            active_late_action = release.late_action;
+            active_rate_view = {
+                release.domain,
+                release.phase,
+                supercycle_cycle,
+                domain_release_sequence,
+                release.substep_ordinal,
+                logical_release_ns,
+                nominal_release_ns,
+                absolute_deadline_ns,
+                release.budget_wcet_ns,
+                release.late_action,
+                degradation_level.load(std::memory_order_acquire),
+                this,
+                &Impl::publish_active_channel,
+                &Impl::copy_active_channel,
+            };
+            const auto status = executor->run_selected(
+                release.phase.index(),
+                &Impl::run_phase,
+                this);
+            ++summary.executed_reference_records;
+            if (status != Status::ok) {
+                failed_phase = release.phase.index();
+                record_active_failure(
+                    summary,
+                    release,
+                    domain_release_sequence);
+                active_reference_index = invalid_reference_release_index;
+                return status;
+            }
+            for (std::size_t channel_index = 0;
+                 channel_index < cross_rate_channels.size();
+                 ++channel_index) {
+                if (cross_rate_channels[channel_index].producer !=
+                    release.phase) {
+                    continue;
+                }
+                if (active_publication_claims[channel_index].load(
+                        std::memory_order_acquire) != 2) {
+                    failed_phase = release.phase.index();
+                    record_active_failure(
+                        summary,
+                        release,
+                        domain_release_sequence);
+                    active_reference_index =
+                        invalid_reference_release_index;
+                    return Status::callback_failed;
+                }
+            }
+            for (std::size_t channel_index = 0;
+                 channel_index < cross_rate_channels.size();
+                 ++channel_index) {
+                if (cross_rate_channels[channel_index].producer !=
+                    release.phase) {
+                    continue;
+                }
+                auto& channel_state = active_channel_states[channel_index];
+                auto& store = compiled_cross_rate_plan.stores[channel_index];
+                if (!store.can_publish(channel_state.next_generation)) {
+                    const auto slots = static_cast<std::uint64_t>(
+                        store.slot_count());
+                    if (channel_state.next_generation <= slots ||
+                        store.retire(
+                            channel_state.next_generation - slots) !=
+                            detail::SnapshotStoreResult::ok) {
+                        failed_phase = release.phase.index();
+                        active_rate_summary = &summary;
+                        set_active_failure(
+                            release,
+                            domain_release_sequence);
+                        active_rate_summary = nullptr;
+                        active_reference_index =
+                            invalid_reference_release_index;
+                        return Status::internal_error;
+                    }
+                }
+                if (store.publish(
+                        channel_state.next_generation,
+                        std::span<const std::byte>(
+                            active_staging_payloads.data() +
+                                channel_state.payload_offset,
+                            cross_rate_channels[channel_index].payload_size)) !=
+                        detail::SnapshotStoreResult::ok) {
+                    failed_phase = release.phase.index();
+                    active_rate_summary = &summary;
+                    set_active_failure(release, domain_release_sequence);
+                    active_rate_summary = nullptr;
+                    active_reference_index =
+                        invalid_reference_release_index;
+                    return Status::internal_error;
+                }
+                std::copy_n(
+                    active_staging_payloads.begin() +
+                        static_cast<std::ptrdiff_t>(
+                            channel_state.payload_offset),
+                    cross_rate_channels[channel_index].payload_size,
+                    active_committed_payloads.begin() +
+                        static_cast<std::ptrdiff_t>(
+                            channel_state.payload_offset));
+                channel_state.generation = channel_state.next_generation;
+                channel_state.next_generation = store.next_generation();
+                channel_state.source_logical_release_ns = logical_release_ns;
+                channel_state.provenance =
+                    CrossRateSampleProvenance::produced;
+                channel_state.held = false;
+            }
+        }
+
+        active_reference_index = invalid_reference_release_index;
+        return Status::ok;
+    }
+
+    Status run_active_step(
+        const HostFrameContext& frame,
+        StepResult& output,
+        std::size_t& failed_phase) noexcept {
+        if (active_faulted) {
+            return Status::invalid_state;
+        }
+        if (frame.delta.count() <= 0 || !frame.nominal_release_ns) {
+            return Status::invalid_argument;
+        }
+
+        const auto delta_ns =
+            static_cast<std::uint64_t>(frame.delta.count());
+        std::uint64_t end_ns = 0;
+        if (!checked_time_add(active_logical_cursor_ns, delta_ns, end_ns)) {
+            return Status::invalid_argument;
+        }
+
+        std::uint64_t epoch_ns = active_nominal_epoch_ns;
+        if (active_epoch_mapped) {
+            std::uint64_t expected_nominal_ns = 0;
+            if (!checked_time_add(
+                    active_nominal_epoch_ns,
+                    active_logical_cursor_ns,
+                    expected_nominal_ns) ||
+                *frame.nominal_release_ns != expected_nominal_ns) {
+                return Status::invalid_argument;
+            }
+        } else {
+            if (active_logical_cursor_ns != 0) {
+                return Status::invalid_state;
+            }
+            epoch_ns = *frame.nominal_release_ns;
+        }
+
+        std::uint64_t nominal_end_ns = 0;
+        if (!checked_time_add(epoch_ns, end_ns, nominal_end_ns)) {
+            return Status::invalid_argument;
+        }
+        (void)nominal_end_ns;
+
+        detail::RateDueCounts due_counts;
+        const auto count_status = detail::count_due_rate_work(
+            compiled_rate_plan,
+            compiled_rate_dispatch_plan,
+            active_logical_cursor_ns,
+            end_ns,
+            due_counts);
+        if (count_status != Status::ok) {
+            return count_status;
+        }
+        output.rate.due_domain_releases = due_counts.domain_releases;
+        output.rate.due_reference_records = due_counts.reference_records;
+        active_stale_reads.store(0, std::memory_order_relaxed);
+
+        const auto ceil_sequence = [](std::uint64_t value,
+                                      std::uint64_t period) noexcept {
+            return value / period + (value % period != 0 ? 1u : 0u);
+        };
+        std::array<std::uint64_t, rate_domain_capacity> next_sequence{};
+        std::array<std::uint64_t, rate_domain_capacity> end_sequence{};
+        std::array<std::uint32_t, rate_domain_capacity> catch_up_counts{};
+        for (std::size_t domain_index = 0;
+             domain_index < compiled_rate_plan.domains.size();
+             ++domain_index) {
+            const auto period =
+                compiled_rate_plan.domains[domain_index].period_ns;
+            next_sequence[domain_index] =
+                ceil_sequence(active_logical_cursor_ns, period);
+            end_sequence[domain_index] = ceil_sequence(end_ns, period);
+        }
+
+        std::uint64_t settled_records = 0;
+        Status execution_status = Status::ok;
+        bool done = false;
+        while (!done) {
+            const auto decision_now_ns = clock_now();
+            std::uint64_t barrier_ns = end_ns;
+            for (std::size_t domain_index = 0;
+                 domain_index < compiled_rate_plan.domains.size();
+                 ++domain_index) {
+                if (next_sequence[domain_index] >=
+                    end_sequence[domain_index]) {
+                    continue;
+                }
+                const auto& domain =
+                    compiled_rate_plan.domains[domain_index];
+                std::uint64_t next_release_ns = 0;
+                std::uint64_t next_nominal_ns = 0;
+                std::uint64_t next_deadline_ns = 0;
+                if (!checked_time_multiply(
+                        next_sequence[domain_index],
+                        domain.period_ns,
+                        next_release_ns) ||
+                    !checked_time_add(
+                        epoch_ns,
+                        next_release_ns,
+                        next_nominal_ns) ||
+                    !checked_time_add(
+                        next_nominal_ns,
+                        domain.relative_deadline_ns,
+                        next_deadline_ns)) {
+                    execution_status = Status::capacity_exceeded;
+                    done = true;
+                    break;
+                }
+                const bool omission =
+                    decision_now_ns > next_deadline_ns &&
+                    (domain.late_action == RateLateAction::skip ||
+                     domain.late_action == RateLateAction::hold);
+                if (!omission) {
+                    barrier_ns = std::min(barrier_ns, next_release_ns);
+                    continue;
+                }
+                const auto late_end_ns = decision_now_ns - epoch_ns -
+                    domain.relative_deadline_ns;
+                const auto first_nonlate = std::max(
+                    next_sequence[domain_index],
+                    ceil_sequence(late_end_ns, domain.period_ns));
+                if (first_nonlate < end_sequence[domain_index]) {
+                    std::uint64_t first_nonlate_ns = 0;
+                    if (!checked_time_multiply(
+                            first_nonlate,
+                            domain.period_ns,
+                            first_nonlate_ns)) {
+                        execution_status = Status::capacity_exceeded;
+                        done = true;
+                        break;
+                    }
+                    barrier_ns = std::min(barrier_ns, first_nonlate_ns);
+                }
+            }
+            if (done) {
+                break;
+            }
+
+            for (std::size_t domain_index = 0;
+                 domain_index < compiled_rate_plan.domains.size();
+                 ++domain_index) {
+                const auto& domain =
+                    compiled_rate_plan.domains[domain_index];
+                if (domain.late_action != RateLateAction::skip &&
+                    domain.late_action != RateLateAction::hold) {
+                    continue;
+                }
+                const auto target = std::min(
+                    end_sequence[domain_index],
+                    ceil_sequence(barrier_ns, domain.period_ns));
+                if (target <= next_sequence[domain_index]) {
+                    continue;
+                }
+                const auto releases =
+                    target - next_sequence[domain_index];
+                std::uint64_t records = 0;
+                if (!checked_time_multiply(
+                        releases,
+                        compiled_rate_dispatch_plan
+                            .records_per_domain_release[domain_index],
+                        records)) {
+                    execution_status = Status::capacity_exceeded;
+                    done = true;
+                    break;
+                }
+                output.rate.late_domain_releases += releases;
+                settled_records += records;
+                if (domain.late_action == RateLateAction::skip) {
+                    output.rate.skipped_domain_releases += releases;
+                } else {
+                    output.rate.held_domain_releases += releases;
+                    for (std::size_t channel_index = 0;
+                         channel_index <
+                             compiled_cross_rate_plan.channels.size();
+                         ++channel_index) {
+                        if (compiled_cross_rate_plan.channels[channel_index]
+                                .producer_domain == domain.domain) {
+                            active_channel_states[channel_index].held = true;
+                        }
+                    }
+                }
+                next_sequence[domain_index] = target;
+            }
+            if (done) {
+                break;
+            }
+
+            std::uint64_t next_release_ns = end_ns;
+            bool has_release = false;
+            for (std::size_t domain_index = 0;
+                 domain_index < compiled_rate_plan.domains.size();
+                 ++domain_index) {
+                if (next_sequence[domain_index] >=
+                    end_sequence[domain_index]) {
+                    continue;
+                }
+                std::uint64_t candidate_ns = 0;
+                if (!checked_time_multiply(
+                        next_sequence[domain_index],
+                        compiled_rate_plan.domains[domain_index].period_ns,
+                        candidate_ns)) {
+                    execution_status = Status::capacity_exceeded;
+                    done = true;
+                    break;
+                }
+                next_release_ns = std::min(next_release_ns, candidate_ns);
+                has_release = true;
+            }
+            if (done || !has_release) {
+                break;
+            }
+
+            for (std::size_t domain_index = 0;
+                 domain_index < compiled_rate_plan.domains.size();
+                 ++domain_index) {
+                if (next_sequence[domain_index] >=
+                    end_sequence[domain_index]) {
+                    continue;
+                }
+                const auto& domain =
+                    compiled_rate_plan.domains[domain_index];
+                std::uint64_t logical_release_ns = 0;
+                if (!checked_time_multiply(
+                        next_sequence[domain_index],
+                        domain.period_ns,
+                        logical_release_ns)) {
+                    execution_status = Status::capacity_exceeded;
+                    done = true;
+                    break;
+                }
+                if (logical_release_ns != next_release_ns) {
+                    continue;
+                }
+                const auto within_cycle = next_sequence[domain_index] %
+                    domain.releases_per_supercycle;
+                const auto group_slice_begin =
+                    compiled_rate_dispatch_plan
+                        .domain_group_offsets[domain_index];
+                const auto group_slice_end =
+                    compiled_rate_dispatch_plan
+                        .domain_group_offsets[domain_index + 1];
+                if (within_cycle >= group_slice_end - group_slice_begin) {
+                    execution_status = Status::internal_error;
+                    done = true;
+                    break;
+                }
+                const auto group_index =
+                    compiled_rate_dispatch_plan.domain_group_indices[
+                        group_slice_begin +
+                        static_cast<std::size_t>(within_cycle)];
+                const auto& group =
+                    compiled_rate_dispatch_plan.groups[group_index];
+                const auto& release = compiled_rate_plan.releases[
+                    group.first_reference_index];
+                std::uint64_t nominal_release_ns = 0;
+                std::uint64_t absolute_deadline_ns = 0;
+                if (!checked_time_add(
+                        epoch_ns,
+                        logical_release_ns,
+                        nominal_release_ns) ||
+                    !checked_time_add(
+                        nominal_release_ns,
+                        release.relative_deadline_ns,
+                        absolute_deadline_ns)) {
+                    execution_status = Status::capacity_exceeded;
+                    done = true;
+                    break;
+                }
+                const bool late = clock_now() > absolute_deadline_ns;
+                if (late && release.late_action == RateLateAction::skip) {
+                    ++output.rate.late_domain_releases;
+                    ++output.rate.skipped_domain_releases;
+                    settled_records += group.reference_count;
+                    ++next_sequence[domain_index];
+                    continue;
+                }
+                if (late && release.late_action == RateLateAction::hold) {
+                    ++output.rate.late_domain_releases;
+                    ++output.rate.held_domain_releases;
+                    for (std::size_t channel_index = 0;
+                         channel_index <
+                             compiled_cross_rate_plan.channels.size();
+                         ++channel_index) {
+                        if (compiled_cross_rate_plan.channels[channel_index]
+                                .producer_domain == release.domain) {
+                            active_channel_states[channel_index].held = true;
+                        }
+                    }
+                    settled_records += group.reference_count;
+                    ++next_sequence[domain_index];
+                    continue;
+                }
+                if (late && release.late_action == RateLateAction::fail) {
+                    ++output.rate.late_domain_releases;
+                    ++output.rate.failed_domain_releases;
+                    output.rate.rejected_reference_records +=
+                        due_counts.reference_records - settled_records;
+                    active_logical_release_ns = logical_release_ns;
+                    active_rate_summary = &output.rate;
+                    set_active_failure(
+                        release,
+                        next_sequence[domain_index]);
+                    active_rate_summary = nullptr;
+                    execution_status = Status::callback_failed;
+                    done = true;
+                    break;
+                }
+                if (late && release.late_action ==
+                        RateLateAction::bounded_catch_up &&
+                    catch_up_counts[domain_index] >=
+                        release.bounded_catch_up_limit) {
+                    output.rate.rejected_reference_records +=
+                        due_counts.reference_records - settled_records;
+                    execution_status = Status::capacity_exceeded;
+                    done = true;
+                    break;
+                }
+                if (output.rate.executed_reference_records +
+                        group.reference_count >
+                    compiled_rate_dispatch_plan.policy
+                        .maximum_dispatch_records_per_step) {
+                    output.rate.rejected_reference_records +=
+                        due_counts.reference_records - settled_records;
+                    execution_status = Status::capacity_exceeded;
+                    done = true;
+                    break;
+                }
+
+                if (late) {
+                    ++output.rate.late_domain_releases;
+                    if (release.late_action ==
+                        RateLateAction::bounded_catch_up) {
+                        ++catch_up_counts[domain_index];
+                        ++output.rate.caught_up_domain_releases;
+                    } else if (release.late_action ==
+                               RateLateAction::degrade) {
+                        const auto current = degradation_level.load(
+                            std::memory_order_relaxed);
+                        if (current <
+                            config.watchdog_max_degradation_level) {
+                            degradation_level.store(
+                                current + 1,
+                                std::memory_order_release);
+                        }
+                        ++output.rate.degraded_domain_releases;
+                    }
+                } else {
+                    ++output.rate.on_time_domain_releases;
+                }
+
+                const auto supercycle_cycle =
+                    next_sequence[domain_index] /
+                    domain.releases_per_supercycle;
+                const auto executed_before_group =
+                    output.rate.executed_reference_records;
+                const auto group_status = execute_active_group(
+                    group,
+                    supercycle_cycle,
+                    next_sequence[domain_index],
+                    logical_release_ns,
+                    nominal_release_ns,
+                    absolute_deadline_ns,
+                    output.rate,
+                    failed_phase);
+                if (group_status != Status::ok) {
+                    ++output.rate.failed_domain_releases;
+                    const auto attempted_in_group =
+                        output.rate.executed_reference_records -
+                        executed_before_group;
+                    output.rate.rejected_reference_records +=
+                        due_counts.reference_records - settled_records -
+                        attempted_in_group;
+                    active_logical_cursor_ns = end_ns;
+                    active_nominal_epoch_ns = epoch_ns;
+                    active_epoch_mapped = true;
+                    execution_status = group_status;
+                    done = true;
+                    break;
+                }
+                settled_records += group.reference_count;
+                ++next_sequence[domain_index];
+            }
+        }
+
+        output.callbacks_executed = static_cast<std::size_t>(
+            output.rate.executed_reference_records);
+        output.rate.stale_reads =
+            active_stale_reads.load(std::memory_order_acquire);
+        if (execution_status == Status::ok ||
+            (execution_status == Status::capacity_exceeded &&
+             !active_faulted)) {
+            active_logical_cursor_ns = end_ns;
+            active_nominal_epoch_ns = epoch_ns;
+            active_epoch_mapped = true;
+        } else if (active_faulted) {
+            active_logical_cursor_ns = active_logical_release_ns;
+            active_nominal_epoch_ns = epoch_ns;
+            active_epoch_mapped = true;
+        }
+        return execution_status;
+    }
+
     static detail::PhaseTaskDispatch run_phase(
         void* opaque,
         std::uint32_t phase_index,
@@ -1390,6 +2543,10 @@ struct Runtime::Impl {
                 self.numerics,
                 task_context,
                 self.degradation_level.load(std::memory_order_acquire),
+                self.active_reference_index !=
+                        invalid_reference_release_index
+                    ? &self.active_rate_view
+                    : nullptr,
             };
             try {
                 result = callback.callback(
@@ -1453,6 +2610,8 @@ struct Runtime::Impl {
     detail::ThreadStartupGate thread_startup_gate;
     detail::ThreadStartupResult frame_startup_result;
     RuntimeConfig config{};
+    RateExecutionPolicy rate_execution_policy{};
+    bool rate_execution_policy_set = false;
     CpuMemoryPolicy cpu_memory_policy{};
     CpuMemoryPolicyReport cpu_memory_policy_report{};
     bool cpu_memory_policy_report_available = false;
@@ -1474,8 +2633,30 @@ struct Runtime::Impl {
     std::vector<detail::RateDomainSpec> rate_domains;
     std::vector<detail::RateBindingSpec> rate_bindings;
     detail::CompiledRatePlan compiled_rate_plan;
+    detail::CompiledRateDispatchPlan compiled_rate_dispatch_plan;
     std::vector<detail::CrossRateChannelSpec> cross_rate_channels;
     detail::CompiledCrossRatePlan compiled_cross_rate_plan;
+    std::vector<ActiveChannelState> active_channel_states;
+    std::vector<std::byte> active_committed_payloads;
+    std::vector<std::byte> active_staging_payloads;
+    std::vector<std::byte> active_checkpoint_state;
+    std::unique_ptr<std::atomic<std::uint8_t>[]> active_publication_claims;
+    std::uint64_t active_logical_cursor_ns = 0;
+    std::uint64_t active_nominal_epoch_ns = 0;
+    bool active_epoch_mapped = false;
+    bool active_faulted = false;
+    RateDomainHandle active_fault_domain{};
+    std::uint64_t active_fault_sequence = 0;
+    std::uint32_t active_fault_substep = 0;
+    std::size_t active_reference_index = invalid_reference_release_index;
+    std::uint64_t active_supercycle_cycle = 0;
+    std::uint64_t active_logical_release_ns = 0;
+    std::uint64_t active_nominal_release_ns = 0;
+    std::uint64_t active_absolute_deadline_ns = 0;
+    RateLateAction active_late_action = RateLateAction::fail;
+    StepResult::RateSummary* active_rate_summary = nullptr;
+    std::atomic<std::uint64_t> active_stale_reads{0};
+    RateReleaseView active_rate_view{};
     std::unique_ptr<detail::ResidentRegionSet> resident_regions;
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::TelemetryCounters telemetry_counters;
@@ -1626,6 +2807,32 @@ Status Runtime::set_host_executor(
     }
     impl_->host_executor = adapter;
     impl_->host_executor_set = true;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_rate_execution_policy(
+    const RateExecutionPolicy& policy) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "rate execution policy is frozen");
+    }
+    if (policy.maximum_dispatch_records_per_step == 0 ||
+        policy.maximum_dispatch_records_per_step >
+            reference_release_capacity) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "rate execution dispatch bound is invalid");
+    }
+    impl_->rate_execution_policy = policy;
+    impl_->rate_execution_policy_set = true;
     impl_->clear_error();
     return Status::ok;
 }
@@ -2040,6 +3247,8 @@ Status Runtime::register_rate_domain(
             registration.budget_wcet_ns,
             registration.criticality,
             registration.optional,
+            registration.late_action,
+            registration.bounded_catch_up_limit,
         });
         out_domain = RateDomainHandle{impl_->graph_owner, index};
     } catch (const std::bad_alloc&) {
@@ -2090,6 +3299,8 @@ Status Runtime::replace_rate_domain(
             registration.budget_wcet_ns,
             registration.criticality,
             registration.optional,
+            registration.late_action,
+            registration.bounded_catch_up_limit,
         };
         impl_->rate_domains[domain.index()] = std::move(candidate);
     } catch (const std::bad_alloc&) {
@@ -2638,6 +3849,25 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(rate_status, rate_diagnostic.message);
     }
 
+    detail::CompiledRateDispatchPlan compiled_rate_dispatch_plan;
+    if (impl_->rate_execution_policy_set) {
+        detail::RateDispatchDiagnostic dispatch_diagnostic;
+        const auto dispatch_status = detail::compile_rate_dispatch(
+            impl_->graph_owner,
+            impl_->config.determinism_tier,
+            impl_->rate_execution_policy,
+            impl_->dependencies,
+            compiled_rate_plan,
+            impl_->cross_rate_channels,
+            compiled_rate_dispatch_plan,
+            dispatch_diagnostic);
+        if (dispatch_status != Status::ok) {
+            return impl_->fail(
+                dispatch_status,
+                dispatch_diagnostic.message);
+        }
+    }
+
     detail::CompiledCrossRatePlan compiled_cross_rate_plan;
     detail::CrossRateCompileDiagnostic cross_rate_diagnostic;
     const auto cross_rate_status = detail::compile_cross_rate_data(
@@ -2651,6 +3881,93 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(
             cross_rate_status,
             cross_rate_diagnostic.message);
+    }
+
+    std::vector<Impl::ActiveChannelState> active_channel_states;
+    std::vector<std::byte> active_committed_payloads;
+    std::vector<std::byte> active_staging_payloads;
+    std::vector<std::byte> active_checkpoint_state;
+    std::unique_ptr<std::atomic<std::uint8_t>[]>
+        active_publication_claims;
+    if (impl_->rate_execution_policy_set) {
+        try {
+            active_channel_states.reserve(
+                impl_->cross_rate_channels.size());
+            std::size_t payload_bytes = 0;
+            for (const auto& channel : impl_->cross_rate_channels) {
+                if (!detail::checked_add(
+                        payload_bytes,
+                        channel.payload_size,
+                        payload_bytes)) {
+                    return impl_->fail(
+                        Status::capacity_exceeded,
+                        "active cross-rate payload storage overflows");
+                }
+            }
+            active_committed_payloads.resize(payload_bytes);
+            active_staging_payloads.resize(payload_bytes);
+            if (!impl_->cross_rate_channels.empty()) {
+                active_publication_claims =
+                    std::make_unique<std::atomic<std::uint8_t>[]>(
+                        impl_->cross_rate_channels.size());
+            }
+            std::size_t payload_offset = 0;
+            for (std::size_t index = 0;
+                 index < impl_->cross_rate_channels.size();
+                 ++index) {
+                const auto& channel = impl_->cross_rate_channels[index];
+                std::copy(
+                    channel.initial_sample.begin(),
+                    channel.initial_sample.end(),
+                    active_committed_payloads.begin() +
+                        static_cast<std::ptrdiff_t>(payload_offset));
+                std::copy(
+                    channel.initial_sample.begin(),
+                    channel.initial_sample.end(),
+                    active_staging_payloads.begin() +
+                        static_cast<std::ptrdiff_t>(payload_offset));
+                active_channel_states.push_back({payload_offset});
+                active_publication_claims[index].store(
+                    0,
+                    std::memory_order_relaxed);
+                const auto publish_status =
+                    compiled_cross_rate_plan.stores[index].publish(
+                        1,
+                        std::span<const std::byte>(
+                            channel.initial_sample.data(),
+                            channel.initial_sample.size()));
+                if (publish_status !=
+                    detail::SnapshotStoreResult::ok) {
+                    return impl_->fail(
+                        Status::internal_error,
+                        "active initial channel publication failed");
+                }
+                payload_offset += channel.payload_size;
+            }
+            std::size_t channel_state_bytes = 0;
+            std::size_t checkpoint_state_bytes = 0;
+            if (!detail::checked_multiply(
+                    impl_->cross_rate_channels.size(),
+                    kRateDispatchChannelStateBytes,
+                    channel_state_bytes) ||
+                !detail::checked_add(
+                    kRateDispatchStateHeaderBytes,
+                    channel_state_bytes,
+                    checkpoint_state_bytes) ||
+                !detail::checked_add(
+                    checkpoint_state_bytes,
+                    payload_bytes,
+                    checkpoint_state_bytes)) {
+                return impl_->fail(
+                    Status::capacity_exceeded,
+                    "active canonical state size overflows");
+            }
+            active_checkpoint_state.resize(checkpoint_state_bytes);
+        } catch (const std::bad_alloc&) {
+            return impl_->fail(Status::resource_exhausted, nullptr);
+        } catch (...) {
+            return impl_->fail(Status::internal_error, nullptr);
+        }
     }
 
     const auto minimum_graph_queue_capacity =
@@ -2676,6 +3993,12 @@ Status Runtime::finalize() noexcept {
 
     std::size_t registered_state_bytes = 0;
     for (const auto& state : impl_->states) {
+        if (impl_->rate_execution_policy_set &&
+            identifier_view(state.name) == kRateDispatchStateName) {
+            return impl_->fail(
+                Status::invalid_config,
+                "application state name collides with the active rate state record");
+        }
         if (!detail::checked_artifact_add(
                 registered_state_bytes,
                 state.storage.size(),
@@ -2700,8 +4023,22 @@ Status Runtime::finalize() noexcept {
     }
     std::size_t checkpoint_record_bytes = 0;
     std::size_t checkpoint_required_bytes = 0;
+    const auto checkpoint_state_count = impl_->states.size() +
+        (impl_->rate_execution_policy_set ? std::size_t{1} : 0);
+    std::size_t checkpoint_payload_bytes = registered_state_bytes;
+    if ((impl_->rate_execution_policy_set &&
+         (impl_->states.size() >= kMaxRegisteredStates ||
+          !detail::checked_artifact_add(
+              checkpoint_payload_bytes,
+              active_checkpoint_state.size(),
+              checkpoint_payload_bytes))) ||
+        checkpoint_state_count > kMaxRegisteredStates) {
+        return impl_->fail(
+            Status::invalid_config,
+            "active checkpoint state exceeds the schema-1 record bound");
+    }
     if (!detail::checked_artifact_multiply(
-            impl_->states.size(),
+            checkpoint_state_count,
             detail::checkpoint_record_header_size,
             checkpoint_record_bytes) ||
         !detail::checked_artifact_add(
@@ -2710,7 +4047,7 @@ Status Runtime::finalize() noexcept {
             checkpoint_required_bytes) ||
         !detail::checked_artifact_add(
             checkpoint_required_bytes,
-            registered_state_bytes,
+            checkpoint_payload_bytes,
             checkpoint_required_bytes) ||
         checkpoint_required_bytes >
             impl_->config.snapshot_max_bytes) {
@@ -2767,6 +4104,8 @@ Status Runtime::finalize() noexcept {
         compiled_cross_rate_plan.channels.size();
     memory_plan.cross_rate_selection_count =
         compiled_cross_rate_plan.selections.size();
+    memory_plan.rate_checkpoint_state_bytes =
+        active_checkpoint_state.size();
     bool plan_valid = true;
     for (std::size_t index = 0;
          index < impl_->cross_rate_channels.size();
@@ -3004,6 +4343,35 @@ Status Runtime::finalize() noexcept {
         plan_valid = plan_valid &&
             add_rate_plan_bytes(store.payload_storage_bytes());
     }
+    const auto rate_dispatch_bytes_begin = memory_plan.rate_plan_bytes;
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.admission.capacity(),
+        sizeof(detail::RateAdmissionRecord));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.groups.capacity(),
+        sizeof(detail::RateReleaseGroup));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.domain_group_indices.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        active_channel_states.capacity(),
+        sizeof(Impl::ActiveChannelState));
+    plan_valid = plan_valid && add_rate_plan_array(
+        active_committed_payloads.capacity(),
+        sizeof(std::byte));
+    plan_valid = plan_valid && add_rate_plan_array(
+        active_staging_payloads.capacity(),
+        sizeof(std::byte));
+    plan_valid = plan_valid && add_rate_plan_array(
+        impl_->rate_execution_policy_set
+            ? impl_->cross_rate_channels.size()
+            : 0,
+        sizeof(std::atomic<std::uint8_t>));
+    plan_valid = plan_valid && add_rate_plan_array(
+        active_checkpoint_state.capacity(),
+        sizeof(std::byte));
+    memory_plan.rate_dispatch_state_bytes =
+        memory_plan.rate_plan_bytes - rate_dispatch_bytes_begin;
     plan_valid = plan_valid && add_runtime_array(
         compiled_order.capacity(),
         sizeof(PhaseHandle));
@@ -3245,6 +4613,40 @@ Status Runtime::finalize() noexcept {
                 1);
         }
         add_runtime_extent(
+            compiled_rate_dispatch_plan.admission.data(),
+            compiled_rate_dispatch_plan.admission.capacity(),
+            sizeof(detail::RateAdmissionRecord));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.groups.data(),
+            compiled_rate_dispatch_plan.groups.capacity(),
+            sizeof(detail::RateReleaseGroup));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.domain_group_indices.data(),
+            compiled_rate_dispatch_plan.domain_group_indices.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            active_channel_states.data(),
+            active_channel_states.capacity(),
+            sizeof(Impl::ActiveChannelState));
+        add_runtime_extent(
+            active_committed_payloads.data(),
+            active_committed_payloads.capacity(),
+            sizeof(std::byte));
+        add_runtime_extent(
+            active_staging_payloads.data(),
+            active_staging_payloads.capacity(),
+            sizeof(std::byte));
+        add_runtime_extent(
+            active_publication_claims.get(),
+            impl_->rate_execution_policy_set
+                ? impl_->cross_rate_channels.size()
+                : 0,
+            sizeof(std::atomic<std::uint8_t>));
+        add_runtime_extent(
+            active_checkpoint_state.data(),
+            active_checkpoint_state.capacity(),
+            sizeof(std::byte));
+        add_runtime_extent(
             compiled_order.data(),
             compiled_order.capacity(),
             sizeof(PhaseHandle));
@@ -3307,7 +4709,16 @@ Status Runtime::finalize() noexcept {
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
     impl_->compiled_order = std::move(compiled_order);
     impl_->compiled_rate_plan = std::move(compiled_rate_plan);
+    impl_->compiled_rate_dispatch_plan =
+        std::move(compiled_rate_dispatch_plan);
     impl_->compiled_cross_rate_plan = std::move(compiled_cross_rate_plan);
+    impl_->active_channel_states = std::move(active_channel_states);
+    impl_->active_committed_payloads =
+        std::move(active_committed_payloads);
+    impl_->active_staging_payloads = std::move(active_staging_payloads);
+    impl_->active_checkpoint_state = std::move(active_checkpoint_state);
+    impl_->active_publication_claims =
+        std::move(active_publication_claims);
     impl_->resident_regions = std::move(resident_regions);
     impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
@@ -3556,7 +4967,12 @@ Status Runtime::start() noexcept {
         detail::make_thread_role_plan(*device_report, *runtime_stack_report);
 
     impl_->thread_startup_gate.reset();
-    impl_->degradation_level.store(0, std::memory_order_release);
+    if (!impl_->rate_execution_policy_set ||
+        (!impl_->active_epoch_mapped &&
+         impl_->active_logical_cursor_ns == 0 &&
+         !impl_->active_faulted)) {
+        impl_->degradation_level.store(0, std::memory_order_release);
+    }
     impl_->runtime_stack_results_available = false;
     const auto rollback_startup =
         [&](Status failure,
@@ -3794,6 +5210,11 @@ Status Runtime::step(
             Status::invalid_state,
             "device teardown is pending; retry stop");
     }
+    if (impl_->rate_execution_policy_set && impl_->active_faulted) {
+        return impl_->fail(
+            Status::invalid_state,
+            "active policy failure is terminal for execution");
+    }
     if (impl_->in_periodic_run.load(std::memory_order_acquire) &&
         !impl_->periodic_dispatch.load(std::memory_order_acquire)) {
         return impl_->fail(
@@ -3819,6 +5240,32 @@ Status Runtime::step(
     if (frame.delta.count() < 0) {
         impl_->in_step.store(false, std::memory_order_release);
         return impl_->fail(Status::invalid_argument, "frame delta cannot be negative");
+    }
+    if (impl_->rate_execution_policy_set) {
+        std::uint64_t checked_end_ns = 0;
+        std::uint64_t expected_nominal_ns = 0;
+        if (impl_->active_faulted) {
+            impl_->in_step.store(false, std::memory_order_release);
+            return impl_->fail(
+                Status::invalid_state,
+                "active rate execution is fault-gated until checked stop");
+        }
+        if (frame.delta.count() <= 0 || !frame.nominal_release_ns ||
+            !checked_time_add(
+                impl_->active_logical_cursor_ns,
+                static_cast<std::uint64_t>(frame.delta.count()),
+                checked_end_ns) ||
+            (impl_->active_epoch_mapped &&
+             (!checked_time_add(
+                  impl_->active_nominal_epoch_ns,
+                  impl_->active_logical_cursor_ns,
+                  expected_nominal_ns) ||
+              *frame.nominal_release_ns != expected_nominal_ns))) {
+            impl_->in_step.store(false, std::memory_order_release);
+            return impl_->fail(
+                Status::invalid_argument,
+                "active rate step requires a positive bounded contiguous nominal window");
+        }
     }
 
     struct StepGuard {
@@ -3857,11 +5304,13 @@ Status Runtime::step(
 
     impl_->active_frame = &frame;
     std::size_t failed_phase = impl_->callbacks.size();
-    const auto execution_status = impl_->executor->run(
-        &Impl::run_phase,
-        impl_.get(),
-        output.callbacks_executed,
-        failed_phase);
+    const auto execution_status = impl_->rate_execution_policy_set
+        ? impl_->run_active_step(frame, output, failed_phase)
+        : impl_->executor->run(
+              &Impl::run_phase,
+              impl_.get(),
+              output.callbacks_executed,
+              failed_phase);
     impl_->active_frame = nullptr;
 
     output.finish_ns = impl_->clock_now();
@@ -4099,6 +5548,7 @@ Status Runtime::run_periodic(
                     frame_index,
                     config.period,
                     deadline,
+                    release,
                 },
                 &step_result);
         }
@@ -4118,6 +5568,62 @@ Status Runtime::run_periodic(
             step_result.watchdog_fired;
         frame_result.degradation_level =
             step_result.degradation_level;
+        frame_result.rate = step_result.rate;
+
+        const auto add_rate = [](std::uint64_t& total,
+                                 std::uint64_t value) noexcept {
+            return checked_time_add(total, value, total);
+        };
+        if (!add_rate(
+                output.rate.due_domain_releases,
+                step_result.rate.due_domain_releases) ||
+            !add_rate(
+                output.rate.due_reference_records,
+                step_result.rate.due_reference_records) ||
+            !add_rate(
+                output.rate.executed_reference_records,
+                step_result.rate.executed_reference_records) ||
+            !add_rate(
+                output.rate.on_time_domain_releases,
+                step_result.rate.on_time_domain_releases) ||
+            !add_rate(
+                output.rate.late_domain_releases,
+                step_result.rate.late_domain_releases) ||
+            !add_rate(
+                output.rate.caught_up_domain_releases,
+                step_result.rate.caught_up_domain_releases) ||
+            !add_rate(
+                output.rate.skipped_domain_releases,
+                step_result.rate.skipped_domain_releases) ||
+            !add_rate(
+                output.rate.held_domain_releases,
+                step_result.rate.held_domain_releases) ||
+            !add_rate(
+                output.rate.degraded_domain_releases,
+                step_result.rate.degraded_domain_releases) ||
+            !add_rate(
+                output.rate.rejected_reference_records,
+                step_result.rate.rejected_reference_records) ||
+            !add_rate(
+                output.rate.stale_reads,
+                step_result.rate.stale_reads) ||
+            !add_rate(
+                output.rate.failed_domain_releases,
+                step_result.rate.failed_domain_releases)) {
+            return impl_->fail(
+                Status::capacity_exceeded,
+                "periodic active-rate summary overflowed");
+        }
+        if (!output.rate.has_first_failure &&
+            step_result.rate.has_first_failure) {
+            output.rate.has_first_failure = true;
+            output.rate.first_failing_domain =
+                step_result.rate.first_failing_domain;
+            output.rate.first_failing_sequence =
+                step_result.rate.first_failing_sequence;
+            output.rate.first_failing_substep =
+                step_result.rate.first_failing_substep;
+        }
 
         ++output.frames_executed;
         if (frame_result.deadline_missed) {
@@ -4441,6 +5947,12 @@ bool Runtime::rate_model_enabled() const noexcept {
     return impl_ && !impl_->provider_callback_active() &&
         impl_->state != RuntimeState::configuring &&
         !impl_->compiled_rate_plan.domains.empty();
+}
+
+bool Runtime::rate_execution_enabled() const noexcept {
+    return impl_ && !impl_->provider_callback_active() &&
+        impl_->state != RuntimeState::configuring &&
+        impl_->rate_execution_policy_set;
 }
 
 std::size_t Runtime::rate_domain_count() const noexcept {
@@ -4878,7 +6390,7 @@ Status Runtime::checkpoint_size(
     std::size_t record_bytes = 0;
     std::size_t payload_bytes = 0;
     if (!detail::checked_artifact_multiply(
-            impl_->states.size(),
+            impl_->checkpoint_state_count(),
             detail::checkpoint_record_header_size,
             record_bytes)) {
         return impl_->fail(
@@ -4894,6 +6406,15 @@ Status Runtime::checkpoint_size(
                 Status::internal_error,
                 "finalized checkpoint size overflowed");
         }
+    }
+    if (impl_->rate_execution_policy_set &&
+        !detail::checked_artifact_add(
+            payload_bytes,
+            impl_->active_checkpoint_state.size(),
+            payload_bytes)) {
+        return impl_->fail(
+            Status::internal_error,
+            "finalized checkpoint size overflowed");
     }
     if (!detail::checked_artifact_add(
             detail::checkpoint_header_size,
@@ -4962,7 +6483,7 @@ Status Runtime::write_checkpoint(
         impl_->observability.workload_id;
     const auto status = detail::encode_checkpoint_artifact(
         metadata,
-        impl_->states.size(),
+        impl_->checkpoint_state_count(),
         &Impl::provide_state,
         impl_.get(),
         impl_->config.snapshot_max_bytes,
@@ -5001,6 +6522,11 @@ Status Runtime::restore_checkpoint(
             Status::invalid_state,
             "device teardown is pending; retry stop");
     }
+    if (impl_->rate_execution_policy_set && impl_->active_faulted) {
+        return impl_->fail(
+            Status::invalid_state,
+            "active policy failure is terminal for checkpoint restore");
+    }
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
         impl_->in_replay.load(std::memory_order_acquire)) {
@@ -5023,7 +6549,7 @@ Status Runtime::restore_checkpoint(
         detail::parse_checkpoint_artifact(
             checkpoint,
             impl_->config.snapshot_max_bytes,
-            impl_->config.state_capacity,
+            impl_->checkpoint_state_count(),
             parsed);
     if (parse_status != Status::ok) {
         return impl_->fail(
@@ -5036,7 +6562,7 @@ Status Runtime::restore_checkpoint(
         parsed.replay_id != impl_->replay_id ||
         parsed.graph_id != impl_->graph_id ||
         parsed.state_schema_id != impl_->state_schema_id ||
-        parsed.state_count != impl_->states.size() ||
+        parsed.state_count != impl_->checkpoint_state_count() ||
         parsed.workload_id != impl_->observability.workload_id ||
         (impl_->config.determinism_tier ==
              DeterminismTier::unspecified &&
@@ -5067,9 +6593,35 @@ Status Runtime::restore_checkpoint(
                 "checkpoint state schema does not match registration");
         }
     }
+    detail::CheckpointRecordView active_record;
+    if (impl_->rate_execution_policy_set &&
+        (!detail::next_checkpoint_record(
+             checkpoint,
+             parsed,
+             cursor,
+             active_record) ||
+         active_record.name != kRateDispatchStateName ||
+         active_record.schema_version != kRateDispatchStateSchema ||
+         !impl_->validate_active_checkpoint_state(
+             active_record.payload))) {
+        return impl_->fail(
+            Status::incompatible_artifact,
+            "active checkpoint state is malformed or incompatible");
+    }
+
+    // Rebuild internal active stores before application bytes. Semantic
+    // validation above makes this operation infallible; retaining the checked
+    // result protects the transaction if those invariants ever diverge.
+    if (impl_->rate_execution_policy_set &&
+        !impl_->apply_active_checkpoint_state(active_record.payload)) {
+        return impl_->fail(
+            Status::internal_error,
+            "active checkpoint store rebuild failed");
+    }
 
     // The second pass cannot fail: the complete source and every destination
-    // were validated above, so restore is transactional for registered bytes.
+    // were validated above, so registered application bytes remain
+    // transactional.
     cursor = {};
     for (std::size_t index = 0;
          index < impl_->states.size();
@@ -5107,6 +6659,11 @@ Status Runtime::write_input_log(
         return impl_->fail(
             Status::invalid_state,
             "input-log export requires a finalized runtime");
+    }
+    if (impl_->rate_execution_policy_set) {
+        return impl_->fail(
+            Status::invalid_state,
+            "schema-1 input logs cannot encode active rate actions");
     }
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
@@ -5185,6 +6742,11 @@ Status Runtime::replay(
         return impl_->fail(
             Status::invalid_state,
             "replay requires a running runtime");
+    }
+    if (impl_->rate_execution_policy_set) {
+        return impl_->fail(
+            Status::invalid_state,
+            "schema-1 replay cannot reproduce active nominal releases or late actions");
     }
     if (impl_->stop_pending) {
         return impl_->fail(

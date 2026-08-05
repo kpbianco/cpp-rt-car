@@ -245,6 +245,17 @@ leave all registered bytes unchanged.
 
 ## Running-state boundary
 
+M16-03 active state is allocated only during finalization. Admission records,
+domain-release groups, channel aliases/generations, staged and committed
+payload bytes, publication claims, and the canonical checkpoint-state buffer
+are counted once in `rate_dispatch_state_bytes`, within `rate_plan_bytes` and
+the existing runtime-control logical extent. `rate_checkpoint_state_bytes`
+identifies the canonical record buffer without adding a planned row or provider
+region. The six-row equation remains unchanged. Active dispatch, publish,
+copy, skip, catch-up, hold, degrade, fail, summary inspection, and checked stop
+use only that storage; allocation instrumentation covers on-time and late
+degrade frames.
+
 Before `start()` creates a thread, M15-03 applies and observes resident-memory
 policy for phase scratch, task scratch, and trace storage. It then creates the
 configured fixed worker team, an optional M5 watchdog lane, and one M8 device
@@ -274,6 +285,9 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
 - 64 complete frames under each executor policy with concurrent phases, range
   work, fixed-tree reductions, tracing, an armed watchdog, plus 64
   mock-device frames, under allocation instrumentation:
+  `tests/test_trace_noalloc.cpp`;
+- active admission/storage accounting and allocation-free dispatch:
+  `tests/test_memory_plan.cpp`, `tests/test_rate_dispatch.cpp`,
   `tests/test_trace_noalloc.cpp`;
 - C ABI plan, scratch, malformed discriminator, and reserved-field checks:
   `tests/test_cabi_dlopen.c`;

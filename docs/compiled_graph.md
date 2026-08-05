@@ -11,7 +11,8 @@ plan. Release 1.2 runs the same frozen graph from host-driven or finite
 self-paced M5 calls. Latency qualification remains deployment-specific work.
 M16-01 adds a separate C++ rate-domain kind and reference-plan compiler. M16-02
 adds a distinct instance-owned cross-rate channel kind and immutable selection
-records without changing graph execution or the stable C ABI.
+records. M16-03 can opt into selected CPU record execution without changing the
+stable C ABI or reference-only graph execution.
 
 ## Graph vocabulary
 
@@ -89,9 +90,13 @@ The immutable reference interval is `[0, lcm(periods))` relative to epoch zero.
 All domain releases are integral nanoseconds; substeps share their domain
 release timestamp. Equal timestamps order by domain registration, this
 contract's compiled phase order, then substep ordinal. Reduced period ratios
-are exact against registration-order domain zero. These rules do not filter,
-repeat, reorder, skip, catch up, hold, degrade, or shed execution: `step()` and
-`run_periodic()` still submit the complete compiled graph once per frame.
+are exact against registration-order domain zero. Without the execution policy,
+`step()` and `run_periodic()` still submit the complete compiled graph once per
+frame. Active M16-03 plans repeat this exact order by checked supercycle
+arithmetic. They permit ordinary dependencies only within one domain and run
+each selected CPU phase serially through the existing executor without
+releasing graph successors. Late actions operate on a whole domain release;
+optional shedding remains outside this contract.
 
 ## Resource ordering
 
@@ -161,10 +166,12 @@ freezes this graph surface under the M11 compatibility policy.
 - Compiler: `rt/src/compiled_graph.cpp`
 - Rate compiler: `rt/src/rate_timeline.cpp`
 - Cross-rate compiler/store: `rt/src/cross_rate_data.cpp`
+- Active admission/dispatch compiler: `rt/src/rate_dispatch.cpp`
 - Runtime integration: `rt/src/host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Rate/reference tests: `tests/test_rate_timeline.cpp`
 - Cross-rate selection/storage tests: `tests/test_cross_rate_data.cpp`
+- Active admission/dispatch tests: `tests/test_rate_dispatch.cpp`
 - First-frame allocation instrumentation: `tests/test_trace_noalloc.cpp`
 - Dynamic C ABI coverage: `tests/test_cabi_dlopen.c`
 - C and C++ embedding samples: `samples/embed_c/mini_app.c`,

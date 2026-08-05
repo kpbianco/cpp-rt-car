@@ -90,8 +90,23 @@ indexes, mode, payload size, maximum age, and every copied initial-sample byte
 to `graph_id`. The marker is absent when no channel is declared, preserving the
 exact M16-01 graph/replay identity. Selection records are a deterministic
 derivative of already-hashed graph/rate/channel inputs and are not separately
-hashed. Checkpoint and input-log remain schema 1: runtime execution does not yet
-progress channel state, and persisting such state is an M16-03 design gate.
+hashed.
+
+M16-03 conditionally appends the active execution bound and every late-action
+and catch-up field to graph identity. The marker is absent for reference-only
+plans, preserving their exact M16-01/M16-02 identity and artifact bytes. Active
+execution is D0 only. It contributes one reserved canonical generic state
+record containing the logical cursor, epoch mapping, degradation/fault state,
+channel generations/aliases, and committed payload bytes. That record changes
+state-schema/replay identity and participates in the existing state hash; the
+checkpoint codec and schema number remain unchanged. Restore validates the
+complete internal record before changing any application state, then rebuilds
+the live stores without allocation.
+
+Schema-1 input-log records have no nominal release or action decision fields.
+`write_input_log()` and `replay()` therefore reject active execution explicitly;
+reference-only input logs remain unchanged. Action-aware replay and versioned
+per-release telemetry are M16-04 product decisions, not inferred D1 behavior.
 
 ## Checkpoint format v1
 
@@ -186,6 +201,8 @@ The M7 gates include:
 - allocation instrumentation around checkpoint write, inspect, restore, and
   input-log write;
 - stable C ABI v8 dynamic-loader coverage and C/C++ embedding samples;
+- active canonical-state round trip, corruption transactionality, and explicit
+  active input-log/replay rejection in `tests/test_rate_dispatch.cpp`;
 - CI artifact exchange that compares checkpoint bytes produced by GCC/Clang
   and FMA-on/FMA-off builds.
 

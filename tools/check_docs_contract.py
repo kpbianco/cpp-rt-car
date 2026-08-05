@@ -290,6 +290,9 @@ def check_runtime_contract() -> None:
     cross_rate_header = read("rt/src/cross_rate_data.hpp")
     cross_rate_source = read("rt/src/cross_rate_data.cpp")
     cross_rate_test = read("tests/test_cross_rate_data.cpp")
+    rate_dispatch_header = read("rt/src/rate_dispatch.hpp")
+    rate_dispatch_source = read("rt/src/rate_dispatch.cpp")
+    rate_dispatch_test = read("tests/test_rate_dispatch.cpp")
     executor_doc = read("docs/executor.md")
     memory_doc = read("docs/memory_plan.md")
     cpu_memory_policy_doc = read("docs/cpu_memory_policy.md")
@@ -1270,6 +1273,88 @@ def check_runtime_contract() -> None:
         if phrase not in normalized_cross_docs:
             fail(f"M16-02 component contracts are missing phrase {phrase!r}")
 
+    # M16-03 checks likewise assert permanent opt-in behavior and deliberately
+    # avoid naming the moving active/latest batch frontier.
+    for token in (
+        "enum class RateLateAction",
+        "struct RateExecutionPolicy",
+        "class RateReleaseView",
+        "nominal_release_ns",
+        "set_rate_execution_policy(",
+        "rate_execution_enabled(",
+        "rate_dispatch_state_bytes",
+        "rate_checkpoint_state_bytes",
+    ):
+        if token not in runtime_header:
+            fail(f"public SDK headers: missing permanent M16-03 token {token!r}")
+    for token in (
+        "compile_rate_dispatch(",
+        "count_due_rate_work(",
+        "domain_group_indices",
+        "declared-budget admission found an infeasible mandatory record",
+    ):
+        if token not in rate_dispatch_header and token not in rate_dispatch_source:
+            fail(f"active rate compiler is missing {token!r}")
+    for token in (
+        "run_active_step(",
+        "execute_active_group(",
+        "publish_active_channel(",
+        "copy_active_channel(",
+        "kRateDispatchStateName",
+        "restore_committed(",
+    ):
+        if token not in runtime_source:
+            fail(f"M16-03 runtime integration is missing {token!r}")
+    if "run_selected(" not in executor_source:
+        fail("M16-03 executor integration is missing selected-phase dispatch")
+    for test_name in (
+        "PolicyIsOptInCopiedFrozenAndLegacyDispatchIsExact",
+        "AdmissionRejectsMalformedAndInfeasibleActivePlans",
+        "AdmissionMatchesIndependentCompleteSupercycleSimulation",
+        "RejectsD1CrossDomainDependenciesAndSkipProducers",
+        "ExecutesExactHalfOpenWindowsAndReportsContextAndCaps",
+        "CallbackFailureRejectsEveryUnattemptedSubstep",
+        "AppliesSkipCatchUpDegradeAndFailPolicies",
+        "PublishesCopiesHoldsAndRejectsDuplicateOrMissingPayloads",
+        "PublishesEverySubstepAndUsesExactHeldSelection",
+        "PeriodicUsesAbsoluteReleaseAndAggregatesRateSummaries",
+        "TwoActiveRuntimeEpochsAndCursorsRemainIsolated",
+        "ActiveCheckpointRoundTripsAndReplayIsExplicitlyRejected",
+    ):
+        if test_name not in rate_dispatch_test:
+            fail(
+                "tests/test_rate_dispatch.cpp: missing permanent "
+                f"M16-03 gate {test_name!r}"
+            )
+    if "RateDispatchOnTimeAndLateDegradeDoNotAllocate" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing M16-03 allocation gate")
+    for token in (
+        "rt/src/rate_dispatch.cpp",
+        "test_rate_dispatch.cpp",
+        "m16_rate_dispatch",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"M16-03 CMake integration is missing {token!r}")
+    for token in ("RateDispatch.*", "m16_rate_dispatch"):
+        if token not in ci_workflow:
+            fail(f"M16-03 TSan/CI coverage is missing {token!r}")
+    if "additive_active_policy" not in package_cpp_consumer:
+        fail("preferred package consumer is missing the additive M16-03 gate")
+    if "pre_m16_03_compiled" not in package_compat_consumer:
+        fail("compatibility package consumer is missing the pre-M16-03 aggregate gate")
+    normalized_dispatch_docs = " ".join(
+        (graph_doc + " " + host_doc + " " + executor_doc + " " +
+         memory_doc + " " + time_doc + " " + determinism_doc).lower().split()
+    )
+    for phrase in (
+        "conservative serialized",
+        "exact half-open interval",
+        "canonical generic state",
+        "m16-04",
+    ):
+        if phrase not in normalized_dispatch_docs:
+            fail(f"M16-03 component contracts are missing phrase {phrase!r}")
+
     for token in (
         "Runtime::run_periodic(",
         "clock_sleep_until(",
@@ -2158,6 +2243,8 @@ def main() -> int:
             "rt/include/rt/xdma_backend.hpp",
             "rt/include/rt/xdma_linux.hpp",
             "rt/src/compiled_graph.cpp",
+            "rt/src/rate_dispatch.hpp",
+            "rt/src/rate_dispatch.cpp",
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
             "rt/src/host_runtime.cpp",
@@ -2189,6 +2276,7 @@ def main() -> int:
             "samples/cuda_qualification.cpp",
             "samples/xdma_qualification.cpp",
             "tests/test_host_runtime.cpp",
+            "tests/test_rate_dispatch.cpp",
             "tests/test_compiled_graph.cpp",
             "tests/test_executor.cpp",
             "tests/test_memory_plan.cpp",

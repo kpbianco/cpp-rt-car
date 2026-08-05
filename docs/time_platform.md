@@ -37,16 +37,17 @@ steps remain usable with a clock that cannot wait; periodic execution returns
 `clock_failure`.
 
 The M16-01 reference supercycle has a different, relative epoch-zero purpose.
-It describes exact domain due times for inspection but does not pace the clock
-or change `run_periodic()` releases. Each periodic host frame still runs the
-complete graph once under the absolute cadence above; rate-domain late,
-skip/catch-up/hold/degrade/fail behavior remains deferred.
+It does not pace the clock, and reference-only plans do not change
+`run_periodic()` releases.
+For an opt-in M16-03 plan, each periodic release is also the active nominal
+timestamp and the positive period is the next half-open logical window; the
+absolute cadence remains unchanged by late work.
 
 M16-02 selection ages are exact differences within that relative reference
 model, including checked prior-supercycle wrap. They use no runtime clock,
 sleep, tolerance, floating point, callback completion order, or wall time.
-Fresh/stale is immutable selection metadata and does not change cadence or
-trigger timeout, cancellation, skip, hold, degradation, or failure.
+Reference selection freshness remains immutable and does not change cadence.
+Active callback reads report fresh/stale from exact committed generation age.
 
 `PeriodicFrameResult` reports status, frame index, release, wake, start, finish,
 signed deadline slack, miss state, watchdog state, and degradation level.
@@ -157,6 +158,25 @@ bearing and retryable; unresolved stack ownership blocks later region rollback
 and provider release. No custom stack substitution, fixed CPU/NUMA assumption,
 privileged host mutation, or timing-only verification is added.
 
+## M16-03 logical and nominal rate time
+
+Active rate execution keeps logical simulation time distinct from the runtime
+clock. The first positive host step maps logical epoch zero to its appended
+nominal release timestamp. Later windows must be contiguous and equal
+`epoch + cursor`; each covers the exact half-open interval
+`[cursor, cursor + delta)`. Overflow, zero delta, a missing nominal release, or
+a noncontiguous mapping fails before callback dispatch. Host-driven steps never
+sleep. `run_periodic()` passes its existing absolute release as the nominal
+timestamp, so late work never shifts the periodic epoch.
+
+Immediately before one atomic domain release, the runtime compares the injected
+or monotonic clock with the checked absolute deadline. The configured skip,
+bounded-catch-up, hold, degrade, or fail action is then applied once to the
+whole release. Large late skip/hold prefixes use checked aggregate counts; the
+global callback cap and catch-up cap prevent backlog or spill. Fake-clock tests
+establish these integer decisions only. They are not measured WCET, latency,
+deadline, HIL, field, RT1, or RT2 evidence.
+
 Neither requested/resolved/acquired/applied/verified reports, preflight, nor
 named-host functional tests establish hardware/HIL behavior, latency, field
 results, RT1, RT2, signing, release, deployment, or production validation.
@@ -186,7 +206,7 @@ covered by the M11 compatibility and export policy.
   `rt/src/watchdog_monitor.cpp`,
   `rt/src/native_platform_preflight.cpp`;
 - fake-clock, no-drift, deadline, watchdog, and degradation tests:
-  `tests/test_periodic_runtime.cpp`;
+  `tests/test_periodic_runtime.cpp`, `tests/test_rate_dispatch.cpp`;
 - fail-closed preflight tests: `tests/test_platform_preflight.cpp`;
 - armed-watchdog allocation gate: `tests/test_trace_noalloc.cpp`;
 - dynamic C ABI coverage: `tests/test_cabi_dlopen.c`;

@@ -219,6 +219,73 @@ SnapshotStoreResult SnapshotStore::copy(
     return SnapshotStoreResult::ok;
 }
 
+SnapshotStoreResult SnapshotStore::retire(
+    std::uint64_t generation) noexcept {
+    if (!controls_ || generation == 0 ||
+        generation > maximum_generation()) {
+        return SnapshotStoreResult::invalid_argument;
+    }
+    const auto slot_index = static_cast<std::size_t>(
+        (generation - 1) % slot_count_);
+    auto& control = controls_[slot_index].value;
+    auto observed = control.load(std::memory_order_acquire);
+    if (control_generation(observed) != generation) {
+        return control_generation(observed) < generation
+            ? SnapshotStoreResult::not_ready
+            : SnapshotStoreResult::stale_generation;
+    }
+    if (control_state(observed) != kPublished) {
+        return SnapshotStoreResult::not_ready;
+    }
+    if (!control.compare_exchange_strong(
+            observed,
+            encode_control(generation, kFree),
+            std::memory_order_acq_rel,
+            std::memory_order_acquire)) {
+        return SnapshotStoreResult::not_ready;
+    }
+    return SnapshotStoreResult::ok;
+}
+
+bool SnapshotStore::can_publish(std::uint64_t generation) const noexcept {
+    if (!controls_ || generation == 0 ||
+        generation > maximum_generation() ||
+        generation != next_generation_) {
+        return false;
+    }
+    const auto slot_index = static_cast<std::size_t>(
+        (generation - 1) % slot_count_);
+    return control_state(
+        controls_[slot_index].value.load(std::memory_order_acquire)) == kFree;
+}
+
+SnapshotStoreResult SnapshotStore::restore_committed(
+    std::uint64_t generation,
+    std::uint64_t next_generation,
+    std::span<const std::byte> payload) noexcept {
+    if (!controls_ || !payload_ || payload.size() != payload_size_ ||
+        generation == 0 || generation > maximum_generation() ||
+        (next_generation != 0 &&
+         (next_generation > maximum_generation() ||
+          next_generation != generation + 1))) {
+        return SnapshotStoreResult::invalid_argument;
+    }
+    for (std::size_t index = 0; index < slot_count_; ++index) {
+        controls_[index].value.store(0, std::memory_order_relaxed);
+    }
+    const auto slot_index = static_cast<std::size_t>(
+        (generation - 1) % slot_count_);
+    std::memcpy(
+        payload_.get() + slot_index * payload_size_,
+        payload.data(),
+        payload_size_);
+    controls_[slot_index].value.store(
+        encode_control(generation, kPublished),
+        std::memory_order_release);
+    next_generation_ = next_generation;
+    return SnapshotStoreResult::ok;
+}
+
 Status compile_cross_rate_data(
     std::uint32_t graph_owner,
     std::size_t phase_count,

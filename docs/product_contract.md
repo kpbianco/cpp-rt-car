@@ -47,12 +47,13 @@ stack, control, and selected-region ownership. M15 is complete at the audited
 baseline after mandatory CI and maintainer merge. M16-01 adds an additive C++
 rate-domain and phase-ownership model plus an immutable epoch-zero reference
 timeline. It uses exact checked integer arithmetic and changes graph/replay
-compatibility identity only for an explicit rate model. It does not yet change
-callback dispatch. M16-02 adds bounded copied CPU-to-CPU cross-rate channel
+compatibility identity only for an explicit rate model. M16-02 adds bounded
+copied CPU-to-CPU cross-rate channel
 declarations, deterministic first/repeating-supercycle sample-and-hold and
-freshness selections, and preallocated exact-generation SPSC stores. The stores
-are not invoked by runtime execution; admission, late behavior,
-shedding/recovery, and telemetry fields remain deferred.
+freshness selections, and preallocated exact-generation SPSC stores. M16-03
+optionally activates D0 mandatory-CPU admission/dispatch, store transfer, and
+bounded late behavior. M16-04 shedding/recovery and versioned telemetry remain
+deferred.
 
 ## Claim policy
 
@@ -201,10 +202,23 @@ deadline, budget, criticality, and optionality. Equal timestamps order by
 domain registration, compiled phase, then substep. Reduced period ratios use
 registration-order domain zero as their exact reference.
 
-This is a reference plan, not an active dispatcher. Host-driven and periodic
-frames still execute the complete graph once. Budget/WCET is not admission or
-timing proof, and no freshness, late, catch-up, shedding, or recovery behavior
-is implied.
+Without an explicit `RateExecutionPolicy`, this remains a reference plan:
+host-driven and periodic frames execute the complete graph once and retain the
+pre-M16-03 identity. With the additive configuring-only policy, M16-03 admits
+only mandatory D0 CPU plans on one conservative serialized declared-budget
+lane. Active steps dispatch exact reference records in positive contiguous
+logical/nominal windows, with a positive callback-record cap and explicit skip,
+bounded-catch-up, hold, degrade, or fail behavior. Declared budget/WCET remains
+untrusted input, not measured timing or a deadline proof.
+
+Active callbacks receive a nullable release view and use bounded exact-size
+publish/copy operations for compiled cross-rate channels. Publications stage
+before committing a complete exact generation; holds alias the last committed
+or initial sample. Active cursor, epoch, fault/action, generation/alias, and
+payload state is one canonical generic schema-1 checkpoint record. Schema-1
+input logs and replay reject active execution because they cannot encode the
+nominal release and action decisions. Optional shedding/recovery and versioned
+per-release telemetry remain M16-04.
 
 ### Observability
 
@@ -301,7 +315,8 @@ callback expressions.
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
 | CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Rate-domain reference plan | M16-01 implemented; external gates pending | Bounded copied domains and ownership, exact epoch-zero supercycle, immutable inspection, identity/accounting integration, and unchanged complete-graph dispatch; later M16 semantics remain incomplete |
-| Cross-rate data contract | M16-02 implemented; external gates pending | CPU-only fixed-payload channels, exact initial/wrap/held/fresh/stale selection metadata, and bounded two-slot SPSC storage; active data transfer and rate dispatch remain absent |
+| Cross-rate data contract | M16-02 implemented; external gates pending | CPU-only fixed-payload channels, exact initial/wrap/held/fresh/stale selection metadata, and bounded two-slot SPSC storage; M16-03 connects them only for opt-in active plans |
+| Active rate admission and late policy | M16-03 implemented; external gates pending | Opt-in D0 mandatory-CPU serialized admission/dispatch, bounded late actions, exact-generation transfer, functional summaries, and canonical active checkpoint state; M16-04 shedding/recovery and versioned telemetry remain |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

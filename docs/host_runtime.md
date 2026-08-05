@@ -95,7 +95,8 @@ runtime configuring with no cross-rate inspectors, provider callback, native
 policy action, worker, device ownership, or callback execution. A rejected
 declaration may be replaced under its stable instance-owned handle and retried.
 Selection inspection distinguishes the first supercycle from repeating steady
-state, and each compiled channel owns one inactive two-slot SPSC store.
+state, and each compiled channel owns one two-slot SPSC store. M16-03 uses it
+only when the configuring-only active execution policy is present.
 
 ## Typed configuration
 
@@ -376,9 +377,12 @@ fault-injectable mock; see the
 [device backend contract](device_backend.md).
 M16-01 adds rate-model/reference-plan inspection. M16-02 adds CPU-only
 cross-rate declarations, immutable first/repeating selection inspection,
-copied initial-sample inspection, and inactive preallocated snapshot stores.
-Active transfer/dispatch, admission, late/catch-up policy, shedding/recovery,
-and new telemetry are not present.
+copied initial-sample inspection, and preallocated snapshot stores. M16-03 adds
+a configuring-only opt-in execution policy, conservative serialized admission,
+checked logical/nominal active windows, serial selected-CPU dispatch, exact-generation
+publish/copy, late actions, result summaries, and one canonical active
+checkpoint record. Reference-only behavior remains exact. Optional
+shedding/recovery and versioned action telemetry remain M16-04.
 
 ## Code and evidence
 
@@ -387,12 +391,14 @@ and new telemetry are not present.
 - Graph compiler: `rt/src/compiled_graph.cpp`
 - Rate compiler: `rt/src/rate_timeline.cpp`
 - Cross-rate compiler/store: `rt/src/cross_rate_data.cpp`
+- Active admission/dispatch compiler: `rt/src/rate_dispatch.cpp`
 - Unified executor: `rt/src/executor.cpp`
 - Resident-region policy: `rt/src/memory_policy.cpp`
 - C ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - C++ lifecycle tests: `tests/test_host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Rate/reference tests: `tests/test_rate_timeline.cpp`
+- Active admission/dispatch tests: `tests/test_rate_dispatch.cpp`
 - Executor tests: `tests/test_executor.cpp`
 - Memory-plan tests: `tests/test_memory_plan.cpp`
 - Memory-provider/policy tests: `tests/test_memory_policy.cpp`

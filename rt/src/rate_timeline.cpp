@@ -206,6 +206,9 @@ Status compile_rate_timeline(
             compiled.budget_wcet_ns = source.budget_wcet_ns;
             compiled.criticality = source.criticality;
             compiled.optional = source.optional;
+            compiled.late_action = source.late_action;
+            compiled.bounded_catch_up_limit =
+                source.bounded_catch_up_limit;
             compiled.releases_per_supercycle = supercycle / source.period_ns;
             const auto ratio_gcd = std::gcd(source.period_ns, reference_period);
             compiled.period_ratio_numerator = source.period_ns / ratio_gcd;
@@ -289,6 +292,8 @@ Status compile_rate_timeline(
                             domain.budget_wcet_ns,
                             domain.criticality,
                             domain.optional,
+                            domain.late_action,
+                            domain.bounded_catch_up_limit,
                         });
                     }
                 }

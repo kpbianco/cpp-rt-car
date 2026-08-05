@@ -82,6 +82,7 @@ int main() {
     rt::RateDomainHandle producer_rate;
     rt::RateDomainHandle consumer_rate;
     rt::CrossRateChannelHandle channel;
+    const rt::RateExecutionPolicy additive_active_policy{};
     const std::array initial{std::byte{0x2a}};
 
     if (runtime.configure(config) != rt::Status::ok ||
@@ -131,6 +132,8 @@ int main() {
         runtime.copy_cross_rate_initial_sample(0, copied_initial) !=
             rt::Status::ok ||
         copied_initial != initial ||
+        additive_active_policy.maximum_dispatch_records_per_step != 0 ||
+        runtime.rate_execution_enabled() ||
         runtime.reference_release_count() != 3 ||
         runtime.start() != rt::Status::ok ||
         runtime.step({

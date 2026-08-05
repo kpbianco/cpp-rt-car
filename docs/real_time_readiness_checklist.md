@@ -36,12 +36,16 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   the audited baseline.
 - [x] M16-01 compiles a bounded exact epoch-zero rate reference plan with
   checked arithmetic, phase ownership, immutable inspection, identity, and
-  accounting tests. This is a functional plan gate only; it is not active
-  multi-rate dispatch, admission, overload policy, or timing qualification.
+  accounting tests. Reference compilation is a functional gate, not timing
+  qualification.
 - [x] M16-02 compiles exact initial/wrap/held/fresh/stale cross-rate selections
   and constructs a two-slot exact-generation SPSC primitive with synthetic
-  ThreadSanitizer coverage. The primitive is inactive and is not evidence of
-  active payload transfer, callback-rate execution, latency, RT1, or RT2.
+  ThreadSanitizer coverage.
+- [x] M16-03 adds opt-in D0 mandatory-CPU conservative admission, bounded
+  exact-order active dispatch, cross-rate transfer, explicit late actions,
+  functional summaries, canonical checkpoint state, active replay rejection,
+  allocation instrumentation, and ThreadSanitizer coverage. These are portable
+  RT0 functional gates, not measured WCET, latency, HIL, field, RT1, or RT2.
 - [ ] A named deployment independently verifies requested memory locking,
   NUMA/huge-page outcomes, residency under load, and worst-case behavior;
   M15 provider/declaration injection, `mlock`, `mincore`, preflight, and hosted CI do not
@@ -84,9 +88,9 @@ runtime-stack observation. Declarations are trusted metadata, not independent
 observation. None of this changes any unchecked deployment gate above.
 Provider-backed checked stop releases trace backing, so post-stop trace export
 must occur before that cleanup or be treated as unavailable.
-M16-01 budget/WCET metadata and exact timeline agreement are not feasibility,
-latency, RT1, or RT2 evidence. Cross-rate freshness, admission, late/catch-up,
-and shedding/recovery remain unchecked M16 gates.
+M16-03 declared-budget admission and fake-clock late/catch-up results are not
+measured WCET, latency, RT1, or RT2 evidence. Optional shedding/recovery and
+versioned policy telemetry remain unchecked M16-04 gates.
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its
