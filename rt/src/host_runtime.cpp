@@ -1512,7 +1512,8 @@ struct Runtime::Impl {
                 active_shedding_state->shed_mask);
             rate_counters->set(
                 RateCounterId::currently_shed_domains,
-                std::popcount(active_shedding_state->shed_mask));
+                static_cast<std::uint64_t>(
+                    std::popcount(active_shedding_state->shed_mask)));
         }
         std::copy(
             bytes.begin(),
@@ -2186,7 +2187,8 @@ struct Runtime::Impl {
         }
         transition.after = active_shedding_state->shed_mask;
         summary.currently_shed_domains =
-            std::popcount(active_shedding_state->shed_mask);
+            static_cast<std::uint64_t>(
+                std::popcount(active_shedding_state->shed_mask));
         return transition;
     }
 
@@ -2481,8 +2483,9 @@ struct Runtime::Impl {
         output.rate.rate_policy_version =
             rate_execution_policy.host_policy_version;
         output.rate.currently_shed_domains = active_shedding_state
-            ? std::popcount(active_shedding_state->shed_mask)
-            : 0;
+            ? static_cast<std::uint64_t>(
+                  std::popcount(active_shedding_state->shed_mask))
+            : std::uint64_t{0};
         for (std::size_t domain_index = 0;
              domain_index < compiled_rate_plan.domains.size();
              ++domain_index) {
