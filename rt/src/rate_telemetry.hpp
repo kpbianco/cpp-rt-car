@@ -16,6 +16,13 @@ static_assert(
     std::atomic<std::uint64_t>::is_always_lock_free,
     "rate telemetry requires lock-free 64-bit atomics");
 
+#if defined(_MSC_VER)
+// The slot and counters intentionally occupy separate cache lines. MSVC
+// reports C4324 whenever an alignment specifier introduces that padding.
+#    pragma warning(push)
+#    pragma warning(disable : 4324)
+#endif
+
 class RateTelemetryRing final {
 public:
     explicit RateTelemetryRing(std::size_t capacity);
@@ -73,6 +80,10 @@ private:
     alignas(64) std::atomic<std::uint64_t> overwritten_{0};
     alignas(64) std::atomic<std::uint64_t> dropped_{0};
 };
+
+#if defined(_MSC_VER)
+#    pragma warning(pop)
+#endif
 
 constexpr std::size_t RateTelemetryRing::slot_size() noexcept {
     return sizeof(Slot);
