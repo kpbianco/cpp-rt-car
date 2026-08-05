@@ -249,7 +249,7 @@
     "tests/test_release_tools.py": "548341cb7b693b9a1c1981441383a302494c198f736f97182aa3c0f2f1af7d26",
     "tests/test_rt_pipeline.cpp": "1d0f6dc159572a580b5a2364ec3590bb393e1706189a0292970c55d0f9c93a3f",
     "tests/test_thread_policy.cpp": "122b8918975f3ad8fcffb6a7fc8db6cf6eeb7ead376d4d20a9577f6644cf975c",
-    "tests/test_trace_noalloc.cpp": "429d34fa03836be4b035560b33942e219eccbb2c709cff12468c37e8ddeb918c",
+    "tests/test_trace_noalloc.cpp": "3c60995a35309f5adc1c0c2e515d61c14573a06197fc61cf2ce4be202db344b7",
     "tools/autotune/config.schema.json": "1560d35b521b2ae882815b235459ed6058d4640af1ddb6bcb4d82b3c525eb56a",
     "tools/autotune/install_profile.py": "ff698ebb0824b3abe680012973daae8e8d71dab03caa067a63e0c46590547009",
     "tools/autotune/make_config.py": "cd74c17a59f988edded265b422f0496b46dd148af04a5a789647e06ae67efcfb",

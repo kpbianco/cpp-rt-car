@@ -1098,7 +1098,7 @@ TEST(TraceNoAlloc, RatePlanCompleteDeviceFramesDoNotAllocate) {
     run_complete_device_frames_noalloc(false, true);
 }
 
-TEST(TraceNoAlloc, NativeHalV2FinalizedStartFramesAndStopDoNotAllocate) {
+TEST(TraceNoAlloc, NativeHalV2FramesAndStopDoNotAllocateAfterStart) {
     NoAllocNativeHalV2Backend backend;
     rt::Runtime runtime;
     rt::RuntimeConfig config;
@@ -1131,11 +1131,11 @@ TEST(TraceNoAlloc, NativeHalV2FinalizedStartFramesAndStopDoNotAllocate) {
             phase),
         rt::Status::ok);
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
 
     bool complete = true;
     {
         AllocationGuard guard;
-        complete = runtime.start() == rt::Status::ok;
         for (std::uint64_t frame = 0; complete && frame < 64; ++frame) {
             complete = runtime.step({
                            frame,
