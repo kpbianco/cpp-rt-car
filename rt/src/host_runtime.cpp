@@ -7,6 +7,7 @@
 #include "memory_policy.hpp"
 #include "native_platform_preflight.hpp"
 #include "rate_dispatch.hpp"
+#include "rate_telemetry.hpp"
 #include "rate_timeline.hpp"
 #include "resource_policy.hpp"
 #include "snapshot_codec.hpp"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -68,6 +70,8 @@ constexpr std::uint32_t kRateDispatchStateSchema = 1;
 constexpr std::uint64_t kRateDispatchStateMagic = 0x3154534457465452ull;
 constexpr std::size_t kRateDispatchStateHeaderBytes = 96;
 constexpr std::size_t kRateDispatchChannelStateBytes = 64;
+constexpr std::uint64_t kRateOptionalStateMagic = 0x3154504f57465452ull;
+constexpr std::size_t kRateOptionalStateHeaderBytes = 48;
 
 #ifndef RTFW_BUILD_ID_STRING
 #define RTFW_BUILD_ID_STRING "rtfw-" RTFW_VERSION_STRING
@@ -783,6 +787,12 @@ struct Runtime::Impl {
         bool held = false;
     };
 
+    struct ActiveSheddingState {
+        std::uint64_t shed_mask = 0;
+        std::uint32_t consecutive_late = 0;
+        std::uint32_t consecutive_on_time = 0;
+    };
+
     explicit Impl(
         RuntimeClock* injected_clock,
         PlatformPreflightProbe* injected_preflight)
@@ -1005,6 +1015,23 @@ struct Runtime::Impl {
                     static_cast<std::uint64_t>(domain.late_action));
                 hash_u64(hash, domain.bounded_catch_up_limit);
             }
+            if (!compiled_rate_dispatch_plan.optional_shed_order.empty()) {
+                hash_u64(hash, 0x4d31362d73686564ull);
+                hash_u64(hash, rate_execution_policy.host_policy_version);
+                hash_u64(
+                    hash,
+                    rate_execution_policy.consecutive_late_threshold);
+                hash_u64(
+                    hash,
+                    rate_execution_policy.consecutive_on_time_threshold);
+                hash_u64(
+                    hash,
+                    compiled_rate_dispatch_plan.optional_shed_order.size());
+                for (const auto domain_index :
+                     compiled_rate_dispatch_plan.optional_shed_order) {
+                    hash_u64(hash, domain_index);
+                }
+            }
         }
         return hash;
     }
@@ -1143,6 +1170,49 @@ struct Runtime::Impl {
             active_committed_payloads.end(),
             active_checkpoint_state.begin() +
                 static_cast<std::ptrdiff_t>(payload_offset));
+        if (!compiled_rate_dispatch_plan.optional_shed_order.empty()) {
+            const auto optional_offset =
+                payload_offset + active_committed_payloads.size();
+            (void)store_u64_le(bytes, optional_offset, kRateOptionalStateMagic);
+            (void)store_u64_le(
+                bytes,
+                optional_offset + 8,
+                rate_execution_policy.host_policy_version);
+            (void)store_u32_le(
+                bytes,
+                optional_offset + 16,
+                rate_execution_policy.consecutive_late_threshold);
+            (void)store_u32_le(
+                bytes,
+                optional_offset + 20,
+                rate_execution_policy.consecutive_on_time_threshold);
+            (void)store_u32_le(
+                bytes, optional_offset + 24,
+                active_shedding_state->consecutive_late);
+            (void)store_u32_le(
+                bytes, optional_offset + 28,
+                active_shedding_state->consecutive_on_time);
+            (void)store_u64_le(
+                bytes, optional_offset + 32,
+                active_shedding_state->shed_mask);
+            (void)store_u32_le(
+                bytes,
+                optional_offset + 40,
+                static_cast<std::uint32_t>(
+                    compiled_rate_dispatch_plan.optional_shed_order.size()));
+            (void)store_u32_le(
+                bytes,
+                optional_offset + 44,
+                static_cast<std::uint32_t>(
+                    std::popcount(active_shedding_state->shed_mask)));
+            for (std::size_t index = 0;
+                 index < compiled_rate_dispatch_plan.optional_shed_order.size();
+                 ++index) {
+                bytes[optional_offset + kRateOptionalStateHeaderBytes + index] =
+                    static_cast<std::byte>(
+                        compiled_rate_dispatch_plan.optional_shed_order[index]);
+            }
+        }
     }
 
     [[nodiscard]] bool validate_active_checkpoint_state(
@@ -1291,7 +1361,73 @@ struct Runtime::Impl {
             }
             expected_payload_offset += cross_rate_channels[index].payload_size;
         }
-        return expected_payload_offset == active_committed_payloads.size();
+        if (expected_payload_offset != active_committed_payloads.size()) {
+            return false;
+        }
+        if (compiled_rate_dispatch_plan.optional_shed_order.empty()) {
+            return bytes.size() == kRateDispatchStateHeaderBytes +
+                active_channel_states.size() * kRateDispatchChannelStateBytes +
+                active_committed_payloads.size();
+        }
+        const auto optional_offset = kRateDispatchStateHeaderBytes +
+            active_channel_states.size() * kRateDispatchChannelStateBytes +
+            active_committed_payloads.size();
+        std::uint64_t optional_magic = 0;
+        std::uint64_t policy_version = 0;
+        std::uint32_t late_threshold = 0;
+        std::uint32_t on_time_threshold = 0;
+        std::uint32_t late_streak = 0;
+        std::uint32_t on_time_streak = 0;
+        std::uint64_t shed_mask = 0;
+        std::uint32_t order_count = 0;
+        std::uint32_t shed_count = 0;
+        std::uint64_t optional_mask = 0;
+        for (const auto index : compiled_rate_dispatch_plan.optional_shed_order) {
+            optional_mask |= std::uint64_t{1} << index;
+        }
+        if (!load_u64_le(bytes, optional_offset, optional_magic) ||
+            !load_u64_le(bytes, optional_offset + 8, policy_version) ||
+            !load_u32_le(bytes, optional_offset + 16, late_threshold) ||
+            !load_u32_le(bytes, optional_offset + 20, on_time_threshold) ||
+            !load_u32_le(bytes, optional_offset + 24, late_streak) ||
+            !load_u32_le(bytes, optional_offset + 28, on_time_streak) ||
+            !load_u64_le(bytes, optional_offset + 32, shed_mask) ||
+            !load_u32_le(bytes, optional_offset + 40, order_count) ||
+            !load_u32_le(bytes, optional_offset + 44, shed_count) ||
+            optional_magic != kRateOptionalStateMagic ||
+            policy_version != rate_execution_policy.host_policy_version ||
+            late_threshold != rate_execution_policy.consecutive_late_threshold ||
+            on_time_threshold != rate_execution_policy.consecutive_on_time_threshold ||
+            order_count != compiled_rate_dispatch_plan.optional_shed_order.size() ||
+            bytes.size() != optional_offset + kRateOptionalStateHeaderBytes +
+                order_count ||
+            (shed_mask & ~optional_mask) != 0 ||
+            shed_count != static_cast<std::uint32_t>(
+                std::popcount(shed_mask)) ||
+            late_streak > late_threshold || on_time_streak > on_time_threshold ||
+            (late_streak != 0 && on_time_streak != 0)) {
+            return false;
+        }
+        for (std::size_t index = 0; index < order_count; ++index) {
+            const auto expected =
+                compiled_rate_dispatch_plan.optional_shed_order[index];
+            if (static_cast<std::uint8_t>(
+                    bytes[optional_offset + kRateOptionalStateHeaderBytes + index]) !=
+                    expected) {
+                return false;
+            }
+            if ((shed_mask & (std::uint64_t{1} << expected)) == 0) {
+                for (std::size_t later = index + 1; later < order_count; ++later) {
+                    if ((shed_mask & (std::uint64_t{1} <<
+                         compiled_rate_dispatch_plan.optional_shed_order[later])) != 0) {
+                        return false;
+                    }
+                }
+                break;
+            }
+        }
+        return (shed_count == order_count || late_streak < late_threshold) &&
+            (shed_count == 0 || on_time_streak < on_time_threshold);
     }
 
     [[nodiscard]] bool apply_active_checkpoint_state(
@@ -1316,9 +1452,10 @@ struct Runtime::Impl {
         degradation_level.store(degradation, std::memory_order_release);
         const auto payload_begin = kRateDispatchStateHeaderBytes +
             active_channel_states.size() * kRateDispatchChannelStateBytes;
+        const auto payload_end = payload_begin + active_committed_payloads.size();
         std::copy(
             bytes.begin() + static_cast<std::ptrdiff_t>(payload_begin),
-            bytes.end(),
+            bytes.begin() + static_cast<std::ptrdiff_t>(payload_end),
             active_committed_payloads.begin());
         std::copy(
             active_committed_payloads.begin(),
@@ -1362,6 +1499,21 @@ struct Runtime::Impl {
                 detail::SnapshotStoreResult::ok) {
                 return false;
             }
+        }
+        if (!compiled_rate_dispatch_plan.optional_shed_order.empty()) {
+            (void)load_u32_le(
+                bytes, payload_end + 24,
+                active_shedding_state->consecutive_late);
+            (void)load_u32_le(
+                bytes, payload_end + 28,
+                active_shedding_state->consecutive_on_time);
+            (void)load_u64_le(
+                bytes, payload_end + 32,
+                active_shedding_state->shed_mask);
+            rate_counters->set(
+                RateCounterId::currently_shed_domains,
+                static_cast<std::uint64_t>(
+                    std::popcount(active_shedding_state->shed_mask)));
         }
         std::copy(
             bytes.begin(),
@@ -1948,6 +2100,179 @@ struct Runtime::Impl {
         }
     }
 
+    struct PolicyTransition {
+        RateTransitionId id = RateTransitionId::none;
+        RateActionReason reason = RateActionReason::on_time;
+        std::uint64_t before = 0;
+        std::uint64_t after = 0;
+        std::uint32_t domain_index =
+            std::numeric_limits<std::uint32_t>::max();
+    };
+
+    [[nodiscard]] PolicyTransition current_policy_state(
+        RateActionReason reason) const noexcept {
+        PolicyTransition transition;
+        transition.reason = reason;
+        transition.before = active_shedding_state
+            ? active_shedding_state->shed_mask
+            : 0;
+        transition.after = transition.before;
+        return transition;
+    }
+
+    [[nodiscard]] PolicyTransition observe_mandatory_release(
+        bool late,
+        StepResult::RateSummary& summary) noexcept {
+        PolicyTransition transition;
+        transition.before = active_shedding_state
+            ? active_shedding_state->shed_mask
+            : 0;
+        transition.after = transition.before;
+        transition.reason = late
+            ? RateActionReason::deadline_late
+            : RateActionReason::on_time;
+        if (!active_shedding_state) {
+            return transition;
+        }
+        if (late) {
+            active_shedding_state->consecutive_on_time = 0;
+            if (active_shedding_state->consecutive_late <
+                rate_execution_policy.consecutive_late_threshold) {
+                ++active_shedding_state->consecutive_late;
+            }
+            if (active_shedding_state->consecutive_late ==
+                rate_execution_policy.consecutive_late_threshold) {
+                for (const auto index :
+                     compiled_rate_dispatch_plan.optional_shed_order) {
+                    const auto bit = std::uint64_t{1} << index;
+                    if ((active_shedding_state->shed_mask & bit) == 0) {
+                        active_shedding_state->shed_mask |= bit;
+                        active_shedding_state->consecutive_late = 0;
+                        transition.id = RateTransitionId::shed;
+                        transition.reason = RateActionReason::late_threshold;
+                        transition.domain_index = static_cast<std::uint32_t>(index);
+                        transition.after = active_shedding_state->shed_mask;
+                        ++summary.shed_transitions;
+                        break;
+                    }
+                }
+            }
+        } else {
+            active_shedding_state->consecutive_late = 0;
+            if (active_shedding_state->consecutive_on_time <
+                rate_execution_policy.consecutive_on_time_threshold) {
+                ++active_shedding_state->consecutive_on_time;
+            }
+            if (active_shedding_state->consecutive_on_time ==
+                rate_execution_policy.consecutive_on_time_threshold) {
+                for (auto iterator =
+                         compiled_rate_dispatch_plan.optional_shed_order.rbegin();
+                     iterator !=
+                         compiled_rate_dispatch_plan.optional_shed_order.rend();
+                     ++iterator) {
+                    const auto bit = std::uint64_t{1} << *iterator;
+                    if ((active_shedding_state->shed_mask & bit) != 0) {
+                        active_shedding_state->shed_mask &= ~bit;
+                        active_shedding_state->consecutive_on_time = 0;
+                        transition.id = RateTransitionId::recover;
+                        transition.reason = RateActionReason::on_time_threshold;
+                        transition.domain_index =
+                            static_cast<std::uint32_t>(*iterator);
+                        transition.after = active_shedding_state->shed_mask;
+                        ++summary.recovery_transitions;
+                        break;
+                    }
+                }
+            }
+        }
+        transition.after = active_shedding_state->shed_mask;
+        summary.currently_shed_domains =
+            static_cast<std::uint64_t>(
+                std::popcount(active_shedding_state->shed_mask));
+        return transition;
+    }
+
+    void emit_rate_action(
+        const HostFrameContext& frame,
+        const CompiledRateDomain& domain,
+        std::uint64_t first_sequence,
+        std::uint64_t logical_release_ns,
+        std::uint64_t nominal_release_ns,
+        std::uint64_t release_count,
+        std::uint64_t reference_record_count,
+        RateActionId action,
+        RateActionReason reason,
+        bool late,
+        const PolicyTransition& transition,
+        Status status) noexcept {
+        if (!rate_telemetry) {
+            return;
+        }
+        (void)rate_telemetry->emit(RateActionRecord{
+            rate_action_schema_version,
+            sizeof(RateActionRecord),
+            0,
+            rate_execution_policy.host_policy_version,
+            observability.runtime_id,
+            frame.frame_index,
+            first_sequence,
+            logical_release_ns,
+            nominal_release_ns,
+            domain.period_ns,
+            release_count,
+            reference_record_count,
+            transition.before,
+            transition.after,
+            static_cast<std::uint32_t>(domain.registration_index),
+            transition.domain_index,
+            action,
+            transition.id,
+            reason,
+            domain.optional,
+            late,
+            {},
+            static_cast<std::int32_t>(status),
+            degradation_level.load(std::memory_order_acquire),
+            {},
+        });
+    }
+
+    [[nodiscard]] bool commit_rate_counters(
+        const StepResult::RateSummary& summary) noexcept {
+        if (!rate_counters) {
+            return true;
+        }
+        const std::array<std::pair<RateCounterId, std::uint64_t>, 15> additions{{
+            {RateCounterId::due_domain_releases, summary.due_domain_releases},
+            {RateCounterId::executed_reference_records, summary.executed_reference_records},
+            {RateCounterId::late_domain_releases, summary.late_domain_releases},
+            {RateCounterId::caught_up_domain_releases, summary.caught_up_domain_releases},
+            {RateCounterId::skipped_domain_releases, summary.skipped_domain_releases},
+            {RateCounterId::held_domain_releases, summary.held_domain_releases},
+            {RateCounterId::degraded_domain_releases, summary.degraded_domain_releases},
+            {RateCounterId::failed_domain_releases, summary.failed_domain_releases},
+            {RateCounterId::optional_due_domain_releases, summary.optional_due_domain_releases},
+            {RateCounterId::optional_executed_domain_releases, summary.optional_executed_domain_releases},
+            {RateCounterId::shed_domain_releases, summary.shed_domain_releases},
+            {RateCounterId::shed_transitions, summary.shed_transitions},
+            {RateCounterId::recovery_transitions, summary.recovery_transitions},
+            {RateCounterId::rejected_reference_records, summary.rejected_reference_records},
+            {RateCounterId::stale_reads, summary.stale_reads},
+        }};
+        for (const auto& [id, amount] : additions) {
+            if (!rate_counters->add(id, amount)) {
+                return false;
+            }
+        }
+        rate_counters->set(
+            RateCounterId::currently_shed_domains,
+            summary.currently_shed_domains);
+        rate_counters->set(
+            RateCounterId::policy_version,
+            rate_execution_policy.host_policy_version);
+        return true;
+    }
+
     Status execute_active_group(
         const detail::RateReleaseGroup& group,
         std::uint64_t supercycle_cycle,
@@ -2155,6 +2480,36 @@ struct Runtime::Impl {
         }
         output.rate.due_domain_releases = due_counts.domain_releases;
         output.rate.due_reference_records = due_counts.reference_records;
+        output.rate.rate_policy_version =
+            rate_execution_policy.host_policy_version;
+        output.rate.currently_shed_domains = active_shedding_state
+            ? static_cast<std::uint64_t>(
+                  std::popcount(active_shedding_state->shed_mask))
+            : std::uint64_t{0};
+        for (std::size_t domain_index = 0;
+             domain_index < compiled_rate_plan.domains.size();
+             ++domain_index) {
+            if (!compiled_rate_plan.domains[domain_index].optional) {
+                continue;
+            }
+            std::uint64_t optional_releases = 0;
+            std::uint64_t optional_records = 0;
+            if (detail::count_due_domain_releases(
+                    compiled_rate_plan,
+                    compiled_rate_dispatch_plan,
+                    domain_index,
+                    active_logical_cursor_ns,
+                    end_ns,
+                    optional_releases,
+                    optional_records) != Status::ok ||
+                !checked_time_add(
+                    output.rate.optional_due_domain_releases,
+                    optional_releases,
+                    output.rate.optional_due_domain_releases)) {
+                return Status::capacity_exceeded;
+            }
+            (void)optional_records;
+        }
         active_stale_reads.store(0, std::memory_order_relaxed);
 
         const auto ceil_sequence = [](std::uint64_t value,
@@ -2179,6 +2534,16 @@ struct Runtime::Impl {
         bool done = false;
         while (!done) {
             const auto decision_now_ns = clock_now();
+            std::uint64_t optional_mask = 0;
+            for (const auto optional_index :
+                 compiled_rate_dispatch_plan.optional_shed_order) {
+                optional_mask |= std::uint64_t{1} << optional_index;
+            }
+            const bool aggregate_mandatory_omissions =
+                compiled_rate_dispatch_plan.optional_shed_order.empty() ||
+                (active_shedding_state &&
+                 (active_shedding_state->shed_mask & optional_mask) ==
+                     optional_mask);
             std::uint64_t barrier_ns = end_ns;
             for (std::size_t domain_index = 0;
                  domain_index < compiled_rate_plan.domains.size();
@@ -2208,30 +2573,40 @@ struct Runtime::Impl {
                     done = true;
                     break;
                 }
-                const bool omission =
+                const bool already_shed = domain.optional &&
+                    active_shedding_state &&
+                    (active_shedding_state->shed_mask &
+                     (std::uint64_t{1} << domain_index)) != 0;
+                const bool late_omission =
                     decision_now_ns > next_deadline_ns &&
                     (domain.late_action == RateLateAction::skip ||
                      domain.late_action == RateLateAction::hold);
+                const bool omission =
+                    already_shed ||
+                    (late_omission &&
+                     (domain.optional || aggregate_mandatory_omissions));
                 if (!omission) {
                     barrier_ns = std::min(barrier_ns, next_release_ns);
                     continue;
                 }
-                const auto late_end_ns = decision_now_ns - epoch_ns -
-                    domain.relative_deadline_ns;
-                const auto first_nonlate = std::max(
-                    next_sequence[domain_index],
-                    ceil_sequence(late_end_ns, domain.period_ns));
-                if (first_nonlate < end_sequence[domain_index]) {
-                    std::uint64_t first_nonlate_ns = 0;
-                    if (!checked_time_multiply(
-                            first_nonlate,
-                            domain.period_ns,
-                            first_nonlate_ns)) {
-                        execution_status = Status::capacity_exceeded;
-                        done = true;
-                        break;
+                if (decision_now_ns > next_deadline_ns) {
+                    const auto late_end_ns = decision_now_ns - epoch_ns -
+                        domain.relative_deadline_ns;
+                    const auto first_nonlate = std::max(
+                        next_sequence[domain_index],
+                        ceil_sequence(late_end_ns, domain.period_ns));
+                    if (first_nonlate < end_sequence[domain_index]) {
+                        std::uint64_t first_nonlate_ns = 0;
+                        if (!checked_time_multiply(
+                                first_nonlate,
+                                domain.period_ns,
+                                first_nonlate_ns)) {
+                            execution_status = Status::capacity_exceeded;
+                            done = true;
+                            break;
+                        }
+                        barrier_ns = std::min(barrier_ns, first_nonlate_ns);
                     }
-                    barrier_ns = std::min(barrier_ns, first_nonlate_ns);
                 }
             }
             if (done) {
@@ -2243,7 +2618,12 @@ struct Runtime::Impl {
                  ++domain_index) {
                 const auto& domain =
                     compiled_rate_plan.domains[domain_index];
-                if (domain.late_action != RateLateAction::skip &&
+                const bool already_shed = domain.optional &&
+                    active_shedding_state &&
+                    (active_shedding_state->shed_mask &
+                     (std::uint64_t{1} << domain_index)) != 0;
+                if (!already_shed &&
+                    domain.late_action != RateLateAction::skip &&
                     domain.late_action != RateLateAction::hold) {
                     continue;
                 }
@@ -2255,19 +2635,42 @@ struct Runtime::Impl {
                 }
                 const auto releases =
                     target - next_sequence[domain_index];
+                const auto first_sequence = next_sequence[domain_index];
                 std::uint64_t records = 0;
+                std::uint64_t first_logical_release_ns = 0;
+                std::uint64_t first_nominal_release_ns = 0;
                 if (!checked_time_multiply(
                         releases,
                         compiled_rate_dispatch_plan
                             .records_per_domain_release[domain_index],
-                        records)) {
+                        records) ||
+                    !checked_time_multiply(
+                        first_sequence,
+                        domain.period_ns,
+                        first_logical_release_ns) ||
+                    !checked_time_add(
+                        epoch_ns,
+                        first_logical_release_ns,
+                        first_nominal_release_ns)) {
                     execution_status = Status::capacity_exceeded;
                     done = true;
                     break;
                 }
-                output.rate.late_domain_releases += releases;
+                std::uint64_t first_deadline_ns = 0;
+                const bool range_late = checked_time_add(
+                        first_nominal_release_ns,
+                        domain.relative_deadline_ns,
+                        first_deadline_ns) &&
+                    decision_now_ns > first_deadline_ns;
                 settled_records += records;
-                if (domain.late_action == RateLateAction::skip) {
+                if (range_late) {
+                    output.rate.late_domain_releases += releases;
+                } else {
+                    output.rate.on_time_domain_releases += releases;
+                }
+                if (already_shed) {
+                    output.rate.shed_domain_releases += releases;
+                } else if (domain.late_action == RateLateAction::skip) {
                     output.rate.skipped_domain_releases += releases;
                 } else {
                     output.rate.held_domain_releases += releases;
@@ -2280,6 +2683,33 @@ struct Runtime::Impl {
                             active_channel_states[channel_index].held = true;
                         }
                     }
+                }
+                emit_rate_action(
+                    frame,
+                    domain,
+                    first_sequence,
+                    first_logical_release_ns,
+                    first_nominal_release_ns,
+                    releases,
+                    records,
+                    already_shed
+                        ? RateActionId::optional_shed
+                        : domain.late_action == RateLateAction::skip
+                            ? RateActionId::skip
+                            : RateActionId::hold,
+                    already_shed
+                        ? RateActionReason::already_shed
+                        : RateActionReason::deadline_late,
+                    range_late,
+                    current_policy_state(
+                        already_shed
+                            ? RateActionReason::already_shed
+                            : RateActionReason::deadline_late),
+                    Status::ok);
+                if (!domain.optional && active_shedding_state && releases != 0) {
+                    active_shedding_state->consecutive_on_time = 0;
+                    active_shedding_state->consecutive_late =
+                        rate_execution_policy.consecutive_late_threshold;
                 }
                 next_sequence[domain_index] = target;
             }
@@ -2369,10 +2799,45 @@ struct Runtime::Impl {
                     break;
                 }
                 const bool late = clock_now() > absolute_deadline_ns;
+                if (domain.optional && active_shedding_state &&
+                    (active_shedding_state->shed_mask &
+                     (std::uint64_t{1} << domain_index)) != 0) {
+                    ++output.rate.shed_domain_releases;
+                    settled_records += group.reference_count;
+                    PolicyTransition transition;
+                    transition.before = active_shedding_state->shed_mask;
+                    transition.after = transition.before;
+                    emit_rate_action(
+                        frame,
+                        domain,
+                        next_sequence[domain_index],
+                        logical_release_ns,
+                        nominal_release_ns,
+                        1,
+                        group.reference_count,
+                        RateActionId::optional_shed,
+                        RateActionReason::already_shed,
+                        late,
+                        transition,
+                        Status::ok);
+                    ++next_sequence[domain_index];
+                    continue;
+                }
                 if (late && release.late_action == RateLateAction::skip) {
                     ++output.rate.late_domain_releases;
                     ++output.rate.skipped_domain_releases;
                     settled_records += group.reference_count;
+                    const auto transition = domain.optional
+                        ? current_policy_state(RateActionReason::deadline_late)
+                        : observe_mandatory_release(true, output.rate);
+                    emit_rate_action(
+                        frame, domain, next_sequence[domain_index],
+                        logical_release_ns, nominal_release_ns, 1,
+                        group.reference_count, RateActionId::skip,
+                        transition.id == RateTransitionId::none
+                            ? RateActionReason::deadline_late
+                            : transition.reason,
+                        true, transition, Status::ok);
                     ++next_sequence[domain_index];
                     continue;
                 }
@@ -2389,6 +2854,17 @@ struct Runtime::Impl {
                         }
                     }
                     settled_records += group.reference_count;
+                    const auto transition = domain.optional
+                        ? current_policy_state(RateActionReason::deadline_late)
+                        : observe_mandatory_release(true, output.rate);
+                    emit_rate_action(
+                        frame, domain, next_sequence[domain_index],
+                        logical_release_ns, nominal_release_ns, 1,
+                        group.reference_count, RateActionId::hold,
+                        transition.id == RateTransitionId::none
+                            ? RateActionReason::deadline_late
+                            : transition.reason,
+                        true, transition, Status::ok);
                     ++next_sequence[domain_index];
                     continue;
                 }
@@ -2403,6 +2879,17 @@ struct Runtime::Impl {
                         release,
                         next_sequence[domain_index]);
                     active_rate_summary = nullptr;
+                    PolicyTransition transition;
+                    transition.before = active_shedding_state
+                        ? active_shedding_state->shed_mask
+                        : 0;
+                    transition.after = transition.before;
+                    emit_rate_action(
+                        frame, domain, next_sequence[domain_index],
+                        logical_release_ns, nominal_release_ns, 1,
+                        group.reference_count, RateActionId::fail,
+                        RateActionReason::deadline_late, true, transition,
+                        Status::callback_failed);
                     execution_status = Status::callback_failed;
                     done = true;
                     break;
@@ -2413,6 +2900,18 @@ struct Runtime::Impl {
                         release.bounded_catch_up_limit) {
                     output.rate.rejected_reference_records +=
                         due_counts.reference_records - settled_records;
+                    PolicyTransition transition;
+                    transition.before = active_shedding_state
+                        ? active_shedding_state->shed_mask
+                        : 0;
+                    transition.after = transition.before;
+                    emit_rate_action(
+                        frame, domain, next_sequence[domain_index],
+                        logical_release_ns, nominal_release_ns, 1,
+                        group.reference_count,
+                        RateActionId::execute_catch_up,
+                        RateActionReason::dispatch_capacity, true,
+                        transition, Status::capacity_exceeded);
                     execution_status = Status::capacity_exceeded;
                     done = true;
                     break;
@@ -2423,6 +2922,20 @@ struct Runtime::Impl {
                         .maximum_dispatch_records_per_step) {
                     output.rate.rejected_reference_records +=
                         due_counts.reference_records - settled_records;
+                    PolicyTransition transition;
+                    transition.before = active_shedding_state
+                        ? active_shedding_state->shed_mask
+                        : 0;
+                    transition.after = transition.before;
+                    emit_rate_action(
+                        frame, domain, next_sequence[domain_index],
+                        logical_release_ns, nominal_release_ns, 1,
+                        group.reference_count,
+                        late && release.late_action == RateLateAction::bounded_catch_up
+                            ? RateActionId::execute_catch_up
+                            : RateActionId::execute_on_time,
+                        RateActionReason::dispatch_capacity, late,
+                        transition, Status::capacity_exceeded);
                     execution_status = Status::capacity_exceeded;
                     done = true;
                     break;
@@ -2475,10 +2988,48 @@ struct Runtime::Impl {
                     active_logical_cursor_ns = end_ns;
                     active_nominal_epoch_ns = epoch_ns;
                     active_epoch_mapped = true;
+                    PolicyTransition transition;
+                    transition.before = active_shedding_state
+                        ? active_shedding_state->shed_mask
+                        : 0;
+                    transition.after = transition.before;
+                    emit_rate_action(
+                        frame, domain, next_sequence[domain_index],
+                        logical_release_ns, nominal_release_ns, 1,
+                        group.reference_count,
+                        late && release.late_action == RateLateAction::bounded_catch_up
+                            ? RateActionId::execute_catch_up
+                            : late && release.late_action == RateLateAction::degrade
+                                ? RateActionId::execute_degraded
+                                : RateActionId::execute_on_time,
+                        RateActionReason::callback_failure, late,
+                        transition, group_status);
                     execution_status = group_status;
                     done = true;
                     break;
                 }
+                if (domain.optional) {
+                    ++output.rate.optional_executed_domain_releases;
+                }
+                const auto transition = domain.optional
+                    ? current_policy_state(
+                          late ? RateActionReason::deadline_late
+                               : RateActionReason::on_time)
+                    : observe_mandatory_release(late, output.rate);
+                emit_rate_action(
+                    frame, domain, next_sequence[domain_index],
+                    logical_release_ns, nominal_release_ns, 1,
+                    group.reference_count,
+                    late && release.late_action == RateLateAction::bounded_catch_up
+                        ? RateActionId::execute_catch_up
+                        : late && release.late_action == RateLateAction::degrade
+                            ? RateActionId::execute_degraded
+                            : RateActionId::execute_on_time,
+                    transition.id == RateTransitionId::none
+                        ? (late ? RateActionReason::deadline_late
+                                : RateActionReason::on_time)
+                        : transition.reason,
+                    late, transition, Status::ok);
                 settled_records += group.reference_count;
                 ++next_sequence[domain_index];
             }
@@ -2641,6 +3192,7 @@ struct Runtime::Impl {
     std::vector<std::byte> active_staging_payloads;
     std::vector<std::byte> active_checkpoint_state;
     std::unique_ptr<std::atomic<std::uint8_t>[]> active_publication_claims;
+    std::unique_ptr<ActiveSheddingState> active_shedding_state;
     std::uint64_t active_logical_cursor_ns = 0;
     std::uint64_t active_nominal_epoch_ns = 0;
     bool active_epoch_mapped = false;
@@ -2660,6 +3212,8 @@ struct Runtime::Impl {
     std::unique_ptr<detail::ResidentRegionSet> resident_regions;
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::TelemetryCounters telemetry_counters;
+    std::unique_ptr<detail::RateTelemetryRing> rate_telemetry;
+    std::unique_ptr<detail::RateCounters> rate_counters;
     ObservabilityMetadata observability{};
     std::uint64_t graph_id = 0;
     std::uint64_t state_schema_id = 0;
@@ -2826,10 +3380,16 @@ Status Runtime::set_rate_execution_policy(
     }
     if (policy.maximum_dispatch_records_per_step == 0 ||
         policy.maximum_dispatch_records_per_step >
-            reference_release_capacity) {
+            reference_release_capacity ||
+        policy.host_policy_version == 0 ||
+        policy.consecutive_late_threshold == 0 ||
+        policy.consecutive_on_time_threshold == 0 ||
+        policy.consecutive_late_threshold > rate_policy_threshold_limit ||
+        policy.consecutive_on_time_threshold > rate_policy_threshold_limit ||
+        policy.rate_telemetry_capacity > rate_telemetry_capacity_limit) {
         return impl_->fail(
             Status::invalid_argument,
-            "rate execution dispatch bound is invalid");
+            "rate execution policy fields or telemetry capacity are invalid");
     }
     impl_->rate_execution_policy = policy;
     impl_->rate_execution_policy_set = true;
@@ -3889,8 +4449,20 @@ Status Runtime::finalize() noexcept {
     std::vector<std::byte> active_checkpoint_state;
     std::unique_ptr<std::atomic<std::uint8_t>[]>
         active_publication_claims;
+    std::unique_ptr<Impl::ActiveSheddingState> active_shedding_state;
+    std::unique_ptr<detail::RateTelemetryRing> rate_telemetry;
+    std::unique_ptr<detail::RateCounters> rate_counters;
     if (impl_->rate_execution_policy_set) {
         try {
+            rate_telemetry = std::make_unique<detail::RateTelemetryRing>(
+                impl_->rate_execution_policy.rate_telemetry_capacity);
+            rate_counters = std::make_unique<detail::RateCounters>();
+            rate_counters->reset(
+                impl_->rate_execution_policy.host_policy_version);
+            if (!compiled_rate_dispatch_plan.optional_shed_order.empty()) {
+                active_shedding_state =
+                    std::make_unique<Impl::ActiveSheddingState>();
+            }
             active_channel_states.reserve(
                 impl_->cross_rate_channels.size());
             std::size_t payload_bytes = 0;
@@ -3957,7 +4529,16 @@ Status Runtime::finalize() noexcept {
                 !detail::checked_add(
                     checkpoint_state_bytes,
                     payload_bytes,
-                    checkpoint_state_bytes)) {
+                    checkpoint_state_bytes) ||
+                (!compiled_rate_dispatch_plan.optional_shed_order.empty() &&
+                 (!detail::checked_add(
+                      checkpoint_state_bytes,
+                      kRateOptionalStateHeaderBytes,
+                      checkpoint_state_bytes) ||
+                  !detail::checked_add(
+                      checkpoint_state_bytes,
+                      compiled_rate_dispatch_plan.optional_shed_order.size(),
+                      checkpoint_state_bytes)))) {
                 return impl_->fail(
                     Status::capacity_exceeded,
                     "active canonical state size overflows");
@@ -4106,6 +4687,25 @@ Status Runtime::finalize() noexcept {
         compiled_cross_rate_plan.selections.size();
     memory_plan.rate_checkpoint_state_bytes =
         active_checkpoint_state.size();
+    memory_plan.optional_rate_domain_count =
+        compiled_rate_dispatch_plan.optional_shed_order.size();
+    memory_plan.rate_shedding_state_bytes = active_shedding_state
+        ? sizeof(Impl::ActiveSheddingState)
+        : 0;
+    memory_plan.rate_telemetry_capacity =
+        impl_->rate_execution_policy_set
+        ? impl_->rate_execution_policy.rate_telemetry_capacity
+        : 0;
+    memory_plan.rate_telemetry_slot_bytes =
+        impl_->rate_execution_policy_set
+        ? detail::RateTelemetryRing::slot_size()
+        : 0;
+    memory_plan.rate_telemetry_storage_bytes = rate_telemetry
+        ? rate_telemetry->slot_storage_bytes()
+        : 0;
+    memory_plan.rate_telemetry_counter_bytes = rate_counters
+        ? sizeof(detail::RateCounters)
+        : 0;
     bool plan_valid = true;
     for (std::size_t index = 0;
          index < impl_->cross_rate_channels.size();
@@ -4354,6 +4954,9 @@ Status Runtime::finalize() noexcept {
         compiled_rate_dispatch_plan.domain_group_indices.capacity(),
         sizeof(std::size_t));
     plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.optional_shed_order.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
         active_channel_states.capacity(),
         sizeof(Impl::ActiveChannelState));
     plan_valid = plan_valid && add_rate_plan_array(
@@ -4370,6 +4973,16 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_rate_plan_array(
         active_checkpoint_state.capacity(),
         sizeof(std::byte));
+    if (active_shedding_state) {
+        plan_valid = plan_valid &&
+            add_rate_plan_bytes(sizeof(Impl::ActiveSheddingState));
+    }
+    if (rate_telemetry && rate_counters) {
+        plan_valid = plan_valid &&
+            add_rate_plan_bytes(sizeof(detail::RateTelemetryRing)) &&
+            add_rate_plan_bytes(rate_telemetry->slot_storage_bytes()) &&
+            add_rate_plan_bytes(sizeof(detail::RateCounters));
+    }
     memory_plan.rate_dispatch_state_bytes =
         memory_plan.rate_plan_bytes - rate_dispatch_bytes_begin;
     plan_valid = plan_valid && add_runtime_array(
@@ -4625,6 +5238,10 @@ Status Runtime::finalize() noexcept {
             compiled_rate_dispatch_plan.domain_group_indices.capacity(),
             sizeof(std::size_t));
         add_runtime_extent(
+            compiled_rate_dispatch_plan.optional_shed_order.data(),
+            compiled_rate_dispatch_plan.optional_shed_order.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
             active_channel_states.data(),
             active_channel_states.capacity(),
             sizeof(Impl::ActiveChannelState));
@@ -4646,6 +5263,24 @@ Status Runtime::finalize() noexcept {
             active_checkpoint_state.data(),
             active_checkpoint_state.capacity(),
             sizeof(std::byte));
+        add_runtime_extent(
+            active_shedding_state.get(),
+            active_shedding_state ? 1 : 0,
+            sizeof(Impl::ActiveSheddingState));
+        add_runtime_extent(
+            rate_telemetry.get(),
+            rate_telemetry ? 1 : 0,
+            sizeof(detail::RateTelemetryRing));
+        if (rate_telemetry) {
+            add_runtime_extent(
+                rate_telemetry->slot_data(),
+                rate_telemetry->slot_storage_bytes(),
+                1);
+        }
+        add_runtime_extent(
+            rate_counters.get(),
+            rate_counters ? 1 : 0,
+            sizeof(detail::RateCounters));
         add_runtime_extent(
             compiled_order.data(),
             compiled_order.capacity(),
@@ -4719,6 +5354,9 @@ Status Runtime::finalize() noexcept {
     impl_->active_checkpoint_state = std::move(active_checkpoint_state);
     impl_->active_publication_claims =
         std::move(active_publication_claims);
+    impl_->active_shedding_state = std::move(active_shedding_state);
+    impl_->rate_telemetry = std::move(rate_telemetry);
+    impl_->rate_counters = std::move(rate_counters);
     impl_->resident_regions = std::move(resident_regions);
     impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
@@ -5304,7 +5942,7 @@ Status Runtime::step(
 
     impl_->active_frame = &frame;
     std::size_t failed_phase = impl_->callbacks.size();
-    const auto execution_status = impl_->rate_execution_policy_set
+    auto execution_status = impl_->rate_execution_policy_set
         ? impl_->run_active_step(frame, output, failed_phase)
         : impl_->executor->run(
               &Impl::run_phase,
@@ -5312,6 +5950,11 @@ Status Runtime::step(
               output.callbacks_executed,
               failed_phase);
     impl_->active_frame = nullptr;
+    if (impl_->rate_execution_policy_set &&
+        !impl_->commit_rate_counters(output.rate) &&
+        execution_status == Status::ok) {
+        execution_status = Status::capacity_exceeded;
+    }
 
     output.finish_ns = impl_->clock_now();
     if (watchdog_token != 0) {
@@ -5609,11 +6252,30 @@ Status Runtime::run_periodic(
                 step_result.rate.stale_reads) ||
             !add_rate(
                 output.rate.failed_domain_releases,
-                step_result.rate.failed_domain_releases)) {
+                step_result.rate.failed_domain_releases) ||
+            !add_rate(
+                output.rate.optional_due_domain_releases,
+                step_result.rate.optional_due_domain_releases) ||
+            !add_rate(
+                output.rate.optional_executed_domain_releases,
+                step_result.rate.optional_executed_domain_releases) ||
+            !add_rate(
+                output.rate.shed_domain_releases,
+                step_result.rate.shed_domain_releases) ||
+            !add_rate(
+                output.rate.shed_transitions,
+                step_result.rate.shed_transitions) ||
+            !add_rate(
+                output.rate.recovery_transitions,
+                step_result.rate.recovery_transitions)) {
             return impl_->fail(
                 Status::capacity_exceeded,
                 "periodic active-rate summary overflowed");
         }
+        output.rate.currently_shed_domains =
+            step_result.rate.currently_shed_domains;
+        output.rate.rate_policy_version =
+            step_result.rate.rate_policy_version;
         if (!output.rate.has_first_failure &&
             step_result.rate.has_first_failure) {
             output.rate.has_first_failure = true;
@@ -6369,6 +7031,145 @@ Status Runtime::read_trace(
     cursor.next_sequence = sequence;
     result.next_sequence = sequence;
     result.remaining_sequence_count = end - sequence;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::rate_telemetry_metadata(
+    RateTelemetryMetadata& metadata) noexcept {
+    metadata = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state == RuntimeState::configuring ||
+        !impl_->rate_telemetry || !impl_->rate_counters) {
+        return impl_->fail(
+            Status::invalid_state,
+            "rate telemetry requires a finalized active-rate runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "rate telemetry inspection cannot run during execution");
+    }
+    metadata.schema_version = rate_action_schema_version;
+    metadata.record_size = sizeof(RateActionRecord);
+    metadata.counter_count = rate_action_counter_count;
+    metadata.host_policy_version =
+        impl_->rate_execution_policy.host_policy_version;
+    metadata.runtime_id = impl_->observability.runtime_id;
+    metadata.capacity = impl_->rate_telemetry->capacity();
+    metadata.next_sequence = impl_->rate_telemetry->next_sequence();
+    metadata.records_emitted = impl_->rate_telemetry->emitted();
+    metadata.records_overwritten = impl_->rate_telemetry->overwritten();
+    metadata.records_dropped = impl_->rate_telemetry->dropped();
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::rate_counters_snapshot(
+    RateCounterSnapshot& snapshot) noexcept {
+    snapshot = {};
+    const auto status = rate_telemetry_metadata(snapshot.metadata);
+    if (status != Status::ok) {
+        return status;
+    }
+    for (std::size_t index = 0;
+         index < rate_action_counter_count;
+         ++index) {
+        snapshot.values[index] = impl_->rate_counters->load(
+            static_cast<RateCounterId>(index));
+    }
+    snapshot.values[static_cast<std::size_t>(RateCounterId::records_emitted)] =
+        snapshot.metadata.records_emitted;
+    snapshot.values[static_cast<std::size_t>(RateCounterId::records_overwritten)] =
+        snapshot.metadata.records_overwritten;
+    snapshot.values[static_cast<std::size_t>(RateCounterId::records_dropped)] =
+        snapshot.metadata.records_dropped;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::read_rate_actions(
+    RateTelemetryCursor& cursor,
+    std::span<RateActionRecord> output,
+    RateTelemetryReadResult& result) noexcept {
+    result = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state == RuntimeState::configuring ||
+        !impl_->rate_telemetry || !impl_->rate_counters) {
+        return impl_->fail(
+            Status::invalid_state,
+            "rate action inspection requires a finalized active-rate runtime");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "rate action inspection cannot run during execution");
+    }
+    if (cursor.schema_version != rate_action_schema_version ||
+        cursor.reserved0 != 0 ||
+        (cursor.runtime_id == 0 && cursor.next_sequence != 0) ||
+        (cursor.runtime_id != 0 &&
+         cursor.runtime_id != impl_->observability.runtime_id)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "rate telemetry cursor is malformed or foreign");
+    }
+    const auto end = impl_->rate_telemetry->next_sequence();
+    if (cursor.runtime_id != 0 && cursor.next_sequence > end) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "rate telemetry cursor points beyond the stream");
+    }
+    const auto oldest = impl_->rate_telemetry->oldest_sequence(end);
+    auto sequence = cursor.next_sequence;
+    RateTelemetryReadResult candidate;
+    candidate.metadata.schema_version = rate_action_schema_version;
+    candidate.metadata.record_size = sizeof(RateActionRecord);
+    candidate.metadata.counter_count = rate_action_counter_count;
+    candidate.metadata.host_policy_version =
+        impl_->rate_execution_policy.host_policy_version;
+    candidate.metadata.runtime_id = impl_->observability.runtime_id;
+    candidate.metadata.capacity = impl_->rate_telemetry->capacity();
+    candidate.metadata.next_sequence = end;
+    candidate.metadata.records_emitted = impl_->rate_telemetry->emitted();
+    candidate.metadata.records_overwritten = impl_->rate_telemetry->overwritten();
+    candidate.metadata.records_dropped = impl_->rate_telemetry->dropped();
+    if (sequence < oldest) {
+        candidate.lost_records = oldest - sequence;
+        sequence = oldest;
+    }
+    candidate.first_sequence = sequence;
+    while (sequence < end && candidate.records_read < output.size()) {
+        RateActionRecord record;
+        if (impl_->rate_telemetry->read_sequence(sequence, record)) {
+            output[candidate.records_read] = record;
+            ++candidate.records_read;
+        } else {
+            ++candidate.lost_records;
+        }
+        ++sequence;
+    }
+    candidate.next_sequence = sequence;
+    candidate.remaining_sequence_count = end - sequence;
+    RateTelemetryCursor committed = cursor;
+    committed.runtime_id = impl_->observability.runtime_id;
+    committed.next_sequence = sequence;
+    cursor = committed;
+    result = candidate;
     impl_->clear_error();
     return Status::ok;
 }

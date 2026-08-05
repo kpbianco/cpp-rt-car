@@ -10,6 +10,12 @@ integration.
 The legacy `SimCore` binary trace and mutex-backed metrics registry remain
 experimental and do not inherit this contract.
 
+M16-04 adds a deliberately separate C++ rate-action telemetry schema version
+1. Its fixed 160-byte records, 20 counters/gauges, metadata, and runtime-bound
+cursors are specified in the [rate-action telemetry contract](rate_telemetry.md).
+They do not append global schema-2 event or metric IDs, are not exported by the
+C ABI, and are not checkpoint or replay history.
+
 ## Schema and provenance
 
 Observability schema version 2 has fixed numeric trace-event and metric IDs.
@@ -201,6 +207,8 @@ host sink.
 - implementation: `rt/src/telemetry.cpp`,
   `rt/src/host_runtime.cpp`, and
   `rt/src/observability_export.cpp`.
+- separate rate-action implementation and tests: `rt/src/rate_telemetry.cpp`,
+  `tests/test_rate_telemetry.cpp`.
 
 ## Explicit boundaries
 

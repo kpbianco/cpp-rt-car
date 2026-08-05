@@ -83,6 +83,8 @@ int main() {
     rt::RateDomainHandle consumer_rate;
     rt::CrossRateChannelHandle channel;
     const rt::RateExecutionPolicy additive_active_policy{};
+    const rt::RateActionRecord rate_action_record{};
+    const rt::RateTelemetryCursor rate_cursor{};
     const std::array initial{std::byte{0x2a}};
 
     if (runtime.configure(config) != rt::Status::ok ||
@@ -133,6 +135,10 @@ int main() {
             rt::Status::ok ||
         copied_initial != initial ||
         additive_active_policy.maximum_dispatch_records_per_step != 0 ||
+        additive_active_policy.host_policy_version != 1 ||
+        rate_action_record.schema_version != rt::rate_action_schema_version ||
+        rate_action_record.record_size != sizeof(rt::RateActionRecord) ||
+        rate_cursor.schema_version != rt::rate_action_schema_version ||
         runtime.rate_execution_enabled() ||
         runtime.reference_release_count() != 3 ||
         runtime.start() != rt::Status::ok ||

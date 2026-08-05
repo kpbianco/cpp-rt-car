@@ -92,11 +92,15 @@ release timestamp. Equal timestamps order by domain registration, this
 contract's compiled phase order, then substep ordinal. Reduced period ratios
 are exact against registration-order domain zero. Without the execution policy,
 `step()` and `run_periodic()` still submit the complete compiled graph once per
-frame. Active M16-03 plans repeat this exact order by checked supercycle
+frame. Active plans repeat this exact order by checked supercycle
 arithmetic. They permit ordinary dependencies only within one domain and run
 each selected CPU phase serially through the existing executor without
 releasing graph successors. Late actions operate on a whole domain release;
-optional shedding remains outside this contract.
+mandatory-only admission excludes optional budgets. Optional CPU domains start
+active and shed by increasing criticality then reverse registration, with
+recovery reversing that order. A transition after a settled mandatory release
+affects the next record in this same total order. Optional cross-rate endpoints
+are rejected so omission cannot change generation selection.
 
 ## Resource ordering
 
@@ -167,11 +171,13 @@ freezes this graph surface under the M11 compatibility policy.
 - Rate compiler: `rt/src/rate_timeline.cpp`
 - Cross-rate compiler/store: `rt/src/cross_rate_data.cpp`
 - Active admission/dispatch compiler: `rt/src/rate_dispatch.cpp`
+- Rate-action telemetry: `rt/src/rate_telemetry.cpp`
 - Runtime integration: `rt/src/host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Rate/reference tests: `tests/test_rate_timeline.cpp`
 - Cross-rate selection/storage tests: `tests/test_cross_rate_data.cpp`
 - Active admission/dispatch tests: `tests/test_rate_dispatch.cpp`
+- Shedding/telemetry tests: `tests/test_rate_telemetry.cpp`
 - First-frame allocation instrumentation: `tests/test_trace_noalloc.cpp`
 - Dynamic C ABI coverage: `tests/test_cabi_dlopen.c`
 - C and C++ embedding samples: `samples/embed_c/mini_app.c`,

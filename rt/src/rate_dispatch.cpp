@@ -70,10 +70,16 @@ Status compile_rate_dispatch(
     diagnostic = {};
     if (policy.maximum_dispatch_records_per_step == 0 ||
         policy.maximum_dispatch_records_per_step >
-            reference_release_capacity) {
+            reference_release_capacity ||
+        policy.host_policy_version == 0 ||
+        policy.consecutive_late_threshold == 0 ||
+        policy.consecutive_on_time_threshold == 0 ||
+        policy.consecutive_late_threshold > rate_policy_threshold_limit ||
+        policy.consecutive_on_time_threshold > rate_policy_threshold_limit ||
+        policy.rate_telemetry_capacity > rate_telemetry_capacity_limit) {
         diagnostic = {
             Status::invalid_config,
-            "active rate execution requires a positive dispatch bound"};
+            "active rate execution requires valid positive policy fields and bounded telemetry"};
         return diagnostic.status;
     }
     if (determinism_tier != DeterminismTier::unspecified) {
@@ -96,27 +102,46 @@ Status compile_rate_dispatch(
         for (const auto& channel : channels) {
             if (!channel.producer.valid() ||
                 channel.producer.owner() != graph_owner ||
-                channel.producer.index() >= rate_plan.bindings.size()) {
+                channel.producer.index() >= rate_plan.bindings.size() ||
+                !channel.consumer.valid() ||
+                channel.consumer.owner() != graph_owner ||
+                channel.consumer.index() >= rate_plan.bindings.size()) {
                 diagnostic = {
                     Status::invalid_handle,
-                    "active cross-rate producer is invalid"};
+                    "active cross-rate endpoint is invalid"};
                 return diagnostic.status;
             }
-            const auto binding = std::find_if(
+            const auto producer_binding = std::find_if(
                 rate_plan.bindings.begin(),
                 rate_plan.bindings.end(),
                 [&](const CompiledRateBinding& candidate) {
                     return candidate.phase == channel.producer;
                 });
-            if (binding == rate_plan.bindings.end() ||
-                !binding->domain.valid() ||
-                binding->domain.index() >= rate_plan.domains.size()) {
+            const auto consumer_binding = std::find_if(
+                rate_plan.bindings.begin(),
+                rate_plan.bindings.end(),
+                [&](const CompiledRateBinding& candidate) {
+                    return candidate.phase == channel.consumer;
+                });
+            if (producer_binding == rate_plan.bindings.end() ||
+                consumer_binding == rate_plan.bindings.end() ||
+                !producer_binding->domain.valid() ||
+                !consumer_binding->domain.valid() ||
+                producer_binding->domain.index() >= rate_plan.domains.size() ||
+                consumer_binding->domain.index() >= rate_plan.domains.size()) {
                 diagnostic = {
                     Status::invalid_handle,
-                    "active cross-rate producer has no valid domain"};
+                    "active cross-rate endpoint has no valid domain"};
                 return diagnostic.status;
             }
-            producer_domains[binding->domain.index()] = true;
+            if (rate_plan.domains[producer_binding->domain.index()].optional ||
+                rate_plan.domains[consumer_binding->domain.index()].optional) {
+                diagnostic = {
+                    Status::invalid_config,
+                    "optional domains cannot produce or consume active cross-rate channels"};
+                return diagnostic.status;
+            }
+            producer_domains[producer_binding->domain.index()] = true;
         }
 
         for (std::size_t index = 0;
@@ -126,7 +151,7 @@ Status compile_rate_dispatch(
             if (domain.period_ns == 0 ||
                 domain.relative_deadline_ns == 0 ||
                 domain.relative_deadline_ns > domain.period_ns ||
-                domain.budget_wcet_ns == 0 || domain.optional ||
+                domain.budget_wcet_ns == 0 ||
                 !valid_action(domain.late_action) ||
                 (domain.late_action == RateLateAction::bounded_catch_up &&
                  domain.bounded_catch_up_limit == 0) ||
@@ -184,6 +209,24 @@ Status compile_rate_dispatch(
         candidate.policy = policy;
         candidate.admission.reserve(rate_plan.releases.size());
         candidate.groups.reserve(rate_plan.releases.size());
+        candidate.optional_shed_order.reserve(rate_plan.domains.size());
+        for (std::size_t index = 0; index < rate_plan.domains.size(); ++index) {
+            if (rate_plan.domains[index].optional) {
+                candidate.optional_shed_order.push_back(index);
+            }
+        }
+        std::sort(
+            candidate.optional_shed_order.begin(),
+            candidate.optional_shed_order.end(),
+            [&](std::size_t left, std::size_t right) {
+                const auto left_criticality = static_cast<std::uint8_t>(
+                    rate_plan.domains[left].criticality);
+                const auto right_criticality = static_cast<std::uint8_t>(
+                    rate_plan.domains[right].criticality);
+                return left_criticality != right_criticality
+                    ? left_criticality < right_criticality
+                    : left > right;
+            });
 
         std::uint64_t previous_finish = 0;
         for (std::size_t index = 0;
@@ -191,7 +234,7 @@ Status compile_rate_dispatch(
              ++index) {
             const auto& release = rate_plan.releases[index];
             if (release.phase_kind != RatePhaseKind::cpu ||
-                release.optional || release.budget_wcet_ns == 0 ||
+                release.budget_wcet_ns == 0 ||
                 release.relative_deadline_ns == 0 ||
                 release.domain_registration_index >=
                     rate_plan.domains.size()) {
@@ -201,33 +244,35 @@ Status compile_rate_dispatch(
                     index};
                 return diagnostic.status;
             }
-            const auto declared_start =
-                std::max(previous_finish, release.release_time_ns);
-            std::uint64_t declared_finish = 0;
-            if (!checked_add(
+            if (!release.optional) {
+                const auto declared_start =
+                    std::max(previous_finish, release.release_time_ns);
+                std::uint64_t declared_finish = 0;
+                if (!checked_add(
+                        declared_start,
+                        release.budget_wcet_ns,
+                        declared_finish)) {
+                    diagnostic = {
+                        Status::capacity_exceeded,
+                        "declared-budget admission arithmetic overflowed",
+                        index};
+                    return diagnostic.status;
+                }
+                if (declared_finish > release.deadline_time_ns) {
+                    diagnostic = {
+                        Status::invalid_config,
+                        "declared-budget admission found an infeasible mandatory record",
+                        index};
+                    return diagnostic.status;
+                }
+                candidate.admission.push_back({
+                    index,
                     declared_start,
-                    release.budget_wcet_ns,
-                    declared_finish)) {
-                diagnostic = {
-                    Status::capacity_exceeded,
-                    "declared-budget admission arithmetic overflowed",
-                    index};
-                return diagnostic.status;
+                    declared_finish,
+                    release.deadline_time_ns,
+                });
+                previous_finish = declared_finish;
             }
-            if (declared_finish > release.deadline_time_ns) {
-                diagnostic = {
-                    Status::invalid_config,
-                    "declared-budget admission found an infeasible mandatory record",
-                    index};
-                return diagnostic.status;
-            }
-            candidate.admission.push_back({
-                index,
-                declared_start,
-                declared_finish,
-                release.deadline_time_ns,
-            });
-            previous_finish = declared_finish;
 
             if (candidate.groups.empty() ||
                 candidate.groups.back().domain_registration_index !=

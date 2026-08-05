@@ -52,8 +52,9 @@ copied CPU-to-CPU cross-rate channel
 declarations, deterministic first/repeating-supercycle sample-and-hold and
 freshness selections, and preallocated exact-generation SPSC stores. M16-03
 optionally activates D0 mandatory-CPU admission/dispatch, store transfer, and
-bounded late behavior. M16-04 shedding/recovery and versioned telemetry remain
-deferred.
+bounded late behavior. M16-04 admits bounded optional CPU domains beside that
+mandatory-only admission result, adds deterministic hysteretic shedding and
+recovery, and exposes a separate fixed-capacity versioned rate-action stream.
 
 ## Claim policy
 
@@ -204,9 +205,10 @@ registration-order domain zero as their exact reference.
 
 Without an explicit `RateExecutionPolicy`, this remains a reference plan:
 host-driven and periodic frames execute the complete graph once and retain the
-pre-M16-03 identity. With the additive configuring-only policy, M16-03 admits
-only mandatory D0 CPU plans on one conservative serialized declared-budget
-lane. Active steps dispatch exact reference records in positive contiguous
+pre-M16-03 identity. With the additive configuring-only policy, admission
+simulates only mandatory D0 CPU records on one conservative serialized
+declared-budget lane. M16-04 may execute optional CPU records beside the
+admitted mandatory schedule. Active steps dispatch exact reference records in positive contiguous
 logical/nominal windows, with a positive callback-record cap and explicit skip,
 bounded-catch-up, hold, degrade, or fail behavior. Declared budget/WCET remains
 untrusted input, not measured timing or a deadline proof.
@@ -217,8 +219,17 @@ before committing a complete exact generation; holds alias the last committed
 or initial sample. Active cursor, epoch, fault/action, generation/alias, and
 payload state is one canonical generic schema-1 checkpoint record. Schema-1
 input logs and replay reject active execution because they cannot encode the
-nominal release and action decisions. Optional shedding/recovery and versioned
-per-release telemetry remain M16-04.
+nominal release and action decisions. Mandatory releases alone drive copied
+late/on-time thresholds: optional domains shed by increasing criticality and
+reverse registration, then recover in reverse order. Optional channel
+endpoints are rejected. Policy version/order/state participate in active
+identity and the existing canonical generic state record.
+
+The separate rate-action schema version 1 uses fixed 160-byte records, exact
+numeric action/transition/reason tables, a bounded nonblocking runtime-owned
+ring, runtime-bound cursors with exact gaps, and 20 cumulative counters/gauges.
+It neither changes global observability schema 2 nor supplies authenticated or
+action-aware replay.
 
 ### Observability
 
@@ -316,7 +327,7 @@ callback expressions.
 | CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Rate-domain reference plan | M16-01 implemented; external gates pending | Bounded copied domains and ownership, exact epoch-zero supercycle, immutable inspection, identity/accounting integration, and unchanged complete-graph dispatch; later M16 semantics remain incomplete |
 | Cross-rate data contract | M16-02 implemented; external gates pending | CPU-only fixed-payload channels, exact initial/wrap/held/fresh/stale selection metadata, and bounded two-slot SPSC storage; M16-03 connects them only for opt-in active plans |
-| Active rate admission and late policy | M16-03 implemented; external gates pending | Opt-in D0 mandatory-CPU serialized admission/dispatch, bounded late actions, exact-generation transfer, functional summaries, and canonical active checkpoint state; M16-04 shedding/recovery and versioned telemetry remain |
+| Active rate admission and optional recovery | M16-04 implemented; external gates pending | Mandatory-only D0 CPU admission, optional CPU dispatch, deterministic hysteretic shedding/recovery, exact-generation transfer, bounded late actions, canonical policy checkpoint state, and separate versioned rate-action telemetry |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

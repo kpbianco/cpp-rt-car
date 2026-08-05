@@ -34,7 +34,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
-| M16 | In progress | M16-01 reference plans, M16-02 deterministic cross-rate selection/storage, and M16-03 opt-in admission/CPU dispatch/late policy are present; M16-04 shedding/recovery and versioned telemetry remain |
+| M16 | In progress | M16-01 through M16-04 reference, cross-rate, active dispatch, optional shedding/recovery, and versioned telemetry are implemented locally; mandatory CI and human completion gates remain |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
@@ -573,8 +573,8 @@ Exit gates:
 
 ## M16 — Multi-rate simulation
 
-M16-01, M16-02, and M16-03 are implemented in this worktree, subject to their local, CI,
-and human review gates:
+M16-01 through M16-04 are implemented in this worktree, subject to their local,
+CI, and human review gates:
 
 - bounded copied rate domains and exactly-one phase ownership;
 - exact checked epoch-zero `[0, lcm)` reference timeline with deterministic
@@ -593,10 +593,12 @@ and human review gates:
 - staged exact-generation channel transfer, functional step/periodic summaries,
   and one canonical active checkpoint state record without schema evolution.
 
-Remaining M16 outcome:
-
-- optional-domain shedding/recovery and versioned per-release policy telemetry;
-- an action-aware replay format if approved beyond schema-1 input logs.
+- mandatory-only admission with bounded optional CPU execution, deterministic
+  criticality/registration shedding order, reverse recovery, and hysteresis;
+- fixed-capacity versioned rate-action records, exact loss/cursors/counters,
+  conditional policy checkpoint state, and unchanged schema-2 observability;
+- action-aware replay remains outside M16 and would require separate approval
+  beyond schema-1 input logs.
 
 Exit gates:
 
@@ -605,8 +607,8 @@ Exit gates:
 - overload never creates unbounded catch-up work or silently skips mandatory
   releases.
 
-M16 and CAP-M16 remain incomplete until M16-04 shedding/recovery with versioned
-telemetry is delivered and its gates pass.
+M16 and CAP-M16 remain incomplete until the M16-04 mandatory CI and human gates
+pass; local functional implementation alone does not close them.
 
 ## M17 — HAL v2 and heterogeneous memory
 

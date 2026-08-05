@@ -177,6 +177,13 @@ global callback cap and catch-up cap prevent backlog or spill. Fake-clock tests
 establish these integer decisions only. They are not measured WCET, latency,
 deadline, HIL, field, RT1, or RT2 evidence.
 
+Only a settled mandatory domain release updates the M16-04 consecutive-late or
+consecutive-on-time streak. A threshold changes exactly one optional domain;
+the change is effective for the next total-order release, even at the same
+logical timestamp. Optional lateness keeps its configured late action but does
+not drive those streaks. Large omitted windows use checked bounded aggregate
+updates and do not replay every omitted supercycle.
+
 Neither requested/resolved/acquired/applied/verified reports, preflight, nor
 named-host functional tests establish hardware/HIL behavior, latency, field
 results, RT1, RT2, signing, release, deployment, or production validation.

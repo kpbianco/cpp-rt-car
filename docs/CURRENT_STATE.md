@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-05
-Batch baseline: `34f0752596d84ef1f98a8a0d544861bda4935f3f`
+Batch baseline: `9c350ab5b66e37e90aef7e96939c71df04101b27`
 
 ## Product state
 
@@ -12,7 +12,7 @@ Batch baseline: `34f0752596d84ef1f98a8a0d544861bda4935f3f`
 - License: Apache-2.0.
 - M14, M14.1, and M15 are complete at the audited baseline.
 - M16 is active and remains incomplete. The current approved implementation
-  contract is `contracts/active-batch.yaml` (`M16-03`).
+  contract is `contracts/active-batch.yaml` (`M16-04`).
 
 ## M16-01 and M16-02 implementation
 
@@ -79,12 +79,35 @@ committed channel bytes are retained in one internal canonical state record
 through the unchanged checkpoint schema-1 generic record mechanism. Active
 schema-1 input-log export and replay are rejected explicitly.
 
+## M16-04 implementation
+
+M16-04 appends a copied policy version, positive late/recovery hysteresis
+thresholds, and a bounded telemetry capacity. Active finalization now accepts
+optional CPU D0 domains while admission remains mandatory-only. Optional work
+starts active, sheds by increasing criticality and reverse registration order,
+and recovers in the exact reverse order. Only settled mandatory releases drive
+the streaks; transitions affect the next release in total order, including at
+the same timestamp. Optional cross-rate endpoints remain rejected.
+
+The runtime owns a separate fixed-capacity rate-action schema-1 ring and 20
+counters/gauges. Publication is one bounded nonblocking attempt with explicit
+overwrite, contention, and zero-capacity loss. Runtime-bound cursors report
+exact gaps and inspection rejects an active step or periodic loop. This stream
+does not change global observability schema 2 and is not checkpointed or an
+action-replay log.
+
+The canonical active generic checkpoint record conditionally retains policy
+version, thresholds, streaks, deterministic optional order, and shed state.
+Reference-only and mandatory-only records remain byte-identical. Finalization
+accounts policy, checkpoint, ring, slot, and counter storage once inside the
+existing rate-plan/runtime-control extent and six-row memory equation.
+
 ## Boundary and remaining work
 
-M16-03 establishes portable RT0 functional admission, active CPU dispatch,
-cross-rate payload transfer, and late-frame actions. It does not add optional
-work, shedding/recovery, action replay, or versioned per-release telemetry;
-those remain M16-04 work, so M16 and CAP-M16 are incomplete.
+M16-04 establishes portable RT0 functional optional-work shedding/recovery and
+versioned rate-action observation. Action-aware replay, active D1, device-rate
+execution, and qualification remain outside this batch. M16 and CAP-M16 remain
+incomplete until mandatory CI and human review pass.
 
 Local deterministic verification can establish exact integer compilation,
 functional lifecycle, package compatibility, bounded storage, replay identity,
@@ -95,6 +118,6 @@ signing, release, staging, deployment, or production validation is claimed.
 
 ## Next action
 
-Complete the M16-03 local verification contract, retain
-`docs/evidence/M16-03-2026-08-05.md`, and submit the bounded diff for mandatory
-CI and human review. Do not mark M16 or CAP-M16 complete from this batch.
+Complete the M16-04 local verification contract, retain
+`docs/evidence/M16-04-2026-08-05.md`, and submit the bounded diff for mandatory
+CI and human review. Do not mark M16 or CAP-M16 complete before those gates.

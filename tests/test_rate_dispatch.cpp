@@ -284,7 +284,7 @@ TEST(RateDispatch, PolicyIsOptInCopiedFrozenAndLegacyDispatchIsExact) {
 }
 
 TEST(RateDispatch, AdmissionRejectsMalformedAndInfeasibleActivePlans) {
-    for (const auto malformed : std::array<rt::RateDomainRegistration, 5>{
+    for (const auto malformed : std::array<rt::RateDomainRegistration, 4>{
              rt::RateDomainRegistration{
                  "zero-budget", 100, 1, 100, 0},
              rt::RateDomainRegistration{
@@ -295,11 +295,8 @@ TEST(RateDispatch, AdmissionRejectsMalformedAndInfeasibleActivePlans) {
                  "bad-catch", 100, 1, 100, 10,
                  rt::RateCriticality::normal, false,
                  rt::RateLateAction::bounded_catch_up, 0},
-             rt::RateDomainRegistration{
-                 "optional", 100, 1, 100, 10,
-                 rt::RateCriticality::normal, true,
-                 rt::RateLateAction::fail, 0},
          }) {
+        SCOPED_TRACE(malformed.name);
         rt::Runtime runtime;
         std::size_t calls = 0;
         rt::PhaseHandle phase;

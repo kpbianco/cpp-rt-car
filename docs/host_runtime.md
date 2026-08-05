@@ -382,7 +382,10 @@ a configuring-only opt-in execution policy, conservative serialized admission,
 checked logical/nominal active windows, serial selected-CPU dispatch, exact-generation
 publish/copy, late actions, result summaries, and one canonical active
 checkpoint record. Reference-only behavior remains exact. Optional
-shedding/recovery and versioned action telemetry remain M16-04.
+CPU domains now use mandatory-release hysteresis, deterministic shedding and
+reverse recovery, with policy state retained in the same generic record. A
+separate fixed-capacity schema-1 rate-action ring and 20 counters/gauges expose
+bounded loss-aware inspection without changing global observability schema 2.
 
 ## Code and evidence
 
@@ -392,6 +395,7 @@ shedding/recovery and versioned action telemetry remain M16-04.
 - Rate compiler: `rt/src/rate_timeline.cpp`
 - Cross-rate compiler/store: `rt/src/cross_rate_data.cpp`
 - Active admission/dispatch compiler: `rt/src/rate_dispatch.cpp`
+- Rate-action telemetry: `rt/src/rate_telemetry.cpp`
 - Unified executor: `rt/src/executor.cpp`
 - Resident-region policy: `rt/src/memory_policy.cpp`
 - C ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
@@ -399,6 +403,7 @@ shedding/recovery and versioned action telemetry remain M16-04.
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Rate/reference tests: `tests/test_rate_timeline.cpp`
 - Active admission/dispatch tests: `tests/test_rate_dispatch.cpp`
+- Shedding/telemetry tests: `tests/test_rate_telemetry.cpp`
 - Executor tests: `tests/test_executor.cpp`
 - Memory-plan tests: `tests/test_memory_plan.cpp`
 - Memory-provider/policy tests: `tests/test_memory_policy.cpp`

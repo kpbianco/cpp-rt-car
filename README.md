@@ -28,7 +28,7 @@ versioned observability/replay, and asynchronous device integration.
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
 | Rate-domain reference plan | M16-01 implemented; external gates pending | Existing C++ SDK headers expose bounded instance-owned domains and phase bindings plus exact checked `[0, lcm)` inspection; reference-only frames retain complete-graph dispatch |
 | Cross-rate data contract | M16-02 implemented; external gates pending | Existing C++ SDK headers expose copied CPU-only channels, exact first/repeating sample-and-hold and freshness selections, and bounded SPSC stores used only by opt-in active plans |
-| Active rate admission and late policy | M16-03 implemented; external gates pending | Opt-in mandatory-CPU D0 admission/dispatch, exact-generation transfer, bounded late actions, functional summaries, and canonical active checkpoint state; M16-04 remains |
+| Active rate admission and optional recovery | M16-04 implemented; external gates pending | Mandatory-only D0 CPU admission, bounded optional execution, deterministic shedding/recovery, exact-generation transfer, canonical policy state, and separate versioned rate-action telemetry |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -228,7 +228,11 @@ per channel. M16-03 optionally activates D0 mandatory-CPU serialized admission
 and exact reference dispatch, with checked logical/nominal windows, staged
 cross-rate transfer, bounded skip/catch-up/hold/degrade/fail actions, functional
 summaries, and canonical checkpoint state. Reference-only behavior is unchanged.
-Optional shedding/recovery and versioned action telemetry remain M16-04.
+M16-04 admits bounded optional CPU domains beside the mandatory-only admission
+result, applies mandatory-release hysteresis with deterministic shed/recovery
+order, and exposes a separate fixed-capacity versioned rate-action stream with
+explicit loss and runtime-bound cursors. Active D1/action replay remains
+unsupported.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -292,8 +296,9 @@ accounting and observation, declared-only opaque accounting, and retryable
 cross-category cleanup. M15 is complete at the audited baseline. M16-01 adds
 the bounded rate-domain/reference-plan boundary and M16-02 adds deterministic
 cross-rate selection/storage. M16-03 adds opt-in admission, CPU dispatch,
-transfer, and late-frame policy; M16 and CAP-M16 remain incomplete pending
-M16-04 shedding/recovery and versioned telemetry. The
+transfer, and late-frame policy. M16-04 adds optional shedding/recovery and
+versioned telemetry; M16 and CAP-M16 remain incomplete pending its mandatory CI
+and human gates. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.
 

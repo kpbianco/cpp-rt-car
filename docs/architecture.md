@@ -127,6 +127,20 @@ complete, then enter the exact-generation stores; hold preserves the current
 alias. Cursor, fault, alias, generation, and payload state remains runtime-
 owned and participates in generic checkpoint state.
 
+M16-04 extends that compiler with optional CPU groups while preserving
+mandatory-only admission. A runtime-owned policy state tracks bounded
+late/on-time streaks and a deterministic shed bitset/order. Only settled
+mandatory releases update it; one threshold crossing changes one optional
+domain, immediately affecting the next total-order release. Optional channel
+endpoints remain invalid. The conditional checkpoint tail retains this state
+without changing the schema-1 codec or mandatory-only bytes.
+
+A separate `rate_telemetry` component owns a fixed-capacity atomic record ring
+and fixed counter bank. It publishes one nonblocking attempt per action/range,
+reports overwrite/contention/zero-capacity loss, and exposes only non-RT
+runtime-bound cursor inspection. It is deliberately separate from global
+observability schema 2 and from checkpoint/replay artifacts.
+
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
 run on static-assignment, bounded-throughput, or borrowed-host policy.
@@ -243,9 +257,9 @@ trace/task/phase rollback while retaining the first error and every unresolved
 owner.
 M16-01 adds the bounded reference-plan compiler. M16-02 adds cross-rate
 selection and snapshot-store construction. M16-03 adds opt-in active admission,
-selected CPU dispatch, transfer, and late actions without adding a lane,
-provider region, or telemetry field. M16-04 owns optional shedding/recovery and
-versioned per-release telemetry.
+selected CPU dispatch, transfer, and late actions. M16-04 adds optional CPU
+shedding/recovery and a separate versioned per-release telemetry component
+without adding a lane or provider region.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),

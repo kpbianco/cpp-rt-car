@@ -109,6 +109,7 @@ if (SIM_GTEST_AVAILABLE)
     list(APPEND TEST_SOURCES
         test_cross_rate_data.cpp
         test_rate_dispatch.cpp
+        test_rate_telemetry.cpp
         test_rate_timeline.cpp
         test_cpu_memory_policy.cpp
         test_memory_policy.cpp
@@ -196,6 +197,11 @@ if (SIM_GTEST_AVAILABLE)
         COMMAND simcore_tests
             --gtest_filter=RateDispatch.*:RateTimeline.*Admission*:CrossRateData.*Active*:HostRuntime.*RateDispatch*:PeriodicRuntime.*RateDispatch*:UnifiedExecutor.*RateDispatch*:MemoryPlan.*RateDispatch*:DeterminismReplay.*RateDispatch*:TraceNoAlloc.*RateDispatch*)
     set_tests_properties(m16_rate_dispatch PROPERTIES TIMEOUT 60)
+    add_test(
+        NAME m16_shedding_telemetry
+        COMMAND simcore_tests
+            --gtest_filter=RateShedding.*:RateTelemetry.*:MemoryPlan.*RateTelemetry*:DeterminismReplay.*RateTelemetry*:Observability.*RateTelemetry*:TraceNoAlloc.*RateTelemetry*)
+    set_tests_properties(m16_shedding_telemetry PROPERTIES TIMEOUT 60)
 
     add_test(
         NAME m16_cross_rate_data

@@ -49,6 +49,10 @@ int main() {
     const rt::MemoryPlan pre_m16_plan{1024, 512};
     const rt::CrossRateChannelRegistration additive_cross_rate{};
     const rt::RateExecutionPolicy additive_rate_execution{};
+    const rt::RateExecutionPolicy pre_m16_04_rate_execution{17};
+    const rt::StepResult::RateSummary pre_m16_04_summary{
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+        false, {}, 0, 0};
     const rt::HostFrameContext pre_m16_03_frame{
         1, std::chrono::nanoseconds{1}, std::nullopt};
     const rt::CompiledRateDomain pre_m16_03_compiled{
@@ -59,6 +63,10 @@ int main() {
         pre_m16_plan.rate_plan_bytes != 0 ||
         additive_cross_rate.payload_size != 0 ||
         additive_rate_execution.maximum_dispatch_records_per_step != 0 ||
+        pre_m16_04_rate_execution.maximum_dispatch_records_per_step != 17 ||
+        pre_m16_04_rate_execution.host_policy_version != 1 ||
+        pre_m16_04_summary.optional_due_domain_releases != 0 ||
+        pre_m16_04_summary.rate_policy_version != 0 ||
         pre_m16_03_frame.nominal_release_ns.has_value() ||
         pre_m16_03_compiled.late_action != rt::RateLateAction::fail) {
         return 3;
