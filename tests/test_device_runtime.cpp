@@ -60,6 +60,8 @@ struct CleanupMemoryProvider {
     static constexpr std::size_t slot_bytes = 128 * 1024;
     struct alignas(64) Slot {
         std::array<std::byte, slot_bytes> bytes{};
+    };
+    struct Token {
         rt::MemoryRegionId region{};
     };
 
@@ -80,6 +82,7 @@ struct CleanupMemoryProvider {
     }
 
     std::array<Slot, 3> slots{};
+    std::array<Token, 3> tokens{};
     std::vector<std::uint32_t>* calls = nullptr;
     std::size_t rollback_count = 0;
     std::size_t release_count = 0;
@@ -100,8 +103,8 @@ struct CleanupMemoryProvider {
             return rt::Status::resource_exhausted;
         }
         auto& slot = self.slots[index];
-        slot.region = request.region;
-        allocation.token = &slot;
+        self.tokens[index].region = request.region;
+        allocation.token = &self.tokens[index];
         allocation.allocation_base = slot.bytes.data();
         allocation.allocation_bytes = request.logical_bytes;
         allocation.usable_data = slot.bytes.data();
@@ -135,10 +138,10 @@ struct CleanupMemoryProvider {
         const rt::MemoryPolicy&,
         const rt::MemoryProviderObservation&) noexcept {
         auto& self = *static_cast<CleanupMemoryProvider*>(user_data);
-        const auto& slot = *static_cast<Slot*>(token);
+        const auto& provider_token = *static_cast<Token*>(token);
         ++self.rollback_count;
         if (self.calls) {
-            self.calls->push_back(rollback_event + slot.region.value);
+            self.calls->push_back(rollback_event + provider_token.region.value);
         }
         return rt::Status::ok;
     }
@@ -148,10 +151,10 @@ struct CleanupMemoryProvider {
         void* token,
         rt::RollbackIntent) noexcept {
         auto& self = *static_cast<CleanupMemoryProvider*>(user_data);
-        const auto& slot = *static_cast<Slot*>(token);
+        const auto& provider_token = *static_cast<Token*>(token);
         ++self.release_count;
         if (self.calls) {
-            self.calls->push_back(release_event + slot.region.value);
+            self.calls->push_back(release_event + provider_token.region.value);
         }
     }
 };
