@@ -87,10 +87,13 @@ touch, `mlock`, and `mincore` residency observation. Locking-only allocations
 are page-backed independently so page-granular unlock cannot affect another
 runtime. `mlock` is not independent lock readback or device/DMA pinning. Caller,
 host-adapter, XDMA, and vendor
-roles remain verify-only, with opaque cardinality left unknown. Stable memory
-rows still project the plan exactly once; fragmented control allocations,
-stack residency, exact external/backend accounting, and full byte closure
-remain M15-04 work. See the
+roles remain verify-only, with opaque cardinality left unknown unless declared.
+Stable memory rows still project the plan exactly once. M15-04 inventories
+constructed runtime, executor, and device controls as checked non-overlapping
+logical extents; aggregates live runtime-owned stack commitment; and accepts
+bounded copied declarations for otherwise opaque external/backend facts.
+Logical, declared, committed, resident, locked, pinned, and guard facts remain
+separate. See the
 [CPU/memory policy contract](cpu_memory_policy.md).
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
@@ -201,7 +204,12 @@ M15-02 extends the immutable CPU/memory inventory with per-role native thread
 apply/readback and a fail-closed startup barrier. M15-03 adds the isolated
 three-region memory transaction without changing the C or device ABI. Provider
 callbacks remain control-path-only; provider-backed checked stop makes trace
-unavailable after its backing token is released.
+unavailable after its backing token is released. M15-04 adds exact
+control-ledger reconciliation, live stack observation, and owning-lane stack
+cleanup before join. Cleanup proceeds from device ownership through device
+service, reverse executor instances, watchdog, fragmented controls, and
+trace/task/phase rollback while retaining the first error and every unresolved
+owner.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),

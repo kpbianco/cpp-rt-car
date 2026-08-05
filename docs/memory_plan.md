@@ -78,7 +78,7 @@ M15 leaves `MemoryPlan` and its equation source-compatible and adds a separate
 `trace_storage_bytes`; their `accounted_bytes` sum must equal `planned_bytes`.
 Separate informational rows report registered state, backend-reported control,
 and the checked sum of registered device-buffer spans. Stack and reserved
-provider rows remain excluded.
+provider rows remain excluded from `planned_bytes`.
 
 M15-03 makes exactly the active phase-scratch, task-scratch, and trace-storage
 rows provider-capable. They are acquired in that order with the logical plan
@@ -94,14 +94,28 @@ exceed the logical payload without changing `planned_bytes`. Resident,
 verified-locked, and provider-confirmed pinned bytes are separate observations;
 actual guard spans, actual page bytes, explicit huge-page outcome, fallback,
 and provider/native errors are separate too. No physical field is added to the
-plan equation or counted again in `memory.host-provider`.
+plan equation or counted again in `memory.host-provider`. That reserved row is
+always zero/not-applicable and rejects declarations; provider commitment and
+observation stay on the selected planned rows.
 
-M15-02 thread stack/guard creation attributes remain per-thread readback, not
-committed or resident stack evidence. Fragmented runtime/executor/device
-control allocation, runtime-owned stack residency, exact external/backend
-accounting, and complete cross-category byte closure remain deferred to
-M15-04. Borrowed registered state/device buffers and backend-owned storage are
-not mutated. See [the CPU/memory policy contract](cpu_memory_policy.md).
+M15-04 builds a checked logical extent ledger after persistent controls are
+constructed. Every runtime, executor, and device extent has a nonzero stable
+ledger identity, a validated address range, and exactly one owner. Missing,
+duplicate, overlapping, overflowing, or estimate-mismatched inventories fail
+finalization before report publication. The three ledger totals equal the
+existing control terms; the six planned rows still sum to `planned_bytes`.
+
+Runtime-owned stack commitment and guard bytes are aggregated exactly once
+from live executor, watchdog, and device-service lanes and remain excluded from
+the plan equation. On Linux NPTL the guard is a subspan of the native stack
+extent returned by `pthread_getattr_np`, not additional commitment.
+Cross-category totals classify facts as exact,
+declared-only, partial, unknown, or not applicable. Bounded declarations may
+close logical byte/cardinality facts that device ABI v1 or an external host
+does not expose, but never authorize mutation or establish residency, locking,
+pinning, or qualification. Borrowed registered state/device buffers and
+backend-owned storage are not mutated. See
+[the CPU/memory policy contract](cpu_memory_policy.md).
 
 ## Configuration
 
@@ -214,7 +228,11 @@ contention rather than waiting. Watchdog waiting and device polling are
 confined to runtime-owned service lanes. CPU device submission and completion
 publication use fixed-capacity backend/manager state without waiting.
 Workers use bounded queue operations and yield when idle or waiting for nested
-work.
+work. M15-04 holds the startup barrier until requested runtime-stack
+application and live observation are acceptable. On stop, stack cleanup
+completes on each owning quiescent lane before join; unresolved cleanup blocks
+control/selected-region rollback and provider-token release until checked
+retry succeeds.
 
 This boundary covers runtime and C-adapter code. User callbacks can still
 allocate, block, perform I/O, submit to unrelated systems, or retain invalid

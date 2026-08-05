@@ -329,6 +329,10 @@ def check_runtime_contract() -> None:
         "tests/add_subdirectory_consumer/CMakeLists.txt"
     )
     package_consumer = read("tests/package_consumer/CMakeLists.txt")
+    package_cpp_consumer = read("tests/package_consumer/cpp_consumer.cpp")
+    package_compat_consumer = read(
+        "tests/package_consumer/compat_consumer.cpp"
+    )
     package_contract = read("tests/package_consumer/package_contract.cmake")
     package_config = read("cmake/rtfwConfig.cmake.in")
     snapshot_fuzz = read("tests/snapshot_fuzz.cpp")
@@ -978,6 +982,108 @@ def check_runtime_contract() -> None:
             fail(f"CMake M15-03 integration is missing {token!r}")
     if "MemoryPolicy.*" not in ci_workflow:
         fail(".github/workflows/ci.yml: TSan filter is missing MemoryPolicy.*")
+
+    # M15-04 closure checks are permanent product facts. They intentionally do
+    # not inspect the active batch or milestone frontier, which later batches
+    # are expected to advance.
+    for token in (
+        "resource_accounting_declaration_capacity = 32",
+        "thread_resource_accounting_key(",
+        "memory_resource_accounting_key(",
+        "struct ResourceAccountingDeclaration",
+        "accounting_declaration_count",
+        "accounting_declarations",
+    ):
+        if token not in config_header:
+            fail(f"rt/config.hpp: missing permanent M15-04 declaration token {token!r}")
+    for token in (
+        "enum class ResourceAccountingExactness",
+        "struct MemoryAccountingTotal",
+        "declared_accounted_bytes",
+        "accounting_exactness",
+        "planned_total",
+        "informational_total",
+        "excluded_total",
+        "closed_total",
+        "accounting_complete",
+    ):
+        if token not in runtime_header:
+            fail(f"rt/runtime.hpp: missing permanent M15-04 report token {token!r}")
+    for token in (
+        "struct LogicalControlExtent",
+        "struct ControlExtentLedger",
+        "validate_control_extent_ledger(",
+        "refresh_accounting_totals(",
+        "validate_accounting_closure(",
+    ):
+        if token not in resource_policy_header and token not in resource_policy_source:
+            fail(f"M15-04 accounting implementation is missing {token!r}")
+    for token in (
+        "cleanup_stack_current(",
+        "cleanup_and_join()",
+        "wait_quiescent()",
+        "aggregate_runtime_stack_startup_results(",
+    ):
+        if token not in thread_policy_header and token not in thread_policy_source:
+            fail(f"M15-04 stack lifecycle implementation is missing {token!r}")
+    for token in (
+        "append_control_extents(",
+        "lane_cleanup_pending",
+        "memory_cleanup_pending",
+        "strict runtime-stack policy failed live apply or observation",
+        "device/thread/stack cleanup failed; retry stop",
+    ):
+        if token not in runtime_source and token not in executor_source and token not in device_manager:
+            fail(f"M15-04 runtime closure is missing {token!r}")
+    for test_name, source in (
+        ("ExactControlExtentLedgerRejectsMalformedInventories", memory_test),
+        ("BoundedDeclarationsCloseExternalFactsWithoutQualification", cpu_memory_policy_test),
+        ("RejectsDuplicateOwnedAndContradictoryDeclarations", cpu_memory_policy_test),
+        ("LiveRuntimeStackAccountingIsExactBoundedAndIsolated", thread_policy_test),
+        ("StrictRuntimeStackMismatchRollsBackAndRecovers", thread_policy_test),
+        ("FailedStartCleanupRetryClearsRetainedStackError", thread_policy_test),
+        ("BestEffortRuntimeStackFailureIsReportedWithoutCommitBlock", thread_policy_test),
+        ("StrictStackLockingCannotClaimIndependentReadback", thread_policy_test),
+        ("StrictClosureDoesNotDoubleCountProviderStorage", memory_policy_test),
+        ("PartialRollbackRetriesOnlyTheUnresolvedRegion", memory_policy_test),
+        ("StartupRetainsFirstErrorWhenRollbackAlsoFails", memory_policy_test),
+        ("DeviceStackCleanupFailureDefersRollbackAndRetriesOnOwner", device_test),
+        ("UnresolvedStackCleanupDestructionFailsClosed", device_test),
+    ):
+        if test_name not in source:
+            fail(f"M15-04 permanent test gate is missing {test_name!r}")
+    for token in (
+        "m15_accounting_closure",
+        "m15_stack_lifecycle",
+        "m15_cross_category_rollback",
+    ):
+        if token not in tests_cmake or token not in ci_workflow:
+            fail(f"M15-04 CTest/TSan gate is missing {token!r}")
+    for token in (
+        "pre_m15_04_policy",
+        "pre_m15_04_report",
+        "accounting_declarations",
+        "cpu_memory_policy_report(",
+    ):
+        if token not in package_cpp_consumer:
+            fail(f"preferred package consumer is missing M15-04 token {token!r}")
+    for token in (
+        "pre_m15_04_thread",
+        "pre_m15_04_report",
+        "accounting_complete",
+    ):
+        if token not in package_compat_consumer:
+            fail(f"compatibility package consumer is missing M15-04 token {token!r}")
+    normalized_m15_doc = " ".join(cpu_memory_policy_doc.lower().split())
+    for phrase in (
+        "exact logical control extents",
+        "declared_only",
+        "owning quiescent lane",
+        "declared bytes are not independent observation",
+        "mandatory ci and human review remain m15 completion gates",
+    ):
+        if phrase not in normalized_m15_doc:
+            fail(f"docs/cpu_memory_policy.md: missing M15-04 phrase {phrase!r}")
 
     for token in (
         "Runtime::run_periodic(",

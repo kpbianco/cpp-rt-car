@@ -33,7 +33,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M13 | Complete | Strict runtime profiles and operational target-runtime autotune integration |
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
-| M15 | In progress | Policy inventory, runtime-owned thread application, and three-region provider/residency transaction implemented; M15-04 accounting/stack/control closure remains |
+| M15 | In progress | M15-01 through M15-04 are implemented locally; mandatory CI and human accounting/API/lifetime/compatibility review remain completion gates |
 | M16 | Planned | Multi-rate deterministic simulation domains and release coordination |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
@@ -549,13 +549,18 @@ Implemented in M15-03, subject to the batch verification and review gates:
   device/DMA pinning, and provider-backed trace is unavailable after its token
   is released at checked stop.
 
-Remaining milestone outcome:
+Implemented in M15-04, subject to the batch verification and review gates:
 
-- M15-04 integration of fragmented runtime/executor/device control storage and
-  runtime-owned stack residency;
-- exact external/backend accounting and complete cross-category byte closure,
-  while borrowed memory and externally owned host/vendor resources remain
-  verify-only and unmodified.
+- exact non-overlapping logical extent reconciliation for constructed
+  runtime/executor/device controls against the existing `MemoryPlan` terms;
+- exact, declared-only, partial, unknown, and not-applicable row/aggregate
+  accounting with bounded copied declarations for opaque external/backend facts;
+- live runtime-owned stack commitment/observation and status-bearing owning-lane
+  cleanup before native stack lifetime ends;
+- retryable reverse device/thread/stack/control/selected-region cleanup with
+  first-error retention and no early provider-token release;
+- unchanged provider acquisition boundary, borrowed-resource ownership, stable
+  C ABI v8, device ABI v1, schemas, package inventory, and RT0 claim boundary.
 
 Exit gates:
 

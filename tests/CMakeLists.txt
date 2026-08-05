@@ -182,6 +182,23 @@ if (SIM_GTEST_AVAILABLE)
 
     add_test(NAME simcore_all COMMAND simcore_tests)
     set_tests_properties(simcore_all PROPERTIES TIMEOUT 180)
+    add_test(
+        NAME m15_accounting_closure
+        COMMAND simcore_tests
+            --gtest_filter=CpuMemoryPolicy.*:MemoryPlan.ExactControlExtentLedgerRejectsMalformedInventories:MemoryPolicy.StrictClosureDoesNotDoubleCountProviderStorage)
+    add_test(
+        NAME m15_stack_lifecycle
+        COMMAND simcore_tests
+            --gtest_filter=ThreadPolicy.LiveRuntimeStackAccountingIsExactBoundedAndIsolated:ThreadPolicy.StrictRuntimeStackMismatchRollsBackAndRecovers:ThreadPolicy.FailedStartCleanupRetryClearsRetainedStackError:ThreadPolicy.BestEffortRuntimeStackFailureIsReportedWithoutCommitBlock:ThreadPolicy.StrictStackLockingCannotClaimIndependentReadback)
+    add_test(
+        NAME m15_cross_category_rollback
+        COMMAND simcore_tests
+            --gtest_filter=DeviceRuntime.DeviceStackCleanupFailureDefersRollbackAndRetriesOnOwner:MemoryPolicy.ExecutorStackCleanupRetriesWithWatchdogStillAccounted:MemoryPolicy.PartialRollbackRetriesOnlyTheUnresolvedRegion:MemoryPolicy.StartupRetainsFirstErrorWhenRollbackAlsoFails)
+    set_tests_properties(
+        m15_accounting_closure
+        m15_stack_lifecycle
+        m15_cross_category_rollback
+        PROPERTIES TIMEOUT 60)
 
     add_executable(
         rtfw_thread_policy_rollback_test test_thread_policy.cpp)

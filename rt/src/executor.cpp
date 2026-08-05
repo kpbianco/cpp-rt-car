@@ -126,6 +126,25 @@ public:
         return sizeof(Cell);
     }
 
+    void append_control_extents(
+        std::vector<LogicalControlExtent>& extents,
+        std::uint64_t& next_extent_id) const {
+        extents.push_back({
+            next_extent_id++,
+            ControlExtentOwner::executor,
+            this,
+            sizeof(*this),
+        });
+        if (capacity_ != 0) {
+            extents.push_back({
+                next_extent_id++,
+                ControlExtentOwner::executor,
+                cells_.get(),
+                capacity_ * sizeof(Cell),
+            });
+        }
+    }
+
 private:
     std::unique_ptr<Cell[]> cells_;
     std::size_t capacity_;
@@ -283,7 +302,7 @@ Executor::Executor(
 }
 
 Executor::~Executor() {
-    stop();
+    (void)stop();
 }
 
 bool Executor::estimate_control_storage(
@@ -413,19 +432,24 @@ Status Executor::start(
     return Status::ok;
 }
 
-void Executor::stop() noexcept {
+Status Executor::stop() noexcept {
     (void)started_.exchange(false, std::memory_order_acq_rel);
     stopping_.store(true, std::memory_order_release);
     if (policy_ == ExecutorPolicy::host_adapter) {
-        return;
+        return Status::ok;
     }
     for (std::size_t worker = 0; worker < worker_count_; ++worker) {
         wake_sequences_[worker].fetch_add(1, std::memory_order_release);
         wake_sequences_[worker].notify_all();
     }
+    Status first_failure = Status::ok;
     for (std::size_t worker = worker_count_; worker != 0; --worker) {
-        threads_[worker - 1].join();
+        const auto status = threads_[worker - 1].cleanup_and_join();
+        if (first_failure == Status::ok && status != Status::ok) {
+            first_failure = status;
+        }
     }
+    return first_failure;
 }
 
 void Executor::wait_started() const noexcept {
@@ -1187,6 +1211,40 @@ bool Executor::static_assignment(
     }
     worker_index = static_assignments_[phase_index];
     return true;
+}
+
+void Executor::append_control_extents(
+    std::vector<LogicalControlExtent>& extents,
+    std::uint64_t& next_extent_id) const {
+    const auto add = [&](const void* data, std::size_t count, std::size_t size) {
+        if (count == 0) {
+            return;
+        }
+        extents.push_back({
+            next_extent_id++,
+            ControlExtentOwner::executor,
+            data,
+            count * size,
+        });
+    };
+    add(this, 1, sizeof(*this));
+    add(queues_.data(), queues_.capacity(), sizeof(queues_[0]));
+    for (const auto& queue : queues_) {
+        queue->append_control_extents(extents, next_extent_id);
+    }
+    add(threads_.get(), policy_ == ExecutorPolicy::host_adapter ? 0 : worker_count_, sizeof(NativeThread));
+    add(startup_results_.get(), policy_ == ExecutorPolicy::host_adapter ? 0 : worker_count_, sizeof(ThreadStartupResult));
+    add(worker_entries_.get(), policy_ == ExecutorPolicy::host_adapter ? 0 : worker_count_, sizeof(WorkerEntry));
+    add(wake_sequences_.get(), policy_ == ExecutorPolicy::host_adapter ? 0 : worker_count_, sizeof(std::atomic<std::uint64_t>));
+    add(host_work_slots_.get(), policy_ == ExecutorPolicy::host_adapter ? task_scratch_slots_ : 0, sizeof(HostWorkSlot));
+    add(free_scratch_words_.get(), free_scratch_word_count_, sizeof(std::atomic<std::uint64_t>));
+    add(initial_indegree_.data(), initial_indegree_.capacity(), sizeof(initial_indegree_[0]));
+    add(current_indegree_.get(), phase_count_, sizeof(std::atomic<std::uint32_t>));
+    add(phase_states_.get(), phase_count_, sizeof(std::atomic<std::uint8_t>));
+    add(phase_statuses_.get(), phase_count_, sizeof(std::atomic<std::int32_t>));
+    add(successor_offsets_.data(), successor_offsets_.capacity(), sizeof(successor_offsets_[0]));
+    add(successors_.data(), successors_.capacity(), sizeof(successors_[0]));
+    add(static_assignments_.data(), static_assignments_.capacity(), sizeof(static_assignments_[0]));
 }
 
 } // namespace rt::detail

@@ -231,7 +231,7 @@ jobs:
         run: |
           ctest --test-dir build-tsan \
             --output-on-failure \
-            -R 'simcore_all|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
+            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
 
   build-windows:
     runs-on: windows-2022

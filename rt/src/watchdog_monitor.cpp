@@ -16,7 +16,7 @@ constexpr auto kMaximumParkInterval = std::chrono::milliseconds(1);
 } // namespace
 
 WatchdogMonitor::~WatchdogMonitor() {
-    stop();
+    (void)stop();
 }
 
 Status WatchdogMonitor::start(
@@ -45,12 +45,12 @@ Status WatchdogMonitor::start(
     return status;
 }
 
-void WatchdogMonitor::stop() noexcept {
+Status WatchdogMonitor::stop() noexcept {
     (void)started_.exchange(false, std::memory_order_acq_rel);
     stop_requested_.store(true, std::memory_order_release);
     active_state_.store(0, std::memory_order_release);
     service_cv_.notify_one();
-    thread_.join();
+    return thread_.cleanup_and_join();
 }
 
 void WatchdogMonitor::wait_started() const noexcept {

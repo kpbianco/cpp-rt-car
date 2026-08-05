@@ -97,8 +97,41 @@ DeviceManager::~DeviceManager() {
     (void)stop();
 }
 
+void DeviceManager::append_control_extents(
+    std::vector<LogicalControlExtent>& extents,
+    std::uint64_t& next_extent_id) const {
+    const auto add = [&](const void* data, std::size_t count, std::size_t size) {
+        if (count == 0) {
+            return;
+        }
+        extents.push_back({
+            next_extent_id++,
+            ControlExtentOwner::device,
+            data,
+            count * size,
+        });
+    };
+    add(this, 1, sizeof(*this));
+    add(backends_.data(), backends_.capacity(), sizeof(backends_[0]));
+    for (const auto& backend : backends_) {
+        const auto begin = reinterpret_cast<std::uintptr_t>(&backend);
+        const auto end = begin + sizeof(backend);
+        const auto name = reinterpret_cast<std::uintptr_t>(
+            backend.name.data());
+        if (name < begin || name >= end) {
+            add(backend.name.data(), backend.name.capacity() + 1, 1);
+        }
+    }
+    add(initialized_backends_.data(), initialized_backends_.capacity(), sizeof(initialized_backends_[0]));
+    add(buffers_.data(), buffers_.capacity(), sizeof(buffers_[0]));
+    add(native_buffer_tokens_.data(), native_buffer_tokens_.capacity(), sizeof(native_buffer_tokens_[0]));
+    add(outstanding_slots_.get(), outstanding_capacity_, sizeof(Outstanding));
+    add(completion_buffer_.get(), completion_batch_, sizeof(rtfw_device_completion));
+}
+
 bool DeviceManager::estimate_control_storage(
     std::size_t backend_count,
+    std::size_t backend_name_bytes,
     std::size_t buffer_count,
     std::size_t outstanding_capacity,
     std::size_t completion_batch,
@@ -116,13 +149,12 @@ bool DeviceManager::estimate_control_storage(
             return true;
         };
     return add(backend_count, sizeof(DeviceBackendSpec)) &&
+           add(backend_name_bytes, 1) &&
            add(backend_count, sizeof(std::uint8_t)) &&
            add(buffer_count, sizeof(DeviceBufferSpec)) &&
            add(buffer_count, sizeof(std::uint64_t)) &&
            add(outstanding_capacity, sizeof(Outstanding)) &&
-           add(completion_batch, sizeof(rtfw_device_completion)) &&
-           add(1, sizeof(NativeThread)) &&
-           add(1, sizeof(ThreadStartupResult));
+           add(completion_batch, sizeof(rtfw_device_completion));
 }
 
 Status DeviceManager::initialize_backends() noexcept {
@@ -224,7 +256,7 @@ bool DeviceManager::has_backend_ownership() const noexcept {
 }
 
 bool DeviceManager::cleanup_pending() const noexcept {
-    return has_backend_ownership();
+    return has_backend_ownership() || service_thread_.joinable();
 }
 
 Status DeviceManager::shutdown_backends() noexcept {
@@ -345,14 +377,14 @@ void DeviceManager::wait_started() const noexcept {
     service_thread_.wait_started();
 }
 
-void DeviceManager::stop_lane() noexcept {
+Status DeviceManager::quiesce_lane() noexcept {
     const bool was_started =
         started_.exchange(false, std::memory_order_acq_rel);
     if (was_started || service_thread_.joinable()) {
         stopping_.store(true, std::memory_order_release);
         wake_sequence_.fetch_add(1, std::memory_order_release);
         wake_sequence_.notify_all();
-        service_thread_.join();
+        service_thread_.wait_quiescent();
         for (std::size_t index = 0;
              index < outstanding_capacity_;
              ++index) {
@@ -372,11 +404,32 @@ void DeviceManager::stop_lane() noexcept {
         observer_ = nullptr;
         observer_data_ = nullptr;
     }
+    return Status::ok;
+}
+
+Status DeviceManager::cleanup_lane() noexcept {
+    return service_thread_.cleanup_and_join();
+}
+
+Status DeviceManager::stop_lane() noexcept {
+    const auto quiesce_status = quiesce_lane();
+    const auto cleanup_status = cleanup_lane();
+    return quiesce_status != Status::ok
+        ? quiesce_status
+        : cleanup_status;
 }
 
 Status DeviceManager::stop() noexcept {
-    stop_lane();
-    return shutdown_backends();
+    const auto quiesce_status = quiesce_lane();
+    const auto backend_status = shutdown_backends();
+    const auto cleanup_status = cleanup_lane();
+    if (quiesce_status != Status::ok) {
+        return quiesce_status;
+    }
+    if (backend_status != Status::ok) {
+        return backend_status;
+    }
+    return cleanup_status;
 }
 
 DeviceManager::Outstanding* DeviceManager::acquire_outstanding() noexcept {

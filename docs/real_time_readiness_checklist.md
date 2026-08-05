@@ -31,12 +31,13 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
 - [x] Optional strict platform preflight is read-only, runs before runtime
   threads start, and fails closed with per-check explanations (M5 functional
   gate; not deployment qualification).
-- [ ] Complete M15 policy closure covers fragmented runtime/executor/device
-  control allocation, runtime-owned stack residency, and exact
-  external/backend byte accounting (M15-04 remains).
+- [ ] M15-04 functional closure for fragmented controls, runtime-owned stacks,
+  declared external/backend accounting, and retryable rollback is implemented;
+  mandatory CI and human accounting/API/lifetime/compatibility review remain
+  before the M15 gate can be checked.
 - [ ] A named deployment independently verifies requested memory locking,
   NUMA/huge-page outcomes, residency under load, and worst-case behavior;
-  M15-03 provider injection, `mlock`, `mincore`, preflight, and hosted CI do not
+  M15 provider/declaration injection, `mlock`, `mincore`, preflight, and hosted CI do not
   satisfy this gate or prove device/DMA pinning.
 - [x] Multiple runtime instances have isolated clocks, numerical policy,
   allocator state, trace state, and device state, including concurrent
@@ -70,11 +71,12 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   target.
 - [ ] The qualification record is reproducible from a clean checkout.
 
-M15-03 implements process-local provider/resident handling for phase scratch,
-task scratch, and trace storage only. It does not change any unchecked
-deployment gate above. Provider-backed checked stop releases trace backing, so
-post-stop trace export must occur before that cleanup or be treated as
-unavailable.
+M15 implements process-local provider/resident handling for phase scratch,
+task scratch, and trace storage only, plus logical control accounting and live
+runtime-stack observation. Declarations are trusted metadata, not independent
+observation. None of this changes any unchecked deployment gate above.
+Provider-backed checked stop releases trace backing, so post-stop trace export
+must occur before that cleanup or be treated as unavailable.
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its

@@ -2,6 +2,7 @@
 
 #include "aligned_storage.hpp"
 #include "compiled_graph.hpp"
+#include "resource_policy.hpp"
 #include "thread_policy.hpp"
 
 #include <atomic>
@@ -48,7 +49,7 @@ public:
         ThreadPolicyProvider& provider,
         ThreadStartupGate& gate,
         const ThreadRolePlan& plan) noexcept;
-    void stop() noexcept;
+    Status stop() noexcept;
     void wait_started() const noexcept;
     [[nodiscard]] const ThreadStartupResult* startup_results() const noexcept {
         return startup_results_.get();
@@ -85,6 +86,9 @@ public:
     [[nodiscard]] bool static_assignment(
         std::size_t phase_index,
         std::size_t& worker_index) const noexcept;
+    void append_control_extents(
+        std::vector<LogicalControlExtent>& extents,
+        std::uint64_t& next_extent_id) const;
     [[nodiscard]] static bool estimate_control_storage(
         ExecutorPolicy policy,
         std::size_t worker_count,

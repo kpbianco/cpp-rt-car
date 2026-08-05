@@ -35,6 +35,21 @@ LegacyTickDuration volatile legacy_tick_duration =
 #endif
 
 int main() {
+    const rt::ThreadPolicyReport pre_m15_04_thread{
+        rt::thread_role_frame,
+        {},
+        {},
+        rt::ResourceOwnership::caller,
+        rt::PolicyApplicationMode::verify_only,
+        1,
+        true,
+    };
+    const rt::CpuMemoryPolicyReport pre_m15_04_report{
+        rt::cpu_memory_policy_schema_version, 1, {pre_m15_04_thread}, 0, {}};
+    if (pre_m15_04_report.threads[0].role != rt::thread_role_frame ||
+        pre_m15_04_report.accounting_complete) {
+        return 3;
+    }
     if (legacy_pipeline_factory == nullptr) {
         return 1;
     }

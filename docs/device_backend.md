@@ -183,6 +183,19 @@ backend-reported private control bytes. Backend-reported storage is
 informational and excluded from `planned_bytes` because the backend owns it.
 Registered buffer payload bytes are borrowed and excluded.
 
+M15-04 reconciles the runtime-owned device-manager object and constructed
+registration, outstanding, completion, and service-control allocations as
+non-overlapping logical extents against `device_control_bytes`. Backend-private
+`control_storage_bytes` remains device-ABI-v1 metadata: a matching declaration
+is `declared_only`, and a contradiction fails finalization. Neither mechanism
+authorizes access to backend-owned memory or changes device ABI v1.
+
+Checked cleanup preserves M14.1 backend and buffer ownership before the
+device-service lane performs stack cleanup on its owning quiescent thread and
+joins. A failed backend or stack cleanup retains ownership and blocks lower
+control/selected-region rollback and provider-token release until `stop()`
+retry succeeds.
+
 Observability schema version 2 retains IDs 0–21 and adds device submission,
 completion, failure, saturation, timeout, loss, reset, poll, outstanding, and
 service-start metrics. Trace IDs 12–14 report submission from its CPU worker,

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,22 @@
 #include <rt/runtime.hpp>
 
 #include "rt/src/thread_policy.hpp"
+
+#if defined(__SANITIZE_ADDRESS__)
+#define RTFW_DEVICE_TEST_ADDRESS_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define RTFW_DEVICE_TEST_ADDRESS_SANITIZER 1
+#endif
+#endif
+
+#if defined(__SANITIZE_THREAD__)
+#define RTFW_DEVICE_TEST_THREAD_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define RTFW_DEVICE_TEST_THREAD_SANITIZER 1
+#endif
+#endif
 
 namespace {
 
@@ -43,6 +60,7 @@ struct CleanupMemoryProvider {
     static constexpr std::size_t slot_bytes = 128 * 1024;
     struct alignas(64) Slot {
         std::array<std::byte, slot_bytes> bytes{};
+        rt::MemoryRegionId region{};
     };
 
     rt::MemoryProvider table() noexcept {
@@ -62,8 +80,12 @@ struct CleanupMemoryProvider {
     }
 
     std::array<Slot, 3> slots{};
+    std::vector<std::uint32_t>* calls = nullptr;
     std::size_t rollback_count = 0;
     std::size_t release_count = 0;
+
+    static constexpr std::uint32_t rollback_event = 500;
+    static constexpr std::uint32_t release_event = 600;
 
     static rt::Status acquire(
         void* user_data,
@@ -78,6 +100,7 @@ struct CleanupMemoryProvider {
             return rt::Status::resource_exhausted;
         }
         auto& slot = self.slots[index];
+        slot.region = request.region;
         allocation.token = &slot;
         allocation.allocation_base = slot.bytes.data();
         allocation.allocation_bytes = request.logical_bytes;
@@ -108,18 +131,28 @@ struct CleanupMemoryProvider {
 
     static rt::Status rollback(
         void* user_data,
-        void*,
+        void* token,
         const rt::MemoryPolicy&,
         const rt::MemoryProviderObservation&) noexcept {
-        ++static_cast<CleanupMemoryProvider*>(user_data)->rollback_count;
+        auto& self = *static_cast<CleanupMemoryProvider*>(user_data);
+        const auto& slot = *static_cast<Slot*>(token);
+        ++self.rollback_count;
+        if (self.calls) {
+            self.calls->push_back(rollback_event + slot.region.value);
+        }
         return rt::Status::ok;
     }
 
     static void release(
         void* user_data,
-        void*,
+        void* token,
         rt::RollbackIntent) noexcept {
-        ++static_cast<CleanupMemoryProvider*>(user_data)->release_count;
+        auto& self = *static_cast<CleanupMemoryProvider*>(user_data);
+        const auto& slot = *static_cast<Slot*>(token);
+        ++self.release_count;
+        if (self.calls) {
+            self.calls->push_back(release_event + slot.region.value);
+        }
     }
 };
 
@@ -177,6 +210,28 @@ public:
         result.verified = rt::PolicyOperationState::succeeded;
     }
 
+    [[nodiscard]] rt::Status cleanup_stack_current(
+        rt::ThreadRoleId role,
+        std::size_t instance,
+        const rt::detail::ThreadRolePlan& plan,
+        rt::detail::ThreadStartupResult& result) noexcept override {
+        if (role == rt::thread_role_device_service) {
+            ++device_cleanup_count;
+            device_cleanup_thread = std::this_thread::get_id();
+            if (device_cleanup_failures_remaining != 0) {
+                --device_cleanup_failures_remaining;
+                result.stack_cleanup = rt::PolicyOperationState::failed;
+                result.stack_cleanup_error = EIO;
+                return rt::Status::internal_error;
+            }
+        }
+        return ThreadPolicyProvider::cleanup_stack_current(
+            role,
+            instance,
+            plan,
+            result);
+    }
+
     void after_join(rt::ThreadRoleId role, std::size_t) noexcept override {
         if (role == rt::thread_role_device_service) {
             rollback_count_seen_at_join = memory_provider
@@ -188,7 +243,10 @@ public:
 
     CleanupMemoryProvider* memory_provider = nullptr;
     bool fail = true;
+    std::size_t device_cleanup_failures_remaining = 0;
+    std::size_t device_cleanup_count = 0;
     std::size_t device_join_count = 0;
+    std::thread::id device_cleanup_thread{};
     std::size_t rollback_count_seen_at_join =
         std::numeric_limits<std::size_t>::max();
 };
@@ -810,6 +868,7 @@ TEST(DeviceRuntime, FailedInitializeWithoutOwnershipCanRestart) {
 TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
     std::vector<std::uint32_t> calls;
     CleanupMemoryProvider memory_provider;
+    memory_provider.calls = &calls;
     TeardownProbe probe;
     probe.calls = &calls;
     probe.register_failure = RTFW_DEVICE_STATUS_ERROR;
@@ -855,7 +914,10 @@ TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
     EXPECT_EQ(probe.registered_buffers, 1u);
     EXPECT_EQ(probe.unregister_calls, 1u);
     EXPECT_EQ(probe.shutdown_calls, 0u);
-    EXPECT_EQ(memory_provider.rollback_count, 3u);
+    // The retained device registration can still reference runtime-owned
+    // execution state. Lower ownership categories must remain applied until a
+    // checked retry resolves the M14.1 cleanup obligation.
+    EXPECT_EQ(memory_provider.rollback_count, 0u);
     EXPECT_EQ(memory_provider.release_count, 0u);
     EXPECT_EQ(
         calls,
@@ -874,13 +936,30 @@ TEST(DeviceRuntime, FailedRegistrationRollbackRemainsRecoverable) {
     EXPECT_EQ(probe.registered_buffers, 0u);
     EXPECT_EQ(probe.unregister_calls, 2u);
     EXPECT_EQ(probe.shutdown_calls, 1u);
+    EXPECT_EQ(memory_provider.rollback_count, 3u);
     EXPECT_EQ(memory_provider.release_count, 3u);
     EXPECT_EQ(
         calls,
         (std::vector<std::uint32_t>{
             TeardownProbe::unregister_event,
             TeardownProbe::shutdown_event,
+            CleanupMemoryProvider::rollback_event +
+                rt::memory_region_trace_storage.value,
+            CleanupMemoryProvider::rollback_event +
+                rt::memory_region_task_scratch.value,
+            CleanupMemoryProvider::rollback_event +
+                rt::memory_region_phase_scratch.value,
+            CleanupMemoryProvider::release_event +
+                rt::memory_region_trace_storage.value,
+            CleanupMemoryProvider::release_event +
+                rt::memory_region_task_scratch.value,
+            CleanupMemoryProvider::release_event +
+                rt::memory_region_phase_scratch.value,
         }));
+
+    calls.clear();
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_TRUE(calls.empty());
 }
 
 TEST(DeviceRuntime, DeviceServicePolicyFailureRollsBackMemoryAfterJoinAndRetries) {
@@ -924,6 +1003,88 @@ TEST(DeviceRuntime, DeviceServicePolicyFailureRollsBackMemoryAfterJoinAndRetries
     ASSERT_EQ(runtime.start(), rt::Status::ok);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
     EXPECT_EQ(memory_provider.release_count, 3u);
+}
+
+TEST(DeviceRuntime, DeviceStackCleanupFailureDefersRollbackAndRetriesOnOwner) {
+    rt::MockDeviceBackend backend({4, 1, 1, 1'000});
+    CleanupMemoryProvider memory_provider;
+    FailingDeviceServiceThreadProvider thread_provider;
+    thread_provider.fail = false;
+    thread_provider.memory_provider = &memory_provider;
+    thread_provider.device_cleanup_failures_remaining = 1;
+    rt::Runtime runtime;
+    rt::detail::RuntimeThreadPolicyTestAccess::set_provider(
+        runtime,
+        thread_provider);
+    ASSERT_EQ(runtime.configure(device_config(1, 1, 4)), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.set_memory_provider(memory_provider.table()),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
+        rt::Status::ok);
+    rt::DeviceBackendHandle backend_handle;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            {"device-stack-cleanup", backend.api()},
+            backend_handle),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.stop(), rt::Status::internal_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::running);
+    EXPECT_EQ(thread_provider.device_cleanup_count, 1u);
+    EXPECT_EQ(thread_provider.device_join_count, 0u);
+    EXPECT_NE(
+        thread_provider.device_cleanup_thread,
+        std::this_thread::get_id());
+    EXPECT_EQ(memory_provider.rollback_count, 0u);
+    EXPECT_EQ(memory_provider.release_count, 0u);
+
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+    EXPECT_EQ(thread_provider.device_cleanup_count, 2u);
+    EXPECT_EQ(thread_provider.device_join_count, 1u);
+    EXPECT_EQ(memory_provider.rollback_count, 3u);
+    EXPECT_EQ(memory_provider.release_count, 3u);
+
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(thread_provider.device_cleanup_count, 2u);
+}
+
+TEST(DeviceRuntime, UnresolvedStackCleanupDestructionFailsClosed) {
+#if defined(__linux__) && GTEST_HAS_DEATH_TEST && \
+    !defined(RTFW_DEVICE_TEST_ADDRESS_SANITIZER) && \
+    !defined(RTFW_DEVICE_TEST_THREAD_SANITIZER)
+    EXPECT_DEATH(
+        {
+            rt::MockDeviceBackend backend({4, 1, 1, 1'000});
+            FailingDeviceServiceThreadProvider thread_provider;
+            thread_provider.fail = false;
+            thread_provider.device_cleanup_failures_remaining =
+                std::numeric_limits<std::size_t>::max();
+            rt::Runtime runtime;
+            rt::detail::RuntimeThreadPolicyTestAccess::set_provider(
+                runtime,
+                thread_provider);
+            ASSERT_EQ(
+                runtime.configure(device_config(1, 1, 4)),
+                rt::Status::ok);
+            ASSERT_EQ(
+                runtime.register_callback({"cpu", &no_op_cpu, nullptr}),
+                rt::Status::ok);
+            rt::DeviceBackendHandle backend_handle;
+            ASSERT_EQ(
+                runtime.register_device_backend(
+                    {"device-stack-destructor", backend.api()},
+                    backend_handle),
+                rt::Status::ok);
+            ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+            ASSERT_EQ(runtime.start(), rt::Status::ok);
+        },
+        "");
+#endif
 }
 
 TEST(DeviceMock, BoundedQueueSaturatesWithoutBlocking) {

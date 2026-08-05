@@ -502,10 +502,15 @@ public:
     }
 
     [[nodiscard]] rt::Status before_create(
-        rt::ThreadRoleId,
-        std::size_t,
+        rt::ThreadRoleId role,
+        std::size_t instance,
         const rt::detail::ThreadRolePlan&,
         std::int32_t& system_error) noexcept override {
+        if (fail_before_create && role == fail_role &&
+            instance == failure_instance) {
+            system_error = ENOMEM;
+            return rt::Status::resource_exhausted;
+        }
         system_error = 0;
         return rt::Status::ok;
     }
@@ -533,6 +538,28 @@ public:
         result.verified = rt::PolicyOperationState::succeeded;
     }
 
+    [[nodiscard]] rt::Status cleanup_stack_current(
+        rt::ThreadRoleId role,
+        std::size_t instance,
+        const rt::detail::ThreadRolePlan& plan,
+        rt::detail::ThreadStartupResult& result) noexcept override {
+        if (role == rt::thread_role_executor_worker &&
+            instance == cleanup_failure_instance) {
+            ++cleanup_attempt_count;
+            if (cleanup_failures_remaining != 0) {
+                --cleanup_failures_remaining;
+                result.stack_cleanup = rt::PolicyOperationState::failed;
+                result.stack_cleanup_error = EIO;
+                return rt::Status::internal_error;
+            }
+        }
+        return ThreadPolicyProvider::cleanup_stack_current(
+            role,
+            instance,
+            plan,
+            result);
+    }
+
     void after_join(rt::ThreadRoleId, std::size_t) noexcept override {
         if (memory_provider) {
             rollback_count_seen_at_join =
@@ -542,7 +569,12 @@ public:
     }
 
     bool fail_executor = true;
+    bool fail_before_create = false;
     rt::ThreadRoleId fail_role = rt::thread_role_executor_worker;
+    std::size_t failure_instance = 0;
+    std::size_t cleanup_failure_instance = 0;
+    std::size_t cleanup_failures_remaining = 0;
+    std::size_t cleanup_attempt_count = 0;
     FixedProvider* memory_provider = nullptr;
     std::size_t rollback_count_seen_at_join =
         std::numeric_limits<std::size_t>::max();
@@ -743,6 +775,66 @@ TEST(MemoryPolicy, RollbackFailureRetainsTokensUntilCheckedStopRetry) {
     EXPECT_EQ(provider.count(EventKind::release), 3u);
 }
 
+TEST(MemoryPolicy, PartialRollbackRetriesOnlyTheUnresolvedRegion) {
+    FixedProvider provider;
+    rt::Runtime runtime;
+    CallbackProbe callback;
+    configure_provider_runtime(runtime, provider, &callback);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    provider.clear_events();
+    provider.rollback_failures_remaining = 1;
+
+    EXPECT_EQ(runtime.stop(), rt::Status::internal_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::running);
+    const std::array first_attempt{
+        event(EventKind::rollback, rt::memory_region_trace_storage),
+        event(EventKind::rollback, rt::memory_region_task_scratch),
+        event(EventKind::rollback, rt::memory_region_phase_scratch),
+    };
+    ASSERT_EQ(provider.event_count, first_attempt.size());
+    EXPECT_TRUE(std::equal(
+        first_attempt.begin(),
+        first_attempt.end(),
+        provider.events.begin()));
+    EXPECT_EQ(provider.count(EventKind::release), 0u);
+
+    rt::RuntimeTraceCursor cursor;
+    std::array<rt::RuntimeTraceEvent, 64> trace{};
+    rt::RuntimeTraceReadResult trace_result;
+    ASSERT_EQ(
+        runtime.read_trace(cursor, trace, trace_result),
+        rt::Status::ok);
+    EXPECT_EQ(
+        std::count_if(
+            trace.begin(),
+            trace.begin() + static_cast<std::ptrdiff_t>(
+                trace_result.events_read),
+            [](const rt::RuntimeTraceEvent& entry) {
+                return entry.type == rt::RuntimeTraceEventType::stopped;
+            }),
+        0);
+
+    provider.clear_events();
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+    const std::array retry_and_release{
+        event(EventKind::rollback, rt::memory_region_trace_storage),
+        event(EventKind::release, rt::memory_region_trace_storage),
+        event(EventKind::release, rt::memory_region_task_scratch),
+        event(EventKind::release, rt::memory_region_phase_scratch),
+    };
+    ASSERT_EQ(provider.event_count, retry_and_release.size());
+    EXPECT_TRUE(std::equal(
+        retry_and_release.begin(),
+        retry_and_release.end(),
+        provider.events.begin()));
+
+    provider.clear_events();
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(provider.event_count, 0u);
+}
+
 TEST(MemoryPolicy, AcquisitionFailureReleasesCompletedTokensInReverse) {
     const std::array failure_regions{
         rt::memory_region_phase_scratch,
@@ -927,6 +1019,65 @@ TEST(MemoryPolicy, InactiveRowsDoNotInvokeProvider) {
     EXPECT_EQ(trace->acquired, rt::PolicyOperationState::not_attempted);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
     EXPECT_EQ(provider.count(EventKind::release), 1u);
+}
+
+TEST(MemoryPolicy, StrictClosureDoesNotDoubleCountProviderStorage) {
+    FixedProvider provider;
+    rt::Runtime runtime;
+    ASSERT_EQ(runtime.configure(provider_config()), rt::Status::ok);
+    ASSERT_EQ(runtime.set_memory_provider(provider.table()), rt::Status::ok);
+    rt::CpuMemoryPolicy policy;
+    policy.accounting_requirement = rt::PolicyRequirement::strict;
+    policy.accounting_declaration_count = 1;
+    policy.accounting_declarations[0] = {
+        rt::thread_resource_accounting_key(rt::thread_role_frame),
+        1,
+        8u * 1024u * 1024u,
+    };
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* host_provider = find_memory(
+        report,
+        rt::memory_region_host_provider);
+    ASSERT_NE(host_provider, nullptr);
+    EXPECT_EQ(host_provider->logical_region_count, 0u);
+    EXPECT_EQ(host_provider->accounted_bytes, 0u);
+    EXPECT_EQ(
+        host_provider->accounting_exactness,
+        rt::ResourceAccountingExactness::not_applicable);
+
+    const auto start_status = runtime.start();
+#if defined(__linux__)
+    ASSERT_EQ(start_status, rt::Status::ok);
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    EXPECT_TRUE(report.accounting_complete);
+#else
+    EXPECT_EQ(start_status, rt::Status::invalid_config);
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    EXPECT_FALSE(report.accounting_complete);
+#endif
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+
+    FixedProvider rejected_provider;
+    rt::Runtime rejected;
+    ASSERT_EQ(rejected.configure(provider_config()), rt::Status::ok);
+    ASSERT_EQ(
+        rejected.set_memory_provider(rejected_provider.table()),
+        rt::Status::ok);
+    rt::CpuMemoryPolicy invalid;
+    invalid.accounting_declaration_count = 1;
+    invalid.accounting_declarations[0] = {
+        rt::memory_resource_accounting_key(
+            rt::memory_region_host_provider),
+        1,
+        kProviderBytes,
+    };
+    ASSERT_EQ(rejected.set_cpu_memory_policy(invalid), rt::Status::ok);
+    EXPECT_EQ(rejected.finalize(), rt::Status::invalid_config);
+    EXPECT_EQ(rejected_provider.event_count, 0u);
 }
 
 TEST(MemoryPolicy, StrictDeferredRegionFailsBeforeProviderCallbacks) {
@@ -1332,6 +1483,89 @@ TEST(MemoryPolicy, WatchdogFailureJoinsBeforeMemoryRollbackAndRetries) {
     EXPECT_EQ(provider.count(EventKind::rollback), 3u);
 
     thread_provider.fail_executor = false;
+    provider.clear_events();
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.step({0, std::chrono::nanoseconds(1), std::nullopt}),
+        rt::Status::ok);
+    EXPECT_EQ(callback.calls, 1u);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(provider.count(EventKind::release), 3u);
+}
+
+TEST(MemoryPolicy, ExecutorStackCleanupRetriesWithWatchdogStillAccounted) {
+    FixedProvider provider;
+    FailingExecutorThreadProvider thread_provider;
+    thread_provider.fail_executor = false;
+    thread_provider.cleanup_failure_instance = 1;
+    thread_provider.cleanup_failures_remaining = 1;
+    thread_provider.memory_provider = &provider;
+    rt::Runtime runtime;
+    rt::detail::RuntimeThreadPolicyTestAccess::set_provider(
+        runtime,
+        thread_provider);
+    auto config = provider_config();
+    config.worker_count = 2;
+    config.watchdog_timeout_ns = 60'000'000'000ull;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(runtime.set_memory_provider(provider.table()), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    provider.clear_events();
+
+    EXPECT_EQ(runtime.stop(), rt::Status::internal_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::running);
+    EXPECT_EQ(thread_provider.cleanup_attempt_count, 1u);
+    EXPECT_EQ(thread_provider.join_count, 2u);
+    EXPECT_EQ(provider.count(EventKind::rollback), 0u);
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* stack = find_memory(
+        report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->logical_region_count, 3u);
+    EXPECT_EQ(stack->rollback_error, EIO);
+
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+    EXPECT_EQ(thread_provider.cleanup_attempt_count, 2u);
+    EXPECT_EQ(thread_provider.join_count, 3u);
+    EXPECT_EQ(provider.count(EventKind::rollback), 2u);
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    stack = find_memory(report, rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->rollback_error, 0);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(MemoryPolicy, StartupRetainsFirstErrorWhenRollbackAlsoFails) {
+    FixedProvider provider;
+    provider.rollback_failures_remaining = 1;
+    FailingExecutorThreadProvider thread_provider;
+    thread_provider.fail_executor = false;
+    thread_provider.fail_before_create = true;
+    rt::Runtime runtime;
+    rt::detail::RuntimeThreadPolicyTestAccess::set_provider(
+        runtime,
+        thread_provider);
+    CallbackProbe callback;
+    auto policy = strict_resident_policy();
+    auto& executor_request =
+        policy.thread_policies[policy.thread_policy_count++];
+    executor_request.role = rt::thread_role_executor_worker;
+    executor_request.policy.requirement = rt::PolicyRequirement::strict;
+    configure_provider_runtime(runtime, provider, &callback, &policy);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    provider.clear_events();
+
+    EXPECT_EQ(runtime.start(), rt::Status::resource_exhausted);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_EQ(callback.calls, 0u);
+    EXPECT_EQ(provider.count(EventKind::rollback), 3u);
+    EXPECT_EQ(provider.count(EventKind::release), 0u);
+
+    thread_provider.fail_before_create = false;
     provider.clear_events();
     ASSERT_EQ(runtime.start(), rt::Status::ok);
     ASSERT_EQ(

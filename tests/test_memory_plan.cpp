@@ -10,6 +10,8 @@
 
 #include <rt/runtime.hpp>
 
+#include "rt/src/resource_policy.hpp"
+
 namespace {
 
 bool is_aligned(const void* pointer, std::size_t alignment) {
@@ -159,6 +161,76 @@ rt::RuntimeConfig scratch_overflow_config(
 }
 
 } // namespace
+
+TEST(MemoryPlan, ExactControlExtentLedgerRejectsMalformedInventories) {
+    std::array<std::byte, 64> first{};
+    std::array<std::byte, 64> second{};
+    const std::array<rt::detail::LogicalControlExtent, 2> extents{{
+        {1, rt::detail::ControlExtentOwner::runtime, first.data(), first.size()},
+        {2, rt::detail::ControlExtentOwner::executor, second.data(), second.size()},
+    }};
+    const std::array<rt::detail::ControlExtentExpectation, 3> expected{{
+        {1, first.size()},
+        {1, second.size()},
+        {0, 0},
+    }};
+    rt::detail::ControlExtentLedger ledger;
+    const char* diagnostic = nullptr;
+    EXPECT_EQ(
+        rt::detail::validate_control_extent_ledger(
+            extents, expected, ledger, diagnostic),
+        rt::Status::ok);
+    EXPECT_EQ(ledger.accounted_bytes[0], first.size());
+    EXPECT_EQ(ledger.accounted_bytes[1], second.size());
+
+    auto duplicate = extents;
+    duplicate[1].stable_extent_id = duplicate[0].stable_extent_id;
+    EXPECT_EQ(
+        rt::detail::validate_control_extent_ledger(
+            duplicate, expected, ledger, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_NE(std::string_view(diagnostic).find("duplicate"),
+              std::string_view::npos);
+
+    auto overlap = extents;
+    overlap[1].data = first.data() + 32;
+    EXPECT_EQ(
+        rt::detail::validate_control_extent_ledger(
+            overlap, expected, ledger, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_NE(std::string_view(diagnostic).find("overlapping"),
+              std::string_view::npos);
+
+    auto missing = expected;
+    missing[0].extent_count = 2;
+    EXPECT_EQ(
+        rt::detail::validate_control_extent_ledger(
+            extents, missing, ledger, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_NE(std::string_view(diagnostic).find("missing"),
+              std::string_view::npos);
+
+    auto mismatch = expected;
+    ++mismatch[1].accounted_bytes;
+    EXPECT_EQ(
+        rt::detail::validate_control_extent_ledger(
+            extents, mismatch, ledger, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_NE(std::string_view(diagnostic).find("construction estimate"),
+              std::string_view::npos);
+
+    auto address_overflow = extents;
+    address_overflow[0].data = reinterpret_cast<const std::byte*>(
+        std::numeric_limits<std::uintptr_t>::max() - 1u);
+    address_overflow[0].bytes = 4;
+    EXPECT_EQ(
+        rt::detail::validate_control_extent_ledger(
+            address_overflow, expected, ledger, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_NE(
+        std::string_view(diagnostic).find("address overflows"),
+        std::string_view::npos);
+}
 
 TEST(MemoryPlan, FinalizedPlanMatchesConfigurationAndAlignment) {
     rt::Runtime runtime;

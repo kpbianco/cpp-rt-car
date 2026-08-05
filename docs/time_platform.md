@@ -137,11 +137,20 @@ rather than inferred. In M15-03, a strict runtime-provider NUMA request is
 rejected and best effort retains default placement; provider results require
 advertised capabilities and independent observation.
 
+M15-04 observes each runtime-owned executor, watchdog, and device-service stack
+only while its native mapping is live. Supported Linux stack locking and
+`mincore` residency observation participate in the held startup gate. Cleanup
+is requested on the owning quiescent lane before join and remains status-
+bearing and retryable; unresolved stack ownership blocks later region rollback
+and provider release. No custom stack substitution, fixed CPU/NUMA assumption,
+privileged host mutation, or timing-only verification is added.
+
 Neither requested/resolved/acquired/applied/verified reports, preflight, nor
 named-host functional tests establish hardware/HIL behavior, latency, field
 results, RT1, RT2, signing, release, deployment, or production validation.
-Fragmented control/stack residency and complete byte closure remain M15-04
-work.
+Logical extents and declarations do not establish allocator commitment or
+physical residency; `mlock` remains application rather than independent lock
+readback.
 
 ## C ABI
 

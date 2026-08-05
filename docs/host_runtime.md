@@ -30,16 +30,17 @@ independent support matrices and evidence gates.
 | `finalized` | `start()`, preflight, and create configured runtime-owned lanes or bind the already-running host team | `running` |
 | `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
 | `running` | `run_periodic(config)` | `running` |
-| `finalized` or `running` | `stop()` and all device cleanup succeeds | `stopped` |
-| `finalized` or `running` | `stop()` and device cleanup fails | public state unchanged; execution and mutation gated |
+| `finalized` or `running` | `stop()` and all device/lane/stack/memory cleanup succeeds | `stopped` |
+| `finalized` or `running` | `stop()` and device/lane/stack/memory cleanup fails | public state unchanged; execution and mutation gated |
 | cleanup pending | repeated `stop()` | retry unresolved cleanup; `stopped` only on success |
 | `stopped` | repeated `stop()` | `stopped` |
 
 Other transitions return `rt::Status::invalid_state`. A stopped runtime is
 terminal. Destruction requires that no host call or callback is active; hosts
 with device backends must call `stop()` and require success before releasing
-borrowed resources. The C++ destructor is a best-effort fallback because it
-cannot return a cleanup status.
+borrowed resources. The C++ destructor cannot return cleanup status and fails
+closed rather than discarding unresolved device, lane, stack, or provider
+ownership. Checked `stop()` is the recoverable integration path.
 Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
@@ -53,16 +54,25 @@ transaction then aggregates native apply/readback and commits `running` only
 after every required row is acceptable. A later creation, apply, mismatch, or
 device-start failure quiesces device service, executor workers in reverse index
 order, and watchdog before reversing memory policy. No phase, device command
-provider, or periodic observer can run before commit. External host-adapter,
-XDMA, and vendor lanes remain verify-only.
+provider, or periodic observer can run before commit. M15-04 additionally
+reconciles constructed fragmented controls with the finalized plan, aggregates
+live runtime-owned stack/guard commitment, and applies supported stack policy
+inside the same startup barrier. External host-adapter, XDMA, and vendor lanes
+remain verify-only; copied accounting declarations describe logical facts only.
 
 A failed backend initialization gets one checked shutdown attempt. Failed
 buffer unregistration and backend shutdown preserve their ownership markers,
 and later `stop()` calls retry only unresolved operations in reverse order.
-The device service, executor, and watchdog lanes are quiesced even when cleanup
-fails. While cleanup is pending, `start()`, `step()`, `run_periodic()`,
+The device service, executor workers in reverse instance order, and watchdog
+are quiesced; each lane performs stack cleanup on its owner before join. A
+cleanup failure retains the quiescent lane and blocks fragmented-control and
+trace/task/phase rollback plus provider release. While cleanup is pending,
+`start()`, `step()`, `run_periodic()`,
 checkpoint restore, replay, device health, and device reset fail closed;
 read-only lifecycle diagnostics remain available.
+The successful checked retry republishes the resolved owning-lane cleanup
+state before entering `stopped`, including when the original failure occurred
+during startup while the public state remained `finalized`.
 
 Control operations are single-host-thread operations in 1.2. `step()`,
 `run_periodic()`, checkpoint/restore, input-log export, and replay are
@@ -327,10 +337,11 @@ traversal.
 ## Current boundary
 
 M4 finalizes aligned phase/task scratch, queue/control, and trace storage under
-a configured memory budget. M15-03 can supply exactly the phase/task/trace
-backing through a bounded provider or a Linux resident mapping transaction;
-fragmented control allocations, stack residency, and complete external/backend
-accounting remain deferred. The target CPU frame path has a multi-frame
+a configured memory budget. M15 supplies exactly the phase/task/trace backing
+through a bounded provider or Linux resident mapping transaction. M15-04 adds
+logical fragmented-control closure, live runtime-stack accounting, declared
+external/backend facts, and retryable cross-category cleanup without expanding
+that provider boundary. The target CPU frame path has a multi-frame
 zero-allocation gate and explicit queue/scratch overload behavior. Plan scope
 and exclusions are specified in the
 [memory-plan contract](memory_plan.md); policy, queue, and nesting details are

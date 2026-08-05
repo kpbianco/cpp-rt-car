@@ -559,6 +559,20 @@ enum class MemoryAccountingScope : std::uint8_t {
     excluded,
 };
 
+enum class ResourceAccountingExactness : std::uint8_t {
+    exact,
+    declared_only,
+    partial,
+    unknown,
+    not_applicable,
+};
+
+struct MemoryAccountingTotal {
+    std::size_t accounted_bytes = 0;
+    ResourceAccountingExactness exactness =
+        ResourceAccountingExactness::not_applicable;
+};
+
 struct ThreadPolicyReport {
     ThreadRoleId role{};
     ResourceAccountingKey accounting_key{};
@@ -583,6 +597,11 @@ struct ThreadPolicyReport {
     std::int32_t resolution_error = 0;
     std::int32_t apply_error = 0;
     std::int32_t verify_error = 0;
+    // Appended M15-04 accounting metadata. declared_accounted_bytes is trusted
+    // host metadata for an externally owned role, never native observation.
+    std::size_t declared_accounted_bytes = 0;
+    ResourceAccountingExactness accounting_exactness =
+        ResourceAccountingExactness::unknown;
 };
 
 struct MemoryPolicyReport {
@@ -620,6 +639,9 @@ struct MemoryPolicyReport {
     std::int32_t apply_error = 0;
     std::int32_t verify_error = 0;
     std::int32_t rollback_error = 0;
+    // Appended M15-04 closure metadata preserves the M15-03 aggregate prefix.
+    ResourceAccountingExactness accounting_exactness =
+        ResourceAccountingExactness::unknown;
 };
 
 struct CpuMemoryPolicyReport {
@@ -628,6 +650,15 @@ struct CpuMemoryPolicyReport {
     std::array<ThreadPolicyReport, thread_role_report_capacity> threads{};
     std::size_t memory_count = 0;
     std::array<MemoryPolicyReport, memory_region_report_capacity> memory{};
+    // Appended M15-04 aggregate closure keeps exact, declared, and incomplete
+    // totals distinct without changing the six-row MemoryPlan equation.
+    PolicyRequirement accounting_requirement =
+        PolicyRequirement::best_effort;
+    MemoryAccountingTotal planned_total{};
+    MemoryAccountingTotal informational_total{};
+    MemoryAccountingTotal excluded_total{};
+    MemoryAccountingTotal closed_total{};
+    bool accounting_complete = false;
 };
 
 enum class RuntimeTraceEventType : std::uint16_t {

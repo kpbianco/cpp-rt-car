@@ -9,12 +9,14 @@
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <new>
 #include <string_view>
 
 #if defined(__linux__)
 #include <sched.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #endif
 
@@ -348,6 +350,19 @@ void ThreadStartupResult::reset() noexcept {
     apply_error = 0;
     verify_error = 0;
     used_default_fallback = false;
+    stack_applied = PolicyOperationState::not_attempted;
+    stack_verified = PolicyOperationState::not_attempted;
+    stack_cleanup = PolicyOperationState::not_attempted;
+    stack_mapping_base = nullptr;
+    stack_mapping_bytes = 0;
+    stack_usable_bytes = 0;
+    stack_guard_bytes = 0;
+    stack_resident_bytes = 0;
+    stack_locked_bytes = 0;
+    stack_apply_error = 0;
+    stack_verify_error = 0;
+    stack_cleanup_error = 0;
+    stack_lock_applied = false;
 }
 
 void ThreadStartupResult::publish() noexcept {
@@ -396,6 +411,154 @@ Status ThreadPolicyProvider::before_create(
 void ThreadPolicyProvider::after_join(
     ThreadRoleId,
     std::size_t) noexcept {}
+
+void ThreadPolicyProvider::apply_and_verify_stack_current(
+    ThreadRoleId,
+    std::size_t,
+    const ThreadRolePlan& plan,
+    ThreadStartupResult& result) noexcept {
+#if !defined(__linux__)
+    (void)plan;
+    result.stack_applied = PolicyOperationState::unsupported;
+    result.stack_verified = PolicyOperationState::unsupported;
+    result.stack_apply_error = kUnsupportedError;
+    result.stack_verify_error = kUnsupportedError;
+#else
+    pthread_attr_t attributes;
+    int status = pthread_getattr_np(pthread_self(), &attributes);
+    if (status != 0) {
+        result.stack_applied = PolicyOperationState::failed;
+        result.stack_verified = PolicyOperationState::failed;
+        result.stack_apply_error = status;
+        result.stack_verify_error = status;
+        return;
+    }
+    void* stack_base = nullptr;
+    std::size_t stack_bytes = 0;
+    std::size_t guard_bytes = 0;
+    const int stack_status = pthread_attr_getstack(
+        &attributes,
+        &stack_base,
+        &stack_bytes);
+    const int guard_status = pthread_attr_getguardsize(
+        &attributes,
+        &guard_bytes);
+    const int destroy_status = pthread_attr_destroy(&attributes);
+    status = stack_status != 0
+        ? stack_status
+        : (guard_status != 0 ? guard_status : destroy_status);
+    if (status != 0 || stack_base == nullptr || stack_bytes == 0 ||
+        guard_bytes > stack_bytes) {
+        const auto error = status != 0 ? status : EINVAL;
+        result.stack_applied = PolicyOperationState::failed;
+        result.stack_verified = PolicyOperationState::failed;
+        result.stack_apply_error = error;
+        result.stack_verify_error = error;
+        return;
+    }
+
+    // Linux NPTL includes the guard inside the stack-size allocation. The
+    // returned base names the complete mapping and the protected low pages
+    // precede the usable downward-growing stack range.
+    result.stack_mapping_base = static_cast<std::byte*>(stack_base);
+    result.stack_mapping_bytes = stack_bytes;
+    result.stack_guard_bytes = guard_bytes;
+    result.stack_usable_bytes = stack_bytes - guard_bytes;
+    auto* const usable_base = result.stack_mapping_base + guard_bytes;
+
+    if (plan.stack_resolved.locking == PolicyToggle::enabled) {
+        if (::mlock(usable_base, result.stack_usable_bytes) != 0) {
+            result.stack_apply_error = errno;
+            result.stack_applied = PolicyOperationState::failed;
+        } else {
+            result.stack_lock_applied = true;
+            result.stack_applied = PolicyOperationState::succeeded;
+        }
+    } else {
+        result.stack_applied = PolicyOperationState::succeeded;
+    }
+
+    const long native_page = ::sysconf(_SC_PAGESIZE);
+    if (native_page <= 0 ||
+        (static_cast<unsigned long>(native_page) &
+         (static_cast<unsigned long>(native_page) - 1ul)) != 0) {
+        result.stack_verify_error = errno == 0 ? EINVAL : errno;
+        result.stack_verified = PolicyOperationState::failed;
+        return;
+    }
+    const auto page = static_cast<std::size_t>(native_page);
+    const auto begin = reinterpret_cast<std::uintptr_t>(usable_base);
+    if ((begin & (page - 1)) != 0 ||
+        (result.stack_usable_bytes & (page - 1)) != 0) {
+        result.stack_verify_error = EINVAL;
+        result.stack_verified = PolicyOperationState::failed;
+        return;
+    }
+
+    std::size_t resident = 0;
+    for (std::size_t offset = 0;
+         offset < result.stack_usable_bytes;
+         offset += page) {
+        unsigned char state = 0;
+        if (::mincore(usable_base + offset, page, &state) != 0) {
+            result.stack_verify_error = errno;
+            result.stack_verified = PolicyOperationState::failed;
+            return;
+        }
+        if ((state & 1u) != 0) {
+            resident += page;
+        }
+    }
+    result.stack_resident_bytes = resident;
+    // Linux exposes residency independently through mincore. A successful
+    // mlock call is an applied operation, not independent lock readback.
+    result.stack_locked_bytes = 0;
+    bool matches = true;
+    if (plan.stack_resolved.residency_verification ==
+        PolicyToggle::enabled) {
+        matches = resident == result.stack_usable_bytes;
+    }
+    if (plan.stack_resolved.locking == PolicyToggle::enabled) {
+        matches = false;
+    }
+    if (result.stack_applied == PolicyOperationState::failed) {
+        result.stack_verified = PolicyOperationState::failed;
+    } else {
+        result.stack_verified = matches
+            ? PolicyOperationState::succeeded
+            : PolicyOperationState::mismatched;
+    }
+#endif
+}
+
+Status ThreadPolicyProvider::cleanup_stack_current(
+    ThreadRoleId,
+    std::size_t,
+    const ThreadRolePlan&,
+    ThreadStartupResult& result) noexcept {
+    if (!result.stack_lock_applied) {
+        result.stack_cleanup = PolicyOperationState::succeeded;
+        result.stack_cleanup_error = 0;
+        return Status::ok;
+    }
+#if defined(__linux__)
+    auto* const usable_base =
+        result.stack_mapping_base + result.stack_guard_bytes;
+    if (::munlock(usable_base, result.stack_usable_bytes) != 0) {
+        result.stack_cleanup = PolicyOperationState::failed;
+        result.stack_cleanup_error = errno;
+        return Status::internal_error;
+    }
+    result.stack_lock_applied = false;
+    result.stack_cleanup = PolicyOperationState::succeeded;
+    result.stack_cleanup_error = 0;
+    return Status::ok;
+#else
+    result.stack_cleanup = PolicyOperationState::unsupported;
+    result.stack_cleanup_error = kUnsupportedError;
+    return Status::internal_error;
+#endif
+}
 
 Status NativeThreadPolicyProvider::resolve(
     ThreadRoleId role,
@@ -741,7 +904,13 @@ void NativeThreadPolicyProvider::verify_current(
 }
 
 NativeThread::~NativeThread() {
-    join();
+    if (cleanup_and_join() != Status::ok) {
+        // Destroying the synchronization state of a still-live owning lane
+        // would abandon the stack operation and create a use-after-free. The
+        // checked Runtime::stop() path is retryable; destruction is only a
+        // best-effort fallback and must fail closed if that retry still fails.
+        std::terminate();
+    }
 }
 
 Status NativeThread::start(
@@ -757,9 +926,16 @@ Status NativeThread::start(
     }
     result.reset();
     body_started_.store(false, std::memory_order_relaxed);
+    body_quiescent_.store(false, std::memory_order_relaxed);
+    cleanup_request_.store(0, std::memory_order_relaxed);
+    cleanup_complete_.store(0, std::memory_order_relaxed);
+    cleanup_status_.store(
+        static_cast<std::int32_t>(Status::ok),
+        std::memory_order_relaxed);
+    cleanup_succeeded_ = false;
     provider_ = &provider;
     gate_ = &gate;
-    plan_ = &plan;
+    plan_ = plan;
     result_ = &result;
     instance_index_ = instance_index;
     role_ = plan.role;
@@ -840,17 +1016,59 @@ Status NativeThread::start(
 
 void NativeThread::run_entry(NativeThread& self) noexcept {
     self.provider_->apply_and_verify_current(
-        self.plan_->role,
+        self.plan_.role,
         self.instance_index_,
-        *self.plan_,
+        self.plan_,
+        *self.result_);
+    self.provider_->apply_and_verify_stack_current(
+        self.plan_.role,
+        self.instance_index_,
+        self.plan_,
         *self.result_);
     self.result_->publish();
-    if (!self.gate_->wait()) {
-        return;
+    if (self.gate_->wait()) {
+        self.body_started_.store(true, std::memory_order_release);
+        self.body_started_.notify_all();
+        self.entry_(self.entry_data_);
     }
-    self.body_started_.store(true, std::memory_order_release);
-    self.body_started_.notify_all();
-    self.entry_(self.entry_data_);
+    self.body_quiescent_.store(true, std::memory_order_release);
+    self.body_quiescent_.notify_all();
+
+    std::uint64_t completed = 0;
+    for (;;) {
+        auto requested = self.cleanup_request_.load(
+            std::memory_order_acquire);
+        while (requested == completed) {
+            self.cleanup_request_.wait(
+                completed,
+                std::memory_order_relaxed);
+            requested = self.cleanup_request_.load(
+                std::memory_order_acquire);
+        }
+        const auto status = self.provider_->cleanup_stack_current(
+            self.role_,
+            self.instance_index_,
+            self.plan_,
+            *self.result_);
+        if (status == Status::ok) {
+            self.result_->stack_cleanup = PolicyOperationState::succeeded;
+            self.result_->stack_cleanup_error = 0;
+        } else if (self.result_->stack_cleanup !=
+                   PolicyOperationState::failed) {
+            self.result_->stack_cleanup = PolicyOperationState::failed;
+            self.result_->stack_cleanup_error =
+                static_cast<std::int32_t>(status);
+        }
+        self.cleanup_status_.store(
+            static_cast<std::int32_t>(status),
+            std::memory_order_relaxed);
+        completed = requested;
+        self.cleanup_complete_.store(completed, std::memory_order_release);
+        self.cleanup_complete_.notify_all();
+        if (status == Status::ok) {
+            return;
+        }
+    }
 }
 
 #if defined(__linux__)
@@ -860,19 +1078,50 @@ void* NativeThread::pthread_entry(void* self) noexcept {
 }
 #endif
 
-void NativeThread::join() noexcept {
+Status NativeThread::cleanup_and_join() noexcept {
+    if (!joinable()) {
+        return Status::ok;
+    }
+    if (!cleanup_succeeded_) {
+        wait_quiescent();
+        const auto request = cleanup_request_.fetch_add(
+            1,
+            std::memory_order_acq_rel) + 1;
+        cleanup_request_.notify_all();
+        auto complete = cleanup_complete_.load(std::memory_order_acquire);
+        while (complete < request) {
+            cleanup_complete_.wait(complete, std::memory_order_relaxed);
+            complete = cleanup_complete_.load(std::memory_order_acquire);
+        }
+        const auto cleanup_status = static_cast<Status>(
+            cleanup_status_.load(std::memory_order_acquire));
+        if (cleanup_status != Status::ok) {
+            return cleanup_status;
+        }
+        cleanup_succeeded_ = true;
+    }
 #if defined(__linux__)
     if (joinable_) {
-        (void)pthread_join(thread_, nullptr);
+        const int status = pthread_join(thread_, nullptr);
+        if (status != 0) {
+            return Status::internal_error;
+        }
         joinable_ = false;
+        cleanup_succeeded_ = false;
         provider_->after_join(role_, instance_index_);
     }
 #else
     if (thread_.joinable()) {
         thread_.join();
+        cleanup_succeeded_ = false;
         provider_->after_join(role_, instance_index_);
     }
 #endif
+    return Status::ok;
+}
+
+void NativeThread::join() noexcept {
+    (void)cleanup_and_join();
 }
 
 bool NativeThread::joinable() const noexcept {
@@ -889,6 +1138,12 @@ void NativeThread::wait_started() const noexcept {
     }
 }
 
+void NativeThread::wait_quiescent() const noexcept {
+    while (!body_quiescent_.load(std::memory_order_acquire)) {
+        body_quiescent_.wait(false, std::memory_order_relaxed);
+    }
+}
+
 ThreadRolePlan make_thread_role_plan(
     const ThreadPolicyReport& report) noexcept {
     return {
@@ -897,6 +1152,16 @@ ThreadRolePlan make_thread_role_plan(
         report.resolved,
         report.resolution,
     };
+}
+
+ThreadRolePlan make_thread_role_plan(
+    const ThreadPolicyReport& report,
+    const MemoryPolicyReport& stack_report) noexcept {
+    auto plan = make_thread_role_plan(report);
+    plan.stack_requested = stack_report.requested;
+    plan.stack_resolved = stack_report.resolved;
+    plan.stack_resolution = stack_report.resolution;
+    return plan;
 }
 
 void reset_thread_report_operations(ThreadPolicyReport& report) noexcept {
@@ -983,6 +1248,180 @@ void aggregate_thread_startup_results(
     } else if (report.verified_instance_count == count) {
         report.verified = PolicyOperationState::succeeded;
     }
+}
+
+Status aggregate_runtime_stack_startup_results(
+    MemoryPolicyReport& report,
+    const ThreadStartupResult* executor_results,
+    std::size_t executor_count,
+    const ThreadStartupResult* watchdog_results,
+    std::size_t watchdog_count,
+    const ThreadStartupResult* device_results,
+    std::size_t device_count) noexcept {
+    const std::array<const ThreadStartupResult*, 3> result_sets{
+        executor_results,
+        watchdog_results,
+        device_results,
+    };
+    const std::array<std::size_t, 3> result_counts{
+        executor_count,
+        watchdog_count,
+        device_count,
+    };
+    std::size_t count = 0;
+    for (std::size_t set = 0; set < result_sets.size(); ++set) {
+        if ((result_sets[set] == nullptr && result_counts[set] != 0) ||
+            result_counts[set] >
+                std::numeric_limits<std::size_t>::max() - count) {
+            report.applied = PolicyOperationState::failed;
+            report.verified = PolicyOperationState::failed;
+            report.apply_error = EINVAL;
+            report.verify_error = EINVAL;
+            return Status::invalid_config;
+        }
+        count += result_counts[set];
+    }
+    if (count != report.logical_region_count) {
+        report.applied = PolicyOperationState::failed;
+        report.verified = PolicyOperationState::failed;
+        report.apply_error = EINVAL;
+        report.verify_error = EINVAL;
+        return Status::invalid_config;
+    }
+
+    std::size_t committed = 0;
+    std::size_t usable = 0;
+    std::size_t guards = 0;
+    std::size_t resident = 0;
+    std::size_t locked = 0;
+    bool any_apply_failed = false;
+    bool any_apply_unsupported = false;
+    bool any_verify_failed = false;
+    bool any_verify_unsupported = false;
+    bool any_verify_mismatched = false;
+    bool any_accounting_unavailable = false;
+    bool all_cleanup_succeeded = count != 0;
+    std::int32_t cleanup_error = 0;
+    const auto checked_sum = [](std::size_t& total, std::size_t value) {
+        if (value > std::numeric_limits<std::size_t>::max() - total) {
+            return false;
+        }
+        total += value;
+        return true;
+    };
+
+    for (std::size_t set = 0; set < result_sets.size(); ++set) {
+        for (std::size_t index = 0;
+             index < result_counts[set];
+             ++index) {
+            const auto& result = result_sets[set][index];
+            if (!result.ready.load(std::memory_order_acquire)) {
+                report.applied = PolicyOperationState::failed;
+                report.verified = PolicyOperationState::failed;
+                report.apply_error = EPROTO;
+                report.verify_error = EPROTO;
+                return Status::invalid_config;
+            }
+            const bool unavailable =
+                result.stack_mapping_base == nullptr &&
+                result.stack_mapping_bytes == 0 &&
+                (result.stack_applied == PolicyOperationState::unsupported ||
+                 result.stack_applied == PolicyOperationState::failed) &&
+                (result.stack_verified == PolicyOperationState::unsupported ||
+                 result.stack_verified == PolicyOperationState::failed);
+            if (!unavailable &&
+                (result.stack_mapping_base == nullptr ||
+                 result.stack_mapping_bytes == 0 ||
+                 result.stack_guard_bytes > result.stack_mapping_bytes ||
+                 result.stack_usable_bytes !=
+                     result.stack_mapping_bytes - result.stack_guard_bytes)) {
+                report.applied = PolicyOperationState::failed;
+                report.verified = PolicyOperationState::failed;
+                report.apply_error = EINVAL;
+                report.verify_error = EINVAL;
+                return Status::invalid_config;
+            }
+            any_accounting_unavailable =
+                any_accounting_unavailable || unavailable;
+            if (!checked_sum(committed, result.stack_mapping_bytes) ||
+                !checked_sum(usable, result.stack_usable_bytes) ||
+                !checked_sum(guards, result.stack_guard_bytes) ||
+                !checked_sum(resident, result.stack_resident_bytes) ||
+                !checked_sum(locked, result.stack_locked_bytes)) {
+                report.applied = PolicyOperationState::failed;
+                report.verified = PolicyOperationState::failed;
+                report.apply_error = EOVERFLOW;
+                report.verify_error = EOVERFLOW;
+                return Status::invalid_config;
+            }
+            any_apply_failed = any_apply_failed ||
+                result.stack_applied == PolicyOperationState::failed;
+            any_apply_unsupported = any_apply_unsupported ||
+                result.stack_applied == PolicyOperationState::unsupported;
+            any_verify_failed = any_verify_failed ||
+                result.stack_verified == PolicyOperationState::failed;
+            any_verify_unsupported = any_verify_unsupported ||
+                result.stack_verified == PolicyOperationState::unsupported;
+            any_verify_mismatched = any_verify_mismatched ||
+                result.stack_verified == PolicyOperationState::mismatched;
+            all_cleanup_succeeded = all_cleanup_succeeded &&
+                result.stack_cleanup == PolicyOperationState::succeeded;
+            if (report.apply_error == 0) {
+                report.apply_error = result.stack_apply_error;
+            }
+            if (report.verify_error == 0) {
+                report.verify_error = result.stack_verify_error;
+            }
+            if (cleanup_error == 0) {
+                cleanup_error = result.stack_cleanup_error;
+            }
+        }
+    }
+
+    report.accounted_bytes = committed;
+    report.committed_bytes = committed;
+    report.actual_guard_bytes_before = guards;
+    report.actual_guard_bytes_after = 0;
+    report.resident_bytes = resident;
+    report.locked_bytes = locked;
+    report.pinned_bytes = 0;
+    report.applied = any_apply_failed        ? PolicyOperationState::failed
+                     : any_apply_unsupported ? PolicyOperationState::unsupported
+                     : count == 0 ? PolicyOperationState::not_attempted
+                                  : PolicyOperationState::succeeded;
+    report.verified = any_verify_mismatched
+        ? PolicyOperationState::mismatched
+        : any_verify_failed
+            ? PolicyOperationState::failed
+            : any_verify_unsupported
+                ? PolicyOperationState::unsupported
+                : count == 0
+                    ? PolicyOperationState::not_attempted
+                    : PolicyOperationState::succeeded;
+    if (cleanup_error != 0) {
+        report.rollback_error = cleanup_error;
+    } else if (all_cleanup_succeeded) {
+        report.rollback_error = 0;
+    }
+    report.accounting_exactness = any_accounting_unavailable
+        ? ResourceAccountingExactness::unknown
+        : ResourceAccountingExactness::exact;
+    (void)usable;
+    return Status::ok;
+}
+
+Status aggregate_stack_startup_results(
+    MemoryPolicyReport& report,
+    const ThreadStartupResult* results,
+    std::size_t count) noexcept {
+    return aggregate_runtime_stack_startup_results(
+        report,
+        results,
+        count,
+        nullptr,
+        0,
+        nullptr,
+        0);
 }
 
 } // namespace rt::detail
