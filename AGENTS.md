@@ -2,7 +2,7 @@
 
 RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
-ABI v1, and Apache-2.0. M14 and M14.1 are complete; M15 is the active milestone.
+ABI v1, and Apache-2.0. M14, M14.1, and M15 are complete; M16 is active.
 
 ## Read before nontrivial work
 
@@ -74,7 +74,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `c20779022286e2f9f45eb433760f4886df70e68f`; harness version: `2`.
+- Control revision: `e00e41f067672bfe98209746ce4fc30780fdd160`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.

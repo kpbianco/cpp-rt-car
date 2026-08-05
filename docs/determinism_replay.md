@@ -61,7 +61,7 @@ Finalization computes four independent identities:
 | Identity | Contents and use |
 | --- | --- |
 | `config_id` | Complete resolved configuration, including worker count and operational capacities; preserved as provenance |
-| `graph_id` | Callback/resource names, dependency edges, and resource-access declarations in registration order |
+| `graph_id` | Callback/resource names, dependency edges, resource-access declarations, and any explicit rate-domain/binding semantics in registration order |
 | `state_schema_id` | Registered state names, schema versions, sizes, and order |
 | `replay_id` | Compatibility identity used by restore and replay |
 
@@ -75,6 +75,15 @@ original `config_id`.
 The build ID and complete runtime version are stored as provenance. D1 restore
 requires the same runtime major version but does not treat build ID equality as
 a D2 claim.
+
+M16-01 conditionally appends copied domain name, period, substeps, deadline,
+budget/WCET, criticality, optionality, and normalized phase/domain binding
+indexes to `graph_id`. Runtime-owner tokens, pointers, storage capacities,
+floating point, wall clocks, and scheduling are excluded. With no explicit
+rate model, the pre-M16 graph/replay hash path is byte-for-byte unchanged.
+Checkpoint and input-log schema 1 need no new fields because their existing
+graph/replay identities already reject a semantically different plan before
+state mutation.
 
 ## Checkpoint format v1
 

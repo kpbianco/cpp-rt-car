@@ -43,9 +43,13 @@ unchanged. M15-04 adds an exact logical extent ledger for constructed runtime,
 executor, and device controls; live runtime-owned stack commitment and
 supported observation; copied bounded declarations for opaque external and
 backend accounting; and status-bearing retryable cleanup across device, lane,
-stack, control, and selected-region ownership. The implementation is not an
-RT, hardware, release, deployment, or production qualification, and M15
-completion remains gated on mandatory CI and human review.
+stack, control, and selected-region ownership. M15 is complete at the audited
+baseline after mandatory CI and maintainer merge. M16-01 adds an additive C++
+rate-domain and phase-ownership model plus an immutable epoch-zero reference
+timeline. It uses exact checked integer arithmetic and changes graph/replay
+compatibility identity only for an explicit rate model. It does not yet change
+callback dispatch or implement cross-rate storage, admission, late behavior,
+shedding/recovery, or telemetry fields.
 
 ## Claim policy
 
@@ -177,6 +181,28 @@ mapping is live. Opaque host/vendor/backend facts may be copied through bounded
 configuring-time declarations and remain `declared_only`, never independently
 verified or qualified. Missing facts remain `partial` or `unknown`.
 
+### Rate-domain reference plan
+
+While configuring, a host may register at most 64 copied rate domains and bind
+every CPU or device phase to one instance-owned domain. A domain has a stable
+1–63 byte identifier, positive integral-nanosecond period, 1–64 same-timestamp
+substeps, relative deadline, non-binding budget/WCET estimate, criticality, and
+optionality. The model is an additive C++ source API and is not runtime-profile
+schema 7 or stable C ABI v8.
+
+Finalization compiles the half-open relative interval `[0, lcm(periods))` with
+checked gcd/lcm, multiplication, addition, and release-count arithmetic. The
+65,536-entry ceiling is checked before construction. Each fixed-copy release
+record exposes time, domain/phase identity, domain sequence, substep,
+deadline, budget, criticality, and optionality. Equal timestamps order by
+domain registration, compiled phase, then substep. Reduced period ratios use
+registration-order domain zero as their exact reference.
+
+This is a reference plan, not an active dispatcher. Host-driven and periodic
+frames still execute the complete graph once. Budget/WCET is not admission or
+timing proof, and no freshness, late, catch-up, shedding, or recovery behavior
+is implied.
+
 ### Observability
 
 The target runtime uses pre-registered numeric event/metric definitions,
@@ -270,7 +296,8 @@ callback expressions.
 | Host-driven callbacks | Implemented RT0 surface | Synchronous host wait; dependency-ready callbacks may overlap without step-time pacing or worker creation |
 | Unified CPU executor | Implemented RT0 surface | Static assignments, bounded local-queue throughput, and a borrowed host job-system adapter share one graph/range/reduction representation |
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
-| CPU/memory policy and resident backing | M15-04 implemented; external gates pending | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
+| CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
+| Rate-domain reference plan | M16-01 implemented; external gates pending | Bounded copied domains and ownership, exact epoch-zero supercycle, immutable inspection, identity/accounting integration, and unchanged complete-graph dispatch; later M16 semantics remain incomplete |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

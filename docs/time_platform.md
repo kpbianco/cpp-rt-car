@@ -36,6 +36,12 @@ implement absolute waiting, and report `supports_absolute_sleep()`. Host-driven
 steps remain usable with a clock that cannot wait; periodic execution returns
 `clock_failure`.
 
+The M16-01 reference supercycle has a different, relative epoch-zero purpose.
+It describes exact domain due times for inspection but does not pace the clock
+or change `run_periodic()` releases. Each periodic host frame still runs the
+complete graph once under the absolute cadence above; rate-domain late,
+skip/catch-up/hold/degrade/fail behavior remains deferred.
+
 `PeriodicFrameResult` reports status, frame index, release, wake, start, finish,
 signed deadline slack, miss state, watchdog state, and degradation level.
 `PeriodicRunResult` reports executed frames, deadline misses, watchdog events,

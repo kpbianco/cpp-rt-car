@@ -117,6 +117,20 @@ pinning, or qualification. Borrowed registered state/device buffers and
 backend-owned storage are not mutated. See
 [the CPU/memory policy contract](cpu_memory_policy.md).
 
+## M16-01 rate-plan accounting
+
+Copied rate-domain definitions, phase bindings, compiled domain/binding
+records, and the reference-release vector are configuration/finalization-only
+dynamic storage. `MemoryPlan::rate_plan_bytes` reports that exact dynamic
+subcomponent, while the same bytes are included once in
+`runtime_control_bytes` and its validated logical extent. Domain, binding, and
+release counts are frozen inspectors.
+
+No seventh planned row is added. The six-row equation and the provider's exact
+phase-scratch/task-scratch/trace acquisition boundary are unchanged. Plan
+inspection and complete CPU/mock-device frames allocate no ordinary heap after
+start; two runtime instances own separate handles and release vectors.
+
 ## Configuration
 
 | Key | Default | Contract |

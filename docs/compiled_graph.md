@@ -9,6 +9,8 @@ Release 0.4 added parallel execution without changing the M2 validation rules.
 Release 0.5 includes the committed graph and executor storage in the M4 memory
 plan. Release 1.2 runs the same frozen graph from host-driven or finite
 self-paced M5 calls. Latency qualification remains deployment-specific work.
+M16-01 adds a separate C++ rate-domain kind and reference-plan compiler without
+changing graph execution or the stable C ABI.
 
 ## Graph vocabulary
 
@@ -65,6 +67,23 @@ After successful finalization, callback/resource registration, dependency
 addition, and access declaration all return `invalid_state`. The compiled
 order remains available through `compiled_phase_at()` in finalized, running,
 and stopped states.
+
+## Rate ownership and reference order
+
+An explicit rate model copies up to 64 named domains while configuring. Each
+CPU or device phase must bind to exactly one instance-owned `RateDomainHandle`,
+and every domain must own a phase. Finalization rejects malformed or duplicate
+domains, missing/rebound/foreign/stale handles, empty ownership, arithmetic
+overflow, or more than 65,536 reference releases without committing a partial
+plan. A rejected plan leaves the runtime configuring and correctable.
+
+The immutable reference interval is `[0, lcm(periods))` relative to epoch zero.
+All domain releases are integral nanoseconds; substeps share their domain
+release timestamp. Equal timestamps order by domain registration, this
+contract's compiled phase order, then substep ordinal. Reduced period ratios
+are exact against registration-order domain zero. These rules do not filter,
+repeat, reorder, skip, catch up, hold, degrade, or shed execution: `step()` and
+`run_periodic()` still submit the complete compiled graph once per frame.
 
 ## Resource ordering
 
@@ -132,8 +151,10 @@ freezes this graph surface under the M11 compatibility policy.
 ## Evidence
 
 - Compiler: `rt/src/compiled_graph.cpp`
+- Rate compiler: `rt/src/rate_timeline.cpp`
 - Runtime integration: `rt/src/host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
+- Rate/reference tests: `tests/test_rate_timeline.cpp`
 - First-frame allocation instrumentation: `tests/test_trace_noalloc.cpp`
 - Dynamic C ABI coverage: `tests/test_cabi_dlopen.c`
 - C and C++ embedding samples: `samples/embed_c/mini_app.c`,

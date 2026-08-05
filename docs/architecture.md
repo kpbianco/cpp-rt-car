@@ -7,7 +7,7 @@ in [ADRs](adr/README.md).
 
 ## Current 1.2 implementation
 
-### Target host, device, distribution, SDK, and M15 policy runtime
+### Target host, device, distribution, SDK, policy, and rate-model runtime
 
 `rt::Runtime` is the first target-path component. It owns a strict
 configure/finalize/start/step/stop state machine, a finalization-time graph
@@ -95,6 +95,15 @@ bounded copied declarations for otherwise opaque external/backend facts.
 Logical, declared, committed, resident, locked, pinned, and guard facts remain
 separate. See the
 [CPU/memory policy contract](cpu_memory_policy.md).
+
+M16-01 adds a finalization-only timeline compiler beside the graph compiler.
+Copied rate-domain and binding declarations are validated against the
+instance-owned graph, then compiled into fixed domain/binding records and an
+epoch-zero `[0, lcm)` release vector. The compiler uses checked integer
+arithmetic and deterministic registration/compiled-phase/substep ordering.
+All storage remains runtime-owned and is counted within the existing runtime-
+control extent. Execution does not consume the reference vector yet: the
+complete compiled graph still runs once per host or periodic frame.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
@@ -210,6 +219,10 @@ cleanup before join. Cleanup proceeds from device ownership through device
 service, reverse executor instances, watchdog, fragmented controls, and
 trace/task/phase rollback while retaining the first error and every unresolved
 owner.
+M16-01 adds the bounded reference-plan compiler and graph/replay identity
+integration without adding a lane, resource owner, provider region, telemetry
+field, or dispatch branch. M16-02 through M16-04 own cross-rate storage,
+admission/late behavior, and deterministic shedding/recovery/telemetry.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),
