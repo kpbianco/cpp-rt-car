@@ -2,12 +2,17 @@
 
 RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
-ABI v1, and Apache-2.0. M14, M14.1, and M15 are complete; M16 is active.
+ABI v1, and Apache-2.0. M14, M14.1, M15, and M16 are complete; M17 is
+active.
 M16-01 supplies the exact reference timeline, M16-02 adds deterministic
 CPU-only cross-rate channel selection and bounded SPSC stores, and M16-03 adds
 opt-in mandatory admission, dispatch, transfer, and late actions. M16-04 adds
 optional CPU shedding/recovery and a separate versioned rate-action stream; it
 does not add action replay, device-rate execution, or RT1/RT2 qualification.
+M17-01 adds the additive C++ HAL v2 core contract and routes unchanged device
+ABI v1 backends through one bounded compatibility adapter; heterogeneous
+memory, command batches, timeline completions, vendor controls, physical
+hardware evidence, and later M17 capabilities remain deferred.
 
 ## Read before nontrivial work
 

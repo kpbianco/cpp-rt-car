@@ -114,6 +114,23 @@ mandatory-only state bytes remain exact. The separate rate-action telemetry
 history, counters, and caller cursors are process-local and not checkpointed.
 Action-aware replay remains unsupported rather than being inferred as D1.
 
+M17-01 preserves the exact pre-M17 device identity path for every adapted
+device-ABI-v1 registration. Its backend name and copied backend identifier are
+hashed at the same positions as before; the adapter kind, HAL table, context,
+addresses, and control-storage capacities append no bytes. An otherwise
+identical v1 configuration therefore retains its exact `graph_id`, `replay_id`,
+checkpoint bytes, input-log bytes, and artifact compatibility after it begins
+traversing the adapter.
+
+A native HAL v2 registration cannot impersonate that legacy path. For native
+v2 only, graph identity conditionally appends an M17 backend-kind marker and
+HAL API version 2 in addition to the existing name/backend identifier
+semantics. Backend order remains registration order. This separation changes
+no checkpoint or input-log field: the existing schema-1 identities reject a
+native/adapted mismatch before state mutation. Equivalent native-v2 and
+adapted-v1 execution may produce the same application state while remaining
+intentionally artifact-incompatible.
+
 ## Checkpoint format v1
 
 Checkpoint artifacts use fixed-width little-endian fields:
@@ -207,6 +224,8 @@ The M7 gates include:
 - allocation instrumentation around checkpoint write, inspect, restore, and
   input-log write;
 - stable C ABI v8 dynamic-loader coverage and C/C++ embedding samples;
+- exact adapted-v1 pre-M17 identity/artifact compatibility and native-v2
+  kind/version separation in `tests/test_determinism_replay.cpp`;
 - active canonical-state round trip, corruption transactionality, and explicit
   active input-log/replay rejection in `tests/test_rate_dispatch.cpp`;
 - CI artifact exchange that compares checkpoint bytes produced by GCC/Clang

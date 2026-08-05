@@ -35,6 +35,10 @@ LegacyTickDuration volatile legacy_tick_duration =
 #endif
 
 int main() {
+    const rt::DeviceBackendRegistration pre_m17_device_backend{
+        "legacy.device.v1", {}};
+    const rt::DeviceBufferRegistration pre_m17_device_buffer{
+        "legacy.buffer.v1", {}, {}};
     const rt::ThreadPolicyReport pre_m15_04_thread{
         rt::thread_role_frame,
         {},
@@ -58,7 +62,15 @@ int main() {
     const rt::CompiledRateDomain pre_m16_03_compiled{
         {}, {}, 0, 1, 1, 1, 1, rt::RateCriticality::normal,
         false, 1, 1, 1};
-    if (pre_m15_04_report.threads[0].role != rt::thread_role_frame ||
+    if (pre_m17_device_backend.name != "legacy.device.v1" ||
+        pre_m17_device_backend.api.abi_version != 0 ||
+        pre_m17_device_buffer.name != "legacy.buffer.v1" ||
+        pre_m17_device_buffer.flags !=
+            (RTFW_DEVICE_BUFFER_HOST_READ |
+             RTFW_DEVICE_BUFFER_HOST_WRITE |
+             RTFW_DEVICE_BUFFER_DEVICE_READ |
+             RTFW_DEVICE_BUFFER_DEVICE_WRITE) ||
+        pre_m15_04_report.threads[0].role != rt::thread_role_frame ||
         pre_m15_04_report.accounting_complete ||
         pre_m16_plan.rate_plan_bytes != 0 ||
         additive_cross_rate.payload_size != 0 ||

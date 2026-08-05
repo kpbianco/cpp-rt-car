@@ -1,6 +1,7 @@
 #pragma once
 
 #include "executor.hpp"
+#include "hal_v2.hpp"
 
 #include <array>
 #include <atomic>
@@ -19,8 +20,10 @@ namespace rt::detail {
 
 struct DeviceBackendSpec {
     std::string name;
-    rtfw_device_backend_api api{};
-    rtfw_device_capabilities capabilities{};
+    HalV2BackendApi api{};
+    HalV2Capabilities capabilities{};
+    HalBackendKind kind = HalBackendKind::adapted_device_abi_v1;
+    DeviceV1CompatibilityAdapter* v1_adapter = nullptr;
 };
 
 struct DeviceBufferSpec {
@@ -124,6 +127,7 @@ public:
     [[nodiscard]] static bool estimate_control_storage(
         std::size_t backend_count,
         std::size_t backend_name_bytes,
+        std::size_t adapted_v1_count,
         std::size_t buffer_count,
         std::size_t outstanding_capacity,
         std::size_t completion_batch,
@@ -136,7 +140,7 @@ private:
         std::uint64_t frame_index = 0;
         std::uint32_t backend_index = 0;
         std::uint32_t phase_index = 0;
-        rtfw_device_completion early_completion{};
+        HalV2Completion early_completion{};
     };
 
     [[nodiscard]] Status initialize_backends() noexcept;
@@ -148,11 +152,11 @@ private:
     static void service_entry(void* manager) noexcept;
     void process_completion(
         std::size_t backend_index,
-        const rtfw_device_completion& completion) noexcept;
+        const HalV2Completion& completion) noexcept;
     void finalize_completion(
         Outstanding& slot,
         std::size_t backend_index,
-        const rtfw_device_completion& completion) noexcept;
+        const HalV2Completion& completion) noexcept;
     void fail_backend_outstanding(
         std::size_t backend_index,
         Status status) noexcept;
@@ -167,7 +171,7 @@ private:
     std::vector<std::uint64_t> native_buffer_tokens_;
     std::unique_ptr<Outstanding[]> outstanding_slots_;
     std::size_t outstanding_capacity_ = 0;
-    std::unique_ptr<rtfw_device_completion[]> completion_buffer_;
+    std::unique_ptr<HalV2Completion[]> completion_buffer_;
     std::size_t completion_batch_ = 0;
     NativeThread service_thread_;
     ThreadStartupResult startup_result_{};
@@ -192,8 +196,5 @@ private:
     std::atomic<std::uint64_t> service_starts_{0};
     std::atomic<std::uint64_t> wake_sequence_{0};
 };
-
-[[nodiscard]] Status device_status_to_runtime(
-    rtfw_device_status status) noexcept;
 
 } // namespace rt::detail

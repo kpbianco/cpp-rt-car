@@ -923,9 +923,16 @@ struct Runtime::Impl {
             hash_string(
                 hash,
                 std::string_view(
-                    backend.capabilities.backend_id,
+                    backend.capabilities.backend_id.data(),
                     std::char_traits<char>::length(
-                        backend.capabilities.backend_id)));
+                        backend.capabilities.backend_id.data())));
+            if (backend.kind == detail::HalBackendKind::native_hal_v2) {
+                hash_u64(hash, 0x4d31372d68616c32ull);
+                hash_u64(
+                    hash,
+                    static_cast<std::uint64_t>(backend.kind));
+                hash_u64(hash, hal_v2_api_version);
+            }
         }
         hash_u64(hash, device_buffers.size());
         for (const auto& buffer : device_buffers) {
@@ -3175,6 +3182,8 @@ struct Runtime::Impl {
     NumericalPolicy numerics{};
     std::vector<RegisteredCallback> callbacks;
     std::vector<detail::DeviceBackendSpec> device_backends;
+    std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
+        device_v1_adapters;
     std::vector<detail::DeviceBufferSpec> device_buffers;
     std::vector<RegisteredResource> resources;
     std::vector<RegisteredState> states;
@@ -3509,21 +3518,7 @@ Status Runtime::register_device_backend(
             Status::capacity_exceeded,
             "configured device backend capacity exceeded");
     }
-    const auto& api = registration.api;
-    if (api.struct_size < sizeof(api) ||
-        api.abi_version != RTFW_DEVICE_ABI_VERSION ||
-        !api.instance ||
-        !api.get_capabilities ||
-        !api.initialize ||
-        !api.register_buffer ||
-        !api.unregister_buffer ||
-        !api.submit ||
-        !api.poll ||
-        !api.cancel ||
-        !api.get_health ||
-        !api.reset ||
-        !api.shutdown ||
-        !reserved_zero(api.reserved)) {
+    if (!detail::validate_device_v1_api(registration.api)) {
         return impl_->fail(
             Status::invalid_argument,
             "device backend function table is malformed or incompatible");
@@ -3540,42 +3535,30 @@ Status Runtime::register_device_backend(
             "device backend names must be unique");
     }
 
-    rtfw_device_capabilities capabilities{};
-    capabilities.struct_size = sizeof(capabilities);
-    capabilities.abi_version = RTFW_DEVICE_ABI_VERSION;
-    rtfw_device_status device_status =
-        RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+    std::unique_ptr<detail::DeviceV1CompatibilityAdapter> adapter;
     try {
-        device_status = api.get_capabilities(
-            api.instance,
-            &capabilities);
+        adapter = std::make_unique<detail::DeviceV1CompatibilityAdapter>(
+            registration.api);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
     } catch (...) {
-        device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        return impl_->fail(Status::internal_error, nullptr);
     }
-    const auto status =
-        detail::device_status_to_runtime(device_status);
+    HalV2Capabilities capabilities;
+    HalV2Status hal_status = HalV2Status::internal_error;
+    try {
+        hal_status = adapter->api().get_capabilities(
+            adapter->api().instance, &capabilities);
+    } catch (...) {
+        hal_status = HalV2Status::internal_error;
+    }
+    const auto status = detail::hal_v2_status_to_runtime(hal_status);
     if (status != Status::ok) {
         return impl_->fail(
             status,
             "device backend capability query failed");
     }
-    if (capabilities.struct_size < sizeof(capabilities) ||
-        capabilities.abi_version != RTFW_DEVICE_ABI_VERSION ||
-        capabilities.max_in_flight == 0 ||
-        capabilities.max_registered_buffers == 0 ||
-        capabilities.max_buffer_bytes == 0 ||
-        capabilities.inline_payload_capacity <
-            RTFW_DEVICE_INLINE_PAYLOAD_CAPACITY ||
-        capabilities.buffer_ref_capacity <
-            RTFW_DEVICE_BUFFER_REF_CAPACITY ||
-        capabilities.supports_cancel > 1 ||
-        capabilities.supports_reset > 1 ||
-        capabilities.deterministic_mock > 1 ||
-        capabilities.reserved0 != 0 ||
-        !valid_identifier(capabilities.backend_id) ||
-        !reserved_zero(capabilities.reserved) ||
-        capabilities.control_storage_bytes >
-            std::numeric_limits<std::size_t>::max()) {
+    if (!detail::validate_hal_v2_capabilities(capabilities)) {
         return impl_->fail(
             Status::invalid_argument,
             "device backend reported malformed capabilities");
@@ -3584,14 +3567,104 @@ Status Runtime::register_device_backend(
     try {
         const auto index = static_cast<std::uint32_t>(
             impl_->device_backends.size());
-        impl_->device_backends.push_back(
-            detail::DeviceBackendSpec{
-                std::string(registration.name),
-                api,
-                capabilities,
-            });
+        auto* adapter_instance = adapter.get();
+        impl_->device_v1_adapters.push_back(std::move(adapter));
+        try {
+            impl_->device_backends.push_back(
+                detail::DeviceBackendSpec{
+                    std::string(registration.name),
+                    adapter_instance->api(),
+                    capabilities,
+                    detail::HalBackendKind::adapted_device_abi_v1,
+                    adapter_instance,
+                });
+        } catch (...) {
+            impl_->device_v1_adapters.pop_back();
+            throw;
+        }
         out_backend =
             DeviceBackendHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_device_backend(
+    const HalV2BackendRegistration& registration,
+    DeviceBackendHandle& out_backend) noexcept {
+    out_backend = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "device backend registration is frozen");
+    }
+    std::array<char, RTFW_DEVICE_IDENTIFIER_CAPACITY> name{};
+    if (!set_identifier(name, registration.name)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device backend name must be a stable identifier");
+    }
+    if (impl_->device_backends.size() >=
+        impl_->config.device_backend_capacity) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "configured device backend capacity exceeded");
+    }
+    if (!detail::validate_hal_v2_api(registration.api)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "HAL v2 backend function table is malformed or incompatible");
+    }
+    const auto duplicate = std::find_if(
+        impl_->device_backends.begin(),
+        impl_->device_backends.end(),
+        [&](const detail::DeviceBackendSpec& backend) {
+            return backend.name == registration.name;
+        });
+    if (duplicate != impl_->device_backends.end()) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device backend names must be unique");
+    }
+
+    HalV2Capabilities capabilities;
+    HalV2Status hal_status = HalV2Status::internal_error;
+    try {
+        hal_status = registration.api.get_capabilities(
+            registration.api.instance, &capabilities);
+    } catch (...) {
+        hal_status = HalV2Status::internal_error;
+    }
+    const auto status = detail::hal_v2_status_to_runtime(hal_status);
+    if (status != Status::ok) {
+        return impl_->fail(status, "HAL v2 backend capability query failed");
+    }
+    if (!detail::validate_hal_v2_capabilities(capabilities)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "HAL v2 backend reported malformed capabilities");
+    }
+    try {
+        const auto index = static_cast<std::uint32_t>(
+            impl_->device_backends.size());
+        impl_->device_backends.push_back(detail::DeviceBackendSpec{
+            std::string(registration.name),
+            registration.api,
+            capabilities,
+            detail::HalBackendKind::native_hal_v2,
+            nullptr,
+        });
+        out_backend = DeviceBackendHandle{impl_->graph_owner, index};
     } catch (const std::bad_alloc&) {
         return impl_->fail(Status::resource_exhausted, nullptr);
     } catch (...) {
@@ -4767,7 +4840,13 @@ Status Runtime::finalize() noexcept {
             memory_plan.executor_control_bytes);
     if (!impl_->device_backends.empty()) {
         std::size_t backend_name_bytes = 0;
+        std::size_t adapted_v1_count = 0;
         for (const auto& backend : impl_->device_backends) {
+            adapted_v1_count +=
+                backend.kind ==
+                    detail::HalBackendKind::adapted_device_abi_v1
+                ? 1u
+                : 0u;
             const auto object_begin =
                 reinterpret_cast<std::uintptr_t>(&backend);
             const auto object_end = object_begin + sizeof(backend);
@@ -4786,6 +4865,7 @@ Status Runtime::finalize() noexcept {
             detail::DeviceManager::estimate_control_storage(
                 impl_->device_backends.size(),
                 backend_name_bytes,
+                adapted_v1_count,
                 impl_->device_buffers.size(),
                 impl_->config.device_outstanding_capacity,
                 impl_->config.device_completion_batch,
@@ -4851,6 +4931,9 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_runtime_array(
         impl_->device_backends.capacity(),
         sizeof(detail::DeviceBackendSpec));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->device_v1_adapters.capacity(),
+        sizeof(std::unique_ptr<detail::DeviceV1CompatibilityAdapter>));
     for (const auto& backend : impl_->device_backends) {
         const auto object_begin = reinterpret_cast<std::uintptr_t>(&backend);
         const auto object_end = object_begin + sizeof(backend);
@@ -5024,6 +5107,16 @@ Status Runtime::finalize() noexcept {
             "finalized memory plan exceeds memory_budget_bytes");
     }
 
+    for (const auto& adapter : impl_->device_v1_adapters) {
+        const auto adapter_status = adapter->prepare_completion_storage(
+            impl_->config.device_completion_batch);
+        if (adapter_status != Status::ok) {
+            return impl_->fail(
+                adapter_status,
+                "device ABI v1 adapter storage allocation failed");
+        }
+    }
+
     CpuMemoryPolicyReport cpu_memory_policy_report;
     const char* policy_diagnostic = nullptr;
     const MemoryProvider* selected_memory_provider =
@@ -5143,6 +5236,10 @@ Status Runtime::finalize() noexcept {
             impl_->device_backends.data(),
             impl_->device_backends.capacity(),
             sizeof(detail::DeviceBackendSpec));
+        add_runtime_extent(
+            impl_->device_v1_adapters.data(),
+            impl_->device_v1_adapters.capacity(),
+            sizeof(std::unique_ptr<detail::DeviceV1CompatibilityAdapter>));
         for (const auto& backend : impl_->device_backends) {
             add_external_string(backend, backend.name);
         }

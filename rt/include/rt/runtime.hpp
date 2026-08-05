@@ -1334,6 +1334,9 @@ public:
     [[nodiscard]] Status register_device_backend(
         const DeviceBackendRegistration& registration,
         DeviceBackendHandle& out_backend) noexcept;
+    [[nodiscard]] Status register_device_backend(
+        const HalV2BackendRegistration& registration,
+        DeviceBackendHandle& out_backend) noexcept;
     [[nodiscard]] Status register_device_buffer(
         const DeviceBufferRegistration& registration,
         DeviceBufferHandle& out_buffer) noexcept;

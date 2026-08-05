@@ -7,6 +7,14 @@ declarations represented by
 `rt/include/rt/device_abi.h`. It does not turn the C++ API into a binary ABI,
 qualify a deployment for hard real time, or make hardware drivers portable.
 
+M17-01 adds HAL API version 2 only to the C++ source surface in the already
+installed `rt/device.hpp` header. It adds no C symbol, C structure, C status,
+installed header, target, or SONAME change. Existing C hosts and every
+device-ABI-v1 backend continue to use their frozen declarations; the runtime
+copies each accepted v1 table into an internal compatibility adapter before
+the canonical HAL v2 manager sees it. Native-v2 users must recompile and
+receive no C++ binary ABI promise. See [the HAL v2 contract](hal_v2.md).
+
 ## Compatibility handshake
 
 An integration should compile against one installed header set and check the
@@ -93,6 +101,9 @@ and verifies the installed Apache-2.0 digest.
 - `RTFW_STATUS_INCOMPATIBLE_ABI` is reserved for header/library ABI mismatch;
   checkpoint and replay mismatch continues to use
   `RTFW_STATUS_INCOMPATIBLE_ARTIFACT`.
+- HAL v2 callback failures and unknown or malformed backend results map to the
+  existing runtime statuses. They add no status value and never reinterpret
+  device ABI v1 `UNSUPPORTED` as success.
 
 ## Host job system adapter
 

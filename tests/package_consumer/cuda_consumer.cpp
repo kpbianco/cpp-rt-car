@@ -5,7 +5,11 @@ int main(int argc, char**) {
         rt::CudaDriverApi driver;
         rt::CudaBackendConfig config;
         rt::CudaDeviceBackend backend(driver, config);
-        return backend.api().abi_version == RTFW_DEVICE_ABI_VERSION ? 0 : 1;
+        const rt::DeviceBackendRegistration registration{
+            "installed.cuda.v1", backend.api()};
+        return registration.api.abi_version == RTFW_DEVICE_ABI_VERSION
+            ? 0
+            : 1;
     }
     return rt::cuda_driver_api_version == 1 ? 0 : 2;
 }

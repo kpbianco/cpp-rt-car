@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace {
 
@@ -44,6 +45,141 @@ struct HostQueue {
     }
 };
 
+struct InstalledHalV2Backend {
+    rt::HalV2BackendApi api() noexcept {
+        rt::HalV2BackendApi table;
+        table.instance = this;
+        table.get_capabilities = &get_capabilities;
+        table.initialize = &initialize;
+        table.register_buffer = &register_buffer;
+        table.unregister_buffer = &unregister_buffer;
+        table.submit = &submit;
+        table.poll = &poll;
+        table.cancel = &cancel;
+        table.get_health = &get_health;
+        table.reset = &reset;
+        table.shutdown = &shutdown;
+        return table;
+    }
+
+    bool initialized = false;
+
+    static InstalledHalV2Backend* self(void* instance) noexcept {
+        return static_cast<InstalledHalV2Backend*>(instance);
+    }
+
+    static rt::HalV2Status get_capabilities(
+        void* instance,
+        rt::HalV2Capabilities* output) noexcept {
+        if (!self(instance) || !output ||
+            output->struct_size < sizeof(*output)) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        *output = {};
+        output->struct_size = sizeof(*output);
+        output->api_version = rt::hal_v2_api_version;
+        output->max_in_flight = 64;
+        output->max_registered_buffers = 8;
+        output->max_buffer_bytes = 4096;
+        output->inline_payload_capacity =
+            rt::hal_v2_inline_payload_capacity;
+        output->buffer_ref_capacity =
+            rt::hal_v2_buffer_ref_capacity;
+        output->supports_cancel = 0;
+        output->supports_reset = 1;
+        output->deterministic_mock = 1;
+        constexpr std::string_view identifier =
+            "installed.native.hal.v2";
+        for (std::size_t index = 0; index < identifier.size(); ++index) {
+            output->backend_id[index] = identifier[index];
+        }
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status initialize(
+        void* instance,
+        const rt::HalV2InitializeConfig* config) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !config ||
+            config->struct_size < sizeof(*config) ||
+            config->api_version != rt::hal_v2_api_version ||
+            backend->initialized) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        backend->initialized = true;
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status register_buffer(
+        void*,
+        const rt::HalV2BufferRegistration*,
+        std::uint64_t*) noexcept {
+        return rt::HalV2Status::unsupported;
+    }
+
+    static rt::HalV2Status unregister_buffer(
+        void*, std::uint64_t) noexcept {
+        return rt::HalV2Status::unsupported;
+    }
+
+    static rt::HalV2Status submit(
+        void*, const rt::HalV2Submission*) noexcept {
+        return rt::HalV2Status::unsupported;
+    }
+
+    static rt::HalV2Status poll(
+        void* instance,
+        rt::HalV2Completion*,
+        std::uint64_t,
+        std::uint64_t* output_count) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !backend->initialized || !output_count) {
+            return rt::HalV2Status::invalid_state;
+        }
+        *output_count = 0;
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status cancel(void*, std::uint64_t) noexcept {
+        return rt::HalV2Status::unsupported;
+    }
+
+    static rt::HalV2Status get_health(
+        void* instance,
+        rt::HalV2Health* output) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !output ||
+            output->struct_size < sizeof(*output)) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        *output = {};
+        output->struct_size = sizeof(*output);
+        output->state = static_cast<std::uint32_t>(
+            backend->initialized
+                ? rt::HalV2HealthState::healthy
+                : rt::HalV2HealthState::shutdown);
+        output->last_status =
+            static_cast<std::int32_t>(rt::HalV2Status::ok);
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status reset(void* instance) noexcept {
+        auto* backend = self(instance);
+        return backend && backend->initialized
+            ? rt::HalV2Status::ok
+            : rt::HalV2Status::invalid_state;
+    }
+
+    static rt::HalV2Status shutdown(void* instance) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !backend->initialized) {
+            return rt::HalV2Status::invalid_state;
+        }
+        backend->initialized = false;
+        return rt::HalV2Status::ok;
+    }
+};
+
 rt::CallbackResult phase(void* opaque, const rt::CallbackContext&) {
     ++*static_cast<std::size_t*>(opaque);
     return rt::CallbackResult::ok;
@@ -64,6 +200,7 @@ int main() {
 
     HostQueue queue;
     rt::Runtime runtime;
+    InstalledHalV2Backend native_hal;
     rt::RuntimeConfig config;
     config.executor_policy = rt::ExecutorPolicy::host_adapter;
     config.worker_count = 2;
@@ -82,6 +219,7 @@ int main() {
     rt::RateDomainHandle producer_rate;
     rt::RateDomainHandle consumer_rate;
     rt::CrossRateChannelHandle channel;
+    rt::DeviceBackendHandle native_backend;
     const rt::RateExecutionPolicy additive_active_policy{};
     const rt::RateActionRecord rate_action_record{};
     const rt::RateTelemetryCursor rate_cursor{};
@@ -95,6 +233,11 @@ int main() {
             8,
             &HostQueue::submit,
             &HostQueue::try_execute_one}) != rt::Status::ok ||
+        runtime.register_device_backend(
+            rt::HalV2BackendRegistration{
+                "installed.native.hal", native_hal.api()},
+            native_backend) != rt::Status::ok ||
+        !native_backend.valid() ||
         runtime.register_callback(
             {"producer.phase", &phase, &calls},
             producer_phase) !=
@@ -149,5 +292,5 @@ int main() {
         runtime.stop() != rt::Status::ok) {
         return 1;
     }
-    return calls == 2 ? 0 : 2;
+    return calls == 2 && !native_hal.initialized ? 0 : 2;
 }

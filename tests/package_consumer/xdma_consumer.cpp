@@ -1,3 +1,4 @@
+#include <rt/device.hpp>
 #include <rt/xdma_backend.hpp>
 
 int main(int argc, char**) {
@@ -7,7 +8,11 @@ int main(int argc, char**) {
         rt::XdmaBackendConfig config;
         rt::XdmaDeviceBackend backend(driver, config);
         api = backend.api();
-        return api.abi_version == RTFW_DEVICE_ABI_VERSION ? 0 : 1;
+        const rt::DeviceBackendRegistration registration{
+            "installed.xdma.v1", api};
+        return registration.api.abi_version == RTFW_DEVICE_ABI_VERSION
+            ? 0
+            : 1;
     }
     return rt::xdma_driver_api_version == 1 ? 0 : 2;
 }

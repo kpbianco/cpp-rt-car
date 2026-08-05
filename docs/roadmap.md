@@ -34,8 +34,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
-| M16 | In progress | M16-01 through M16-04 reference, cross-rate, active dispatch, optional shedding/recovery, and versioned telemetry are implemented locally; mandatory CI and human completion gates remain |
-| M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
+| M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
+| M17 | In progress | M17-01 HAL v2 core/device-ABI-v1 compatibility is implemented locally; heterogeneous memory, batches/timelines, vendor controls, combined execution, and qualification remain |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
@@ -573,8 +573,7 @@ Exit gates:
 
 ## M16 — Multi-rate simulation
 
-M16-01 through M16-04 are implemented in this worktree, subject to their local,
-CI, and human review gates:
+M16-01 through M16-04 are complete in merged target history:
 
 - bounded copied rate domains and exactly-one phase ownership;
 - exact checked epoch-zero `[0, lcm)` reference timeline with deterministic
@@ -607,20 +606,38 @@ Exit gates:
 - overload never creates unbounded catch-up work or silently skips mandatory
   releases.
 
-M16 and CAP-M16 remain incomplete until the M16-04 mandatory CI and human gates
-pass; local functional implementation alone does not close them.
+The retained M16 evidence contains its original pre-merge gate language. The
+merged commits establish completion; no absent final CI run identifier, check
+count, or separate human-review object is inferred.
 
 ## M17 — HAL v2 and heterogeneous memory
 
-Planned outcome:
+M17 is active and incomplete. M17-01 implements:
 
-- a versioned HAL v2 alongside a complete device-ABI-v1 compatibility shim;
+- an additive C++ HAL API version 2 core table in the existing installed
+  header, with capability, lifecycle, borrowed-buffer, one-submission, bounded
+  poll, cancellation, health, reset, and shutdown operations;
+- one canonical HAL v2 manager path for native tables and exactly-once,
+  address-stable adapters around unchanged device-ABI-v1 backends;
+- complete shared-field/status translation, exception containment,
+  fail-closed output validation, legacy adapted-v1 identity, conditional
+  native-v2 kind/version identity, and exact device-control accounting;
+- unchanged service-lane, early-ready, reverse cleanup/retry, mock, CUDA
+  candidate, XDMA candidate, C ABI, package, schema, release, and support
+  boundaries.
+
+Later M17 batches own the remaining planned outcome:
+
 - explicit host, pinned, device, shared, and imported memory domains with
   alignment, coherency, ownership, and synchronization contracts;
 - fixed-capacity per-backend submission lanes so executor workers never invoke
   potentially blocking vendor APIs;
 - capability discovery, completion/error/timestamp domains, CUDA and XDMA v2
   adapters, and lifecycle-safe plugin/factory ownership.
+
+M17-01 adds none of those later memory, topology, batch/timeline,
+vendor-control, isolated-lane, plugin/factory, or hardware capabilities. M17
+and CAP-M17 remain incomplete.
 
 Exit gates:
 

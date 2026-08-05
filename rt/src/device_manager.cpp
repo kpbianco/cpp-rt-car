@@ -37,37 +37,28 @@ bool valid_access(std::uint32_t access) noexcept {
            access == RTFW_DEVICE_ACCESS_READ_WRITE;
 }
 
+rt::HalV2Status runtime_status_to_hal(rt::Status status) noexcept {
+    switch (status) {
+    case rt::Status::device_queue_full:
+        return rt::HalV2Status::queue_full;
+    case rt::Status::device_timeout:
+        return rt::HalV2Status::timeout;
+    case rt::Status::device_lost:
+        return rt::HalV2Status::lost;
+    case rt::Status::device_canceled:
+        return rt::HalV2Status::canceled;
+    case rt::Status::device_reset_required:
+        return rt::HalV2Status::reset_required;
+    case rt::Status::resource_exhausted:
+        return rt::HalV2Status::resource_exhausted;
+    default:
+        return rt::HalV2Status::error;
+    }
+}
+
 } // namespace
 
 namespace rt::detail {
-
-Status device_status_to_runtime(rtfw_device_status status) noexcept {
-    switch (status) {
-    case RTFW_DEVICE_STATUS_OK:
-        return Status::ok;
-    case RTFW_DEVICE_STATUS_INVALID_ARGUMENT:
-        return Status::invalid_argument;
-    case RTFW_DEVICE_STATUS_INVALID_STATE:
-        return Status::invalid_state;
-    case RTFW_DEVICE_STATUS_QUEUE_FULL:
-        return Status::device_queue_full;
-    case RTFW_DEVICE_STATUS_TIMEOUT:
-        return Status::device_timeout;
-    case RTFW_DEVICE_STATUS_ERROR:
-    case RTFW_DEVICE_STATUS_UNSUPPORTED:
-    case RTFW_DEVICE_STATUS_INTERNAL_ERROR:
-        return Status::device_error;
-    case RTFW_DEVICE_STATUS_LOST:
-        return Status::device_lost;
-    case RTFW_DEVICE_STATUS_CANCELED:
-        return Status::device_canceled;
-    case RTFW_DEVICE_STATUS_RESOURCE_EXHAUSTED:
-        return Status::resource_exhausted;
-    case RTFW_DEVICE_STATUS_RESET_REQUIRED:
-        return Status::device_reset_required;
-    }
-    return Status::device_error;
-}
 
 DeviceManager::DeviceManager(
     std::uint32_t owner,
@@ -89,7 +80,7 @@ DeviceManager::DeviceManager(
       completion_buffer_(
           completion_batch == 0
               ? nullptr
-              : std::make_unique<rtfw_device_completion[]>(
+              : std::make_unique<HalV2Completion[]>(
                     completion_batch)),
       completion_batch_(completion_batch) {}
 
@@ -121,17 +112,25 @@ void DeviceManager::append_control_extents(
         if (name < begin || name >= end) {
             add(backend.name.data(), backend.name.capacity() + 1, 1);
         }
+        if (backend.v1_adapter) {
+            add(backend.v1_adapter, 1, sizeof(*backend.v1_adapter));
+            add(
+                backend.v1_adapter->completion_storage(),
+                backend.v1_adapter->completion_capacity(),
+                sizeof(rtfw_device_completion));
+        }
     }
     add(initialized_backends_.data(), initialized_backends_.capacity(), sizeof(initialized_backends_[0]));
     add(buffers_.data(), buffers_.capacity(), sizeof(buffers_[0]));
     add(native_buffer_tokens_.data(), native_buffer_tokens_.capacity(), sizeof(native_buffer_tokens_[0]));
     add(outstanding_slots_.get(), outstanding_capacity_, sizeof(Outstanding));
-    add(completion_buffer_.get(), completion_batch_, sizeof(rtfw_device_completion));
+    add(completion_buffer_.get(), completion_batch_, sizeof(HalV2Completion));
 }
 
 bool DeviceManager::estimate_control_storage(
     std::size_t backend_count,
     std::size_t backend_name_bytes,
+    std::size_t adapted_v1_count,
     std::size_t buffer_count,
     std::size_t outstanding_capacity,
     std::size_t completion_batch,
@@ -148,13 +147,22 @@ bool DeviceManager::estimate_control_storage(
             bytes = total;
             return true;
         };
+    std::size_t adapted_completion_count = 0;
+    if (!checked_multiply(
+            adapted_v1_count,
+            completion_batch,
+            adapted_completion_count)) {
+        return false;
+    }
     return add(backend_count, sizeof(DeviceBackendSpec)) &&
            add(backend_name_bytes, 1) &&
+           add(adapted_v1_count, sizeof(DeviceV1CompatibilityAdapter)) &&
+           add(adapted_completion_count, sizeof(rtfw_device_completion)) &&
            add(backend_count, sizeof(std::uint8_t)) &&
            add(buffer_count, sizeof(DeviceBufferSpec)) &&
            add(buffer_count, sizeof(std::uint64_t)) &&
            add(outstanding_capacity, sizeof(Outstanding)) &&
-           add(completion_batch, sizeof(rtfw_device_completion));
+           add(completion_batch, sizeof(HalV2Completion));
 }
 
 Status DeviceManager::initialize_backends() noexcept {
@@ -162,9 +170,7 @@ Status DeviceManager::initialize_backends() noexcept {
          index < backends_.size();
          ++index) {
         auto& backend = backends_[index];
-        rtfw_device_init_config config{};
-        config.struct_size = sizeof(config);
-        config.abi_version = RTFW_DEVICE_ABI_VERSION;
+        HalV2InitializeConfig config;
         config.requested_in_flight = outstanding_capacity_;
         std::size_t buffer_count = 0;
         for (const auto& buffer : buffers_) {
@@ -172,16 +178,15 @@ Status DeviceManager::initialize_backends() noexcept {
         }
         config.requested_registered_buffers = buffer_count;
 
-        rtfw_device_status device_status =
-            RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        HalV2Status device_status = HalV2Status::internal_error;
         try {
             device_status = backend.api.initialize(
                 backend.api.instance,
                 &config);
         } catch (...) {
-            device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+            device_status = HalV2Status::internal_error;
         }
-        const auto status = device_status_to_runtime(device_status);
+        const auto status = hal_v2_status_to_runtime(device_status);
         if (status != Status::ok) {
             initialized_backends_[index] =
                 kBackendOwnershipInitializationUncertain;
@@ -195,27 +200,25 @@ Status DeviceManager::initialize_backends() noexcept {
     for (std::size_t index = 0; index < buffers_.size(); ++index) {
         const auto& buffer = buffers_[index];
         auto& backend = backends_[buffer.backend_index];
-        rtfw_device_buffer_registration registration{};
-        registration.struct_size = sizeof(registration);
+        HalV2BufferRegistration registration;
         registration.flags = buffer.flags;
         registration.data = buffer.storage.data();
         registration.bytes = buffer.storage.size();
         std::copy(
             buffer.name.begin(),
             buffer.name.end(),
-            std::begin(registration.name));
+            registration.name.begin());
 
-        rtfw_device_status device_status =
-            RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        HalV2Status device_status = HalV2Status::internal_error;
         try {
             device_status = backend.api.register_buffer(
                 backend.api.instance,
                 &registration,
                 &native_buffer_tokens_[index]);
         } catch (...) {
-            device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+            device_status = HalV2Status::internal_error;
         }
-        const auto status = device_status_to_runtime(device_status);
+        const auto status = hal_v2_status_to_runtime(device_status);
         if (status != Status::ok ||
             native_buffer_tokens_[index] == 0) {
             (void)shutdown_backends();
@@ -279,16 +282,15 @@ Status DeviceManager::shutdown_backends() noexcept {
             continue;
         }
         auto& backend = backends_[backend_index];
-        rtfw_device_status device_status =
-            RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        HalV2Status device_status = HalV2Status::internal_error;
         try {
             device_status = backend.api.unregister_buffer(
                 backend.api.instance,
                 token);
         } catch (...) {
-            device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+            device_status = HalV2Status::internal_error;
         }
-        const auto status = device_status_to_runtime(device_status);
+        const auto status = hal_v2_status_to_runtime(device_status);
         if (status == Status::ok) {
             native_buffer_tokens_[buffer_index] = 0;
         } else if (first_failure == Status::ok) {
@@ -304,19 +306,18 @@ Status DeviceManager::shutdown_backends() noexcept {
             continue;
         }
         auto& backend = backends_[backend_index];
-        rtfw_device_status device_status =
-            RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        HalV2Status device_status = HalV2Status::internal_error;
         try {
             device_status =
                 backend.api.shutdown(backend.api.instance);
         } catch (...) {
-            device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+            device_status = HalV2Status::internal_error;
         }
-        const auto status = device_status_to_runtime(device_status);
+        const auto status = hal_v2_status_to_runtime(device_status);
         if (status == Status::ok ||
             (ownership ==
                  kBackendOwnershipInitializationUncertain &&
-             device_status == RTFW_DEVICE_STATUS_INVALID_STATE)) {
+             device_status == HalV2Status::invalid_state)) {
             initialized_backends_[backend_index] =
                 kBackendOwnershipNone;
         } else if (first_failure == Status::ok) {
@@ -479,30 +480,43 @@ Status DeviceManager::submit(
         return Status::invalid_argument;
     }
 
-    auto submission = requested;
+    HalV2Submission submission;
+    submission.timeout_ns = requested.timeout_ns;
+    submission.opcode = requested.opcode;
+    submission.flags = requested.flags;
+    submission.payload_size = requested.payload_size;
+    submission.buffer_count = requested.buffer_count;
+    std::copy(
+        std::begin(requested.payload),
+        std::end(requested.payload),
+        submission.payload.begin());
     for (std::size_t index = 0;
-         index < submission.buffer_count;
+         index < requested.buffer_count;
          ++index) {
+        const auto& requested_reference = requested.buffers[index];
         auto& reference = submission.buffers[index];
-        const DeviceBufferHandle logical{reference.buffer_token};
+        const DeviceBufferHandle logical{requested_reference.buffer_token};
         if (!logical.valid() ||
             logical.owner() != owner_ ||
             logical.index() >= buffers_.size() ||
-            reference.reserved0 != 0 ||
-            !valid_access(reference.access)) {
+            requested_reference.reserved0 != 0 ||
+            !valid_access(requested_reference.access)) {
             return Status::invalid_handle;
         }
         const auto buffer_index =
             static_cast<std::size_t>(logical.index());
         const auto& buffer = buffers_[buffer_index];
         if (buffer.backend_index != backend_index ||
-            reference.offset > buffer.storage.size() ||
-            reference.bytes >
-                buffer.storage.size() - reference.offset) {
+            requested_reference.offset > buffer.storage.size() ||
+            requested_reference.bytes >
+                buffer.storage.size() - requested_reference.offset) {
             return Status::invalid_argument;
         }
         reference.buffer_token =
             native_buffer_tokens_[buffer_index];
+        reference.access = requested_reference.access;
+        reference.offset = requested_reference.offset;
+        reference.bytes = requested_reference.bytes;
     }
 
     auto* slot = acquire_outstanding();
@@ -528,16 +542,15 @@ Status DeviceManager::submit(
 
     submission.submission_id = submission_id;
     submission.frame_index = frame_index;
-    rtfw_device_status device_status =
-        RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+    HalV2Status device_status = HalV2Status::internal_error;
     try {
         device_status = backends_[backend_index].api.submit(
             backends_[backend_index].api.instance,
             &submission);
     } catch (...) {
-        device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        device_status = HalV2Status::internal_error;
     }
-    const auto status = device_status_to_runtime(device_status);
+    const auto status = hal_v2_status_to_runtime(device_status);
     if (status != Status::ok) {
         const auto previous = slot->state.exchange(
             kOutstandingFree,
@@ -611,12 +624,8 @@ void DeviceManager::emit(const DeviceEvent& event) noexcept {
 
 void DeviceManager::process_completion(
     std::size_t backend_index,
-    const rtfw_device_completion& completion) noexcept {
-    if (completion.struct_size < sizeof(completion) ||
-        completion.submission_id == 0 ||
-        !bytes_zero(
-            completion.reserved,
-            std::size(completion.reserved))) {
+    const HalV2Completion& completion) noexcept {
+    if (!validate_hal_v2_completion(completion)) {
         fail_backend_outstanding(
             backend_index,
             Status::device_error);
@@ -667,9 +676,10 @@ void DeviceManager::process_completion(
 void DeviceManager::finalize_completion(
     Outstanding& slot,
     std::size_t backend_index,
-    const rtfw_device_completion& completion) noexcept {
+    const HalV2Completion& completion) noexcept {
     const auto status =
-        device_status_to_runtime(completion.status);
+        hal_v2_status_to_runtime(
+            static_cast<HalV2Status>(completion.status));
     completions_.fetch_add(1, std::memory_order_relaxed);
     if (status != Status::ok) {
         record_failure(status);
@@ -699,9 +709,29 @@ void DeviceManager::fail_backend_outstanding(
          index < outstanding_capacity_;
          ++index) {
         auto& slot = outstanding_slots_[index];
-        if (slot.state.load(std::memory_order_acquire) !=
-                kOutstandingSubmitted ||
+        auto state = slot.state.load(std::memory_order_acquire);
+        if ((state != kOutstandingSubmitting &&
+             state != kOutstandingSubmitted) ||
             slot.backend_index != backend_index) {
+            continue;
+        }
+        if (state == kOutstandingSubmitting) {
+            HalV2Completion completion;
+            completion.status = static_cast<std::int32_t>(
+                runtime_status_to_hal(status));
+            completion.submission_id = slot.submission_id;
+            slot.early_completion = completion;
+            auto expected = kOutstandingSubmitting;
+            if (slot.state.compare_exchange_strong(
+                    expected,
+                    kOutstandingEarlyReady,
+                    std::memory_order_release,
+                    std::memory_order_relaxed)) {
+                continue;
+            }
+            state = expected;
+        }
+        if (state != kOutstandingSubmitted) {
             continue;
         }
         auto expected = kOutstandingSubmitted;
@@ -768,9 +798,15 @@ void DeviceManager::service_loop() noexcept {
         for (std::size_t backend_index = 0;
              backend_index < backends_.size();
              ++backend_index) {
+            std::fill_n(
+                completion_buffer_.get(),
+                completion_batch_,
+                HalV2Completion{});
+            for (std::size_t index = 0; index < completion_batch_; ++index) {
+                completion_buffer_[index].struct_size = 0;
+            }
             std::uint64_t count = 0;
-            rtfw_device_status device_status =
-                RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+            HalV2Status device_status = HalV2Status::internal_error;
             try {
                 device_status = backends_[backend_index].api.poll(
                     backends_[backend_index].api.instance,
@@ -778,11 +814,11 @@ void DeviceManager::service_loop() noexcept {
                     completion_batch_,
                     &count);
             } catch (...) {
-                device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+                device_status = HalV2Status::internal_error;
             }
             service_polls_.fetch_add(1, std::memory_order_relaxed);
             const auto status =
-                device_status_to_runtime(device_status);
+                hal_v2_status_to_runtime(device_status);
             if (status != Status::ok ||
                 count > completion_batch_) {
                 fail_backend_outstanding(
@@ -790,6 +826,53 @@ void DeviceManager::service_loop() noexcept {
                     status == Status::ok
                         ? Status::device_error
                         : status);
+                continue;
+            }
+            bool batch_valid = true;
+            for (std::size_t completion_index = 0;
+                 completion_index < static_cast<std::size_t>(count);
+                 ++completion_index) {
+                const auto& completion =
+                    completion_buffer_[completion_index];
+                if (!validate_hal_v2_completion(completion)) {
+                    batch_valid = false;
+                    break;
+                }
+                for (std::size_t prior = 0;
+                     prior < completion_index;
+                     ++prior) {
+                    if (completion_buffer_[prior].submission_id ==
+                        completion.submission_id) {
+                        batch_valid = false;
+                        break;
+                    }
+                }
+                bool matched = false;
+                for (std::size_t slot_index = 0;
+                     batch_valid && slot_index < outstanding_capacity_;
+                     ++slot_index) {
+                    const auto& slot = outstanding_slots_[slot_index];
+                    const auto slot_state =
+                        slot.state.load(std::memory_order_acquire);
+                    if ((slot_state == kOutstandingSubmitting ||
+                         slot_state == kOutstandingSubmitted) &&
+                        slot.backend_index == backend_index &&
+                        slot.submission_id == completion.submission_id) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    batch_valid = false;
+                }
+                if (!batch_valid) {
+                    break;
+                }
+            }
+            if (!batch_valid) {
+                fail_backend_outstanding(
+                    backend_index,
+                    Status::device_error);
                 continue;
             }
             for (std::size_t completion_index = 0;
@@ -817,26 +900,35 @@ Status DeviceManager::health(
         backend_index >= backends_.size()) {
         return Status::invalid_state;
     }
-    rtfw_device_status device_status =
-        RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+    HalV2Health hal_health;
+    hal_health.reserved0 = std::numeric_limits<std::uint32_t>::max();
+    HalV2Status device_status = HalV2Status::internal_error;
     try {
         device_status = backends_[backend_index].api.get_health(
             backends_[backend_index].api.instance,
-            &output);
+            &hal_health);
     } catch (...) {
-        device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        device_status = HalV2Status::internal_error;
     }
-    const auto status = device_status_to_runtime(device_status);
+    const auto status = hal_v2_status_to_runtime(device_status);
     if (status != Status::ok) {
         return status;
     }
-    if (output.struct_size < sizeof(output) ||
-        output.reserved0 != 0 ||
-        output.state > RTFW_DEVICE_HEALTH_LOST ||
-        !bytes_zero(output.reserved, std::size(output.reserved))) {
-        output = make_device_health();
+    if (!validate_hal_v2_health(hal_health)) {
         return Status::device_error;
     }
+    output.state = hal_health.state;
+    output.last_status = hal_health.last_status;
+    output.generation = hal_health.generation;
+    output.submissions = hal_health.submissions;
+    output.completions = hal_health.completions;
+    output.queue_rejections = hal_health.queue_rejections;
+    output.timeouts = hal_health.timeouts;
+    output.errors = hal_health.errors;
+    output.losses = hal_health.losses;
+    output.cancellations = hal_health.cancellations;
+    output.resets = hal_health.resets;
+    output.outstanding = hal_health.outstanding;
     return Status::ok;
 }
 
@@ -856,15 +948,14 @@ Status DeviceManager::reset(std::size_t backend_index) noexcept {
             return Status::invalid_state;
         }
     }
-    rtfw_device_status device_status =
-        RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+    HalV2Status device_status = HalV2Status::internal_error;
     try {
         device_status = backends_[backend_index].api.reset(
             backends_[backend_index].api.instance);
     } catch (...) {
-        device_status = RTFW_DEVICE_STATUS_INTERNAL_ERROR;
+        device_status = HalV2Status::internal_error;
     }
-    const auto status = device_status_to_runtime(device_status);
+    const auto status = hal_v2_status_to_runtime(device_status);
     if (status == Status::ok) {
         resets_.fetch_add(1, std::memory_order_relaxed);
         auto reset_event = DeviceEvent{

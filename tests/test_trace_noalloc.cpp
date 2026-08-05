@@ -767,6 +767,243 @@ rt::CallbackResult submit_noalloc_device_command(
     return rt::CallbackResult::ok;
 }
 
+struct NoAllocNativeHalV2Backend {
+    rt::HalV2BackendApi api() noexcept {
+        rt::HalV2BackendApi table;
+        table.instance = this;
+        table.get_capabilities = &get_capabilities;
+        table.initialize = &initialize;
+        table.register_buffer = &register_buffer;
+        table.unregister_buffer = &unregister_buffer;
+        table.submit = &submit;
+        table.poll = &poll;
+        table.cancel = &cancel;
+        table.get_health = &get_health;
+        table.reset = &reset;
+        table.shutdown = &shutdown;
+        return table;
+    }
+
+    static NoAllocNativeHalV2Backend* self(void* instance) noexcept {
+        return static_cast<NoAllocNativeHalV2Backend*>(instance);
+    }
+
+    static rt::HalV2Status get_capabilities(
+        void* instance,
+        rt::HalV2Capabilities* output) noexcept {
+        if (!self(instance) || !output ||
+            output->struct_size < sizeof(*output)) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        *output = {};
+        output->struct_size = sizeof(*output);
+        output->api_version = rt::hal_v2_api_version;
+        output->max_in_flight = 4;
+        output->max_registered_buffers = 1;
+        output->max_buffer_bytes = 4096;
+        output->inline_payload_capacity =
+            rt::hal_v2_inline_payload_capacity;
+        output->buffer_ref_capacity =
+            rt::hal_v2_buffer_ref_capacity;
+        output->supports_cancel = 1;
+        output->supports_reset = 1;
+        output->deterministic_mock = 1;
+        constexpr std::array identifier{
+            't', 'e', 's', 't', '.', 'n', 'a', 't', 'i', 'v', 'e',
+            '.', 'h', 'a', 'l', '.', 'v', '2'};
+        std::copy(
+            identifier.begin(),
+            identifier.end(),
+            output->backend_id.begin());
+        output->control_storage_bytes = sizeof(NoAllocNativeHalV2Backend);
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status initialize(
+        void* instance,
+        const rt::HalV2InitializeConfig* config) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !config ||
+            config->struct_size < sizeof(*config) ||
+            config->api_version != rt::hal_v2_api_version ||
+            config->requested_in_flight == 0 ||
+            config->requested_in_flight > 4 ||
+            config->requested_registered_buffers != 0 ||
+            !std::all_of(
+                config->reserved.begin(),
+                config->reserved.end(),
+                [](std::uint64_t value) { return value == 0; })) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        bool expected = false;
+        if (!backend->initialized.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            return rt::HalV2Status::invalid_state;
+        }
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status register_buffer(
+        void*,
+        const rt::HalV2BufferRegistration*,
+        std::uint64_t*) noexcept {
+        return rt::HalV2Status::unsupported;
+    }
+
+    static rt::HalV2Status unregister_buffer(
+        void*, std::uint64_t) noexcept {
+        return rt::HalV2Status::unsupported;
+    }
+
+    static rt::HalV2Status submit(
+        void* instance,
+        const rt::HalV2Submission* submission) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !submission ||
+            !backend->initialized.load(std::memory_order_acquire) ||
+            submission->struct_size < sizeof(*submission) ||
+            submission->api_version != rt::hal_v2_api_version ||
+            submission->submission_id == 0 ||
+            submission->timeout_ns == 0 ||
+            submission->flags != 0 ||
+            submission->payload_size != 0 ||
+            submission->buffer_count != 0 ||
+            !std::all_of(
+                submission->reserved.begin(),
+                submission->reserved.end(),
+                [](std::uint64_t value) { return value == 0; })) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        std::uint64_t expected = 0;
+        if (!backend->pending_submission.compare_exchange_strong(
+                expected,
+                submission->submission_id,
+                std::memory_order_release,
+                std::memory_order_relaxed)) {
+            backend->queue_rejections.fetch_add(
+                1, std::memory_order_relaxed);
+            return rt::HalV2Status::queue_full;
+        }
+        backend->submissions.fetch_add(1, std::memory_order_relaxed);
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status poll(
+        void* instance,
+        rt::HalV2Completion* output,
+        std::uint64_t output_capacity,
+        std::uint64_t* output_count) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !output_count ||
+            !backend->initialized.load(std::memory_order_acquire) ||
+            (output_capacity != 0 && !output)) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        *output_count = 0;
+        if (output_capacity == 0) {
+            return rt::HalV2Status::ok;
+        }
+        const auto submission_id = backend->pending_submission.exchange(
+            0, std::memory_order_acq_rel);
+        if (submission_id == 0) {
+            return rt::HalV2Status::ok;
+        }
+        output[0] = {};
+        output[0].struct_size = sizeof(output[0]);
+        output[0].status =
+            static_cast<std::int32_t>(rt::HalV2Status::ok);
+        output[0].submission_id = submission_id;
+        output[0].device_timestamp_ns = submission_id;
+        output[0].value = submission_id;
+        *output_count = 1;
+        backend->completions.fetch_add(1, std::memory_order_relaxed);
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status cancel(
+        void* instance, std::uint64_t submission_id) noexcept {
+        auto* backend = self(instance);
+        if (!backend || submission_id == 0 ||
+            !backend->initialized.load(std::memory_order_acquire)) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        auto expected = submission_id;
+        return backend->pending_submission.compare_exchange_strong(
+                   expected,
+                   0,
+                   std::memory_order_acq_rel,
+                   std::memory_order_relaxed)
+            ? rt::HalV2Status::ok
+            : rt::HalV2Status::invalid_argument;
+    }
+
+    static rt::HalV2Status get_health(
+        void* instance,
+        rt::HalV2Health* output) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !output ||
+            output->struct_size < sizeof(*output)) {
+            return rt::HalV2Status::invalid_argument;
+        }
+        *output = {};
+        output->struct_size = sizeof(*output);
+        output->state = static_cast<std::uint32_t>(
+            backend->initialized.load(std::memory_order_acquire)
+                ? rt::HalV2HealthState::healthy
+                : rt::HalV2HealthState::shutdown);
+        output->last_status =
+            static_cast<std::int32_t>(rt::HalV2Status::ok);
+        output->submissions =
+            backend->submissions.load(std::memory_order_acquire);
+        output->completions =
+            backend->completions.load(std::memory_order_acquire);
+        output->queue_rejections =
+            backend->queue_rejections.load(std::memory_order_acquire);
+        output->outstanding =
+            backend->pending_submission.load(std::memory_order_acquire) == 0
+                ? 0
+                : 1;
+        return rt::HalV2Status::ok;
+    }
+
+    static rt::HalV2Status reset(void* instance) noexcept {
+        auto* backend = self(instance);
+        if (!backend ||
+            !backend->initialized.load(std::memory_order_acquire)) {
+            return rt::HalV2Status::invalid_state;
+        }
+        return backend->pending_submission.load(
+                   std::memory_order_acquire) == 0
+            ? rt::HalV2Status::ok
+            : rt::HalV2Status::invalid_state;
+    }
+
+    static rt::HalV2Status shutdown(void* instance) noexcept {
+        auto* backend = self(instance);
+        if (!backend ||
+            backend->pending_submission.load(std::memory_order_acquire) != 0) {
+            return rt::HalV2Status::invalid_state;
+        }
+        bool expected = true;
+        return backend->initialized.compare_exchange_strong(
+                   expected,
+                   false,
+                   std::memory_order_acq_rel,
+                   std::memory_order_relaxed)
+            ? rt::HalV2Status::ok
+            : rt::HalV2Status::invalid_state;
+    }
+
+    std::atomic<bool> initialized{false};
+    std::atomic<std::uint64_t> pending_submission{0};
+    std::atomic<std::uint64_t> submissions{0};
+    std::atomic<std::uint64_t> completions{0};
+    std::atomic<std::uint64_t> queue_rejections{0};
+};
+
 } // namespace
 
 void run_complete_device_frames_noalloc(
@@ -859,6 +1096,64 @@ TEST(TraceNoAlloc, ProviderBackedCompleteDeviceFramesDoNotAllocate) {
 
 TEST(TraceNoAlloc, RatePlanCompleteDeviceFramesDoNotAllocate) {
     run_complete_device_frames_noalloc(false, true);
+}
+
+TEST(TraceNoAlloc, NativeHalV2FramesAndStopDoNotAllocateAfterStart) {
+    NoAllocNativeHalV2Backend backend;
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 1;
+    config.trace_capacity = 256;
+    config.executor_queue_capacity = 8;
+    config.task_scratch_slots = 8;
+    config.device_backend_capacity = 1;
+    config.device_buffer_capacity = 1;
+    config.device_outstanding_capacity = 4;
+    config.device_completion_batch = 4;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+
+    rt::DeviceBackendHandle backend_handle;
+    ASSERT_EQ(
+        runtime.register_device_backend(
+            rt::HalV2BackendRegistration{
+                "native.noalloc", backend.api()},
+            backend_handle),
+        rt::Status::ok);
+    rt::PhaseHandle phase;
+    ASSERT_EQ(
+        runtime.register_device_phase(
+            {
+                "native.noalloc.phase",
+                backend_handle,
+                &submit_noalloc_device_command,
+                nullptr,
+            },
+            phase),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    bool complete = true;
+    {
+        AllocationGuard guard;
+        for (std::uint64_t frame = 0; complete && frame < 64; ++frame) {
+            complete = runtime.step({
+                           frame,
+                           std::chrono::nanoseconds(1),
+                           std::nullopt,
+                       }) == rt::Status::ok;
+        }
+        complete = runtime.stop() == rt::Status::ok && complete;
+    }
+
+    EXPECT_TRUE(complete);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_FALSE(backend.initialized.load(std::memory_order_acquire));
+    EXPECT_EQ(backend.submissions.load(std::memory_order_acquire), 64u);
+    EXPECT_EQ(backend.completions.load(std::memory_order_acquire), 64u);
+    EXPECT_EQ(
+        backend.queue_rejections.load(std::memory_order_acquire),
+        0u);
 }
 
 namespace {

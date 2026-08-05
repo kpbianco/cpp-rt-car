@@ -26,9 +26,8 @@ versioned observability/replay, and asynchronous device integration.
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
-| Rate-domain reference plan | M16-01 implemented; external gates pending | Existing C++ SDK headers expose bounded instance-owned domains and phase bindings plus exact checked `[0, lcm)` inspection; reference-only frames retain complete-graph dispatch |
-| Cross-rate data contract | M16-02 implemented; external gates pending | Existing C++ SDK headers expose copied CPU-only channels, exact first/repeating sample-and-hold and freshness selections, and bounded SPSC stores used only by opt-in active plans |
-| Active rate admission and optional recovery | M16-04 implemented; external gates pending | Mandatory-only D0 CPU admission, bounded optional execution, deterministic shedding/recovery, exact-generation transfer, canonical policy state, and separate versioned rate-action telemetry |
+| Multi-rate simulation | M16 complete in merged history | Bounded domains/reference order, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
+| HAL v2 core and device ABI v1 compatibility | M17-01 implemented locally; external gates pending | The installed C++ device header adds HAL API v2 records/table and a native registration overload; all unchanged v1 backends traverse one complete runtime-owned adapter into the canonical manager |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -234,6 +233,18 @@ order, and exposes a separate fixed-capacity versioned rate-action stream with
 explicit loss and runtime-bound cursors. Active D1/action replay remains
 unsupported.
 
+M16 is complete in merged target history. M17-01 adds a distinct C++ HAL API
+version 2 core table to the existing installed device header. Native v2 tables
+and exactly-once, address-stable adapters around device-ABI-v1 tables enter one
+canonical manager path. The adapter preserves all shared capability,
+submission, buffer, completion, health, status, and cleanup fields; malformed
+outputs and exceptions fail closed. Adapted v1 retains legacy graph/replay
+identity, while native v2 includes a kind/API marker. Adapter storage is
+counted once in device control without changing the six-row MemoryPlan. See the
+[HAL v2 contract](docs/hal_v2.md). M17 remains incomplete; heterogeneous
+memory, command batches/timelines, vendor controls, isolated submission lanes,
+combined execution, and physical qualification belong to later batches.
+
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
 uses local queues and bounded steals; `host_adapter` borrows a declared engine
@@ -297,8 +308,9 @@ cross-category cleanup. M15 is complete at the audited baseline. M16-01 adds
 the bounded rate-domain/reference-plan boundary and M16-02 adds deterministic
 cross-rate selection/storage. M16-03 adds opt-in admission, CPU dispatch,
 transfer, and late-frame policy. M16-04 adds optional shedding/recovery and
-versioned telemetry; M16 and CAP-M16 remain incomplete pending its mandatory CI
-and human gates. The
+versioned telemetry; M16 is complete in merged target history. M17-01 adds the
+HAL v2 core and complete device-ABI-v1 compatibility path without promoting
+later M17 or M18 capabilities. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.
 
@@ -326,7 +338,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M14 portable runtime, the 1.2.1 lifecycle-safety closure, M15 CPU/thread policy and selected resident regions, the M16-01 rate reference compiler, and the M9 CUDA/M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M16 portable runtime, the 1.2.1 lifecycle-safety closure, M15 CPU/thread policy and selected resident regions, M17-01 HAL v2 core/v1 compatibility, and the M9 CUDA/M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |
