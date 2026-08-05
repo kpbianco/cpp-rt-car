@@ -35,13 +35,15 @@ resident-memory rollback.
 
 Reference-only M16-01/M16-02 plans do not enter executor queues and continue to
 receive every dependency-ready phase once per host or periodic frame. For an
-opt-in M16-03 active plan, the host dispatcher submits one selected CPU phase
+opt-in active plan, the host dispatcher submits one selected CPU phase
 record at a time through the same worker or host-adapter boundary. Selected
 runs do not release graph successors; finalization therefore permits ordinary
 dependencies only within a rate domain, and domain records already follow the
 compiled graph order. Nested range/reduction work retains the configured
 executor policy and its existing queue, scratch, helping, and cancellation
-rules. No second pool, helper lane, inline spill, or retry loop is introduced.
+rules. Optional shed releases never enter the executor or invoke callbacks;
+mandatory releases are never shed. No second pool, helper lane, inline spill,
+or retry loop is introduced.
 
 The positive policy cap bounds executed reference records per step. Callback
 failure, missing/duplicate publication, finite generation exhaustion, or a
@@ -191,6 +193,7 @@ best-effort destruction.
   `tests/test_memory_policy.cpp`;
 - graph/reference and allocation regression tests:
   `tests/test_compiled_graph.cpp`, `tests/test_rate_dispatch.cpp`,
+  `tests/test_rate_telemetry.cpp`,
   `tests/test_trace_noalloc.cpp`;
 - dynamic C ABI coverage: `tests/test_cabi_dlopen.c`;
 - sanitizer configuration: `.github/workflows/ci.yml`.

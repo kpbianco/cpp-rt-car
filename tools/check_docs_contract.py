@@ -293,6 +293,10 @@ def check_runtime_contract() -> None:
     rate_dispatch_header = read("rt/src/rate_dispatch.hpp")
     rate_dispatch_source = read("rt/src/rate_dispatch.cpp")
     rate_dispatch_test = read("tests/test_rate_dispatch.cpp")
+    rate_telemetry_header = read("rt/src/rate_telemetry.hpp")
+    rate_telemetry_source = read("rt/src/rate_telemetry.cpp")
+    rate_telemetry_test = read("tests/test_rate_telemetry.cpp")
+    rate_telemetry_doc = read("docs/rate_telemetry.md")
     executor_doc = read("docs/executor.md")
     memory_doc = read("docs/memory_plan.md")
     cpu_memory_policy_doc = read("docs/cpu_memory_policy.md")
@@ -1355,6 +1359,97 @@ def check_runtime_contract() -> None:
         if phrase not in normalized_dispatch_docs:
             fail(f"M16-03 component contracts are missing phrase {phrase!r}")
 
+    # M16-04 gates also assert permanent owned behavior rather than the moving
+    # milestone frontier.
+    for token in (
+        "rate_action_schema_version = 1",
+        "rate_action_counter_count = 20",
+        "host_policy_version = 1",
+        "consecutive_late_threshold = 1",
+        "consecutive_on_time_threshold = 1",
+        "struct RateActionRecord",
+        "static_assert(sizeof(RateActionRecord) == 160)",
+        "struct RateTelemetryCursor",
+        "rate_telemetry_metadata(",
+        "rate_counters_snapshot(",
+        "read_rate_actions(",
+    ):
+        if token not in runtime_header:
+            fail(f"public SDK headers: missing permanent M16-04 token {token!r}")
+    for token in (
+        "class RateTelemetryRing",
+        "class RateCounters",
+        "std::memory_order_release",
+        "std::memory_order_acquire",
+    ):
+        if token not in rate_telemetry_header and token not in rate_telemetry_source:
+            fail(f"rate-action telemetry is missing {token!r}")
+    for token in (
+        "active_shedding_state",
+        "RateActionId::optional_shed",
+        "RateTransitionId::recover",
+        "kRateOptionalStateMagic",
+        "rate_shedding_state_bytes",
+        "rate_telemetry_storage_bytes",
+    ):
+        if token not in runtime_source and token not in runtime_header:
+            fail(f"M16-04 runtime integration is missing {token!r}")
+    for test_name in (
+        "NumericSchemaAndCounterTablesAreExact",
+        "ConcurrentPublishAndReadRemainBoundedAndRaceFree",
+        "InspectionRejectsAnActiveStep",
+        "RuntimeBoundCursorsRejectForeignInstancesTransactionally",
+        "RateTelemetrySummaryAndInspectionBoundaryAreExact",
+        "ThresholdTransitionIsImmediateAndRecoveryIsReverse",
+        "ZeroCapacityAndOverwriteReportExactCursorGaps",
+        "OptionalOrderIsCriticalityThenReverseRegistration",
+        "StreakResetAndOptionalLatenessNeverDriveTransitions",
+        "TerminalFailPreventsPolicyTransition",
+        "LargeLateWindowAggregatesAfterBoundedTransitions",
+        "LargeOptionalLatePrefixAggregatesBeforeShedThreshold",
+        "PolicyAndOptionalChannelValidationAreTransactional",
+        "CheckpointRoundTripRestoresStreakAndShedState",
+        "RateTelemetryIsInsideRuntimeControlExactlyOnce",
+    ):
+        if test_name not in rate_telemetry_test:
+            fail(
+                "tests/test_rate_telemetry.cpp: missing permanent "
+                f"M16-04 gate {test_name!r}"
+            )
+    if "RateTelemetryShedRecoverInspectAndStopDoNotAllocate" not in noalloc_test:
+        fail("tests/test_trace_noalloc.cpp: missing M16-04 allocation gate")
+    for token in (
+        "rt/src/rate_telemetry.cpp",
+        "test_rate_telemetry.cpp",
+        "m16_shedding_telemetry",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"M16-04 CMake integration is missing {token!r}")
+    for token in ("RateShedding.*", "RateTelemetry.*", "m16_shedding_telemetry"):
+        if token not in ci_workflow:
+            fail(f"M16-04 TSan/CI coverage is missing {token!r}")
+    for token in ("RateActionRecord", "rate_action_schema_version"):
+        if token not in package_cpp_consumer:
+            fail(f"preferred package consumer is missing M16-04 token {token!r}")
+    if "pre_m16_04_rate_execution" not in package_compat_consumer:
+        fail("compatibility package consumer is missing the pre-M16-04 prefix gate")
+    normalized_m16_04_docs = " ".join(
+        (graph_doc + " " + host_doc + " " + executor_doc + " " +
+         memory_doc + " " + time_doc + " " + observability_doc + " " +
+         determinism_doc + " " + rate_telemetry_doc).lower().split()
+    )
+    for phrase in (
+        "mandatory-only admission",
+        "reverse registration",
+        "fixed 160-byte",
+        "zero telemetry capacity",
+        "global observability remains schema 2",
+        "not checkpointed",
+        "six-row",
+    ):
+        if phrase not in normalized_m16_04_docs:
+            fail(f"M16-04 component contracts are missing phrase {phrase!r}")
+
     for token in (
         "Runtime::run_periodic(",
         "clock_sleep_until(",
@@ -2210,6 +2305,7 @@ def main() -> int:
             "docs/cpu_memory_policy.md",
             "docs/time_platform.md",
             "docs/observability.md",
+            "docs/rate_telemetry.md",
             "docs/determinism_replay.md",
             "docs/device_backend.md",
             "docs/cuda_backend.md",
@@ -2245,6 +2341,8 @@ def main() -> int:
             "rt/src/compiled_graph.cpp",
             "rt/src/rate_dispatch.hpp",
             "rt/src/rate_dispatch.cpp",
+            "rt/src/rate_telemetry.hpp",
+            "rt/src/rate_telemetry.cpp",
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
             "rt/src/host_runtime.cpp",
@@ -2277,6 +2375,7 @@ def main() -> int:
             "samples/xdma_qualification.cpp",
             "tests/test_host_runtime.cpp",
             "tests/test_rate_dispatch.cpp",
+            "tests/test_rate_telemetry.cpp",
             "tests/test_compiled_graph.cpp",
             "tests/test_executor.cpp",
             "tests/test_memory_plan.cpp",

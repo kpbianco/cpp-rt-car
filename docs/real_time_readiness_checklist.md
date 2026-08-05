@@ -46,6 +46,11 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   functional summaries, canonical checkpoint state, active replay rejection,
   allocation instrumentation, and ThreadSanitizer coverage. These are portable
   RT0 functional gates, not measured WCET, latency, HIL, field, RT1, or RT2.
+- [x] M16-04 adds mandatory-driven bounded optional shedding/recovery,
+  transactional policy checkpoint state, a separate fixed-capacity versioned
+  rate-action ring with exact loss/cursors/counters, accounting reconciliation,
+  allocation instrumentation, and synthetic concurrency coverage. Mandatory CI
+  and human review remain completion gates.
 - [ ] A named deployment independently verifies requested memory locking,
   NUMA/huge-page outcomes, residency under load, and worst-case behavior;
   M15 provider/declaration injection, `mlock`, `mincore`, preflight, and hosted CI do not
@@ -88,9 +93,9 @@ runtime-stack observation. Declarations are trusted metadata, not independent
 observation. None of this changes any unchecked deployment gate above.
 Provider-backed checked stop releases trace backing, so post-stop trace export
 must occur before that cleanup or be treated as unavailable.
-M16-03 declared-budget admission and fake-clock late/catch-up results are not
-measured WCET, latency, RT1, or RT2 evidence. Optional shedding/recovery and
-versioned policy telemetry remain unchecked M16-04 gates.
+M16 declared-budget admission and fake-clock late/catch-up/shedding/recovery
+results are not measured WCET, latency, RT1, or RT2 evidence. The M16-04
+mandatory CI and human review gates remain unchecked in this worktree.
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its

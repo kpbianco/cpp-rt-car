@@ -38,6 +38,9 @@ struct CompiledRateDispatchPlan {
     std::vector<std::size_t> domain_group_indices;
     std::array<std::size_t, rate_domain_capacity>
         records_per_domain_release{};
+    // Lower criticality first, then later registration. Recovery traverses
+    // this immutable list in reverse.
+    std::vector<std::size_t> optional_shed_order;
 };
 
 struct RateDispatchDiagnostic {

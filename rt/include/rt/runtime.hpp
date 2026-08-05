@@ -49,6 +49,12 @@ core::seconds tick_duration(core::seconds dt) noexcept;
 
 inline constexpr std::uint32_t observability_schema_version = 2;
 inline constexpr std::uint32_t observability_metadata_size = 184;
+inline constexpr std::uint32_t rate_action_schema_version = 1;
+inline constexpr std::size_t rate_action_counter_count = 20;
+inline constexpr std::size_t rate_telemetry_capacity_limit =
+    reference_release_capacity;
+inline constexpr std::uint32_t rate_policy_threshold_limit =
+    static_cast<std::uint32_t>(reference_release_capacity);
 inline constexpr std::uint32_t checkpoint_schema_version = 1;
 inline constexpr std::uint32_t input_log_schema_version = 1;
 inline constexpr std::size_t replay_identifier_capacity =
@@ -528,6 +534,14 @@ struct StepResult {
         RateDomainHandle first_failing_domain{};
         std::uint64_t first_failing_sequence = 0;
         std::uint32_t first_failing_substep = 0;
+        // M16-04 append-only optional-work and policy summary.
+        std::uint64_t optional_due_domain_releases = 0;
+        std::uint64_t optional_executed_domain_releases = 0;
+        std::uint64_t shed_domain_releases = 0;
+        std::uint64_t shed_transitions = 0;
+        std::uint64_t recovery_transitions = 0;
+        std::uint64_t currently_shed_domains = 0;
+        std::uint64_t rate_policy_version = 0;
     } rate{};
 };
 
@@ -591,6 +605,145 @@ struct StaticPhaseAssignment {
 // enables dispatch; the maximum is a strict per-step callback-record bound.
 struct RateExecutionPolicy {
     std::size_t maximum_dispatch_records_per_step = 0;
+    // M16-04 append-only tail. These defaults retain valid M16-03 aggregate
+    // construction while supplying a versioned bounded policy.
+    std::uint64_t host_policy_version = 1;
+    std::uint32_t consecutive_late_threshold = 1;
+    std::uint32_t consecutive_on_time_threshold = 1;
+    std::size_t rate_telemetry_capacity = 0;
+};
+
+enum class RateActionId : std::uint8_t {
+    execute_on_time = 0,
+    execute_catch_up = 1,
+    skip = 2,
+    hold = 3,
+    execute_degraded = 4,
+    fail = 5,
+    optional_shed = 6,
+};
+
+enum class RateTransitionId : std::uint8_t {
+    none = 0,
+    shed = 1,
+    recover = 2,
+};
+
+enum class RateActionReason : std::uint8_t {
+    on_time = 0,
+    deadline_late = 1,
+    already_shed = 2,
+    late_threshold = 3,
+    on_time_threshold = 4,
+    callback_failure = 5,
+    dispatch_capacity = 6,
+    arithmetic_failure = 7,
+};
+
+enum class RateCounterId : std::uint8_t {
+    due_domain_releases = 0,
+    executed_reference_records = 1,
+    late_domain_releases = 2,
+    caught_up_domain_releases = 3,
+    skipped_domain_releases = 4,
+    held_domain_releases = 5,
+    degraded_domain_releases = 6,
+    failed_domain_releases = 7,
+    optional_due_domain_releases = 8,
+    optional_executed_domain_releases = 9,
+    shed_domain_releases = 10,
+    shed_transitions = 11,
+    recovery_transitions = 12,
+    records_emitted = 13,
+    records_overwritten = 14,
+    records_dropped = 15,
+    currently_shed_domains = 16,
+    policy_version = 17,
+    rejected_reference_records = 18,
+    stale_reads = 19,
+};
+
+enum class RateCounterKind : std::uint8_t {
+    counter,
+    gauge,
+};
+
+struct RateCounterDefinition {
+    RateCounterId id = RateCounterId::due_domain_releases;
+    RateCounterKind kind = RateCounterKind::counter;
+    std::string_view name{};
+};
+
+[[nodiscard]] bool rate_counter_definition(
+    std::size_t schema_index,
+    RateCounterDefinition& definition) noexcept;
+
+// Fixed schema-1 action/range record. A range advances release sequence and
+// logical/nominal release by release_period_ns for each covered release.
+struct RateActionRecord {
+    std::uint32_t schema_version = rate_action_schema_version;
+    std::uint32_t record_size = sizeof(RateActionRecord);
+    std::uint64_t sequence = 0;
+    std::uint64_t host_policy_version = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t frame_index = 0;
+    std::uint64_t first_domain_release_sequence = 0;
+    std::uint64_t logical_release_ns = 0;
+    std::uint64_t nominal_release_ns = 0;
+    std::uint64_t release_period_ns = 0;
+    std::uint64_t release_count = 0;
+    std::uint64_t reference_record_count = 0;
+    std::uint64_t shed_state_before = 0;
+    std::uint64_t shed_state_after = 0;
+    std::uint32_t domain_registration_index = 0;
+    std::uint32_t transition_domain_registration_index =
+        std::numeric_limits<std::uint32_t>::max();
+    RateActionId action = RateActionId::execute_on_time;
+    RateTransitionId transition = RateTransitionId::none;
+    RateActionReason reason = RateActionReason::on_time;
+    bool optional = false;
+    bool late = false;
+    std::array<std::uint8_t, 3> reserved0{};
+    std::int32_t status = static_cast<std::int32_t>(Status::ok);
+    std::uint32_t degradation_level = 0;
+    std::array<std::byte, 32> reserved1{};
+};
+
+static_assert(sizeof(RateActionRecord) == 160);
+
+struct RateTelemetryMetadata {
+    std::uint32_t schema_version = rate_action_schema_version;
+    std::uint32_t record_size = sizeof(RateActionRecord);
+    std::uint32_t counter_count = rate_action_counter_count;
+    std::uint32_t reserved0 = 0;
+    std::uint64_t host_policy_version = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t capacity = 0;
+    std::uint64_t next_sequence = 0;
+    std::uint64_t records_emitted = 0;
+    std::uint64_t records_overwritten = 0;
+    std::uint64_t records_dropped = 0;
+};
+
+struct RateTelemetryCursor {
+    std::uint32_t schema_version = rate_action_schema_version;
+    std::uint32_t reserved0 = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t next_sequence = 0;
+};
+
+struct RateTelemetryReadResult {
+    RateTelemetryMetadata metadata{};
+    std::uint64_t first_sequence = 0;
+    std::uint64_t next_sequence = 0;
+    std::size_t records_read = 0;
+    std::uint64_t lost_records = 0;
+    std::uint64_t remaining_sequence_count = 0;
+};
+
+struct RateCounterSnapshot {
+    RateTelemetryMetadata metadata{};
+    std::array<std::uint64_t, rate_action_counter_count> values{};
 };
 
 // M16-01 rate metadata is an additive C++ source API. Periods, deadlines, and
@@ -798,6 +951,13 @@ struct MemoryPlan {
     // subcomponent of rate_plan_bytes and runtime_control_bytes.
     std::size_t rate_dispatch_state_bytes = 0;
     std::size_t rate_checkpoint_state_bytes = 0;
+    // M16-04 storage remains inside rate_plan_bytes/runtime_control_bytes.
+    std::size_t optional_rate_domain_count = 0;
+    std::size_t rate_shedding_state_bytes = 0;
+    std::size_t rate_telemetry_capacity = 0;
+    std::size_t rate_telemetry_slot_bytes = 0;
+    std::size_t rate_telemetry_storage_bytes = 0;
+    std::size_t rate_telemetry_counter_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
@@ -1322,6 +1482,14 @@ public:
         RuntimeTraceCursor& cursor,
         std::span<RuntimeTraceEvent> output,
         RuntimeTraceReadResult& result) noexcept;
+    [[nodiscard]] Status rate_telemetry_metadata(
+        RateTelemetryMetadata& metadata) noexcept;
+    [[nodiscard]] Status rate_counters_snapshot(
+        RateCounterSnapshot& snapshot) noexcept;
+    [[nodiscard]] Status read_rate_actions(
+        RateTelemetryCursor& cursor,
+        std::span<RateActionRecord> output,
+        RateTelemetryReadResult& result) noexcept;
 
     // Checkpoint and replay calls are non-RT host operations. Buffers are
     // caller-owned, and their maximum accepted sizes are frozen by

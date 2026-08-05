@@ -1,13 +1,14 @@
 schema_version: 1
 batch:
-  id: M16-03
-  title: Add admission and late-frame policy
-  goal: Activate an opt-in bounded CPU-only rate dispatcher over the exact M16-01/M16-02 plans, reject declared-budget-infeasible mandatory schedules before start, execute cross-rate transfers through the preallocated exact-generation stores, and apply explicit skip, bounded-catch-up, hold, degrade, or fail actions without unbounded backlog, hidden work, optional-work shedding, or telemetry-schema changes.
+  id: M16-04
+  title: Add shedding recovery and versioned telemetry
+  goal: Close M16 by admitting opt-in CPU-only optional domains beside the already admitted mandatory schedule, applying deterministic bounded shedding and hysteretic recovery from exact mandatory-release lateness decisions, and retaining a separate fixed-capacity versioned rate-action trace and counter stream without changing stable C ABI v8, global observability schema 2, or checkpoint/input-log codecs.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
     - products/cpp-rt-car/PRD.md#cap-m16--multi-rate-simulation
     - products/cpp-rt-car/acceptance.yaml#CAP-M16
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-16
   milestone: products/cpp-rt-car/roadmap.yaml#M16
   target_contracts:
     - docs/product_contract.md
@@ -18,6 +19,7 @@ sources:
     - docs/executor.md
     - docs/time_platform.md
     - docs/memory_plan.md
+    - docs/observability.md
     - docs/determinism_replay.md
     - docs/testing_ci.md
     - docs/c_abi.md
@@ -29,12 +31,13 @@ sources:
     - docs/evidence/M15-04-2026-08-05.md
     - docs/evidence/M16-01-2026-08-05.md
     - docs/evidence/M16-02-2026-08-05.md
-  baseline_commit: 34f0752596d84ef1f98a8a0d544861bda4935f3f
+    - docs/evidence/M16-03-2026-08-05.md
+  baseline_commit: 9c350ab5b66e37e90aef7e96939c71df04101b27
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M16-03.yaml
-  control_plane_revision: 1d6c1879262a8f1abda54ac02776be1e12424b0c  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M16-04.yaml
+  control_plane_revision: 92abc5d737b95133a4dd9e68170f29cf55d26371  # pragma: allowlist secret
 dependencies:
-  - M16-02
+  - M16-03
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -47,22 +50,20 @@ scope:
     - rt/src/rate_dispatch.hpp
     - rt/src/rate_timeline.cpp
     - rt/src/rate_timeline.hpp
-    - rt/src/cross_rate_data.cpp
-    - rt/src/cross_rate_data.hpp
-    - rt/src/executor.cpp
-    - rt/src/executor.hpp
+    - rt/src/rate_telemetry.cpp
+    - rt/src/rate_telemetry.hpp
     - rt/src/host_runtime.cpp
     - rt/src/resource_policy.cpp
     - rt/src/resource_policy.hpp
     - tests/test_rate_dispatch.cpp
+    - tests/test_rate_telemetry.cpp
     - tests/test_rate_timeline.cpp
     - tests/test_cross_rate_data.cpp
-    - tests/test_compiled_graph.cpp
     - tests/test_host_runtime.cpp
     - tests/test_periodic_runtime.cpp
-    - tests/test_executor.cpp
     - tests/test_memory_plan.cpp
     - tests/test_determinism_replay.cpp
+    - tests/test_observability.cpp
     - tests/test_trace_noalloc.cpp
     - tests/package_consumer/cpp_consumer.cpp
     - tests/package_consumer/compat_consumer.cpp
@@ -80,10 +81,12 @@ scope:
     - docs/executor.md
     - docs/time_platform.md
     - docs/memory_plan.md
+    - docs/observability.md
+    - docs/rate_telemetry.md
     - docs/determinism_replay.md
     - docs/testing_ci.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M16-03-*.md
+    - docs/evidence/M16-04-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -93,18 +96,17 @@ scope:
     - abi/rtfw_c_abi_v8.sha256
     - rt/include/rt/c_api.h
     - rt/include/rt/device_abi.h
-    - rt/include/rt/status.hpp
     - src/c_abi.cpp
     - core/include/core/config.hpp
     - core/include/core/config_hot_reload.hpp
     - configs/*.json
     - rt/include/rt/profile.hpp
     - rt/src/runtime_profile.cpp
-    - rt/src/snapshot_codec.cpp
-    - rt/src/snapshot_codec.hpp
     - rt/src/telemetry.cpp
     - rt/src/telemetry.hpp
     - rt/src/observability_export.cpp
+    - rt/src/snapshot_codec.cpp
+    - rt/src/snapshot_codec.hpp
     - rt/src/device_manager.cpp
     - rt/src/device_manager.hpp
     - rt/src/mock_device.cpp
@@ -123,6 +125,7 @@ scope:
     - docs/evidence/M15-04-2026-08-05.md
     - docs/evidence/M16-01-2026-08-05.md
     - docs/evidence/M16-02-2026-08-05.md
+    - docs/evidence/M16-03-2026-08-05.md
     - .github/workflows/cuda-qualification.yml
     - .github/workflows/xdma-qualification.yml
     - .github/workflows/release.yml
@@ -138,93 +141,89 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The existing reference-only behavior remains the default. An additive configuring-only C++ rate-execution policy explicitly enables active dispatch, bounds total executed reference records per step, and appends source-compatible late-policy fields to rate-domain declarations; pre-M16-03 aggregate initialization and an explicit M16-01/M16-02 plan without the execution policy retain exact complete-graph once-per-frame dispatch and identity.
-  - Active finalization accepts only CPU phases, mandatory domains, positive budget/WCET and relative-deadline values, relative deadlines no greater than their periods, same-domain graph dependencies, and D0 unspecified determinism. Device phases remain reference-only, cross-domain graph dependencies must use declared M16-02 channels, optional-domain shedding/recovery remains M16-04, and active D1 plus active input-log replay are rejected explicitly rather than silently weakened.
-  - Admission simulates every mandatory reference record across one complete supercycle in the existing total order on one conservative serialized release lane. For each record, declared finish is max(previous declared finish, release time) plus its checked positive budget; finalization rejects any finish after that record's checked deadline, any non-idle supercycle boundary, arithmetic/capacity overflow, or a zero/ambiguous input before provider, native-policy, thread, device, callback, or snapshot side effects. Worker count or incidental graph parallelism never multiplies admitted capacity, and admission is labeled a declared-budget screen rather than measured WCET or deadline proof.
-  - Active host-driven steps use a copied optional nominal release timestamp appended to HostFrameContext. The first step establishes the wall-clock mapping for logical epoch zero; later calls must match the checked contiguous logical cursor and nominal release mapping. Each step covers the half-open logical interval [cursor, cursor + delta), while run_periodic supplies its existing absolute release as the nominal timestamp. Host-driven execution never sleeps, periodic releases never shift, and zero/overflow/noncontiguous active windows fail before callback dispatch.
-  - Due work repeats the exact immutable reference vector by checked supercycle arithmetic and executes equal-time domain releases by domain registration order, then compiled phase order, then substep ordinal. One domain release is the atomic late-decision unit; its phase/substep records execute serially through the existing executor boundary, while nested work retains the selected executor policy. The dispatcher neither creates another worker pool nor invokes experimental SimCore, scheduler, fiber, or plugin paths.
-  - Before a domain release begins, the runtime compares its checked absolute deadline with the injected/runtime clock and applies exactly its configured action. skip consumes the release without callbacks and is rejected at finalization for a domain that produces a cross-rate channel; bounded_catch_up executes at most its positive per-step cap and returns capacity_exceeded with exact rejected counts when the cap is exhausted; hold consumes the release without callbacks and explicitly aliases each outgoing channel to its last committed or initial sample; degrade increments the existing capped degradation level once and executes the release with that committed level; fail executes none of that release or later work, reports the exact release, and gates further steps until checked stop. No action retries without a bound, grows backlog, substitutes a newer sample, or silently omits a mandatory release.
-  - A global positive maximum-dispatch count is checked before and during each step. Large deltas and many elapsed supercycles are counted with checked arithmetic and handled by aggregate skip/hold/fail decisions without iterating once per omitted cycle; any work that would exceed the configured callback bound returns a typed existing status and exact StepResult counts, advances no ambiguous partial cursor, and cannot spill, allocate, block, or create a helper lane.
-  - CallbackContext gains an additive nullable rate-release view only during active CPU rate callbacks. It exposes the exact domain, phase, supercycle cycle, domain release sequence, substep, logical/nominal release, deadline, declared budget, late action, and degradation level. A producer must publish one exact-size payload for every outgoing channel before returning success; a consumer may copy only its compiled initial, produced, or explicit-hold generation and receives distinct provenance, age, held, fresh/stale, not-ready, and size results. Missing or duplicate publication fails the release, and no read searches for or silently substitutes a different generation.
-  - Active publication/copy uses the existing two-slot exact-generation SPSC stores with bounded single-attempt ownership and complete-before-visible ordering. Runtime control at release boundaries retires a generation only after its last compiled consumer lifetime or explicit skipped/held disposition, handles supercycle wrap without generation collision, and fails closed at finite generation exhaustion. Two runtimes share no cursor, epoch, alias, payload, action, or fault state, and the complete active path is covered by ThreadSanitizer.
-  - StepResult and periodic result tails expose bounded C++ summaries for due, executed, on-time, late, caught-up, skipped, held, degraded, rejected, stale, and failed releases plus the first failing domain/sequence/substep. These are functional return records, not observability schema 3. Existing trace IDs 1-14, metric IDs 0-31, observability schema 2, and their meanings remain unchanged; versioned per-release telemetry, optional-work shedding, recovery, and policy-version signals remain M16-04.
-  - The active dispatcher state is allocated only during finalization and counted once inside rate_plan_bytes, the M15 runtime-control logical extent, and the existing six-row MemoryPlan equation. It includes the logical cursor, epoch mapping, per-domain catch-up/action state, generation/alias state, and canonical committed channel payload bytes; step, publish, copy, skip, hold, catch-up, degrade, fail, result inspection, and stop perform no ordinary heap allocation or unbounded wait.
-  - Checkpoint schema 1 remains byte-compatible. For an active plan, the runtime contributes one bounded reserved canonical state record through the existing generic checkpoint record mechanism, hashes it into state/replay identity, and transactionally saves/restores the logical cursor, fault/action state, generation aliases, and committed channel bytes before rebuilding live stores. Reference-only and legacy checkpoints remain byte-for-byte unchanged. Because schema-1 input-log records cannot encode nominal releases or late actions, write_input_log and replay reject active rate execution in M16-03; they remain unchanged for legacy/reference-only plans, and action-log/replay evolution requires the M16-04 versioned-telemetry decision.
-  - Failed admission, state allocation, provider ordering, active-state restore, or corrected configuration publishes no partial execution plan or mutable store state. Callback failure or missing publication cancels later work using existing executor semantics; stop remains checked and retryable, clears no unresolved M14.1/M15 owner, and resets no externally borrowed state dishonestly.
-  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, runtime-profile schema 7 and its 25 keys, checkpoint/input-log schema numbers, default installed header/target inventory, compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. The C ABI cannot configure active rates and retains its exact legacy step/periodic behavior.
-  - Target governance, current-state, handoff, roadmap, component contracts, release digest ledger, and retained M16-03 evidence describe only portable RT0 functional admission/dispatch/late-policy results. No declared budget, fake clock, callback fixture, mock, hosted CI, preflight, or documentation is physical hardware, HIL, field, worst-case latency, RT1, RT2, signing, release, deployment, or production evidence; M16 and CAP-M16 remain incomplete until M16-04 shedding/recovery and versioned telemetry pass.
-  - Focused tests, complete deterministic local verification, mandatory GitHub CI, and human public-API, admission arithmetic, scheduling, cross-rate lifetime, checkpoint-state, concurrency, allocation, compatibility, and claim-boundary review pass before merge.
+  - The existing inactive reference-only path and mandatory-only active M16-03 path remain exact defaults. Append-only C++ tails add one copied optional-work shedding policy to RateExecutionPolicy, including a nonzero host policy version, positive consecutive-late and consecutive-on-time thresholds, and a bounded rate-telemetry capacity; pre-M16-04 aggregate prefixes and plans with no optional domain retain their exact behavior and compatibility identity. Zero telemetry capacity is valid and counts every publication attempt as an explicit drop.
+  - Active finalization may now accept bounded optional CPU D0 domains with the existing positive budget/deadline and same-domain ordinary-dependency rules. Conservative admission still simulates every mandatory reference record only and must reject an infeasible mandatory schedule even if every optional domain were shed. Optional budgets remain untrusted planning inputs and are neither admitted capacity nor measured WCET.
+  - "Every optional domain starts active. Optional domains are ordered without host timing, pointer, or container iteration: lower criticality is shed first, ties shed later registration first, and recovery reverses that exact order. Mandatory domains are never shed. An optional domain is rejected if it is a producer or consumer of an M16-02 channel, so shedding cannot create an absent, newer, or ambiguously aged cross-rate generation in this batch."
+  - One mandatory domain release is the only shedding-policy observation unit. A pre-dispatch late mandatory decision increments the consecutive-late count and resets the on-time count; an on-time mandatory decision does the reverse. Reaching the configured late threshold sheds exactly one currently active optional domain, and reaching the configured on-time threshold recovers exactly one shed optional domain; the triggering counter resets after a transition. A terminal fail action records its failure but causes no later shedding or recovery transition.
+  - A shed or recovered state transition becomes effective immediately after the triggering mandatory release is settled and therefore affects the next release in the existing total order, including a later registration at the same logical timestamp. An active optional release retains its configured bounded M16-03 late action, but optional lateness never drives the global shedding or recovery streaks. A shed optional release is consumed without callback, cross-rate transfer, backlog, or degradation and is reported distinctly from skip and hold.
+  - Large windows and aggregate skip/hold prefixes update late/on-time streaks, shed state, recovery state, transition counts, and due dispositions with checked arithmetic. Processing and telemetry attempts are bounded by the fixed domain count, configured thresholds, and existing dispatch cap rather than by every omitted supercycle; no policy loop, backlog, retry, allocation, spill, or helper lane scales without an explicit finite bound.
+  - StepResult and periodic summary tails append exact optional-due, optional-executed, shed-release, shed-transition, recovery-transition, currently-shed-domain, and policy-version fields. Existing due/executed/late/skip/hold/degrade/fail meanings remain unchanged, rejected counts stay exact, and cursor advancement remains unambiguous on callback, capacity, telemetry-loss, or terminal-failure paths.
+  - M16-04 adds a separate C++ rate-action telemetry schema version 1 rather than changing global observability schema 2. Fixed-size records and fixed numeric action/reason/counter IDs carry the host policy version, runtime identity, frame, domain and first release sequence, logical and nominal release, exact contiguous release count, reference-record count, optionality, late state, disposition, transition before/after state, status, and degradation level. A range record may represent consecutive identical omitted or shed decisions; expanding its count reconstructs each covered release exactly.
+  - The rate-action stream uses finalization-time fixed-capacity runtime-owned storage, monotonic record sequences, one nonblocking publication attempt, explicit overwrite/contention/zero-capacity loss accounting, runtime-bound cursors, and cumulative fixed-schema counters and gauges. Emission never waits, allocates, calls host code, performs I/O, or changes dispatch because a reader is slow. Inspection is a non-RT host operation and rejects an active step or periodic loop.
+  - "Schema-1 numeric tables are exact: action IDs 0-6 are execute_on_time, execute_catch_up, skip, hold, execute_degraded, fail, and optional_shed; transition IDs 0-2 are none, shed, and recover; reason IDs 0-7 are on_time, deadline_late, already_shed, late_threshold, on_time_threshold, callback_failure, dispatch_capacity, and arithmetic_failure. The record optional flag distinguishes mandatory from optional execution, while transition fields represent shedding or recovery caused by the same triggering record."
+  - "Rate counter IDs 0-19 are due_domain_releases, executed_reference_records, late_domain_releases, caught_up_domain_releases, skipped_domain_releases, held_domain_releases, degraded_domain_releases, failed_domain_releases, optional_due_domain_releases, optional_executed_domain_releases, shed_domain_releases, shed_transitions, recovery_transitions, records_emitted, records_overwritten, records_dropped, currently_shed_domains, policy_version, rejected_reference_records, and stale_reads; IDs 16-17 are gauges and all others are counters. Policy-version, trace-schema, record-size, counter-count, capacity, emitted/overwritten/dropped totals, and runtime identity are present in metadata; malformed or foreign cursors fail without advancing, and gaps are reported exactly rather than hidden or relabeled as complete action history."
+  - Shedding policy fields, optional ordering, and policy version participate in active graph/replay identity. The existing canonical active checkpoint record transactionally retains late/on-time streaks, the exact optional-domain shed bitset/order state, and policy version beside the M16-03 cursor/fault/channel state; corruption or mismatch rejects before any live state changes. Checkpoint schema 1 and its generic record codec remain unchanged. Rate telemetry history, counters, and caller cursors are process-local observation state, are not checkpointed, and never affect callback or policy decisions.
+  - Active D1, schema-1 input-log export/replay, and action-aware replay remain explicitly unsupported because current input records cannot encode nominal-time decisions or rate actions. Rate telemetry is evidence and observability, not an authenticated replay log, and M16-04 must not place data in reserved artifact bytes or silently claim schedule-independent reproduction.
+  - Shedding state, checkpoint bytes, telemetry slots, counters, cursors, and policy metadata are allocated during configuration/finalization and counted exactly once inside rate_plan_bytes, the M15 runtime-control logical extent, and the existing six-row MemoryPlan equation. Active dispatch, optional omission/execution, transition, record emission, counter update, inspection, stop, and two-runtime concurrency preserve zero ordinary heap allocation and bounded operations after successful start.
+  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, runtime-profile schema 7 and its 25 keys, global observability schema 2 with trace IDs 1-14 and metric IDs 0-31, checkpoint/input-log schema 1 and codecs, default installed header/target inventory, compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. The C ABI cannot configure or inspect active rates and retains exact legacy behavior.
+  - Target governance, current-state, handoff, roadmap, component contracts, release digest ledger, and retained M16-04 evidence describe only portable RT0 functional optional-work and versioned rate-action results. After all focused, full local, mandatory CI, and human gates pass, the target may mark M16/CAP-M16 functionally complete, but no mock, fake clock, declared budget, hosted runner, preflight, or document is physical hardware, HIL, field, worst-case latency, RT1, RT2, signing, release, deployment, or production evidence.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='RateDispatch.*:RateTimeline.*Admission*:CrossRateData.*Active*:HostRuntime.*RateDispatch*:PeriodicRuntime.*RateDispatch*:UnifiedExecutor.*RateDispatch*:MemoryPlan.*RateDispatch*:DeterminismReplay.*RateDispatch*:TraceNoAlloc.*RateDispatch*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm16_rate_dispatch|m16_rate_timeline|m16_cross_rate_data'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='RateShedding.*:RateTelemetry.*:RateDispatch.*Optional*:RateDispatch.*Shedding*:RateTimeline.*Optional*:HostRuntime.*RateTelemetry*:PeriodicRuntime.*RateTelemetry*:MemoryPlan.*RateTelemetry*:DeterminismReplay.*RateTelemetry*:Observability.*Rate*:TraceNoAlloc.*RateTelemetry*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm16_shedding_telemetry|m16_rate_dispatch|m16_rate_timeline|m16_cross_rate_data'
     - ./scripts/agent-verify.sh full
   focused_tests_to_add:
-    - opt-in policy copy, freeze, default inactive compatibility, source-compatible aggregate tails, malformed enum/cap rejection, and identity sensitivity for every execution and late-policy field
-    - exact conservative one-supercycle admission agreement with an independent integer simulator, including harmonic/non-harmonic, simultaneous, phase/substep multiplication, deadline boundary, idle gaps, final-boundary, zero, overflow, and infeasible mandatory cases
-    - active rejection of device phases, optional domains, D1, cross-domain graph dependencies, missing positive budget/deadline, deadline greater than period, skip producers, and active input-log/replay without changing reference-only acceptance
-    - exact half-open logical windows, first release at epoch zero, multi-supercycle wrap, contiguous nominal timestamps, zero delta, large-delta aggregate handling, arithmetic overflow, periodic absolute epoch, and no host-driven sleep
-    - reference-order callback dispatch and context fields for harmonic, co-prime, simultaneous, multi-phase, and multi-substep plans with nested executor work and no hidden lane
-    - on-time and pre-dispatch-late skip, bounded-catch-up, hold, degrade, and fail behavior using a fake clock, including cap exhaustion, exact summary counts, fail gating, no silent mandatory omission, and no unbounded backlog
-    - active cross-rate initial/read/publish, exact generation, same-time, held alias, stale/not-ready, missing/duplicate/wrong-owner/wrong-size publication, lifetime retirement, store wrap, and no newer-sample substitution
-    - active dispatcher and store concurrency under ThreadSanitizer, callback failure cancellation, two-runtime isolation, finite generation exhaustion, and checked stop/restart boundaries
-    - exact active-state and store storage reconciliation inside rate_plan/runtime-control bytes and the six-row MemoryPlan, capacity failure before provider callbacks, and zero ordinary heap allocation across on-time, catch-up, hold, degrade, and failure frames
-    - active checkpoint reserved-state round trip and transactional corruption/identity/size rejection, plus exact legacy/reference-only checkpoint and input-log bytes and explicit active input-log/replay rejection
-    - permanent M14.1/M15/M16-01/M16-02 lifecycle, cleanup, reference, selector, snapshot-store, determinism, package, and compatibility regressions
+    - append-only policy/default construction and preferred/compatibility installed consumers, including unchanged inactive and mandatory-only identity and behavior
+    - optional-domain validation, mandatory-only admission oracle, infeasible mandatory rejection, stable criticality/registration shed order, reverse recovery order, and optional cross-rate endpoint rejection
+    - exact threshold boundary, streak reset, one-transition-per-trigger, immediate next-release effect at the same timestamp, terminal-fail precedence, and active optional late-action behavior under a fake clock
+    - arithmetic aggregate handling across many supercycles with bounded domain work, exact summaries, no backlog, and no iteration proportional to omitted releases
+    - version-1 record and counter numeric IDs, record/range field completeness, every action/reason mapping, exact range expansion, policy-version identity, and malformed enum/version/capacity rejection
+    - nonblocking telemetry publication, overwrite/contention/zero-capacity loss, cursor first-window/gap/runtime binding, failed-read cursor transactionality, two-runtime isolation, and host inspection rejection during active execution
+    - optional shed/recovery state checkpoint round trip plus valid-checksum semantic corruption, policy-version, bitset/order, threshold, and identity mismatch rejection with unchanged destination state
+    - exact shedding/telemetry/checkpoint storage reconciliation inside rate-plan/runtime-control bytes and the six-row MemoryPlan, capacity rejection before provider calls, and zero post-start allocation across optional execute, shed, recover, late actions, loss, inspection, and stop
+    - ThreadSanitizer coverage for active dispatcher, policy counters, telemetry producer/readers, cursor isolation, stop, failure, and two runtime instances without weakening permanent M15/M16 gates
+    - permanent M14.1/M15/M16-01/M16-02/M16-03 lifecycle, cleanup, reference, selection/store, admission, late-action, checkpoint, package, schema-2 observability, no-allocation, determinism, and compatibility regressions
   required_ci:
-    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, exact SDK inventory, permanent M16-01/M16-02 gates, and truthful M16-03 claim checks
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of admission, dispatch, late actions, active stores, state restore, and lifecycle
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical integer admission/order, active policy results, source compatibility, and installed consumers
-    - Unified executor GCC ThreadSanitizer job executing the complete RateDispatch and active CrossRateData suites, two-runtime isolation, host-adapter nested work, failure/stop, and permanent M15/M16 regression processes
-    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving unchanged legacy/reference-only fixtures and explicit rejection of unsupported active D1/replay combinations
+    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, exact SDK inventory, permanent M16-01 through M16-03 gates, and truthful M16-04/M16 completion claims
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of optional validation, shedding/recovery, range arithmetic, rate telemetry, checkpoint restore, and lifecycle
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical integer policy order/results, fixed record layout, source compatibility, and installed consumers
+    - Unified executor GCC ThreadSanitizer job executing complete RateShedding, RateTelemetry, RateDispatch, active CrossRateData, cursor/two-runtime/failure/stop suites and permanent M15/M16 fresh-process gates
+    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving unchanged legacy/reference-only/mandatory-active fixtures and explicit active D1/action-replay rejection
     - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and existing autotune/scaling smoke jobs
-    - Existing no-allocation, bounded-memory-plan/control-ledger, M14.1 recovery, M15 rollback, M16 timeline/selection/store, sanitizer, fuzz-smoke, documentation, release-contract, and package gates; no hosted timing or controlled-hardware claim is authorized
+    - Existing no-allocation, bounded-memory-plan/control-ledger, M14.1 recovery, M15 rollback, all M16 timeline/selection/store/admission/late-action, sanitizer, fuzz-smoke, global observability schema-2, documentation, release-contract, and package gates; no hosted timing or controlled-hardware claim is authorized
   manual:
-    - Human review must approve the additive C++ policy/context/result shape, conservative serialized admission model, logical-to-nominal time mapping, every late action, cross-domain dependency rule, generation lifetime, active checkpoint record, active replay rejection, and preservation of C ABI v8/device ABI v1/schema/package boundaries.
-    - Human concurrency and safety review must confirm bounded executor/store operations, no callback after fail gating, no skipped producer under skip, exact hold aliasing, cancellation and stop ownership, post-start allocation freedom, and that M16-04 remains the only owner of optional shedding/recovery and versioned telemetry.
-    - Performance review is limited to deterministic work/capacity counts and existing hosted smoke jobs. Any measured latency threshold, RT1/RT2 promotion, or controlled-hardware regression gate requires a separately approved named tuple and retained raw evidence.
+    - Human review must approve the append-only C++ policy/summary/telemetry shape, mandatory-only admission boundary, exact shedding and recovery ordering/hysteresis, aggregate arithmetic, terminal-fail precedence, checkpoint state, active replay rejection, and preservation of C ABI v8/device ABI v1/global observability and artifact schemas.
+    - Human concurrency and safety review must confirm bounded nonblocking telemetry publication/readback, exact loss and cursor semantics, no callback for shed work, no mandatory omission, no cross-rate optional endpoint, state/identity/accounting completeness, post-start allocation freedom, and checked lifecycle/rollback behavior.
+    - Performance review is limited to deterministic counts and existing hosted smoke jobs. Any measured latency threshold, RT1/RT2 promotion, controlled-hardware regression, physical recovery, or support-matrix change requires a separately approved named tuple and retained raw evidence.
 risk:
   class: high
   hazards:
-    - an optimistic admission formula can accept more declared work than the fixed reference order can complete, while an unchecked hyperperiod can overflow planning time or storage
-    - host logical time, nominal wall time, periodic release time, per-domain deadline, and measured callback time can be conflated and produce drift or nondeterministic late actions
-    - a skipped or held producer can expose an absent, overwritten, partial, newer, or wrongly aged channel generation to a consumer
-    - catch-up can grow an unbounded backlog or callback burst when a large delta spans many supercycles
-    - filtered/repeated phase execution can violate graph dependencies, resource ordering, device-token lifetime, nested-work ownership, or executor cancellation semantics
-    - time-driven degrade or fail behavior can be mistaken for D1 determinism, optional shedding/recovery, or portable deadline evidence
-    - active cursor, alias, payload, and fault state can be omitted from checkpoint identity/accounting or restored partially after malformed input
-    - additions to aggregate C++ declarations can break 1.x source consumers even when stable C ABI tests remain green
-    - common lifecycle and executor edits can regress M14.1 cleanup, M15 rollback, M16 reference/selection behavior, allocation bounds, sanitizers, package isolation, or legacy dispatch
+    - ambiguous streak boundaries, same-time transition effect, or priority ties can make shedding and recovery depend on incidental execution order
+    - optional work can accidentally enter mandatory admission, or an infeasible mandatory schedule can be hidden behind a policy that sheds everything
+    - shedding a channel endpoint can expose a missing, old, newer, or falsely fresh generation to mandatory work
+    - large elapsed windows can turn threshold processing or telemetry emission into unbounded per-release work or overflow counters and cursor state
+    - telemetry loss can be mistaken for absence of an action, or a run-length record can encode a range that crosses a different disposition or transition
+    - checkpoint restore can accept a different policy version/order or partially restore streak and shed state before rejecting malformed input
+    - telemetry or counter atomics can race with dispatch, readers, stop, or another Runtime, or can introduce false sharing and post-start allocation
+    - append-only C++ declarations or new logical storage can break source consumers, exact MemoryPlan accounting, package isolation, or M16-03 behavior while C ABI tests stay green
+    - functional fake-clock shedding and versioned records can be overstated as measured overload recovery, latency, physical hardware, RT1, or RT2 evidence
   stop_conditions:
-    - the exact baseline commit is unavailable, dirty, or lacks merged M16-02 commit 34f0752596d84ef1f98a8a0d544861bda4935f3f and all retained M15/M16 evidence
-    - target contracts at the exact baseline contradict opt-in CPU-only serialized active dispatch, conservative declared-budget admission, time mapping, late actions, or the M16-04 boundary and require a different product decision
-    - implementation requires changing stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema 7/25 keys, observability schema 2, checkpoint/input-log schema numbers or codecs, installed header/target inventory, support matrices, release version, or license
-    - active correctness requires device completion-payload semantics, cross-domain ordinary graph dependencies, optional shedding/recovery, per-release telemetry schema evolution, or active D1/input-log action replay in this batch
-    - exact admission or due-count arithmetic cannot remain finite, checked, conservative, and bounded by the existing supercycle plus explicit per-step limits
-    - skip, catch-up, hold, degrade, or fail cannot remain explicit and bounded without silent mandatory omission, newer-sample substitution, unbounded retry/backlog, callback preemption, or ambiguous cursor advancement
-    - active cross-rate transfer cannot preserve exact-size complete-before-visible publication, compiled generation selection, finite retention, two-runtime isolation, and ThreadSanitizer race freedom
-    - active state cannot fit one bounded canonical checkpoint record and exact runtime-control accounting without changing schema-1 encoding or breaking transactional restore
-    - implementation requires ordinary heap allocation, blocking mutexes, file I/O, hidden threads, spill execution, or unbounded waits after successful start
+    - the exact baseline commit is unavailable, dirty, or lacks merged M16-03 commit 9c350ab5b66e37e90aef7e96939c71df04101b27 and all retained M15/M16 evidence
+    - target contracts at the exact baseline contradict mandatory-only admission, CPU-only optional domains, criticality/registration ordering, threshold hysteresis, or a separate C++ rate-action telemetry schema and require a different product decision
+    - implementation requires changing stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema 7/25 keys, global observability schema 2/IDs, checkpoint/input-log schema numbers or codecs, installed header/target inventory, support matrices, release version, or license
+    - optional correctness requires a cross-rate optional endpoint, device phase, cross-domain ordinary dependency, callback preemption, or silent mandatory release omission in this batch
+    - shedding/recovery cannot remain deterministic and bounded under aggregate elapsed windows without iteration proportional to unbounded omitted releases, unbounded backlog, retry, allocation, blocking, spill, or hidden threads
+    - versioned rate-action records cannot represent every disposition and transition exactly, including loss and range boundaries, within a fixed-capacity nonblocking runtime-owned stream
+    - policy/checkpoint state cannot be represented canonically and accounted exactly without changing schema-1 encoding or allowing partial restore
     - deterministic functional tests require timing sleeps/tolerances, root privilege, fixed topology, physical CUDA or FPGA/XDMA hardware, controlled timing hosts, secrets, signing, release, deployment, or production access
     - a required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the opt-in execution/late-policy C++ API, admission and dispatch compiler/state, executor filtering, active cross-rate transfer and canonical checkpoint state, tests/CI, documentation/governance, release digests, and retained M16-03 evidence as one batch. Before discarding a running integration, require existing checked stop to quiesce callbacks and device/lane/stack/memory owners. The default and explicit reference-only M16-01/M16-02 paths then retain their exact pre-batch complete-graph behavior; no data migration, host setting, support promotion, release, or deployment rollback is authorized.
+  strategy: Revert the append-only optional-work/shedding policy and summaries, deterministic policy state machine, versioned rate-action trace/counters, checkpoint and accounting integration, tests/CI, documentation/governance, release digests, and retained M16-04 evidence as one batch. Before discarding a running integration, require existing checked stop to quiesce callbacks and every device/lane/stack/memory owner. The exact M16-03 mandatory-only active path and M16-01/M16-02 reference-only path remain the fallback; no data migration, persistent host setting, support promotion, release, or deployment rollback is authorized.
   data_migration: none
-  release_action: Do not publish a release, promote a support/qualification tuple, alter hardware or RT records, or mark M16/CAP-M16 complete from this batch.
+  release_action: Do not publish a release, promote a support/qualification tuple, alter hardware or RT records, or mark M16/CAP-M16 complete until all required focused, full local, mandatory CI, and human gates pass and retained evidence supports that state.
 evidence:
   output:
-    - docs/evidence/M16-03-<date>.md
+    - docs/evidence/M16-04-<date>.md
     - exact baseline, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public execution/late-policy model with defaults, bounds, active restrictions, source compatibility, identity, and every rejected configuration
-    - complete admitted and infeasible schedule inputs, per-record declared start/finish/deadline output, independent-simulator digest, and checked arithmetic/capacity results
-    - host and periodic logical/nominal windows plus every on-time, skip, catch-up, hold, degrade, fail, cap-exhaustion, callback-failure, and cursor/fault result
-    - active cross-rate publication/copy/alias/generation lifetime proof, exact initial/produced/held/stale bytes, concurrency/ThreadSanitizer results, and two-runtime isolation
-    - active-state checkpoint layout/round trip/rejection evidence, unchanged schema numbers and legacy/reference-only artifact bytes, and explicit active D1/input-log/replay boundary
-    - dispatcher/store state storage reconciliation inside rate-plan/runtime-control bytes and MemoryPlan, post-start allocation proof, executor/lifecycle/cleanup results, and unchanged observability schema proof
-    - C++ source, C ABI/device ABI/package/profile/schema/support/release/license compatibility status plus changed and preserved invariants
-    - residual risks and all unperformed M16-04 shedding/recovery/versioned telemetry/action replay, controlled performance, privileged native, physical hardware, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static, unit, independent integer admission/reference, fake-clock late-action, synthetic active-store concurrency, sanitizer, checkpoint-state, package, bounded-memory/no-allocation, and portable RT0 functional dispatch behavior only. Declared budget/WCET values are untrusted inputs, not measurements or deadline guarantees; mocks, fixtures, hosted CI, preflight, and documentation do not establish physical hardware, HIL, field performance, worst-case latency, RT1, RT2, signing, release, deployment, or production readiness.
+    - public optional-work/shedding policy with defaults, policy version, thresholds, bounds, ordering, source compatibility, identity, and every rejected configuration
+    - mandatory-only admission inputs/results plus exact optional execute, late, shed, recovery, same-time, threshold, aggregate-window, terminal-fail, summary, and cursor outcomes
+    - rate-action schema and fixed ID tables, normalized record/range and counter examples for every action/reason, loss/cursor behavior, policy-version metadata, and two-runtime isolation
+    - checkpoint state layout and round trip/rejection evidence for streak, shed order/bitset, policy version, and unchanged checkpoint/input-log codecs plus explicit active D1/action-replay boundary
+    - policy/telemetry/checkpoint storage reconciliation inside rate-plan/runtime-control bytes and MemoryPlan, post-start allocation proof, ThreadSanitizer results, and executor/lifecycle/cleanup behavior
+    - C++ source, C ABI/device ABI/package/profile/global-observability/artifact/support/release/license compatibility status plus changed and preserved invariants
+    - residual risks and all unperformed controlled performance, privileged native, physical shedding/recovery, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish static, unit, independent integer-policy, fake-clock shedding/recovery, synthetic fixed-stream concurrency/loss, sanitizer, checkpoint-state, package, bounded-memory/no-allocation, and portable RT0 functional telemetry behavior only. Declared budget/WCET values are untrusted inputs, not measurements or deadline guarantees; records observe runtime decisions but are not authenticated or an action-replay format; and mocks, fixtures, hosted CI, preflight, or documentation do not establish physical hardware, HIL, field performance, worst-case latency, RT1, RT2, signing, release, deployment, or production readiness.

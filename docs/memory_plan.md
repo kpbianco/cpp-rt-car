@@ -256,6 +256,15 @@ copy, skip, catch-up, hold, degrade, fail, summary inspection, and checked stop
 use only that storage; allocation instrumentation covers on-time and late
 degrade frames.
 
+M16-04 adds the copied optional order, shed bitset/streak state, conditional
+checkpoint tail, fixed rate-action ring/slots, counter bank, and policy
+metadata to the same accounting. `rate_telemetry_bytes` and
+`rate_policy_state_bytes` reconcile exactly once within `rate_plan_bytes` and
+the runtime-control logical extent. The six-row equation and provider regions
+remain unchanged. Zero telemetry capacity owns no slots but still records
+publication drops in the fixed counter bank. Execute, shed, recover, loss,
+inspection, and stop remain allocation-free after successful start.
+
 Before `start()` creates a thread, M15-03 applies and observes resident-memory
 policy for phase scratch, task scratch, and trace storage. It then creates the
 configured fixed worker team, an optional M5 watchdog lane, and one M8 device
@@ -288,6 +297,7 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
   `tests/test_trace_noalloc.cpp`;
 - active admission/storage accounting and allocation-free dispatch:
   `tests/test_memory_plan.cpp`, `tests/test_rate_dispatch.cpp`,
+  `tests/test_rate_telemetry.cpp`,
   `tests/test_trace_noalloc.cpp`;
 - C ABI plan, scratch, malformed discriminator, and reserved-field checks:
   `tests/test_cabi_dlopen.c`;

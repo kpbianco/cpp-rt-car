@@ -3,9 +3,9 @@
 ## Restart context
 
 RTFW 1.2.1 is a portable RT0 C++20 runtime. M14, M14.1, and M15 are complete
-at baseline `34f0752596d84ef1f98a8a0d544861bda4935f3f`. M16 is active, and this
-worktree implements approved batch M16-03: opt-in CPU rate admission, dispatch,
-cross-rate transfer, and late-frame policy over the M16-01/M16-02 plans.
+at baseline `9c350ab5b66e37e90aef7e96939c71df04101b27`. M16 is active, and this
+worktree implements approved batch M16-04: optional CPU shedding/recovery and
+separate versioned rate-action telemetry over the M16-01 through M16-03 plans.
 `contracts/active-batch.yaml` is binding.
 
 ## Read first
@@ -28,7 +28,7 @@ cross-rate transfer, and late-frame policy over the M16-01/M16-02 plans.
 
 Canonical control plane:
 `/home/kbianco/.local/share/portfolio-control/worktrees/control/cpp-rt-car/products/cpp-rt-car`
-at revision `e00e41f067672bfe98209746ce4fc30780fdd160`.
+at revision `92abc5d737b95133a4dd9e68170f29cf55d26371`.
 
 ## Implemented boundary
 
@@ -59,8 +59,8 @@ record exposes endpoint/reference/substep identities, signed cycle offset,
 integer age, held state, provenance, and inclusive freshness classification.
 One two-slot exact-generation SPSC store is preallocated per channel. M16-03
 connects those stores only for explicitly active CPU plans. Active finalization
-performs conservative serialized admission and rejects D1, device/optional
-domains, invalid budgets/deadlines, cross-domain ordinary dependencies, and
+performs conservative serialized mandatory-only admission and rejects D1,
+device domains, invalid budgets/deadlines, cross-domain ordinary dependencies, and
 skip producers. Positive contiguous logical/nominal windows dispatch the exact
 reference order through the existing executor, with bounded skip, catch-up,
 hold, degrade, or fail decisions and exact functional summaries.
@@ -71,14 +71,25 @@ The active cursor, epoch, action/fault state, aliases, generations, and bytes
 are one reserved generic checkpoint record. Schema numbers stay unchanged, and
 active schema-1 input logs/replay are rejected.
 
+M16-04 accepts bounded optional CPU domains that are not cross-rate endpoints.
+Mandatory releases alone drive positive late/on-time hysteresis thresholds.
+Shedding order is lower criticality then later registration; recovery reverses
+that order, and each transition affects the next release immediately. Policy
+state is retained transactionally in the existing active generic record.
+
+A separate fixed 160-byte rate-action schema-1 record, fixed-capacity atomic
+ring, runtime-bound cursors, and 20 counters/gauges report execution, omission,
+transitions, loss, and policy provenance. Zero capacity explicitly drops every
+publication. History/counters are process-local, are not checkpointed, and do
+not alter global observability schema 2 or dispatch decisions.
+
 ## Protected decisions
 
 - C ABI v8, 70 exports/fingerprint, SONAME 8, and device ABI v1 are unchanged.
 - Runtime schema 7/25 keys, observability and artifact schemas, installed
   headers/targets, aliases, support matrices, 1.2.1, and Apache-2.0 are unchanged.
 - The M15 six-row MemoryPlan and provider boundary remain unchanged.
-- Optional shedding/recovery, action replay, and versioned per-release
-  telemetry remain outside M16-03 and are owned by M16-04.
+- Active D1, action replay, and device-rate execution remain unsupported.
 - No compiled plan, mock, hosted CI, or local run is hardware, latency, RT1,
   RT2, signing, release, deployment, or production evidence.
 
@@ -86,6 +97,7 @@ active schema-1 input logs/replay are rejected.
 
 Run every local command in the active batch, ending with
 `./scripts/agent-verify.sh full`. Retain exact results and acceptance mapping in
-`docs/evidence/M16-03-2026-08-05.md`. Mandatory GitHub CI and human public-API,
-admission, dispatch, store lifetime/memory-ordering, identity, accounting, determinism, lifecycle, and
-compatibility review remain external gates. M16 and CAP-M16 remain incomplete.
+`docs/evidence/M16-04-2026-08-05.md`. Mandatory GitHub CI and human public-API,
+policy, telemetry memory-ordering, checkpoint, identity, accounting,
+determinism, lifecycle, and compatibility review remain external gates. M16
+and CAP-M16 remain incomplete until those gates pass.

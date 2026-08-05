@@ -105,8 +105,14 @@ the live stores without allocation.
 
 Schema-1 input-log records have no nominal release or action decision fields.
 `write_input_log()` and `replay()` therefore reject active execution explicitly;
-reference-only input logs remain unchanged. Action-aware replay and versioned
-per-release telemetry are M16-04 product decisions, not inferred D1 behavior.
+reference-only input logs remain unchanged. M16-04 conditionally appends host
+policy version, late/on-time thresholds, and deterministic optional shedding
+order to active graph identity. Telemetry capacity is excluded because loss
+cannot affect dispatch. Its canonical generic state tail transactionally
+retains thresholds, streaks, optional order, shed bitset, and policy version;
+mandatory-only state bytes remain exact. The separate rate-action telemetry
+history, counters, and caller cursors are process-local and not checkpointed.
+Action-aware replay remains unsupported rather than being inferred as D1.
 
 ## Checkpoint format v1
 

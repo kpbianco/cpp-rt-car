@@ -1243,3 +1243,68 @@ TEST(TraceNoAlloc, RateDispatchOnTimeAndLateDegradeDoNotAllocate) {
     EXPECT_EQ(second.rate.degraded_domain_releases, 1u);
     ASSERT_EQ(runtime.stop(), rt::Status::ok);
 }
+
+TEST(TraceNoAlloc, RateTelemetryShedRecoverInspectAndStopDoNotAllocate) {
+    ActiveNoAllocClock clock;
+    clock.now = 10'000;
+    rt::Runtime runtime(clock);
+    rt::RuntimeConfig config;
+    config.callback_capacity = 2;
+    config.executor_queue_capacity = 2;
+    config.task_scratch_slots = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.set_rate_execution_policy({8, 3, 1, 1, 8}),
+        rt::Status::ok);
+    std::array<std::size_t, 2> calls{};
+    std::array<rt::PhaseHandle, 2> phases{};
+    std::array<rt::RateDomainHandle, 2> domains{};
+    ASSERT_EQ(runtime.register_callback(
+                  {"mandatory", &active_noalloc_callback, &calls[0]}, phases[0]),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.register_callback(
+                  {"optional", &active_noalloc_callback, &calls[1]}, phases[1]),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.register_rate_domain(
+                  {"mandatory", 100, 1, 50, 10,
+                   rt::RateCriticality::critical, false,
+                   rt::RateLateAction::skip, 0}, domains[0]),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.register_rate_domain(
+                  {"optional", 100, 1, 50, 10,
+                   rt::RateCriticality::background, true,
+                   rt::RateLateAction::fail, 0}, domains[1]),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.bind_phase_to_rate_domain(phases[0], domains[0]), rt::Status::ok);
+    ASSERT_EQ(runtime.bind_phase_to_rate_domain(phases[1], domains[1]), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    rt::StepResult late;
+    rt::StepResult recovered;
+    rt::RateTelemetryMetadata metadata;
+    rt::RateCounterSnapshot counters;
+    rt::RateTelemetryCursor cursor;
+    rt::RateTelemetryReadResult read;
+    std::array<rt::RateActionRecord, 8> records{};
+    bool complete = false;
+    {
+        AllocationGuard guard;
+        complete = runtime.step(
+                       {0, std::chrono::nanoseconds{100}, std::nullopt, 1'000},
+                       &late) == rt::Status::ok;
+        clock.now = 1'100;
+        complete = runtime.step(
+                       {1, std::chrono::nanoseconds{100}, std::nullopt, 1'100},
+                       &recovered) == rt::Status::ok && complete;
+        complete = runtime.rate_telemetry_metadata(metadata) == rt::Status::ok &&
+            runtime.rate_counters_snapshot(counters) == rt::Status::ok &&
+            runtime.read_rate_actions(cursor, records, read) == rt::Status::ok &&
+            runtime.stop() == rt::Status::ok && complete;
+    }
+    EXPECT_TRUE(complete);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_EQ(late.rate.shed_transitions, 1u);
+    EXPECT_EQ(recovered.rate.recovery_transitions, 1u);
+    EXPECT_EQ(read.records_read, 4u);
+}

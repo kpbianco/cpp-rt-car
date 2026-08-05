@@ -207,6 +207,8 @@ predeclared thresholds, and the measurement procedure.
   `rt/src/cross_rate_data.cpp`, `tests/test_cross_rate_data.cpp`
 - M16-03 admission and active dispatcher:
   `rt/src/rate_dispatch.cpp`, `tests/test_rate_dispatch.cpp`
+- M16-04 shedding recovery and versioned rate-action telemetry:
+  `rt/src/rate_telemetry.cpp`, `tests/test_rate_telemetry.cpp`
 - Stable ABI/export and installed-package gates:
   `tools/check_c_abi.py`, `abi/rtfw_c_abi_v8.exports`,
   `tests/package_consumer`
