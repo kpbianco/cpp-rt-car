@@ -1,74 +1,60 @@
 # Current state
 
 Last audited: 2026-08-05
-Batch baseline: `6d28d6d5eed7cd2c64cf2a0d362d36f59aceeeab`
+Batch baseline: `9dfcee7bc8092de768292ba35ad9bd74e5a5992e`
 
 ## Product state
 
 - Release: 1.2.1 portable RT0.
-- Stable boundary: C ABI v8, SONAME 8, device ABI v1.
+- Stable boundary: C ABI v8 with 70 exports and SONAME 8; device ABI v1.
+- Runtime/profile boundary: schema 7 with 25 keys; observability schema 2;
+  checkpoint and input-log schema 1.
 - License: Apache-2.0.
-- M14 professional SDK/package boundary: complete.
-- M14.1 recoverable device lifecycle: complete.
-- Active milestone: M15 explicit CPU and memory policy.
-- Current implementation contract: `contracts/active-batch.yaml` (`M15-04`).
+- M14, M14.1, and M15 are complete at the audited baseline.
+- M16 is active and remains incomplete. The current approved implementation
+  contract is `contracts/active-batch.yaml` (`M16-01`).
 
-## Repository health
+## M16-01 implementation
 
-The worktree contains the M15-04 implementation on the pinned M15-03 plus
-live-guard baseline. It retains the twelve stable memory identities and the
-six-row `MemoryPlan` equation while adding append-only C++ closure metadata,
-bounded copied declarations for external/backend facts, exact logical control
-extents, live runtime-owned stack accounting and observation, and status-
-bearing owning-lane stack cleanup.
+The worktree adds an additive C++ rate-domain model without changing the
+installed header or target inventory. A runtime can copy up to 64 stable
+domains, bind each CPU or device phase to exactly one instance-owned domain,
+and finalize an immutable epoch-zero reference interval. Periods and releases
+use integral nanoseconds. Domain names, periods, substeps, deadlines,
+non-binding budget/WCET metadata, criticality, optionality, and phase ownership
+are validated and frozen.
 
-Finalization reconciles constructed runtime, executor, and device control
-extents against the existing plan terms and rejects malformed, duplicate,
-overlapping, overflowing, missing, or estimate-mismatched inventories before
-publishing a report. Rows and aggregates distinguish exact, declared-only,
-partial, unknown, and not-applicable logical facts. Declarations do not
-authorize mutation or establish residency, locking, pinning, or qualification.
+The reference interval is `[0, lcm(periods))`. Checked integer gcd/lcm,
+multiplication, addition, and count arithmetic reject overflow or more than
+65,536 release entries before any provider, device, native-policy, thread, or
+callback action. Equal-time releases are ordered by domain registration,
+compiled phase order, then substep ordinal. Inspectors copy fixed records and
+do not allocate or mutate the plan after start.
 
-The configured memory provider remains limited to active phase scratch, task
-scratch, and trace storage. Runtime-owned executor, watchdog, and
-device-service stacks are observed only while live; supported stack policy
-participates in the startup barrier. Cleanup preserves device/backend
-ownership, then device-service, reverse executor instances, and watchdog stack
-ownership before lower control and trace/task/phase rollback. Failed cleanup
-retains ownership, prevents token release, and remains retryable through
-checked stop.
+Explicit rate semantics participate in graph/replay compatibility identity.
+A runtime with no explicit model follows the pre-M16 identity path exactly.
+Rate storage is counted once inside `MemoryPlan::runtime_control_bytes` and the
+existing M15 runtime-control extent; the six-row plan equation and three-region
+provider boundary are unchanged.
 
-Stable ABI, schema, package, release, support, and qualification claims remain
-unchanged. The required deterministic local commands and a clean installed-
-package consumer build pass on the named development host. Mandatory GitHub
-CI and human accounting/API/lifetime/concurrency/native-call/compatibility
-review remain completion gates; this document does not claim those external
-gates passed.
+## Boundary and remaining work
 
-## Current objective
+M16-01 is model-and-reference-plan only. `step()` and `run_periodic()` still
+execute the complete compiled graph once per host frame. The reference plan
+does not dispatch domains and does not implement cross-rate sample/hold or
+freshness, admission feasibility, late skip/catch-up/hold/degrade/fail policy,
+optional-work shedding/recovery, or new trace/metric fields. Those remain M16
+work, so M16 and CAP-M16 are incomplete.
 
-Retain the completed M15-04 local evidence and obtain mandatory CI and human
-review without broadening the provider, ABI, package, schema, or qualification
-boundary.
-
-## Blockers and limitations
-
-- External/backend declarations are trusted logical metadata, not independent
-  observation or qualification evidence.
-- Fragmented controls are logically inventoried; allocator commitment and
-  physical residency are not inferred from their extents.
-- Borrowed registered state/device buffers and backend-owned storage remain
-  unmodified.
-- Named-host `mlock` application is not independent lock readback or
-  device/DMA pinning.
-- M18 still requires exact production CPU, motherboard, GPU, FPGA, kernel,
-  drivers, bitstream, PCIe/IOMMU topology, and workload evidence.
-- Local or hosted CI, injected declarations/providers, preflight, and one-host
-  Linux observations cannot establish hardware, HIL, field, latency, RT1,
-  RT2, thermal, endurance, signing, release, deployment, or production
-  evidence.
+Local deterministic verification can establish exact integer compilation,
+functional lifecycle, package compatibility, bounded storage, replay identity,
+and allocation-free inspection/frames on the named host. Mandatory GitHub CI
+and human API/arithmetic/identity/accounting/determinism/lifecycle review remain
+merge gates. No physical hardware, HIL, field, latency, RT1, RT2, Unreal,
+signing, release, staging, deployment, or production validation is claimed.
 
 ## Next action
 
-Submit the bounded changes for mandatory CI and human review. Do not mark M15
-or CAP-M15 complete before those external gates are retained.
+Complete the M16-01 local verification contract, retain
+`docs/evidence/M16-01-2026-08-05.md`, and submit the bounded diff for mandatory
+CI and human review. Do not mark M16 or CAP-M16 complete from this batch.

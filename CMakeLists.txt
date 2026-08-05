@@ -621,6 +621,7 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/mock_device.cpp
     rt/src/native_platform_preflight.cpp
     rt/src/observability_export.cpp
+    rt/src/rate_timeline.cpp
     rt/src/resource_policy.cpp
     rt/src/runtime_compat.cpp
     rt/src/runtime_profile.cpp

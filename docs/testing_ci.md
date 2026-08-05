@@ -18,6 +18,13 @@ latency qualification and does not prove the complete product contract.
   foreign-runtime handles, direct/transitive resource ordering, immutable
   topology, and randomized DAG agreement with an independent reference
   executor.
+- M16-01 tests compare complete harmonic and non-harmonic `[0, lcm)` timelines
+  field-by-field with an independent integer generator. They cover exact
+  simultaneous-release ordering, reduced ratios, malformed/foreign/rebound/
+  missing ownership, checked arithmetic and capacity boundaries,
+  transactional retry, identity sensitivity, runtime isolation, unchanged
+  host/periodic/mock-device dispatch, exact MemoryPlan reconciliation, and
+  allocation-free inspection plus CPU/device frames.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent
@@ -68,6 +75,8 @@ latency qualification and does not prove the complete product contract.
 - A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
   M5 time/platform, M6 observability, M7 determinism/replay, and M8 device
   suites plus the CPU-only M9 CUDA state machine.
+  It also runs the M16 reference-plan, two-runtime, inspection, host/periodic,
+  and mock-device regressions; this does not make the plan an active dispatcher.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -170,6 +179,8 @@ predeclared thresholds, and the measurement procedure.
   `tests/host_adapter_tests.cpp`,
   `tests/test_trace_noalloc.cpp`,
   `tests/test_cabi_dlopen.c`
+- M16-01 rate model and reference compiler:
+  `rt/src/rate_timeline.cpp`, `tests/test_rate_timeline.cpp`
 - Stable ABI/export and installed-package gates:
   `tools/check_c_abi.py`, `abi/rtfw_c_abi_v8.exports`,
   `tests/package_consumer`

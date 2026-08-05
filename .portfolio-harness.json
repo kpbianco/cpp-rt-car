@@ -1,6 +1,6 @@
 {
   "control_repository": "kpbianco/portfolio-control",
-  "control_revision": "git:c2077902-2286e2f9-f45eb433-760f4886-df70e68f",
+  "control_revision": "git:e00e41f0-67672bfe-98209746-ce4fc307-80fdd160",
   "harness_version": 2,
   "managed_paths": {
     ".agents/skills/ci-diagnose/SKILL.md": "sha256:93a7ce82-51786852-39d6f3f1-24e5670f-648b7f6a-242be771-6e86fd8b-10f653b0",
@@ -26,9 +26,9 @@
     ".github/codex/schemas/planner-review.schema.json": "sha256:0b6e73da-860c4c6d-9024f6e2-c2889162-f4d49813-e4c50691-87f68ef7-9183eba9",
     ".github/codex/schemas/product.schema.json": "sha256:0c01a565-e795a00f-9532a55b-dc2fc1d5-1aa20d8b-2af2f594-1b8be117-23fd4191",
     ".gitignore": "sha256:a55b5990-61dfcc0c-7a818cf5-3ef865ee-1d68dd9b-e83bffab-f72143c1-8254dfa3",
-    "AGENTS.md": "sha256:c691f368-76c2ac45-030482dd-98845033-4a71973e-819a94f3-b5c24d0a-e8284b6f",
+    "AGENTS.md": "sha256:8db0d39b-0e0ab90a-9140cd63-d920f1a7-ff63e412-8e2ab9bd-5defc212-db0f5b5a",
     "contracts/profile-requirements.yaml": "sha256:36a421b8-53f07496-95b773da-201489f7-b17e0d49-3baa4787-482d9f49-715d8bc1",
-    "contracts/repo-profile.yaml": "sha256:5150cd7c-517b2a4d-e0a4078c-2e2ec4b6-ede1a31d-5c06b0b0-5fb36b46-232869e2"
+    "contracts/repo-profile.yaml": "sha256:044de46f-96030d93-93b38d3e-9bced285-5eb19bb0-7c5c2530-42957000-16bf81ad"
   },
   "product": "cpp-rt-car",
   "profile": "assurance",

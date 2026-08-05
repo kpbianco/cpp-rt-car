@@ -25,7 +25,8 @@ versioned observability/replay, and asynchronous device integration.
 | Host job-system adapter | Implemented RT0 surface | A third executor policy submits the same immutable graph/range/reduction jobs to a borrowed fixed-capacity engine queue with explicit runtime scratch and generation-tagged completion context |
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
-| CPU/memory policy model | M15-04 implemented; external gates pending | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
+| CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
+| Rate-domain reference plan | M16-01 implemented; external gates pending | Existing C++ SDK headers expose bounded instance-owned domains and phase bindings plus exact checked `[0, lcm)` inspection; host and periodic frames still run the complete graph once |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -160,10 +161,12 @@ boundary in `<rt/runtime.hpp>`,
 
 1. configure a typed runtime and optionally attach a borrowed host job system
    and/or copied C++ memory-provider table;
-2. register callback/device phases, logical resources, canonical replay state,
+2. register callback/device phases, optional copied rate domains and phase
+   ownership, logical resources, canonical replay state,
    optional device backends, and borrowed device buffers while configuring;
 3. declare phase dependencies and read/write resource access;
-4. finalize to validate and compile the graph, reject an over-budget memory
+4. finalize to validate and compile the graph and optional epoch-zero rate
+   reference plan, reject an over-budget memory
    plan, acquire phase/task/trace backing in stable order, construct fixed
    storage, and freeze topology and static assignments;
 5. optionally require strict read-only platform preflight, apply/observe
@@ -209,6 +212,14 @@ lane before join and is status-bearing and retryable. A failed device, lane,
 stack, or selected-region cleanup retains ownership, prevents provider-token
 release, and requires checked `stop()` retry; destruction with unresolved
 ownership fails closed.
+
+M16-01 rate metadata is a separate additive C++ model, not runtime-profile
+schema 7 or C ABI v8. Up to 64 copied domains use positive integral-nanosecond
+periods and 1–64 same-time substeps; finalization rejects malformed ownership,
+checked arithmetic overflow, or more than 65,536 reference releases before
+start. Fixed-copy inspectors remain immutable and allocation-free after start.
+The plan does not yet drive callbacks or implement cross-rate freshness,
+admission, late/catch-up policy, shedding/recovery, or telemetry evolution.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -269,8 +280,9 @@ role/category identities, external verify-only ownership, and the bounded
 three-region provider/resident transaction without changing steady-state
 callbacks. M15-04 adds exact logical control extents, live runtime-stack
 accounting and observation, declared-only opaque accounting, and retryable
-cross-category cleanup. Mandatory CI and human compatibility/concurrency
-review remain completion gates. The
+cross-category cleanup. M15 is complete at the audited baseline. M16-01 adds
+the bounded rate-domain/reference-plan boundary; M16 and CAP-M16 remain
+incomplete. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.
 
@@ -298,7 +310,7 @@ D3 behavior. Definitions and evidence requirements are in the
 | Path | Purpose |
 | --- | --- |
 | `include/simcore/` | Current phase runtime, queues, memory, trace, metrics, data-layout, and physics utilities |
-| `rt/include/rt/`, `rt/src/` | M1–M14 portable runtime, the 1.2.1 lifecycle-safety closure, M15 CPU/thread policy and selected resident regions, and the M9 CUDA/M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
+| `rt/include/rt/`, `rt/src/` | M1–M14 portable runtime, the 1.2.1 lifecycle-safety closure, M15 CPU/thread policy and selected resident regions, the M16-01 rate reference compiler, and the M9 CUDA/M10 XDMA candidates, graph compiler, unified/host executors, strict profiles, memory/time/platform/observability/replay/device controls, and source-only experimental scheduler/fiber/plugin components |
 | `hal/`, `gpu/` | HAL and CPU-only device/frame-graph experiments |
 | `api/` | Compatibility include for the pre-M1 C header path |
 | `src/` | Demo, C shim, platform setup, metrics, and trace utility |

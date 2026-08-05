@@ -33,6 +33,12 @@ nested CPU work. M15-04 quiesces workers and completes status-bearing stack
 cleanup on each owning lane in reverse index order before join and
 resident-memory rollback.
 
+M16-01 reference releases do not enter executor queues. The executor continues
+to receive every dependency-ready phase in the complete compiled graph exactly
+once per host-driven or periodic frame. Domain periods, substeps, optionality,
+criticality, deadlines, and budget/WCET metadata therefore have no dispatch,
+admission, late, catch-up, or shedding effect in this batch.
+
 The `host_adapter` policy is the explicit exception to runtime-owned worker and
 queue storage. The host attaches a fixed callback table before finalization,
 declares capacities equal to the runtime configuration, and keeps its job

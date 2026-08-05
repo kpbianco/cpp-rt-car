@@ -5,6 +5,7 @@
 #include "executor.hpp"
 #include "memory_policy.hpp"
 #include "native_platform_preflight.hpp"
+#include "rate_timeline.hpp"
 #include "resource_policy.hpp"
 #include "snapshot_codec.hpp"
 #include "telemetry.hpp"
@@ -850,6 +851,12 @@ struct Runtime::Impl {
                resource.index() < resources.size();
     }
 
+    [[nodiscard]] bool valid_rate_domain(
+        RateDomainHandle domain) const noexcept {
+        return domain.valid() && domain.owner() == graph_owner &&
+               domain.index() < rate_domains.size();
+    }
+
     [[nodiscard]] bool valid_device_backend(
         DeviceBackendHandle backend) const noexcept {
         return backend.valid() &&
@@ -915,6 +922,30 @@ struct Runtime::Impl {
             hash_u64(
                 hash,
                 static_cast<std::uint64_t>(access.access));
+        }
+        if (!rate_domains.empty()) {
+            // Conditional marker preserves the exact pre-M16 no-plan hash.
+            hash_u64(hash, 0x4d31362d72617465ull);
+            hash_u64(hash, rate_domains.size());
+            for (const auto& domain : rate_domains) {
+                hash_string(hash, domain.name);
+                hash_u64(hash, domain.period_ns);
+                hash_u64(hash, domain.substep_count);
+                hash_u64(hash, domain.relative_deadline_ns);
+                hash_u64(hash, domain.budget_wcet_ns);
+                hash_u64(
+                    hash,
+                    static_cast<std::uint64_t>(domain.criticality));
+                hash_u64(hash, domain.optional ? 1u : 0u);
+            }
+            hash_u64(hash, compiled_rate_plan.bindings.size());
+            for (const auto& binding : compiled_rate_plan.bindings) {
+                hash_u64(hash, binding.phase.index());
+                hash_u64(hash, binding.domain.index());
+                hash_u64(
+                    hash,
+                    static_cast<std::uint64_t>(binding.phase_kind));
+            }
         }
         return hash;
     }
@@ -1411,6 +1442,9 @@ struct Runtime::Impl {
     std::vector<detail::GraphDependency> dependencies;
     std::vector<detail::GraphResourceAccess> resource_accesses;
     std::vector<PhaseHandle> compiled_order;
+    std::vector<detail::RateDomainSpec> rate_domains;
+    std::vector<detail::RateBindingSpec> rate_bindings;
+    detail::CompiledRatePlan compiled_rate_plan;
     std::unique_ptr<detail::ResidentRegionSet> resident_regions;
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::TelemetryCounters telemetry_counters;
@@ -1929,6 +1963,158 @@ Status Runtime::register_device_phase(
     return Status::ok;
 }
 
+Status Runtime::register_rate_domain(
+    const RateDomainRegistration& registration,
+    RateDomainHandle& out_domain) noexcept {
+    out_domain = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state, "rate-domain registration is frozen");
+    }
+    std::array<char, rate_domain_name_capacity> name{};
+    if (!set_identifier(name, registration.name) ||
+        registration.period_ns == 0 ||
+        registration.substep_count == 0 ||
+        registration.substep_count > rate_domain_substep_capacity ||
+        (registration.criticality != RateCriticality::background &&
+         registration.criticality != RateCriticality::normal &&
+         registration.criticality != RateCriticality::critical)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "rate domain has an invalid name, period, substeps, or criticality");
+    }
+    if (impl_->rate_domains.size() >= rate_domain_capacity) {
+        return impl_->fail(Status::capacity_exceeded, "rate-domain capacity exceeded");
+    }
+    if (std::any_of(
+            impl_->rate_domains.begin(),
+            impl_->rate_domains.end(),
+            [&](const detail::RateDomainSpec& domain) {
+                return domain.name == registration.name;
+            })) {
+        return impl_->fail(Status::invalid_argument, "rate-domain names must be unique");
+    }
+    try {
+        const auto index = static_cast<std::uint32_t>(impl_->rate_domains.size());
+        impl_->rate_domains.push_back({
+            std::string(registration.name),
+            registration.period_ns,
+            registration.substep_count,
+            registration.relative_deadline_ns,
+            registration.budget_wcet_ns,
+            registration.criticality,
+            registration.optional,
+        });
+        out_domain = RateDomainHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::replace_rate_domain(
+    RateDomainHandle domain,
+    const RateDomainRegistration& registration) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state, "rate-domain replacement is frozen");
+    }
+    if (!impl_->valid_rate_domain(domain)) {
+        return impl_->fail(Status::invalid_handle, "rate-domain handle is invalid or foreign");
+    }
+    std::array<char, rate_domain_name_capacity> name{};
+    if (!set_identifier(name, registration.name) ||
+        registration.period_ns == 0 || registration.substep_count == 0 ||
+        registration.substep_count > rate_domain_substep_capacity ||
+        (registration.criticality != RateCriticality::background &&
+         registration.criticality != RateCriticality::normal &&
+         registration.criticality != RateCriticality::critical)) {
+        return impl_->fail(Status::invalid_argument, "replacement rate domain is malformed");
+    }
+    for (std::size_t index = 0; index < impl_->rate_domains.size(); ++index) {
+        if (index != domain.index() &&
+            impl_->rate_domains[index].name == registration.name) {
+            return impl_->fail(Status::invalid_argument, "rate-domain names must be unique");
+        }
+    }
+    try {
+        detail::RateDomainSpec candidate{
+            std::string(registration.name),
+            registration.period_ns,
+            registration.substep_count,
+            registration.relative_deadline_ns,
+            registration.budget_wcet_ns,
+            registration.criticality,
+            registration.optional,
+        };
+        impl_->rate_domains[domain.index()] = std::move(candidate);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::bind_phase_to_rate_domain(
+    PhaseHandle phase,
+    RateDomainHandle domain) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state, "rate-phase bindings are frozen");
+    }
+    if (!impl_->valid_phase(phase) || !impl_->valid_rate_domain(domain)) {
+        return impl_->fail(Status::invalid_handle, "rate binding contains an invalid or foreign handle");
+    }
+    if (std::any_of(
+            impl_->rate_bindings.begin(),
+            impl_->rate_bindings.end(),
+            [&](const detail::RateBindingSpec& binding) {
+                return binding.phase == phase;
+            })) {
+        return impl_->fail(Status::invalid_argument, "phase already has a rate-domain owner");
+    }
+    try {
+        impl_->rate_bindings.push_back({
+            phase,
+            domain,
+            impl_->callbacks[phase.index()].kind == Impl::PhaseKind::cpu
+                ? RatePhaseKind::cpu
+                : RatePhaseKind::device,
+        });
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::bind_phase_to_rate_domain(
+    const RatePhaseBinding& binding) noexcept {
+    return bind_phase_to_rate_domain(binding.phase, binding.domain);
+}
+
 Status Runtime::register_resource(
     std::string_view name,
     ResourceHandle& out_resource) noexcept {
@@ -2261,6 +2447,20 @@ Status Runtime::finalize() noexcept {
         return impl_->fail_compile(compile_status, diagnostic);
     }
 
+    detail::CompiledRatePlan compiled_rate_plan;
+    detail::RateCompileDiagnostic rate_diagnostic;
+    const auto rate_status = detail::compile_rate_timeline(
+        impl_->graph_owner,
+        impl_->callbacks.size(),
+        compiled_order,
+        impl_->rate_domains,
+        impl_->rate_bindings,
+        compiled_rate_plan,
+        rate_diagnostic);
+    if (rate_status != Status::ok) {
+        return impl_->fail(rate_status, rate_diagnostic.message);
+    }
+
     const auto minimum_graph_queue_capacity =
         impl_->callbacks.empty()
         ? std::size_t{0}
@@ -2368,6 +2568,9 @@ Status Runtime::finalize() noexcept {
         impl_->config.scratch_alignment;
     memory_plan.overload_policy =
         impl_->config.overload_policy;
+    memory_plan.rate_domain_count = compiled_rate_plan.domains.size();
+    memory_plan.rate_binding_count = compiled_rate_plan.bindings.size();
+    memory_plan.reference_release_count = compiled_rate_plan.releases.size();
 
     bool plan_valid = detail::checked_align_up(
         memory_plan.phase_scratch_bytes,
@@ -2458,6 +2661,22 @@ Status Runtime::finalize() noexcept {
                    add_runtime_bytes(bytes);
         };
 
+    const auto add_rate_plan_array =
+        [&](std::size_t count, std::size_t element_size) {
+            std::size_t bytes = 0;
+            std::size_t total = 0;
+            if (!detail::checked_multiply(count, element_size, bytes) ||
+                !detail::checked_add(
+                    memory_plan.rate_plan_bytes,
+                    bytes,
+                    total) ||
+                !add_runtime_bytes(bytes)) {
+                return false;
+            }
+            memory_plan.rate_plan_bytes = total;
+            return true;
+        };
+
     plan_valid = plan_valid && add_runtime_array(
         impl_->callbacks.capacity(),
         sizeof(Impl::RegisteredCallback));
@@ -2509,6 +2728,38 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_runtime_array(
         impl_->resource_accesses.capacity(),
         sizeof(detail::GraphResourceAccess));
+    plan_valid = plan_valid && add_rate_plan_array(
+        impl_->rate_domains.capacity(),
+        sizeof(detail::RateDomainSpec));
+    for (const auto& domain : impl_->rate_domains) {
+        const auto object_begin = reinterpret_cast<std::uintptr_t>(&domain);
+        const auto object_end = object_begin + sizeof(domain);
+        const auto name_begin = reinterpret_cast<std::uintptr_t>(
+            domain.name.data());
+        if (name_begin < object_begin || name_begin >= object_end) {
+            const auto bytes = domain.name.capacity() + 1;
+            std::size_t total = 0;
+            plan_valid = plan_valid &&
+                detail::checked_add(
+                    memory_plan.rate_plan_bytes,
+                    bytes,
+                    total) &&
+                add_runtime_bytes(bytes);
+            memory_plan.rate_plan_bytes = total;
+        }
+    }
+    plan_valid = plan_valid && add_rate_plan_array(
+        impl_->rate_bindings.capacity(),
+        sizeof(detail::RateBindingSpec));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_plan.domains.capacity(),
+        sizeof(CompiledRateDomain));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_plan.bindings.capacity(),
+        sizeof(CompiledRateBinding));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_plan.releases.capacity(),
+        sizeof(ReferenceRelease));
     plan_valid = plan_valid && add_runtime_array(
         compiled_order.capacity(),
         sizeof(PhaseHandle));
@@ -2694,6 +2945,29 @@ Status Runtime::finalize() noexcept {
             impl_->resource_accesses.capacity(),
             sizeof(detail::GraphResourceAccess));
         add_runtime_extent(
+            impl_->rate_domains.data(),
+            impl_->rate_domains.capacity(),
+            sizeof(detail::RateDomainSpec));
+        for (const auto& domain : impl_->rate_domains) {
+            add_external_string(domain, domain.name);
+        }
+        add_runtime_extent(
+            impl_->rate_bindings.data(),
+            impl_->rate_bindings.capacity(),
+            sizeof(detail::RateBindingSpec));
+        add_runtime_extent(
+            compiled_rate_plan.domains.data(),
+            compiled_rate_plan.domains.capacity(),
+            sizeof(CompiledRateDomain));
+        add_runtime_extent(
+            compiled_rate_plan.bindings.data(),
+            compiled_rate_plan.bindings.capacity(),
+            sizeof(CompiledRateBinding));
+        add_runtime_extent(
+            compiled_rate_plan.releases.data(),
+            compiled_rate_plan.releases.capacity(),
+            sizeof(ReferenceRelease));
+        add_runtime_extent(
             compiled_order.data(),
             compiled_order.capacity(),
             sizeof(PhaseHandle));
@@ -2755,6 +3029,7 @@ Status Runtime::finalize() noexcept {
 
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
     impl_->compiled_order = std::move(compiled_order);
+    impl_->compiled_rate_plan = std::move(compiled_rate_plan);
     impl_->resident_regions = std::move(resident_regions);
     impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
@@ -3881,6 +4156,64 @@ bool Runtime::compiled_phase_at(
         return false;
     }
     phase = impl_->compiled_order[execution_index];
+    return true;
+}
+
+bool Runtime::rate_model_enabled() const noexcept {
+    return impl_ && !impl_->provider_callback_active() &&
+        impl_->state != RuntimeState::configuring &&
+        !impl_->compiled_rate_plan.domains.empty();
+}
+
+std::size_t Runtime::rate_domain_count() const noexcept {
+    return rate_model_enabled() ? impl_->compiled_rate_plan.domains.size() : 0;
+}
+
+std::size_t Runtime::rate_binding_count() const noexcept {
+    return rate_model_enabled() ? impl_->compiled_rate_plan.bindings.size() : 0;
+}
+
+std::size_t Runtime::reference_release_count() const noexcept {
+    return rate_model_enabled() ? impl_->compiled_rate_plan.releases.size() : 0;
+}
+
+std::uint64_t Runtime::reference_supercycle_ns() const noexcept {
+    return rate_model_enabled() ? impl_->compiled_rate_plan.supercycle_ns : 0;
+}
+
+bool Runtime::compiled_rate_domain_at(
+    std::size_t registration_index,
+    CompiledRateDomain& domain) const noexcept {
+    domain = {};
+    if (!rate_model_enabled() ||
+        registration_index >= impl_->compiled_rate_plan.domains.size()) {
+        return false;
+    }
+    domain = impl_->compiled_rate_plan.domains[registration_index];
+    return true;
+}
+
+bool Runtime::compiled_rate_binding_at(
+    std::size_t compiled_phase_index,
+    CompiledRateBinding& binding) const noexcept {
+    binding = {};
+    if (!rate_model_enabled() ||
+        compiled_phase_index >= impl_->compiled_rate_plan.bindings.size()) {
+        return false;
+    }
+    binding = impl_->compiled_rate_plan.bindings[compiled_phase_index];
+    return true;
+}
+
+bool Runtime::reference_release_at(
+    std::size_t release_index,
+    ReferenceRelease& release) const noexcept {
+    release = {};
+    if (!rate_model_enabled() ||
+        release_index >= impl_->compiled_rate_plan.releases.size()) {
+        return false;
+    }
+    release = impl_->compiled_rate_plan.releases[release_index];
     return true;
 }
 

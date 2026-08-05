@@ -31,10 +31,13 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
 - [x] Optional strict platform preflight is read-only, runs before runtime
   threads start, and fails closed with per-check explanations (M5 functional
   gate; not deployment qualification).
-- [ ] M15-04 functional closure for fragmented controls, runtime-owned stacks,
-  declared external/backend accounting, and retryable rollback is implemented;
-  mandatory CI and human accounting/API/lifetime/compatibility review remain
-  before the M15 gate can be checked.
+- [x] M15 functional closure for fragmented controls, runtime-owned stacks,
+  declared external/backend accounting, and retryable rollback is retained at
+  the audited baseline.
+- [x] M16-01 compiles a bounded exact epoch-zero rate reference plan with
+  checked arithmetic, phase ownership, immutable inspection, identity, and
+  accounting tests. This is a functional plan gate only; it is not active
+  multi-rate dispatch, admission, overload policy, or timing qualification.
 - [ ] A named deployment independently verifies requested memory locking,
   NUMA/huge-page outcomes, residency under load, and worst-case behavior;
   M15 provider/declaration injection, `mlock`, `mincore`, preflight, and hosted CI do not
@@ -77,6 +80,9 @@ runtime-stack observation. Declarations are trusted metadata, not independent
 observation. None of this changes any unchecked deployment gate above.
 Provider-backed checked stop releases trace backing, so post-stop trace export
 must occur before that cleanup or be treated as unavailable.
+M16-01 budget/WCET metadata and exact timeline agreement are not feasibility,
+latency, RT1, or RT2 evidence. Cross-rate freshness, admission, late/catch-up,
+and shedding/recovery remain unchecked M16 gates.
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its

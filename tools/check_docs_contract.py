@@ -284,6 +284,9 @@ def check_runtime_contract() -> None:
     graph_doc = read("docs/compiled_graph.md")
     graph_source = read("rt/src/compiled_graph.cpp")
     graph_test = read("tests/test_compiled_graph.cpp")
+    rate_header = read("rt/src/rate_timeline.hpp")
+    rate_source = read("rt/src/rate_timeline.cpp")
+    rate_test = read("tests/test_rate_timeline.cpp")
     executor_doc = read("docs/executor.md")
     memory_doc = read("docs/memory_plan.md")
     cpu_memory_policy_doc = read("docs/cpu_memory_policy.md")
@@ -1084,6 +1087,103 @@ def check_runtime_contract() -> None:
     ):
         if phrase not in normalized_m15_doc:
             fail(f"docs/cpu_memory_policy.md: missing M15-04 phrase {phrase!r}")
+
+    # M16-01 reference-plan checks are permanent product facts. They do not
+    # inspect the active-batch/latest milestone frontier, which later batches
+    # must advance without invalidating this owned behavior.
+    for token in (
+        "rate_domain_capacity = 64",
+        "rate_domain_substep_capacity = 64",
+        "reference_release_capacity = 65'536",
+        "enum class RateCriticality",
+    ):
+        if token not in config_header:
+            fail(f"rt/config.hpp: missing permanent M16-01 token {token!r}")
+    for token in (
+        "struct RateDomainHandle",
+        "graph_rate_domain_kind_bit",
+        "struct RateDomainRegistration",
+        "struct RatePhaseBinding",
+        "struct CompiledRateDomain",
+        "struct CompiledRateBinding",
+        "struct ReferenceRelease",
+        "register_rate_domain(",
+        "bind_phase_to_rate_domain(",
+        "reference_release_at(",
+        "rate_plan_bytes",
+    ):
+        if token not in runtime_header and token not in config_header:
+            graph_header = read("rt/include/rt/graph.hpp")
+            if token not in graph_header:
+                fail(f"public SDK headers: missing permanent M16-01 token {token!r}")
+    for token in (
+        "compile_rate_timeline(",
+        "checked_lcm(",
+        "reference-release capacity exceeded",
+        "compiled phase order is not a permutation",
+        "candidate.releases",
+    ):
+        if token not in rate_header and token not in rate_source:
+            fail(f"rate timeline compiler is missing {token!r}")
+    for token in (
+        "compiled_rate_plan",
+        "compute_graph_id",
+        "rate_plan_bytes",
+        "add_runtime_extent",
+    ):
+        if token not in runtime_source:
+            fail(f"M16-01 runtime integration is missing {token!r}")
+    for test_name in (
+        "HarmonicAndNonHarmonicTimelineMatchesIndependentGenerator",
+        "ValidationIsBoundedOwnedAndTransactional",
+        "FailedCompilationHasNoProviderSideEffectsAndCanRetry",
+        "CheckedArithmeticRejectsOverflowCapacityAndRecovers",
+        "ReferenceReleaseCapacityBoundaryIsInclusive",
+        "ExplicitPlanDoesNotChangeHostOrPeriodicDispatch",
+        "ExplicitSemanticsChangeIdentityAndNoPlanIdentityIsStable",
+        "DirectCompilerRejectsMalformedNamesAndPhaseOrder",
+        "CpuAndMockDeviceBindingsRemainInstanceOwned",
+        "RateStorageIsExactlyInsideRuntimeControl",
+        "RateIdentityRejectsSemanticallyDifferentPlanTransactionally",
+    ):
+        if test_name not in rate_test:
+            fail(f"tests/test_rate_timeline.cpp: missing permanent M16-01 gate {test_name!r}")
+    for token in (
+        "RatePlanInspectionAndCpuFramesDoNotAllocate",
+        "RatePlanCompleteDeviceFramesDoNotAllocate",
+    ):
+        if token not in noalloc_test:
+            fail(f"tests/test_trace_noalloc.cpp: missing M16-01 allocation gate {token!r}")
+    for token in (
+        "rt/src/rate_timeline.cpp",
+        "test_rate_timeline.cpp",
+        "m16_rate_timeline",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"M16-01 CMake integration is missing {token!r}")
+    for token in ("RateTimeline.*", "m16_rate_timeline"):
+        if token not in ci_workflow:
+            fail(f"M16-01 TSan/CI coverage is missing {token!r}")
+    for token in (
+        "pre_m16_plan",
+        "register_rate_domain(",
+        "compiled_rate_domain_at(",
+    ):
+        if token not in package_cpp_consumer:
+            fail(f"preferred package consumer is missing M16-01 token {token!r}")
+    if "pre_m16_plan" not in package_compat_consumer:
+        fail("compatibility package consumer is missing the pre-M16 aggregate gate")
+    normalized_rate_docs = " ".join(
+        (graph_doc + " " + memory_doc + " " + time_doc).lower().split()
+    )
+    for phrase in (
+        "[0, lcm(periods))",
+        "complete compiled graph",
+        "no seventh planned row",
+        "does not pace the clock",
+    ):
+        if phrase not in normalized_rate_docs:
+            fail(f"M16-01 component contracts are missing phrase {phrase!r}")
 
     for token in (
         "Runtime::run_periodic(",

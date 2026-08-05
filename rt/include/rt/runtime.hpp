@@ -471,6 +471,70 @@ struct StaticPhaseAssignment {
     std::size_t worker_index = 0;
 };
 
+// M16-01 rate metadata is an additive C++ source API. Periods, deadlines, and
+// budget/WCET estimates are integral nanoseconds and are not schema-7 fields.
+// Budget values are planning metadata only; finalization does not perform
+// feasibility admission and reference-plan presence does not alter dispatch.
+struct RateDomainRegistration {
+    std::string_view name{};
+    std::uint64_t period_ns = 0;
+    std::uint32_t substep_count = 1;
+    std::uint64_t relative_deadline_ns = 0;
+    std::uint64_t budget_wcet_ns = 0;
+    RateCriticality criticality = RateCriticality::normal;
+    bool optional = false;
+};
+
+enum class RatePhaseKind : std::uint8_t {
+    cpu,
+    device,
+};
+
+struct RatePhaseBinding {
+    PhaseHandle phase{};
+    RateDomainHandle domain{};
+};
+
+struct CompiledRateDomain {
+    RateDomainHandle domain{};
+    std::array<char, rate_domain_name_capacity> name{};
+    std::size_t registration_index = 0;
+    std::uint64_t period_ns = 0;
+    std::uint32_t substep_count = 0;
+    std::uint64_t relative_deadline_ns = 0;
+    std::uint64_t budget_wcet_ns = 0;
+    RateCriticality criticality = RateCriticality::normal;
+    bool optional = false;
+    std::uint64_t releases_per_supercycle = 0;
+    // Exact reduced period ratio against registration-order domain zero.
+    std::uint64_t period_ratio_numerator = 0;
+    std::uint64_t period_ratio_denominator = 0;
+};
+
+struct CompiledRateBinding {
+    PhaseHandle phase{};
+    RateDomainHandle domain{};
+    RatePhaseKind phase_kind = RatePhaseKind::cpu;
+    std::size_t compiled_phase_index = 0;
+};
+
+struct ReferenceRelease {
+    std::uint64_t release_time_ns = 0;
+    RateDomainHandle domain{};
+    std::size_t domain_registration_index = 0;
+    std::uint64_t domain_release_sequence = 0;
+    PhaseHandle phase{};
+    RatePhaseKind phase_kind = RatePhaseKind::cpu;
+    std::size_t compiled_phase_index = 0;
+    std::uint32_t substep_ordinal = 0;
+    std::uint32_t substep_count = 0;
+    std::uint64_t relative_deadline_ns = 0;
+    std::uint64_t deadline_time_ns = 0;
+    std::uint64_t budget_wcet_ns = 0;
+    RateCriticality criticality = RateCriticality::normal;
+    bool optional = false;
+};
+
 struct MemoryPlan {
     // planned_bytes is the sum of the three control fields and the three
     // *_total/storage fields. It describes requested runtime storage, not RSS.
@@ -507,6 +571,12 @@ struct MemoryPlan {
     std::size_t queue_slots = 0;
     std::size_t scratch_alignment = 0;
     OverloadPolicy overload_policy = OverloadPolicy::reject_submission;
+    // M16-01 rate-plan storage is a subcomponent of runtime_control_bytes and
+    // does not add a seventh planned row or change the six-row equation.
+    std::size_t rate_domain_count = 0;
+    std::size_t rate_binding_count = 0;
+    std::size_t reference_release_count = 0;
+    std::size_t rate_plan_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
@@ -885,6 +955,19 @@ public:
     [[nodiscard]] Status register_device_phase(
         const DevicePhaseRegistration& registration,
         PhaseHandle& out_phase) noexcept;
+    [[nodiscard]] Status register_rate_domain(
+        const RateDomainRegistration& registration,
+        RateDomainHandle& out_domain) noexcept;
+    // Replaces copied metadata without changing the instance-owned identity.
+    // This supports correcting a plan after transactional finalize rejection.
+    [[nodiscard]] Status replace_rate_domain(
+        RateDomainHandle domain,
+        const RateDomainRegistration& registration) noexcept;
+    [[nodiscard]] Status bind_phase_to_rate_domain(
+        PhaseHandle phase,
+        RateDomainHandle domain) noexcept;
+    [[nodiscard]] Status bind_phase_to_rate_domain(
+        const RatePhaseBinding& binding) noexcept;
     [[nodiscard]] Status register_resource(
         std::string_view name,
         ResourceHandle& out_resource) noexcept;
@@ -934,6 +1017,20 @@ public:
     [[nodiscard]] bool compiled_phase_at(
         std::size_t execution_index,
         PhaseHandle& phase) const noexcept;
+    [[nodiscard]] bool rate_model_enabled() const noexcept;
+    [[nodiscard]] std::size_t rate_domain_count() const noexcept;
+    [[nodiscard]] std::size_t rate_binding_count() const noexcept;
+    [[nodiscard]] std::size_t reference_release_count() const noexcept;
+    [[nodiscard]] std::uint64_t reference_supercycle_ns() const noexcept;
+    [[nodiscard]] bool compiled_rate_domain_at(
+        std::size_t registration_index,
+        CompiledRateDomain& domain) const noexcept;
+    [[nodiscard]] bool compiled_rate_binding_at(
+        std::size_t compiled_phase_index,
+        CompiledRateBinding& binding) const noexcept;
+    [[nodiscard]] bool reference_release_at(
+        std::size_t release_index,
+        ReferenceRelease& release) const noexcept;
     [[nodiscard]] bool static_phase_assignment_at(
         std::size_t registration_index,
         StaticPhaseAssignment& assignment) const noexcept;

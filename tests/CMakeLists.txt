@@ -107,6 +107,7 @@ if (SIM_GTEST_AVAILABLE)
     # M15 CPU/memory policy is part of the supported runtime and must remain in both the
     # default and experimental-enabled GoogleTest configurations.
     list(APPEND TEST_SOURCES
+        test_rate_timeline.cpp
         test_cpu_memory_policy.cpp
         test_memory_policy.cpp
         test_thread_policy.cpp)
@@ -182,6 +183,11 @@ if (SIM_GTEST_AVAILABLE)
 
     add_test(NAME simcore_all COMMAND simcore_tests)
     set_tests_properties(simcore_all PROPERTIES TIMEOUT 180)
+    add_test(
+        NAME m16_rate_timeline
+        COMMAND simcore_tests
+            --gtest_filter=RateTimeline.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:PeriodicRuntime.*Rate*:MemoryPlan.*Rate*:DeterminismReplay.*Rate*:TraceNoAlloc.*Rate*)
+    set_tests_properties(m16_rate_timeline PROPERTIES TIMEOUT 60)
     add_test(
         NAME m15_accounting_closure
         COMMAND simcore_tests

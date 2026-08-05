@@ -17,6 +17,16 @@ inline constexpr std::size_t thread_policy_request_capacity = 16;
 inline constexpr std::size_t memory_policy_request_capacity = 16;
 inline constexpr std::size_t resource_accounting_declaration_capacity = 32;
 inline constexpr std::uint32_t memory_provider_api_version = 1;
+inline constexpr std::size_t rate_domain_capacity = 64;
+inline constexpr std::size_t rate_domain_name_capacity = 64;
+inline constexpr std::uint32_t rate_domain_substep_capacity = 64;
+inline constexpr std::size_t reference_release_capacity = 65'536;
+
+enum class RateCriticality : std::uint8_t {
+    background,
+    normal,
+    critical,
+};
 
 enum class NumericalMode : std::uint8_t {
     precise,

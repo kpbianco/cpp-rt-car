@@ -5,7 +5,8 @@ extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
 plan, M5 time/platform controls, M6 versioned observability, M7
 determinism/replay, the M8 bounded device ABI and deterministic mock, and the
 M11 stable C ABI plus host job-system adapter, M12 portable distribution, and
-the M13 complete runtime-profile loader. It
+the M13 complete runtime-profile loader, M15 CPU/memory closure, and the M16-01
+rate-domain reference plan. It
 provides explicit host-driven and finite self-paced operation without adopting
 the legacy `SimCore` scheduler or pacing loop.
 
@@ -25,7 +26,7 @@ independent support matrices and evidence gates.
 
 | Current state | Allowed operation | Resulting state |
 | --- | --- | --- |
-| `configuring` | typed configuration, optional host-executor or memory-provider attachment, graph/state/device registration and declarations | `configuring` |
+| `configuring` | typed configuration, optional host-executor or memory-provider attachment, graph/state/device/rate registration and declarations | `configuring` |
 | `configuring` | `finalize()` | `finalized` |
 | `finalized` | `start()`, preflight, and create configured runtime-owned lanes or bind the already-running host team | `running` |
 | `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
@@ -78,6 +79,13 @@ Control operations are single-host-thread operations in 1.2. `step()`,
 `run_periodic()`, checkpoint/restore, input-log export, and replay are
 non-reentrant with execution. A periodic observer cannot recursively step, and
 `stop()` called from inside a callback, periodic loop, or replay is rejected.
+
+An enabled M16-01 rate model is also part of the finalization transaction.
+Domain and binding storage is copied during configuration; the timeline is
+compiled before provider acquisition or any native, device, thread, or callback
+action. Failure publishes no plan and leaves the runtime configuring. After
+success, fixed-copy inspectors remain available before start, while running,
+and after stop. They do not resize or mutate the plan.
 
 ## Typed configuration
 
@@ -356,17 +364,22 @@ checkpoint and replay control operations; see the
 submission/poll, graph-held completions, health/reset/shutdown, and a
 fault-injectable mock; see the
 [device backend contract](device_backend.md).
+M16-01 adds only rate-model/reference-plan inspection. Cross-rate storage,
+admission, active rate dispatch, late/catch-up policy, shedding/recovery, and
+new telemetry are not present.
 
 ## Code and evidence
 
 - C++ API: `rt/include/rt/runtime.hpp`
 - Implementation: `rt/src/host_runtime.cpp`
 - Graph compiler: `rt/src/compiled_graph.cpp`
+- Rate compiler: `rt/src/rate_timeline.cpp`
 - Unified executor: `rt/src/executor.cpp`
 - Resident-region policy: `rt/src/memory_policy.cpp`
 - C ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`
 - C++ lifecycle tests: `tests/test_host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
+- Rate/reference tests: `tests/test_rate_timeline.cpp`
 - Executor tests: `tests/test_executor.cpp`
 - Memory-plan tests: `tests/test_memory_plan.cpp`
 - Memory-provider/policy tests: `tests/test_memory_policy.cpp`

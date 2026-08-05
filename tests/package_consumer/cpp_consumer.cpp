@@ -55,8 +55,10 @@ int main() {
     const rt::CpuMemoryPolicy pre_m15_04_policy{0, {}, 0, {}};
     const rt::CpuMemoryPolicyReport pre_m15_04_report{
         rt::cpu_memory_policy_schema_version, 0, {}, 0, {}};
+    const rt::MemoryPlan pre_m16_plan{1024, 512};
     if (pre_m15_04_policy.accounting_declaration_count != 0 ||
-        pre_m15_04_report.accounting_complete) {
+        pre_m15_04_report.accounting_complete ||
+        pre_m16_plan.rate_plan_bytes != 0) {
         return 3;
     }
 
@@ -75,6 +77,8 @@ int main() {
         8u * 1024u * 1024u,
     };
     std::size_t calls = 0;
+    rt::PhaseHandle phase_handle;
+    rt::RateDomainHandle rate_domain;
 
     if (runtime.configure(config) != rt::Status::ok ||
         runtime.set_cpu_memory_policy(accounting) != rt::Status::ok ||
@@ -84,15 +88,26 @@ int main() {
             8,
             &HostQueue::submit,
             &HostQueue::try_execute_one}) != rt::Status::ok ||
-        runtime.register_callback({"consumer.phase", &phase, &calls}) !=
+        runtime.register_callback(
+            {"consumer.phase", &phase, &calls},
+            phase_handle) !=
+            rt::Status::ok ||
+        runtime.register_rate_domain(
+            {"consumer.rate", 1'000'000, 1, 1'000'000, 0},
+            rate_domain) != rt::Status::ok ||
+        runtime.bind_phase_to_rate_domain(phase_handle, rate_domain) !=
             rt::Status::ok ||
         runtime.finalize() != rt::Status::ok) {
         return 1;
     }
     rt::CpuMemoryPolicyReport accounting_report;
+    rt::CompiledRateDomain compiled_rate;
     if (!runtime.cpu_memory_policy_report(accounting_report) ||
         accounting_report.thread_count == 0 ||
         accounting_report.threads[0].accounting_key.value == 0 ||
+        !runtime.compiled_rate_domain_at(0, compiled_rate) ||
+        compiled_rate.domain != rate_domain ||
+        runtime.reference_release_count() != 1 ||
         runtime.start() != rt::Status::ok ||
         runtime.step({
             1,

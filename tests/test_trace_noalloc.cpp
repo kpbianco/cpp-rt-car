@@ -769,7 +769,9 @@ rt::CallbackResult submit_noalloc_device_command(
 
 } // namespace
 
-void run_complete_device_frames_noalloc(bool provider_backed) {
+void run_complete_device_frames_noalloc(
+    bool provider_backed,
+    bool explicit_rate_plan = false) {
     NoAllocMemoryProvider memory_provider;
     rt::MockDeviceBackend backend({
         8,
@@ -811,6 +813,17 @@ void run_complete_device_frames_noalloc(bool provider_backed) {
             },
             phase),
         rt::Status::ok);
+    if (explicit_rate_plan) {
+        rt::RateDomainHandle domain;
+        ASSERT_EQ(
+            runtime.register_rate_domain(
+                {"device.rate", 2, 2, 1, 1},
+                domain),
+            rt::Status::ok);
+        ASSERT_EQ(
+            runtime.bind_phase_to_rate_domain(phase, domain),
+            rt::Status::ok);
+    }
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
     ASSERT_EQ(runtime.start(), rt::Status::ok);
     ASSERT_EQ(
@@ -842,6 +855,10 @@ TEST(TraceNoAlloc, CompleteDeviceFramesDoNotAllocate) {
 
 TEST(TraceNoAlloc, ProviderBackedCompleteDeviceFramesDoNotAllocate) {
     run_complete_device_frames_noalloc(true);
+}
+
+TEST(TraceNoAlloc, RatePlanCompleteDeviceFramesDoNotAllocate) {
+    run_complete_device_frames_noalloc(false, true);
 }
 
 namespace {
@@ -1077,4 +1094,60 @@ TEST(TraceNoAlloc, CudaSubmitAndPollDoNotAllocateAfterInitialization) {
     }
     EXPECT_EQ(allocation_count(), 0u);
     EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
+}
+
+TEST(TraceNoAlloc, RatePlanInspectionAndCpuFramesDoNotAllocate) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 2;
+    config.executor_queue_capacity = 8;
+    config.task_scratch_slots = 8;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    std::array<std::uint32_t, 2> execution{};
+    std::size_t execution_count = 0;
+    RuntimeAllocationProbe first{1, &execution, &execution_count};
+    RuntimeAllocationProbe second{2, &execution, &execution_count};
+    rt::PhaseHandle first_phase;
+    rt::PhaseHandle second_phase;
+    ASSERT_EQ(runtime.register_callback({"first", &record_runtime_phase, &first}, first_phase), rt::Status::ok);
+    ASSERT_EQ(runtime.register_callback({"second", &record_runtime_phase, &second}, second_phase), rt::Status::ok);
+    rt::RateDomainHandle fast;
+    rt::RateDomainHandle slow;
+    ASSERT_EQ(runtime.register_rate_domain({"fast", 2, 2, 1, 1}, fast), rt::Status::ok);
+    ASSERT_EQ(runtime.register_rate_domain({"slow", 3, 1, 1, 0}, slow), rt::Status::ok);
+    ASSERT_EQ(runtime.bind_phase_to_rate_domain(first_phase, fast), rt::Status::ok);
+    ASSERT_EQ(runtime.bind_phase_to_rate_domain(second_phase, slow), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    bool complete = true;
+    {
+        AllocationGuard guard;
+        for (std::size_t index = 0; index < runtime.rate_domain_count(); ++index) {
+            rt::CompiledRateDomain domain;
+            complete = runtime.compiled_rate_domain_at(index, domain) && complete;
+        }
+        for (std::size_t index = 0; index < runtime.rate_binding_count(); ++index) {
+            rt::CompiledRateBinding binding;
+            complete = runtime.compiled_rate_binding_at(index, binding) && complete;
+        }
+        for (std::size_t index = 0; index < runtime.reference_release_count(); ++index) {
+            rt::ReferenceRelease release;
+            complete = runtime.reference_release_at(index, release) && complete;
+        }
+        complete = runtime.step({0, std::chrono::nanoseconds{1}, std::nullopt}) ==
+                rt::Status::ok &&
+            complete;
+    }
+    EXPECT_TRUE(complete);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_EQ(execution_count, 2u);
+    ASSERT_EQ(runtime.stop(), rt::Status::ok);
+    {
+        AllocationGuard guard;
+        rt::ReferenceRelease release;
+        complete = runtime.reference_release_at(0, release);
+    }
+    EXPECT_TRUE(complete);
+    EXPECT_EQ(allocation_count(), 0u);
 }
