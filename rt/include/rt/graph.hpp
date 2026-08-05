@@ -117,6 +117,44 @@ struct RateDomainHandle {
         RateDomainHandle) noexcept = default;
 };
 
+// Cross-rate channel handles use the previously invalid combined kind bits.
+// They remain instance-local C++ configuration identities and do not change
+// any stable-C-ABI graph-handle encoding.
+struct CrossRateChannelHandle {
+    std::uint64_t value = invalid_graph_handle;
+
+    constexpr CrossRateChannelHandle() noexcept = default;
+    explicit constexpr CrossRateChannelHandle(std::uint64_t encoded) noexcept
+        : value(encoded) {}
+    constexpr CrossRateChannelHandle(
+        std::uint32_t owner,
+        std::uint32_t index) noexcept
+        : value(
+              (static_cast<std::uint64_t>(owner) << 32u) |
+              graph_resource_kind_bit |
+              graph_rate_domain_kind_bit |
+              static_cast<std::uint64_t>(index)) {}
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return value != invalid_graph_handle &&
+               (static_cast<std::uint32_t>(value) &
+                graph_resource_kind_bit) != 0 &&
+               (static_cast<std::uint32_t>(value) &
+                graph_rate_domain_kind_bit) != 0;
+    }
+    [[nodiscard]] constexpr std::uint32_t owner() const noexcept {
+        return static_cast<std::uint32_t>(value >> 32u);
+    }
+    [[nodiscard]] constexpr std::uint32_t index() const noexcept {
+        return static_cast<std::uint32_t>(value) &
+               graph_handle_index_mask;
+    }
+
+    friend constexpr bool operator==(
+        CrossRateChannelHandle,
+        CrossRateChannelHandle) noexcept = default;
+};
+
 enum class ResourceAccess : std::uint8_t {
     read,
     write,

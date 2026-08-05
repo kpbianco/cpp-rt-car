@@ -85,6 +85,14 @@ Checkpoint and input-log schema 1 need no new fields because their existing
 graph/replay identities already reject a semantically different plan before
 state mutation.
 
+M16-02 conditionally appends channel name, normalized producer/consumer phase
+indexes, mode, payload size, maximum age, and every copied initial-sample byte
+to `graph_id`. The marker is absent when no channel is declared, preserving the
+exact M16-01 graph/replay identity. Selection records are a deterministic
+derivative of already-hashed graph/rate/channel inputs and are not separately
+hashed. Checkpoint and input-log remain schema 1: runtime execution does not yet
+progress channel state, and persisting such state is an M16-03 design gate.
+
 ## Checkpoint format v1
 
 Checkpoint artifacts use fixed-width little-endian fields:

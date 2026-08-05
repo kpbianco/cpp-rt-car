@@ -39,6 +39,12 @@ once per host-driven or periodic frame. Domain periods, substeps, optionality,
 criticality, deadlines, and budget/WCET metadata therefore have no dispatch,
 admission, late, catch-up, or shedding effect in this batch.
 
+M16-02 channel selections and stores also remain outside executor work. A host
+frame neither publishes producer payloads nor copies consumer payloads, repeats
+substeps, filters callbacks, or consults freshness. Synthetic SPSC tests prove
+the bounded store primitive only; they do not establish active dispatch,
+latency, admission, cancellation, timeout, or overload behavior.
+
 The `host_adapter` policy is the explicit exception to runtime-owned worker and
 queue storage. The host attaches a fixed callback table before finalization,
 declares capacities equal to the runtime configuration, and keeps its job

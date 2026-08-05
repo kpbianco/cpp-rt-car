@@ -87,6 +87,16 @@ action. Failure publishes no plan and leaves the runtime configuring. After
 success, fixed-copy inspectors remain available before start, while running,
 and after stop. They do not resize or mutate the plan.
 
+M16-02 cross-rate declarations join that transaction after the reference
+timeline is complete and before memory-provider acquisition. Successful
+finalization publishes copied initial bytes, immutable channel/selection
+inspectors, and one preallocated store per channel together. Failure leaves the
+runtime configuring with no cross-rate inspectors, provider callback, native
+policy action, worker, device ownership, or callback execution. A rejected
+declaration may be replaced under its stable instance-owned handle and retried.
+Selection inspection distinguishes the first supercycle from repeating steady
+state, and each compiled channel owns one inactive two-slot SPSC store.
+
 ## Typed configuration
 
 `rt::RuntimeConfig` has twenty-five schema keys:
@@ -364,9 +374,11 @@ checkpoint and replay control operations; see the
 submission/poll, graph-held completions, health/reset/shutdown, and a
 fault-injectable mock; see the
 [device backend contract](device_backend.md).
-M16-01 adds only rate-model/reference-plan inspection. Cross-rate storage,
-admission, active rate dispatch, late/catch-up policy, shedding/recovery, and
-new telemetry are not present.
+M16-01 adds rate-model/reference-plan inspection. M16-02 adds CPU-only
+cross-rate declarations, immutable first/repeating selection inspection,
+copied initial-sample inspection, and inactive preallocated snapshot stores.
+Active transfer/dispatch, admission, late/catch-up policy, shedding/recovery,
+and new telemetry are not present.
 
 ## Code and evidence
 
@@ -374,6 +386,7 @@ new telemetry are not present.
 - Implementation: `rt/src/host_runtime.cpp`
 - Graph compiler: `rt/src/compiled_graph.cpp`
 - Rate compiler: `rt/src/rate_timeline.cpp`
+- Cross-rate compiler/store: `rt/src/cross_rate_data.cpp`
 - Unified executor: `rt/src/executor.cpp`
 - Resident-region policy: `rt/src/memory_policy.cpp`
 - C ABI: `rt/include/rt/c_api.h`, `src/c_abi.cpp`

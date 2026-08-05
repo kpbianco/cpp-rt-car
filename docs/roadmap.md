@@ -34,7 +34,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
-| M16 | In progress | M16-01 rate-domain/reference-plan implementation is present; cross-rate data, admission/late policy, and shedding/recovery remain |
+| M16 | In progress | M16-01 reference plans and M16-02 deterministic cross-rate selection/storage are present; active dispatch, admission/late policy, and shedding/recovery remain |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
@@ -573,19 +573,25 @@ Exit gates:
 
 ## M16 — Multi-rate simulation
 
-M16-01 implemented in this worktree, subject to its local, CI, and human review
-gates:
+M16-01 and M16-02 are implemented in this worktree, subject to their local, CI,
+and human review gates:
 
 - bounded copied rate domains and exactly-one phase ownership;
 - exact checked epoch-zero `[0, lcm)` reference timeline with deterministic
   same-time ordering and fixed-copy inspection;
 - graph/replay identity and runtime-control accounting integration;
 - unchanged complete-graph host and periodic dispatch.
+- bounded copied CPU-only channels with exact first-cycle initial and
+  repeating-cycle wrap selections;
+- distinct held/provenance/fresh/stale metadata and a preallocated two-slot
+  exact-generation SPSC store per channel;
+- conditional cross-rate graph/replay identity and exact runtime-control
+  accounting without a seventh plan row or provider-region expansion.
 
 Remaining M16 outcome:
 
-- explicit rate domains, rational release relationships, phase ownership, and
-  deterministic cross-rate data-transfer semantics;
+- active rate-domain dispatch and cross-rate payload transfer using the
+  compiled contracts;
 - bounded overrun policy, release/deadline observability, and host-driven plus
   self-paced coordination without constructing hidden worker pools.
 
@@ -596,7 +602,7 @@ Exit gates:
 - overload never creates unbounded catch-up work or silently skips mandatory
   releases.
 
-M16 and CAP-M16 remain incomplete until cross-rate freshness, admission and
+M16 and CAP-M16 remain incomplete until active dispatch/transfer, admission and
 late-frame policy, and shedding/recovery with versioned telemetry are delivered
 and their gates pass.
 

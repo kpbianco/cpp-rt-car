@@ -131,6 +131,21 @@ phase-scratch/task-scratch/trace acquisition boundary are unchanged. Plan
 inspection and complete CPU/mock-device frames allocate no ordinary heap after
 start; two runtime instances own separate handles and release vectors.
 
+## M16-02 cross-rate accounting
+
+Copied channel specifications and initial bytes, compiled descriptors and two
+selection records per consumer reference release, store objects, packed atomic
+slot controls, and fixed payload slots are included exactly once in
+`MemoryPlan::rate_plan_bytes` and the same M15 runtime-control logical extent.
+The plan separately reports channel/selection counts, copied initial bytes,
+total slot count, and total snapshot payload bytes for reconciliation.
+
+Limits are explicit: 256 channels, names shorter than 64 bytes, 64 KiB per
+payload, 1 MiB aggregate initial bytes, 262,144 selections, two slots per
+channel, and 2 MiB aggregate slot payload. Checked arithmetic and construction
+complete before publication. No seventh planned row is added and cross-rate
+storage never enters the phase/task/trace `MemoryProvider` acquisition boundary.
+
 ## Configuration
 
 | Key | Default | Contract |

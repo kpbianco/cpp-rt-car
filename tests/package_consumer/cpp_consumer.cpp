@@ -77,8 +77,12 @@ int main() {
         8u * 1024u * 1024u,
     };
     std::size_t calls = 0;
-    rt::PhaseHandle phase_handle;
-    rt::RateDomainHandle rate_domain;
+    rt::PhaseHandle producer_phase;
+    rt::PhaseHandle consumer_phase;
+    rt::RateDomainHandle producer_rate;
+    rt::RateDomainHandle consumer_rate;
+    rt::CrossRateChannelHandle channel;
+    const std::array initial{std::byte{0x2a}};
 
     if (runtime.configure(config) != rt::Status::ok ||
         runtime.set_cpu_memory_policy(accounting) != rt::Status::ok ||
@@ -89,25 +93,45 @@ int main() {
             &HostQueue::submit,
             &HostQueue::try_execute_one}) != rt::Status::ok ||
         runtime.register_callback(
-            {"consumer.phase", &phase, &calls},
-            phase_handle) !=
+            {"producer.phase", &phase, &calls},
+            producer_phase) !=
             rt::Status::ok ||
+        runtime.register_callback(
+            {"consumer.phase", &phase, &calls},
+            consumer_phase) != rt::Status::ok ||
         runtime.register_rate_domain(
-            {"consumer.rate", 1'000'000, 1, 1'000'000, 0},
-            rate_domain) != rt::Status::ok ||
-        runtime.bind_phase_to_rate_domain(phase_handle, rate_domain) !=
+            {"producer.rate", 1'000'000, 1, 1'000'000, 0},
+            producer_rate) != rt::Status::ok ||
+        runtime.register_rate_domain(
+            {"consumer.rate", 2'000'000, 1, 2'000'000, 0},
+            consumer_rate) != rt::Status::ok ||
+        runtime.bind_phase_to_rate_domain(producer_phase, producer_rate) !=
+            rt::Status::ok ||
+        runtime.bind_phase_to_rate_domain(consumer_phase, consumer_rate) !=
+            rt::Status::ok ||
+        runtime.register_cross_rate_channel(
+            {"producer.to.consumer", producer_phase, consumer_phase,
+             initial.size(), initial},
+            channel) !=
             rt::Status::ok ||
         runtime.finalize() != rt::Status::ok) {
         return 1;
     }
     rt::CpuMemoryPolicyReport accounting_report;
     rt::CompiledRateDomain compiled_rate;
+    rt::CompiledCrossRateChannel compiled_channel;
+    std::array<std::byte, 1> copied_initial{};
     if (!runtime.cpu_memory_policy_report(accounting_report) ||
         accounting_report.thread_count == 0 ||
         accounting_report.threads[0].accounting_key.value == 0 ||
         !runtime.compiled_rate_domain_at(0, compiled_rate) ||
-        compiled_rate.domain != rate_domain ||
-        runtime.reference_release_count() != 1 ||
+        compiled_rate.domain != producer_rate ||
+        !runtime.compiled_cross_rate_channel_at(0, compiled_channel) ||
+        compiled_channel.channel != channel ||
+        runtime.copy_cross_rate_initial_sample(0, copied_initial) !=
+            rt::Status::ok ||
+        copied_initial != initial ||
+        runtime.reference_release_count() != 3 ||
         runtime.start() != rt::Status::ok ||
         runtime.step({
             1,
@@ -116,5 +140,5 @@ int main() {
         runtime.stop() != rt::Status::ok) {
         return 1;
     }
-    return calls == 1 ? 0 : 2;
+    return calls == 2 ? 0 : 2;
 }

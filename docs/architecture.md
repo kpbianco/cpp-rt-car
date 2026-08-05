@@ -105,6 +105,17 @@ All storage remains runtime-owned and is counted within the existing runtime-
 control extent. Execution does not consume the reference vector yet: the
 complete compiled graph still runs once per host or periodic frame.
 
+M16-02 compiles a second immutable layer over that vector. A copied channel
+connects one CPU producer and one CPU consumer in different explicit domains.
+For every consumer reference release the compiler selects the latest strictly
+earlier reference-order producer twice: once for the first supercycle and once
+for repeating steady state. The latter represents wrap with cycle offset `-1`;
+the former uses copied initial bytes when no producer is eligible. Exact age,
+held provenance, and freshness are metadata only. Each channel also owns a
+two-slot packed-atomic SPSC store whose payload becomes visible only after a
+release publication and cannot be copied while the producer owns the slot.
+Neither selections nor stores enter callback dispatch in this batch.
+
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
 run on static-assignment, bounded-throughput, or borrowed-host policy.
@@ -219,10 +230,11 @@ cleanup before join. Cleanup proceeds from device ownership through device
 service, reverse executor instances, watchdog, fragmented controls, and
 trace/task/phase rollback while retaining the first error and every unresolved
 owner.
-M16-01 adds the bounded reference-plan compiler and graph/replay identity
-integration without adding a lane, resource owner, provider region, telemetry
-field, or dispatch branch. M16-02 through M16-04 own cross-rate storage,
-admission/late behavior, and deterministic shedding/recovery/telemetry.
+M16-01 adds the bounded reference-plan compiler. M16-02 adds cross-rate
+selection and snapshot-store construction plus graph/replay identity and exact
+runtime-control accounting, without adding a lane, active owner, provider
+region, telemetry field, or dispatch branch. M16-03 and M16-04 own active
+dispatch, admission/late behavior, and deterministic shedding/recovery/telemetry.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),

@@ -3,6 +3,10 @@
 RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
 ABI v1, and Apache-2.0. M14, M14.1, and M15 are complete; M16 is active.
+M16-01 supplies the exact reference timeline. M16-02 adds deterministic
+CPU-only cross-rate channel selection plus inactive bounded SPSC stores; it
+does not activate rate dispatch, payload transfer, admission/late behavior, or
+shedding/recovery.
 
 ## Read before nontrivial work
 
