@@ -18,6 +18,8 @@ struct RateDomainSpec {
     std::uint64_t budget_wcet_ns = 0;
     RateCriticality criticality = RateCriticality::normal;
     bool optional = false;
+    RateLateAction late_action = RateLateAction::fail;
+    std::uint32_t bounded_catch_up_limit = 0;
 };
 
 struct RateBindingSpec {

@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M16-02
-  title: Add deterministic cross-rate data semantics
-  goal: Add a bounded additive C++ cross-rate channel model for explicit M16 rate plans, compile an immutable sample-and-hold and freshness-selection plan over the exact reference supercycle, and provide preallocated race-free snapshot storage primitives without yet changing host-driven or periodic callback dispatch, admission, late behavior, shedding, recovery, or telemetry schemas.
+  id: M16-03
+  title: Add admission and late-frame policy
+  goal: Activate an opt-in bounded CPU-only rate dispatcher over the exact M16-01/M16-02 plans, reject declared-budget-infeasible mandatory schedules before start, execute cross-rate transfers through the preallocated exact-generation stores, and apply explicit skip, bounded-catch-up, hold, degrade, or fail actions without unbounded backlog, hidden work, optional-work shedding, or telemetry-schema changes.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -28,12 +28,13 @@ sources:
     - docs/evidence/M15-03-2026-08-04.md
     - docs/evidence/M15-04-2026-08-05.md
     - docs/evidence/M16-01-2026-08-05.md
-  baseline_commit: 8dabeb3747a20717ce02c99a3d3c0d9deb1a3532
+    - docs/evidence/M16-02-2026-08-05.md
+  baseline_commit: 34f0752596d84ef1f98a8a0d544861bda4935f3f
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M16-02.yaml
-  control_plane_revision: 0a74f2134d4ae08a6c55975c8497b2c4c01de371  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M16-03.yaml
+  control_plane_revision: 1d6c1879262a8f1abda54ac02776be1e12424b0c  # pragma: allowlist secret
 dependencies:
-  - M16-01
+  - M16-02
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -41,21 +42,25 @@ scope:
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
     - rt/include/rt/config.hpp
-    - rt/include/rt/graph.hpp
     - rt/include/rt/runtime.hpp
-    - rt/src/cross_rate_data.cpp
-    - rt/src/cross_rate_data.hpp
+    - rt/src/rate_dispatch.cpp
+    - rt/src/rate_dispatch.hpp
     - rt/src/rate_timeline.cpp
     - rt/src/rate_timeline.hpp
-    - rt/src/compiled_graph.cpp
-    - rt/src/compiled_graph.hpp
+    - rt/src/cross_rate_data.cpp
+    - rt/src/cross_rate_data.hpp
+    - rt/src/executor.cpp
+    - rt/src/executor.hpp
     - rt/src/host_runtime.cpp
     - rt/src/resource_policy.cpp
     - rt/src/resource_policy.hpp
-    - tests/test_cross_rate_data.cpp
+    - tests/test_rate_dispatch.cpp
     - tests/test_rate_timeline.cpp
+    - tests/test_cross_rate_data.cpp
     - tests/test_compiled_graph.cpp
     - tests/test_host_runtime.cpp
+    - tests/test_periodic_runtime.cpp
+    - tests/test_executor.cpp
     - tests/test_memory_plan.cpp
     - tests/test_determinism_replay.cpp
     - tests/test_trace_noalloc.cpp
@@ -78,7 +83,7 @@ scope:
     - docs/determinism_replay.md
     - docs/testing_ci.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M16-02-*.md
+    - docs/evidence/M16-03-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -88,19 +93,18 @@ scope:
     - abi/rtfw_c_abi_v8.sha256
     - rt/include/rt/c_api.h
     - rt/include/rt/device_abi.h
+    - rt/include/rt/status.hpp
     - src/c_abi.cpp
     - core/include/core/config.hpp
     - core/include/core/config_hot_reload.hpp
     - configs/*.json
     - rt/include/rt/profile.hpp
     - rt/src/runtime_profile.cpp
-    - rt/src/executor.cpp
-    - rt/src/executor.hpp
+    - rt/src/snapshot_codec.cpp
+    - rt/src/snapshot_codec.hpp
     - rt/src/telemetry.cpp
     - rt/src/telemetry.hpp
     - rt/src/observability_export.cpp
-    - rt/src/snapshot_codec.cpp
-    - rt/src/snapshot_codec.hpp
     - rt/src/device_manager.cpp
     - rt/src/device_manager.hpp
     - rt/src/mock_device.cpp
@@ -118,6 +122,7 @@ scope:
     - docs/evidence/M15-03-2026-08-04.md
     - docs/evidence/M15-04-2026-08-05.md
     - docs/evidence/M16-01-2026-08-05.md
+    - docs/evidence/M16-02-2026-08-05.md
     - .github/workflows/cuda-qualification.yml
     - .github/workflows/xdma-qualification.yml
     - .github/workflows/release.yml
@@ -133,89 +138,93 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The installed C++ source API adds bounded cross-rate channel declarations, instance-owned channel identities, compiled channel and consumer-selection records, and fixed-copy inspectors in the existing SDK header inventory. Each channel has a stable restricted name, one CPU producer phase, one CPU consumer phase in a different explicit rate domain, a positive fixed payload size, a copied exact-size initial sample, sample-and-hold mode, and an integral-nanosecond maximum-age threshold; zero maximum age means only an age-zero sample is fresh and UINT64_MAX is the explicit unbounded threshold.
-  - Channel registration is configuring-only and copied. Finalization rejects an absent explicit rate model, malformed or duplicate names, self edges, same-domain edges, missing/foreign/stale/cross-instance handles, non-CPU endpoints, duplicate semantic edges, invalid modes, empty or mismatched initial payloads, per-channel or aggregate capacity excess, checked-size overflow, and an endpoint that is not bound exactly once by M16-01, without publishing a partial channel or snapshot plan.
-  - "For every consumer phase/substep release in the exact M16-01 reference interval, finalization deterministically selects the latest producer phase/substep that precedes it in the existing total reference order: release time, domain registration, compiled phase, then substep ordinal. A producer earlier in that order at the same timestamp is eligible with age zero; a producer later at that timestamp is not. Before the first eligible producer in the first supercycle the copied initial sample is selected, and the repeated steady-state plan represents a prior-supercycle source with an exact negative-one cycle offset rather than inventing an epoch-zero production."
-  - Every compiled selection exposes channel and endpoint identities, consumer and selected producer reference indexes and substep/sequence identities when applicable, source-cycle offset, exact non-overflowing age in nanoseconds, initial-versus-produced provenance, whether the selected generation is held across consumer releases, and fresh-versus-stale classification from the declared maximum age. Initial, fresh, held, and stale facts remain distinct; stale is observable metadata and does not yet trigger skip, fail, degrade, shed, or another late-policy action.
-  - Harmonic, non-harmonic, co-prime, simultaneous-release, multi-substep, domain-registration permutation, compiled-phase-order permutation, first-supercycle, and wraparound examples match a separately implemented reference selector field for field across the complete supercycle. No floating point, tolerance, sleep, wall clock, pointer order, unordered iteration, or observed worker completion order participates in selection or freshness.
-  - The implementation contains one fixed-capacity runtime-owned snapshot-store primitive for each compiled channel. It copies a producer payload into a non-visible slot and publishes the complete generation atomically, copies a selected committed generation to the consumer without exposing a partial write, never overwrites a generation whose compiled lifetime is still live, and returns a bounded typed capacity/not-ready/stale result rather than spinning, blocking, allocating, falling back, or silently substituting a newer sample. Synthetic producer/consumer concurrency under ThreadSanitizer proves the primitive's single-producer/single-consumer race freedom and deterministic selected bytes; the primitive is not yet invoked automatically by Runtime::step or Runtime::run_periodic.
-  - Channel declaration, reference-selection, immutable descriptor, initial-sample, slot, and snapshot bytes are acquired only during configuration/finalization, bounded by explicit constants and checked arithmetic, isolated per Runtime, and represented exactly once inside M16 rate-plan bytes, M15 runtime-control logical extents, and MemoryPlan without adding a seventh planned row or extending the phase/task/trace MemoryProvider acquisition boundary.
-  - Cross-rate names, endpoint bindings, mode, payload size, maximum age, and copied initial-sample bytes participate in explicit-plan graph/replay compatibility identity. A runtime with no cross-rate channels retains its exact M16-01 graph/replay identity and checkpoint/input-log schema-v1 encoding. This batch adds no mutable cross-rate state to checkpoint or input-log artifacts because active runtime transfer is deferred; any need to persist progressed channel state is an M16-03 design gate rather than permission to silently change artifact schemas here.
-  - Failed cross-rate compilation or storage construction leaves the runtime configuring and correctable, with no partial inspectors, provider acquisition, native policy, thread, device ownership, callback, or externally visible snapshot mutation. Existing M14.1 and M15 cleanup, accounting, provider-token, stack, and checked-stop retry invariants remain unchanged because M16-02 adds no active start/stop owner.
-  - M16-02 is a data-contract and bounded-storage-primitive batch only. Existing step and run_periodic continue to execute the complete compiled graph once per host frame and do not automatically consume the selection plan or snapshot store. Active rate release dispatch, host/self-paced coordination, admission feasibility, late skip/bounded-catch-up/hold/degrade/fail behavior, optional-work shedding/recovery, and trace/metric schema changes remain M16-03/M16-04 work and are not implied by compiled cross-rate descriptors.
-  - Default and explicit-channel configurations preserve lifecycle, graph dependency/resource validation, M16-01 domain/reference output, host-adapter behavior, periodic absolute cadence, watchdog, mock-device behavior, deterministic replay, no ordinary heap allocation after successful start, Runtime-instance isolation, pre-M16 aggregate initialization, and preferred/compatibility installed consumers.
-  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, runtime configuration schema 7 and its 25 keys, observability/checkpoint/input-log schemas, installed target/header inventory, compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. Device-producer or device-consumer channels are rejected rather than inventing completion-data semantics that device ABI v1 does not provide.
-  - Target AGENTS, active-batch, current-state, handoff, roadmap, architecture/component contracts, release digest ledger, and retained M16-02 evidence describe the exact compiled-selection and storage-primitive boundary and do not present a fixture, copied initial value, synthetic concurrency test, mock, hosted runner, deterministic replay, preflight, or documentation as active multi-rate dispatch, latency, physical hardware, HIL, field, RT1, RT2, signing, release, deployment, or production evidence.
-  - Focused tests, complete deterministic local verification, mandatory GitHub CI, and human public-API, selection-semantics, bounded-storage, concurrency/lifetime, identity, memory-accounting, determinism, lifecycle, and compatibility review pass before merge. M16 and CAP-M16 remain incomplete after M16-02.
+  - The existing reference-only behavior remains the default. An additive configuring-only C++ rate-execution policy explicitly enables active dispatch, bounds total executed reference records per step, and appends source-compatible late-policy fields to rate-domain declarations; pre-M16-03 aggregate initialization and an explicit M16-01/M16-02 plan without the execution policy retain exact complete-graph once-per-frame dispatch and identity.
+  - Active finalization accepts only CPU phases, mandatory domains, positive budget/WCET and relative-deadline values, relative deadlines no greater than their periods, same-domain graph dependencies, and D0 unspecified determinism. Device phases remain reference-only, cross-domain graph dependencies must use declared M16-02 channels, optional-domain shedding/recovery remains M16-04, and active D1 plus active input-log replay are rejected explicitly rather than silently weakened.
+  - Admission simulates every mandatory reference record across one complete supercycle in the existing total order on one conservative serialized release lane. For each record, declared finish is max(previous declared finish, release time) plus its checked positive budget; finalization rejects any finish after that record's checked deadline, any non-idle supercycle boundary, arithmetic/capacity overflow, or a zero/ambiguous input before provider, native-policy, thread, device, callback, or snapshot side effects. Worker count or incidental graph parallelism never multiplies admitted capacity, and admission is labeled a declared-budget screen rather than measured WCET or deadline proof.
+  - Active host-driven steps use a copied optional nominal release timestamp appended to HostFrameContext. The first step establishes the wall-clock mapping for logical epoch zero; later calls must match the checked contiguous logical cursor and nominal release mapping. Each step covers the half-open logical interval [cursor, cursor + delta), while run_periodic supplies its existing absolute release as the nominal timestamp. Host-driven execution never sleeps, periodic releases never shift, and zero/overflow/noncontiguous active windows fail before callback dispatch.
+  - Due work repeats the exact immutable reference vector by checked supercycle arithmetic and executes equal-time domain releases by domain registration order, then compiled phase order, then substep ordinal. One domain release is the atomic late-decision unit; its phase/substep records execute serially through the existing executor boundary, while nested work retains the selected executor policy. The dispatcher neither creates another worker pool nor invokes experimental SimCore, scheduler, fiber, or plugin paths.
+  - Before a domain release begins, the runtime compares its checked absolute deadline with the injected/runtime clock and applies exactly its configured action. skip consumes the release without callbacks and is rejected at finalization for a domain that produces a cross-rate channel; bounded_catch_up executes at most its positive per-step cap and returns capacity_exceeded with exact rejected counts when the cap is exhausted; hold consumes the release without callbacks and explicitly aliases each outgoing channel to its last committed or initial sample; degrade increments the existing capped degradation level once and executes the release with that committed level; fail executes none of that release or later work, reports the exact release, and gates further steps until checked stop. No action retries without a bound, grows backlog, substitutes a newer sample, or silently omits a mandatory release.
+  - A global positive maximum-dispatch count is checked before and during each step. Large deltas and many elapsed supercycles are counted with checked arithmetic and handled by aggregate skip/hold/fail decisions without iterating once per omitted cycle; any work that would exceed the configured callback bound returns a typed existing status and exact StepResult counts, advances no ambiguous partial cursor, and cannot spill, allocate, block, or create a helper lane.
+  - CallbackContext gains an additive nullable rate-release view only during active CPU rate callbacks. It exposes the exact domain, phase, supercycle cycle, domain release sequence, substep, logical/nominal release, deadline, declared budget, late action, and degradation level. A producer must publish one exact-size payload for every outgoing channel before returning success; a consumer may copy only its compiled initial, produced, or explicit-hold generation and receives distinct provenance, age, held, fresh/stale, not-ready, and size results. Missing or duplicate publication fails the release, and no read searches for or silently substitutes a different generation.
+  - Active publication/copy uses the existing two-slot exact-generation SPSC stores with bounded single-attempt ownership and complete-before-visible ordering. Runtime control at release boundaries retires a generation only after its last compiled consumer lifetime or explicit skipped/held disposition, handles supercycle wrap without generation collision, and fails closed at finite generation exhaustion. Two runtimes share no cursor, epoch, alias, payload, action, or fault state, and the complete active path is covered by ThreadSanitizer.
+  - StepResult and periodic result tails expose bounded C++ summaries for due, executed, on-time, late, caught-up, skipped, held, degraded, rejected, stale, and failed releases plus the first failing domain/sequence/substep. These are functional return records, not observability schema 3. Existing trace IDs 1-14, metric IDs 0-31, observability schema 2, and their meanings remain unchanged; versioned per-release telemetry, optional-work shedding, recovery, and policy-version signals remain M16-04.
+  - The active dispatcher state is allocated only during finalization and counted once inside rate_plan_bytes, the M15 runtime-control logical extent, and the existing six-row MemoryPlan equation. It includes the logical cursor, epoch mapping, per-domain catch-up/action state, generation/alias state, and canonical committed channel payload bytes; step, publish, copy, skip, hold, catch-up, degrade, fail, result inspection, and stop perform no ordinary heap allocation or unbounded wait.
+  - Checkpoint schema 1 remains byte-compatible. For an active plan, the runtime contributes one bounded reserved canonical state record through the existing generic checkpoint record mechanism, hashes it into state/replay identity, and transactionally saves/restores the logical cursor, fault/action state, generation aliases, and committed channel bytes before rebuilding live stores. Reference-only and legacy checkpoints remain byte-for-byte unchanged. Because schema-1 input-log records cannot encode nominal releases or late actions, write_input_log and replay reject active rate execution in M16-03; they remain unchanged for legacy/reference-only plans, and action-log/replay evolution requires the M16-04 versioned-telemetry decision.
+  - Failed admission, state allocation, provider ordering, active-state restore, or corrected configuration publishes no partial execution plan or mutable store state. Callback failure or missing publication cancels later work using existing executor semantics; stop remains checked and retryable, clears no unresolved M14.1/M15 owner, and resets no externally borrowed state dishonestly.
+  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, runtime-profile schema 7 and its 25 keys, checkpoint/input-log schema numbers, default installed header/target inventory, compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. The C ABI cannot configure active rates and retains its exact legacy step/periodic behavior.
+  - Target governance, current-state, handoff, roadmap, component contracts, release digest ledger, and retained M16-03 evidence describe only portable RT0 functional admission/dispatch/late-policy results. No declared budget, fake clock, callback fixture, mock, hosted CI, preflight, or documentation is physical hardware, HIL, field, worst-case latency, RT1, RT2, signing, release, deployment, or production evidence; M16 and CAP-M16 remain incomplete until M16-04 shedding/recovery and versioned telemetry pass.
+  - Focused tests, complete deterministic local verification, mandatory GitHub CI, and human public-API, admission arithmetic, scheduling, cross-rate lifetime, checkpoint-state, concurrency, allocation, compatibility, and claim-boundary review pass before merge.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='CrossRateData.*:RateTimeline.*CrossRate*:CompiledGraph.*CrossRate*:HostRuntime.*CrossRate*:MemoryPlan.*CrossRate*:DeterminismReplay.*CrossRate*:TraceNoAlloc.*CrossRate*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm16_cross_rate_data'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='RateDispatch.*:RateTimeline.*Admission*:CrossRateData.*Active*:HostRuntime.*RateDispatch*:PeriodicRuntime.*RateDispatch*:UnifiedExecutor.*RateDispatch*:MemoryPlan.*RateDispatch*:DeterminismReplay.*RateDispatch*:TraceNoAlloc.*RateDispatch*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm16_rate_dispatch|m16_rate_timeline|m16_cross_rate_data'
     - ./scripts/agent-verify.sh full
   focused_tests_to_add:
-    - additive channel/default construction plus pre-M16-02 positional aggregate and preferred/compatibility installed C++ source consumers
-    - copied stable channel registration and freeze, including malformed, duplicate, self, same-domain, foreign/stale/cross-instance, non-CPU, payload, initial-sample, mode, endpoint-binding, capacity, and overflow rejection
-    - complete independent sample-and-hold selection for harmonic, co-prime non-harmonic, simultaneous, reordered-domain, reordered-compiled-phase, multi-phase, and multi-substep plans
-    - exact same-timestamp visibility, first-supercycle initial selection, prior-supercycle wrap selection, held-generation reuse, maximum-age zero/boundary/UINT64_MAX, and fresh/stale classification
-    - immutable compiled channel and selection inspection before start, while running, and after stop with invalid index rejection and no mutation or allocation
-    - fixed snapshot-store exact-size commit/copy, atomic publication, partial-write invisibility, stale/not-ready/capacity status, live-generation retention, wrap, deterministic bytes, and bounded single-producer/single-consumer concurrency
-    - transactional failed finalization with absent channel/selection/storage publication, zero provider/callback/worker/device side effects, configuring-state correction, and successful retry
-    - unchanged no-channel M16-01 graph/replay identity plus explicit identity sensitivity to channel name, endpoints, mode, payload size, maximum age, and every initial-sample byte
-    - exact channel descriptor/selection/slot/payload storage reconciliation inside rate-plan bytes, M15 runtime control, and the six-row MemoryPlan equation, including two-runtime isolation and capacity rejection
-    - proof that explicit channels do not yet alter callback count/order, complete-graph host/periodic/mock-device dispatch, checkpoint/input-log encoding, telemetry schemas, or post-start allocation behavior
+    - opt-in policy copy, freeze, default inactive compatibility, source-compatible aggregate tails, malformed enum/cap rejection, and identity sensitivity for every execution and late-policy field
+    - exact conservative one-supercycle admission agreement with an independent integer simulator, including harmonic/non-harmonic, simultaneous, phase/substep multiplication, deadline boundary, idle gaps, final-boundary, zero, overflow, and infeasible mandatory cases
+    - active rejection of device phases, optional domains, D1, cross-domain graph dependencies, missing positive budget/deadline, deadline greater than period, skip producers, and active input-log/replay without changing reference-only acceptance
+    - exact half-open logical windows, first release at epoch zero, multi-supercycle wrap, contiguous nominal timestamps, zero delta, large-delta aggregate handling, arithmetic overflow, periodic absolute epoch, and no host-driven sleep
+    - reference-order callback dispatch and context fields for harmonic, co-prime, simultaneous, multi-phase, and multi-substep plans with nested executor work and no hidden lane
+    - on-time and pre-dispatch-late skip, bounded-catch-up, hold, degrade, and fail behavior using a fake clock, including cap exhaustion, exact summary counts, fail gating, no silent mandatory omission, and no unbounded backlog
+    - active cross-rate initial/read/publish, exact generation, same-time, held alias, stale/not-ready, missing/duplicate/wrong-owner/wrong-size publication, lifetime retirement, store wrap, and no newer-sample substitution
+    - active dispatcher and store concurrency under ThreadSanitizer, callback failure cancellation, two-runtime isolation, finite generation exhaustion, and checked stop/restart boundaries
+    - exact active-state and store storage reconciliation inside rate_plan/runtime-control bytes and the six-row MemoryPlan, capacity failure before provider callbacks, and zero ordinary heap allocation across on-time, catch-up, hold, degrade, and failure frames
+    - active checkpoint reserved-state round trip and transactional corruption/identity/size rejection, plus exact legacy/reference-only checkpoint and input-log bytes and explicit active input-log/replay rejection
+    - permanent M14.1/M15/M16-01/M16-02 lifecycle, cleanup, reference, selector, snapshot-store, determinism, package, and compatibility regressions
   required_ci:
-    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, exact SDK inventory, permanent M16-01 gates, and truthful M16-02 claim checks
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of channel validation, selection, storage bounds, finalization, inspection, identity, and lifecycle
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical integer selection/classification, source compatibility, fixed storage, and installed consumers
-    - Unified executor GCC ThreadSanitizer job executing CrossRateData, two-runtime, synthetic producer/consumer, finalization, inspection, host/periodic, and mock-device regressions while retaining M15 cleanup and M16-01 reference gates
-    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving unchanged no-channel artifacts and explicit cross-rate identity tests
+    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, exact SDK inventory, permanent M16-01/M16-02 gates, and truthful M16-03 claim checks
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of admission, dispatch, late actions, active stores, state restore, and lifecycle
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical integer admission/order, active policy results, source compatibility, and installed consumers
+    - Unified executor GCC ThreadSanitizer job executing the complete RateDispatch and active CrossRateData suites, two-runtime isolation, host-adapter nested work, failure/stop, and permanent M15/M16 regression processes
+    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving unchanged legacy/reference-only fixtures and explicit rejection of unsupported active D1/replay combinations
     - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and existing autotune/scaling smoke jobs
-    - Existing no-allocation, bounded-memory-plan/control-ledger, M14.1 device recovery, M15 rollback, M16-01 timeline, sanitizer, documentation, release-contract, and package gates; no controlled-hardware performance, active-dispatch, or timing claim is authorized
+    - Existing no-allocation, bounded-memory-plan/control-ledger, M14.1 recovery, M15 rollback, M16 timeline/selection/store, sanitizer, fuzz-smoke, documentation, release-contract, and package gates; no hosted timing or controlled-hardware claim is authorized
   manual:
-    - Human review must confirm the additive C++ channel/inspector shape, exact same-time/initial/wrap/held/fresh/stale semantics, checked arithmetic and capacities, fixed-store publication/lifetime proof, graph/replay identity, M15 accounting preservation, deferred active-dispatch boundary, and frozen C/device ABI/package/schema surfaces before merge.
-    - The reviewer must confirm that copied payloads and reference-selection agreement are portable functional evidence only, that device endpoints remain unsupported in this batch, and that no mock, fixture, hosted CI, or documentation result is promoted to hardware, HIL, latency, RT1, or RT2 evidence.
+    - Human review must approve the additive C++ policy/context/result shape, conservative serialized admission model, logical-to-nominal time mapping, every late action, cross-domain dependency rule, generation lifetime, active checkpoint record, active replay rejection, and preservation of C ABI v8/device ABI v1/schema/package boundaries.
+    - Human concurrency and safety review must confirm bounded executor/store operations, no callback after fail gating, no skipped producer under skip, exact hold aliasing, cancellation and stop ownership, post-start allocation freedom, and that M16-04 remains the only owner of optional shedding/recovery and versioned telemetry.
+    - Performance review is limited to deterministic work/capacity counts and existing hosted smoke jobs. Any measured latency threshold, RT1/RT2 promotion, or controlled-hardware regression gate requires a separately approved named tuple and retained raw evidence.
 risk:
   class: high
   hazards:
-    - ambiguous same-timestamp, substep, initial-epoch, or supercycle-wrap rules can make two correct-looking selectors choose different generations
-    - a snapshot slot can be published before its payload is complete, overwritten while a consumer copies it, or reused for the wrong release after wrap
-    - an unbounded retry loop, blocking lock, dynamic allocation, or silent newest-sample fallback can enter the future RT data path under contention
-    - freshness age can underflow/overflow across a supercycle or conflate initial, held, stale, unavailable, and late-policy state
-    - copied initial bytes, channel endpoints, or maximum age can be omitted from compatibility identity and permit replay against different data semantics
-    - channel payload and slot storage can escape the M15 logical extent ledger, double count MemoryPlan, extend the provider boundary, or leak across Runtime instances
-    - device phases can be accepted even though device ABI v1 exposes no generic completion-payload publication contract
-    - public aggregate edits or a new installed header/target can break 1.x C++ source consumers while leaving stable C ABI checks green
-    - compiled descriptors or synthetic store tests can be overstated as active dispatch, overload handling, hardware, latency, RT1, or RT2 evidence
-    - common finalization, identity, or accounting changes can regress M14.1 cleanup, M15 rollback, M16-01 reference output, determinism, sanitizers, package behavior, or legacy complete-graph dispatch
+    - an optimistic admission formula can accept more declared work than the fixed reference order can complete, while an unchecked hyperperiod can overflow planning time or storage
+    - host logical time, nominal wall time, periodic release time, per-domain deadline, and measured callback time can be conflated and produce drift or nondeterministic late actions
+    - a skipped or held producer can expose an absent, overwritten, partial, newer, or wrongly aged channel generation to a consumer
+    - catch-up can grow an unbounded backlog or callback burst when a large delta spans many supercycles
+    - filtered/repeated phase execution can violate graph dependencies, resource ordering, device-token lifetime, nested-work ownership, or executor cancellation semantics
+    - time-driven degrade or fail behavior can be mistaken for D1 determinism, optional shedding/recovery, or portable deadline evidence
+    - active cursor, alias, payload, and fault state can be omitted from checkpoint identity/accounting or restored partially after malformed input
+    - additions to aggregate C++ declarations can break 1.x source consumers even when stable C ABI tests remain green
+    - common lifecycle and executor edits can regress M14.1 cleanup, M15 rollback, M16 reference/selection behavior, allocation bounds, sanitizers, package isolation, or legacy dispatch
   stop_conditions:
-    - the exact baseline commit is unavailable, not cleanly inspectable, or does not contain merged M16-01 commit 8dabeb3747a20717ce02c99a3d3c0d9deb1a3532 and retained M15/M16-01 evidence
-    - target repository contracts at the exact baseline contradict the compiled-selection/storage-primitive boundary or require a different same-time, initial, wrap, freshness, payload-ownership, or device-endpoint product decision
-    - implementing deterministic cross-rate semantics requires changing stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema 7/25 keys, observability/checkpoint/input-log schemas, default installed header/target inventory, support matrices, release version, or license
-    - exact first-supercycle and repeated-supercycle source selection or freshness age cannot be represented with checked integer arithmetic and a finite explicitly bounded descriptor/slot plan
-    - race-free snapshot publication would require unbounded spinning, blocking mutexes, heap allocation after start, silent sample substitution, or overwrite of a generation that a compiled consumer can still select
-    - the storage primitive cannot preserve exact payload size, complete-before-visible publication, deterministic selected bytes, bounded capacity failure, and Runtime-instance isolation under ThreadSanitizer
-    - active step/run_periodic filtering, callback repetition/substeps, admission, wall-clock lateness, catch-up, skip/hold/degrade/fail action, shedding/recovery, or telemetry-schema evolution becomes necessary to satisfy this batch instead of remaining explicitly deferred
-    - checkpoint/replay correctness would require persisting progressed mutable cross-rate state or changing artifact encoding before active dispatch; stop for the M16-03 architecture decision instead of silently expanding M16-02
-    - implementation requires changing executor/device/CUDA/XDMA code, invoking vendor or blocking operations, privileged or machine-wide mutation, physical hardware, a controlled timing host, secrets, signing, release, deployment, or production access
-    - deterministic tests require timing sleeps/tolerances, root privilege, a fixed topology, weakening an existing sanitizer/compatibility gate, or relabeling a mock, fixture, hosted runner, preflight, or document as stronger evidence
+    - the exact baseline commit is unavailable, dirty, or lacks merged M16-02 commit 34f0752596d84ef1f98a8a0d544861bda4935f3f and all retained M15/M16 evidence
+    - target contracts at the exact baseline contradict opt-in CPU-only serialized active dispatch, conservative declared-budget admission, time mapping, late actions, or the M16-04 boundary and require a different product decision
+    - implementation requires changing stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema 7/25 keys, observability schema 2, checkpoint/input-log schema numbers or codecs, installed header/target inventory, support matrices, release version, or license
+    - active correctness requires device completion-payload semantics, cross-domain ordinary graph dependencies, optional shedding/recovery, per-release telemetry schema evolution, or active D1/input-log action replay in this batch
+    - exact admission or due-count arithmetic cannot remain finite, checked, conservative, and bounded by the existing supercycle plus explicit per-step limits
+    - skip, catch-up, hold, degrade, or fail cannot remain explicit and bounded without silent mandatory omission, newer-sample substitution, unbounded retry/backlog, callback preemption, or ambiguous cursor advancement
+    - active cross-rate transfer cannot preserve exact-size complete-before-visible publication, compiled generation selection, finite retention, two-runtime isolation, and ThreadSanitizer race freedom
+    - active state cannot fit one bounded canonical checkpoint record and exact runtime-control accounting without changing schema-1 encoding or breaking transactional restore
+    - implementation requires ordinary heap allocation, blocking mutexes, file I/O, hidden threads, spill execution, or unbounded waits after successful start
+    - deterministic functional tests require timing sleeps/tolerances, root privilege, fixed topology, physical CUDA or FPGA/XDMA hardware, controlled timing hosts, secrets, signing, release, deployment, or production access
     - a required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the additive cross-rate channel and inspector API, selection compiler, bounded snapshot-store primitive, identity/accounting integration, tests/CI, documentation, governance refresh, release-contract digests, and retained M16-02 evidence as one batch. M16-02 creates no active callback dispatch, persistent data migration, host setting, thread, device ownership, deployed state, telemetry schema, or support promotion; preserve and use the existing checked stop path for any running Runtime before discarding it.
+  strategy: Revert the opt-in execution/late-policy C++ API, admission and dispatch compiler/state, executor filtering, active cross-rate transfer and canonical checkpoint state, tests/CI, documentation/governance, release digests, and retained M16-03 evidence as one batch. Before discarding a running integration, require existing checked stop to quiesce callbacks and device/lane/stack/memory owners. The default and explicit reference-only M16-01/M16-02 paths then retain their exact pre-batch complete-graph behavior; no data migration, host setting, support promotion, release, or deployment rollback is authorized.
   data_migration: none
   release_action: Do not publish a release, promote a support/qualification tuple, alter hardware or RT records, or mark M16/CAP-M16 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M16-02-<date>.md
+    - docs/evidence/M16-03-<date>.md
     - exact baseline, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public channel model and all name, endpoint, payload, initial-sample, mode, maximum-age, capacity, ownership, freeze, and unsupported-device decisions
-    - complete harmonic/non-harmonic reference inputs, every consumer-to-source selection including first-cycle and wrap provenance, normalized output digest, independent-selector comparison, and every rejected arithmetic/capacity case
-    - fixed snapshot-store layout and generation-lifetime proof, publication/copy memory ordering, exact bytes, bounded capacity/not-ready/stale outcomes, concurrency/ThreadSanitizer results, and two-runtime isolation
-    - graph/replay identity comparisons for no-channel M16-01 compatibility and every channel semantic/initial byte, plus unchanged checkpoint/input-log schema and no-progressed-state boundary
-    - channel descriptor/selection/slot/payload storage reconciliation inside rate-plan bytes, M15 runtime-control extents, and MemoryPlan, plus post-start allocation and unchanged-dispatch results
-    - default/explicit-channel lifecycle, graph, host-adapter, watchdog, mock-device, determinism/replay, failed-finalize retry, checked cleanup, C++ source, C ABI/device ABI/package/schema compatibility, and changed/preserved invariants
-    - residual risks and all unperformed active multi-rate dispatch, admission, late/skip/catch-up/hold/degrade/fail action, shedding/recovery, versioned telemetry, controlled performance, privileged native, physical hardware, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static, unit, property/reference-selector, synthetic bounded-storage concurrency, sanitizer, package, portable RT0, exact integer sample-selection/freshness, identity, bounded-memory, and unchanged-dispatch behavior only. Compiled descriptors and the storage primitive do not establish active multi-rate callback execution, admission feasibility, late/overload action, shedding/recovery, physical accelerator behavior, HIL, field performance, worst-case timing, RT1, RT2, signing, release, deployment, or production readiness.
+    - public execution/late-policy model with defaults, bounds, active restrictions, source compatibility, identity, and every rejected configuration
+    - complete admitted and infeasible schedule inputs, per-record declared start/finish/deadline output, independent-simulator digest, and checked arithmetic/capacity results
+    - host and periodic logical/nominal windows plus every on-time, skip, catch-up, hold, degrade, fail, cap-exhaustion, callback-failure, and cursor/fault result
+    - active cross-rate publication/copy/alias/generation lifetime proof, exact initial/produced/held/stale bytes, concurrency/ThreadSanitizer results, and two-runtime isolation
+    - active-state checkpoint layout/round trip/rejection evidence, unchanged schema numbers and legacy/reference-only artifact bytes, and explicit active D1/input-log/replay boundary
+    - dispatcher/store state storage reconciliation inside rate-plan/runtime-control bytes and MemoryPlan, post-start allocation proof, executor/lifecycle/cleanup results, and unchanged observability schema proof
+    - C++ source, C ABI/device ABI/package/profile/schema/support/release/license compatibility status plus changed and preserved invariants
+    - residual risks and all unperformed M16-04 shedding/recovery/versioned telemetry/action replay, controlled performance, privileged native, physical hardware, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish static, unit, independent integer admission/reference, fake-clock late-action, synthetic active-store concurrency, sanitizer, checkpoint-state, package, bounded-memory/no-allocation, and portable RT0 functional dispatch behavior only. Declared budget/WCET values are untrusted inputs, not measurements or deadline guarantees; mocks, fixtures, hosted CI, preflight, and documentation do not establish physical hardware, HIL, field performance, worst-case latency, RT1, RT2, signing, release, deployment, or production readiness.

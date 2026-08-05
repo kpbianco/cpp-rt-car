@@ -60,6 +60,13 @@ public:
         void* user_data,
         std::size_t& callbacks_executed,
         std::size_t& failed_phase) noexcept;
+    // Executes one selected CPU phase through the normal worker/host-adapter
+    // boundary without releasing graph successors. Active rate dispatch calls
+    // this serially; nested TaskContext work retains the configured policy.
+    [[nodiscard]] Status run_selected(
+        std::size_t phase_index,
+        PhaseTaskCallback callback,
+        void* user_data) noexcept;
     // Called only by the runtime-owned device completion lane. It never
     // executes host code and releases graph successors only after the phase's
     // submission callback has returned.
@@ -215,6 +222,7 @@ private:
     std::atomic<bool> stopping_{false};
     TaskGroup graph_group_{};
     std::atomic<bool> graph_cancelled_{false};
+    std::atomic<bool> selected_run_{false};
     std::atomic<std::size_t> graph_callbacks_executed_{0};
     std::atomic<std::size_t> graph_failed_phase_{
         static_cast<std::size_t>(-1)};

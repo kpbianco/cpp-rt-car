@@ -26,8 +26,9 @@ versioned observability/replay, and asynchronous device integration.
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
-| Rate-domain reference plan | M16-01 implemented; external gates pending | Existing C++ SDK headers expose bounded instance-owned domains and phase bindings plus exact checked `[0, lcm)` inspection; host and periodic frames still run the complete graph once |
-| Cross-rate data contract | M16-02 implemented; external gates pending | Existing C++ SDK headers expose copied CPU-only channels, exact first/repeating sample-and-hold and freshness selections, and inactive bounded SPSC stores |
+| Rate-domain reference plan | M16-01 implemented; external gates pending | Existing C++ SDK headers expose bounded instance-owned domains and phase bindings plus exact checked `[0, lcm)` inspection; reference-only frames retain complete-graph dispatch |
+| Cross-rate data contract | M16-02 implemented; external gates pending | Existing C++ SDK headers expose copied CPU-only channels, exact first/repeating sample-and-hold and freshness selections, and bounded SPSC stores used only by opt-in active plans |
+| Active rate admission and late policy | M16-03 implemented; external gates pending | Opt-in mandatory-CPU D0 admission/dispatch, exact-generation transfer, bounded late actions, functional summaries, and canonical active checkpoint state; M16-04 remains |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -166,17 +167,19 @@ boundary in `<rt/runtime.hpp>`,
    ownership, logical resources, canonical replay state,
    optional device backends, and borrowed device buffers while configuring;
 3. declare phase dependencies and read/write resource access;
-4. finalize to validate and compile the graph and optional epoch-zero rate
-   reference plan, reject an over-budget memory
+4. finalize to validate and compile the graph, optional epoch-zero rate
+   reference plan, and opt-in active CPU admission plan; reject an over-budget memory
    plan, acquire phase/task/trace backing in stable order, construct fixed
    storage, and freeze topology and static assignments;
 5. optionally require strict read-only platform preflight, apply/observe
    selected resident-memory policy, then start the fixed runtime worker team or
    bind the already-running host team, plus configured watchdog/device service
    lanes;
-6. submit host-owned frame index, simulation delta, and optional deadline to
-   `step()`, or run a finite absolute-cadence loop with `run_periodic()`;
-7. inspect per-frame timing, watchdog/degradation, and preflight results;
+6. submit host-owned frame index, simulation delta, optional deadline, and—only
+   for active rates—a contiguous nominal release to `step()`, or run a finite
+   absolute-cadence loop with `run_periodic()`;
+7. inspect per-frame timing, watchdog/degradation, active-rate summaries, and
+   preflight results;
 8. export versioned counters and trace records from a non-RT host lane;
 9. write/restore bounded checkpoints or replay a validated input log from a
    non-RT host lane;
@@ -221,9 +224,11 @@ checked arithmetic overflow, or more than 65,536 reference releases before
 start. Fixed-copy inspectors remain immutable and allocation-free after start.
 M16-02 additionally freezes CPU-only cross-rate channels, exact initial/wrap/
 held/fresh/stale selection metadata, and a two-slot exact-generation SPSC store
-per channel. The plan and stores do not yet drive callbacks or payload transfer;
-admission, late/catch-up policy, shedding/recovery, and telemetry evolution are
-deferred.
+per channel. M16-03 optionally activates D0 mandatory-CPU serialized admission
+and exact reference dispatch, with checked logical/nominal windows, staged
+cross-rate transfer, bounded skip/catch-up/hold/degrade/fail actions, functional
+summaries, and canonical checkpoint state. Reference-only behavior is unchanged.
+Optional shedding/recovery and versioned action telemetry remain M16-04.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -286,8 +291,9 @@ callbacks. M15-04 adds exact logical control extents, live runtime-stack
 accounting and observation, declared-only opaque accounting, and retryable
 cross-category cleanup. M15 is complete at the audited baseline. M16-01 adds
 the bounded rate-domain/reference-plan boundary and M16-02 adds deterministic
-cross-rate selection plus inactive bounded stores; M16 and CAP-M16 remain
-incomplete. The
+cross-rate selection/storage. M16-03 adds opt-in admission, CPU dispatch,
+transfer, and late-frame policy; M16 and CAP-M16 remain incomplete pending
+M16-04 shedding/recovery and versioned telemetry. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.
 

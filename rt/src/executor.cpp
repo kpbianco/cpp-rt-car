@@ -703,6 +703,41 @@ Status Executor::run(
     return status;
 }
 
+Status Executor::run_selected(
+    std::size_t phase_index,
+    PhaseTaskCallback callback,
+    void* user_data) noexcept {
+    if (!started_.load(std::memory_order_acquire) || callback == nullptr ||
+        phase_index >= phase_count_) {
+        return Status::invalid_state;
+    }
+
+    graph_group_.reset();
+    graph_cancelled_.store(false, std::memory_order_relaxed);
+    graph_callbacks_executed_.store(0, std::memory_order_relaxed);
+    graph_failed_phase_.store(phase_count_, std::memory_order_relaxed);
+    phase_callback_ = callback;
+    phase_user_data_ = user_data;
+    phase_states_[phase_index].store(kPhaseIdle, std::memory_order_relaxed);
+    phase_statuses_[phase_index].store(
+        static_cast<std::int32_t>(Status::ok),
+        std::memory_order_relaxed);
+    selected_run_.store(true, std::memory_order_release);
+
+    const auto submission_status = submit_phase(
+        static_cast<std::uint32_t>(phase_index));
+    Status status = submission_status;
+    if (submission_status == Status::ok) {
+        status = wait(graph_group_, kInvalidWorker);
+    } else {
+        cancel_graph(submission_status, phase_index);
+    }
+    selected_run_.store(false, std::memory_order_release);
+    phase_callback_ = nullptr;
+    phase_user_data_ = nullptr;
+    return status;
+}
+
 Status Executor::parallel_for(
     const TaskContext& parent,
     std::size_t item_count,
@@ -1087,19 +1122,21 @@ void Executor::finish_phase(
         return;
     }
 
-    const auto begin = successor_offsets_[phase_index];
-    const auto end = successor_offsets_[phase_index + 1];
-    for (std::size_t cursor = begin; cursor < end; ++cursor) {
-        const auto successor = successors_[cursor];
-        if (current_indegree_[successor].fetch_sub(
-                1,
-                std::memory_order_acq_rel) != 1) {
-            continue;
-        }
-        const auto submit_status = submit_phase(successor);
-        if (submit_status != Status::ok) {
-            cancel_graph(submit_status, phase_count_);
-            break;
+    if (!selected_run_.load(std::memory_order_acquire)) {
+        const auto begin = successor_offsets_[phase_index];
+        const auto end = successor_offsets_[phase_index + 1];
+        for (std::size_t cursor = begin; cursor < end; ++cursor) {
+            const auto successor = successors_[cursor];
+            if (current_indegree_[successor].fetch_sub(
+                    1,
+                    std::memory_order_acq_rel) != 1) {
+                continue;
+            }
+            const auto submit_status = submit_phase(successor);
+            if (submit_status != Status::ok) {
+                cancel_graph(submit_status, phase_count_);
+                break;
+            }
         }
     }
     graph_group_.pending.fetch_sub(1, std::memory_order_acq_rel);

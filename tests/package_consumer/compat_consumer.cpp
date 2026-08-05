@@ -48,10 +48,19 @@ int main() {
         rt::cpu_memory_policy_schema_version, 1, {pre_m15_04_thread}, 0, {}};
     const rt::MemoryPlan pre_m16_plan{1024, 512};
     const rt::CrossRateChannelRegistration additive_cross_rate{};
+    const rt::RateExecutionPolicy additive_rate_execution{};
+    const rt::HostFrameContext pre_m16_03_frame{
+        1, std::chrono::nanoseconds{1}, std::nullopt};
+    const rt::CompiledRateDomain pre_m16_03_compiled{
+        {}, {}, 0, 1, 1, 1, 1, rt::RateCriticality::normal,
+        false, 1, 1, 1};
     if (pre_m15_04_report.threads[0].role != rt::thread_role_frame ||
         pre_m15_04_report.accounting_complete ||
         pre_m16_plan.rate_plan_bytes != 0 ||
-        additive_cross_rate.payload_size != 0) {
+        additive_cross_rate.payload_size != 0 ||
+        additive_rate_execution.maximum_dispatch_records_per_step != 0 ||
+        pre_m16_03_frame.nominal_release_ns.has_value() ||
+        pre_m16_03_compiled.late_action != rt::RateLateAction::fail) {
         return 3;
     }
     if (legacy_pipeline_factory == nullptr) {

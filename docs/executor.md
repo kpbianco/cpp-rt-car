@@ -33,17 +33,21 @@ nested CPU work. M15-04 quiesces workers and completes status-bearing stack
 cleanup on each owning lane in reverse index order before join and
 resident-memory rollback.
 
-M16-01 reference releases do not enter executor queues. The executor continues
-to receive every dependency-ready phase in the complete compiled graph exactly
-once per host-driven or periodic frame. Domain periods, substeps, optionality,
-criticality, deadlines, and budget/WCET metadata therefore have no dispatch,
-admission, late, catch-up, or shedding effect in this batch.
+Reference-only M16-01/M16-02 plans do not enter executor queues and continue to
+receive every dependency-ready phase once per host or periodic frame. For an
+opt-in M16-03 active plan, the host dispatcher submits one selected CPU phase
+record at a time through the same worker or host-adapter boundary. Selected
+runs do not release graph successors; finalization therefore permits ordinary
+dependencies only within a rate domain, and domain records already follow the
+compiled graph order. Nested range/reduction work retains the configured
+executor policy and its existing queue, scratch, helping, and cancellation
+rules. No second pool, helper lane, inline spill, or retry loop is introduced.
 
-M16-02 channel selections and stores also remain outside executor work. A host
-frame neither publishes producer payloads nor copies consumer payloads, repeats
-substeps, filters callbacks, or consults freshness. Synthetic SPSC tests prove
-the bounded store primitive only; they do not establish active dispatch,
-latency, admission, cancellation, timeout, or overload behavior.
+The positive policy cap bounds executed reference records per step. Callback
+failure, missing/duplicate publication, finite generation exhaustion, or a
+configured fail action cancels later active work. Skip, hold, and rejected
+catch-up work never reaches executor queues. These are portable functional
+properties, not latency, timeout, or scheduling qualification.
 
 The `host_adapter` policy is the explicit exception to runtime-owned worker and
 queue storage. The host attaches a fixed callback table before finalization,
@@ -186,6 +190,7 @@ best-effort destruction.
 - provider-backed executor lifecycle and rollback tests:
   `tests/test_memory_policy.cpp`;
 - graph/reference and allocation regression tests:
-  `tests/test_compiled_graph.cpp`, `tests/test_trace_noalloc.cpp`;
+  `tests/test_compiled_graph.cpp`, `tests/test_rate_dispatch.cpp`,
+  `tests/test_trace_noalloc.cpp`;
 - dynamic C ABI coverage: `tests/test_cabi_dlopen.c`;
 - sanitizer configuration: `.github/workflows/ci.yml`.

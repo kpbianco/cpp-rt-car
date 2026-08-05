@@ -69,6 +69,16 @@ public:
         std::uint64_t generation,
         std::span<std::byte> output,
         SnapshotRetention retention) noexcept;
+    [[nodiscard]] SnapshotStoreResult retire(
+        std::uint64_t generation) noexcept;
+    [[nodiscard]] bool can_publish(std::uint64_t generation) const noexcept;
+    // Control-path rebuild used only after complete checkpoint validation and
+    // outside execution. It performs no allocation and publishes the supplied
+    // complete payload before returning.
+    [[nodiscard]] SnapshotStoreResult restore_committed(
+        std::uint64_t generation,
+        std::uint64_t next_generation,
+        std::span<const std::byte> payload) noexcept;
 
     [[nodiscard]] std::size_t payload_size() const noexcept {
         return payload_size_;
@@ -90,6 +100,9 @@ public:
     }
     [[nodiscard]] static constexpr std::uint64_t maximum_generation() noexcept {
         return std::numeric_limits<std::uint64_t>::max() >> 2u;
+    }
+    [[nodiscard]] std::uint64_t next_generation() const noexcept {
+        return next_generation_;
     }
 
 private:

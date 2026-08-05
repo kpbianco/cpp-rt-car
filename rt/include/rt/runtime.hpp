@@ -266,6 +266,10 @@ struct HostFrameContext {
     std::uint64_t frame_index = 0;
     std::chrono::nanoseconds delta{0};
     std::optional<std::uint64_t> deadline_ns{};
+    // Active rate execution maps logical epoch zero to this copied nominal
+    // release. Reference-only execution ignores it. Appended for 1.x source
+    // compatibility with pre-M16-03 aggregate initialization.
+    std::optional<std::uint64_t> nominal_release_ns{};
 };
 
 enum class CallbackResult : std::uint8_t {
@@ -363,6 +367,94 @@ struct ReplayResult {
     std::span<const std::byte> artifact,
     InputLogMetadata& metadata) noexcept;
 
+enum class RateLateAction : std::uint8_t {
+    skip,
+    bounded_catch_up,
+    hold,
+    degrade,
+    fail,
+};
+
+enum class CrossRateSampleProvenance : std::uint8_t {
+    initial_sample,
+    produced,
+};
+
+enum class CrossRateFreshness : std::uint8_t {
+    fresh,
+    stale,
+};
+
+enum class CrossRateReadStatus : std::uint8_t {
+    ok,
+    invalid_channel,
+    wrong_owner,
+    size_mismatch,
+    not_ready,
+    stale_generation,
+};
+
+struct CrossRateReadResult {
+    CrossRateReadStatus status = CrossRateReadStatus::not_ready;
+    CrossRateSampleProvenance provenance =
+        CrossRateSampleProvenance::initial_sample;
+    CrossRateFreshness freshness = CrossRateFreshness::fresh;
+    std::uint64_t generation = 0;
+    std::uint64_t age_ns = 0;
+    bool held = false;
+};
+
+class RateReleaseView {
+public:
+    using PublishOperation = Status (*)(
+        void*,
+        CrossRateChannelHandle,
+        std::span<const std::byte>) noexcept;
+    using CopyOperation = CrossRateReadStatus (*)(
+        void*,
+        CrossRateChannelHandle,
+        std::span<std::byte>,
+        CrossRateReadResult&) noexcept;
+
+    RateDomainHandle domain{};
+    PhaseHandle phase{};
+    std::uint64_t supercycle_cycle = 0;
+    std::uint64_t domain_release_sequence = 0;
+    std::uint32_t substep_ordinal = 0;
+    std::uint64_t logical_release_ns = 0;
+    std::uint64_t nominal_release_ns = 0;
+    std::uint64_t absolute_deadline_ns = 0;
+    std::uint64_t declared_budget_ns = 0;
+    RateLateAction late_action = RateLateAction::fail;
+    std::uint32_t degradation_level = 0;
+
+    [[nodiscard]] Status publish(
+        CrossRateChannelHandle channel,
+        std::span<const std::byte> payload) const noexcept {
+        return publish_operation_
+            ? publish_operation_(operation_context_, channel, payload)
+            : Status::invalid_state;
+    }
+
+    [[nodiscard]] CrossRateReadStatus copy(
+        CrossRateChannelHandle channel,
+        std::span<std::byte> output,
+        CrossRateReadResult& result) const noexcept {
+        result = {};
+        if (!copy_operation_) {
+            result.status = CrossRateReadStatus::not_ready;
+            return result.status;
+        }
+        return copy_operation_(operation_context_, channel, output, result);
+    }
+
+    // Runtime-owned operation hooks. Hosts must treat these as opaque and
+    // must not retain the view beyond its callback.
+    void* operation_context_ = nullptr;
+    PublishOperation publish_operation_ = nullptr;
+    CopyOperation copy_operation_ = nullptr;
+};
+
 struct CallbackContext {
     const HostFrameContext& frame;
     // Valid only for this phase callback. Each phase owns a distinct block so
@@ -374,6 +466,9 @@ struct CallbackContext {
     // its frame returns, so callbacks observe the level committed by earlier
     // frames.
     std::uint32_t degradation_level = 0;
+    // Non-null only for an active CPU rate callback. Appended for source
+    // compatibility with the pre-M16-03 aggregate prefix.
+    const RateReleaseView* rate_release = nullptr;
 };
 
 using FrameCallback = CallbackResult (*)(void*, const CallbackContext&);
@@ -416,6 +511,24 @@ struct StepResult {
     bool deadline_missed = false;
     bool watchdog_fired = false;
     std::uint32_t degradation_level = 0;
+    struct RateSummary {
+        std::uint64_t due_domain_releases = 0;
+        std::uint64_t due_reference_records = 0;
+        std::uint64_t executed_reference_records = 0;
+        std::uint64_t on_time_domain_releases = 0;
+        std::uint64_t late_domain_releases = 0;
+        std::uint64_t caught_up_domain_releases = 0;
+        std::uint64_t skipped_domain_releases = 0;
+        std::uint64_t held_domain_releases = 0;
+        std::uint64_t degraded_domain_releases = 0;
+        std::uint64_t rejected_reference_records = 0;
+        std::uint64_t stale_reads = 0;
+        std::uint64_t failed_domain_releases = 0;
+        bool has_first_failure = false;
+        RateDomainHandle first_failing_domain{};
+        std::uint64_t first_failing_sequence = 0;
+        std::uint32_t first_failing_substep = 0;
+    } rate{};
 };
 
 struct PeriodicRunConfig {
@@ -437,6 +550,7 @@ struct PeriodicFrameResult {
     bool deadline_missed = false;
     bool watchdog_fired = false;
     std::uint32_t degradation_level = 0;
+    StepResult::RateSummary rate{};
 };
 
 using PeriodicFrameObserver = CallbackResult (*)(
@@ -451,6 +565,7 @@ struct PeriodicRunResult {
     std::uint64_t first_release_ns = 0;
     std::uint64_t next_release_ns = 0;
     PeriodicFrameResult last_frame{};
+    StepResult::RateSummary rate{};
 };
 
 struct ExecutorStats {
@@ -471,10 +586,15 @@ struct StaticPhaseAssignment {
     std::size_t worker_index = 0;
 };
 
+// M16-03 active execution remains an opt-in C++ source API and is not a
+// RuntimeConfig/schema-7 or stable-C-ABI field. Presence of this copied policy
+// enables dispatch; the maximum is a strict per-step callback-record bound.
+struct RateExecutionPolicy {
+    std::size_t maximum_dispatch_records_per_step = 0;
+};
+
 // M16-01 rate metadata is an additive C++ source API. Periods, deadlines, and
 // budget/WCET estimates are integral nanoseconds and are not schema-7 fields.
-// Budget values are planning metadata only; finalization does not perform
-// feasibility admission and reference-plan presence does not alter dispatch.
 struct RateDomainRegistration {
     std::string_view name{};
     std::uint64_t period_ns = 0;
@@ -483,6 +603,11 @@ struct RateDomainRegistration {
     std::uint64_t budget_wcet_ns = 0;
     RateCriticality criticality = RateCriticality::normal;
     bool optional = false;
+    // Appended M16-03 fields preserve the M16-01 aggregate prefix. They are
+    // ignored by reference-only plans and participate in identity only when
+    // active execution is explicitly enabled.
+    RateLateAction late_action = RateLateAction::fail;
+    std::uint32_t bounded_catch_up_limit = 0;
 };
 
 enum class RatePhaseKind : std::uint8_t {
@@ -509,6 +634,9 @@ struct CompiledRateDomain {
     // Exact reduced period ratio against registration-order domain zero.
     std::uint64_t period_ratio_numerator = 0;
     std::uint64_t period_ratio_denominator = 0;
+    // Appended M16-03 tail preserves the M16-01 positional aggregate prefix.
+    RateLateAction late_action = RateLateAction::fail;
+    std::uint32_t bounded_catch_up_limit = 0;
 };
 
 struct CompiledRateBinding {
@@ -533,6 +661,8 @@ struct ReferenceRelease {
     std::uint64_t budget_wcet_ns = 0;
     RateCriticality criticality = RateCriticality::normal;
     bool optional = false;
+    RateLateAction late_action = RateLateAction::fail;
+    std::uint32_t bounded_catch_up_limit = 0;
 };
 
 inline constexpr std::size_t invalid_reference_release_index =
@@ -549,16 +679,6 @@ enum class CrossRateMode : std::uint8_t {
 enum class CrossRateSelectionHorizon : std::uint8_t {
     first_supercycle,
     repeating_supercycle,
-};
-
-enum class CrossRateSampleProvenance : std::uint8_t {
-    initial_sample,
-    produced,
-};
-
-enum class CrossRateFreshness : std::uint8_t {
-    fresh,
-    stale,
 };
 
 // M16-02 channels are copied while configuring. Initial bytes must exactly
@@ -674,6 +794,10 @@ struct MemoryPlan {
     std::size_t cross_rate_initial_sample_bytes = 0;
     std::size_t cross_rate_snapshot_slot_count = 0;
     std::size_t cross_rate_snapshot_bytes = 0;
+    // Active dispatcher/control/canonical checkpoint bytes remain a
+    // subcomponent of rate_plan_bytes and runtime_control_bytes.
+    std::size_t rate_dispatch_state_bytes = 0;
+    std::size_t rate_checkpoint_state_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
@@ -1033,6 +1157,10 @@ public:
     // May be called only while configuring.
     [[nodiscard]] Status set_host_executor(
         const HostExecutorAdapter& adapter) noexcept;
+    // Copies the opt-in active CPU rate policy while configuring. There is no
+    // unset operation; reference-only behavior is retained by not calling it.
+    [[nodiscard]] Status set_rate_execution_policy(
+        const RateExecutionPolicy& policy) noexcept;
     [[nodiscard]] Status configure_key(
         std::string_view key,
         std::string_view value) noexcept;
@@ -1123,6 +1251,7 @@ public:
         std::size_t execution_index,
         PhaseHandle& phase) const noexcept;
     [[nodiscard]] bool rate_model_enabled() const noexcept;
+    [[nodiscard]] bool rate_execution_enabled() const noexcept;
     [[nodiscard]] std::size_t rate_domain_count() const noexcept;
     [[nodiscard]] std::size_t rate_binding_count() const noexcept;
     [[nodiscard]] std::size_t reference_release_count() const noexcept;

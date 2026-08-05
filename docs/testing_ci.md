@@ -39,6 +39,13 @@ latency qualification and does not prove the complete product contract.
   the per-generation handoff, so payload visibility depends only on the store's
   publication atomics and each copied generation is checked byte-for-byte. The
   GCC ThreadSanitizer gate runs the complete `CrossRateData` suite.
+- M16-03 tests cover copied/frozen opt-in policy, exact reference-only
+  compatibility, malformed and infeasible admission, D1/cross-domain/skip-
+  producer rejection, half-open contiguous windows, periodic nominal releases,
+  global and catch-up caps, every late action, exact context/summary fields,
+  produced/held reads, missing/duplicate publication, fault gating, active
+  checkpoint round trip/corruption transactionality, and active input-log
+  rejection. Allocation instrumentation covers on-time and late-degrade paths.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent
@@ -89,9 +96,9 @@ latency qualification and does not prove the complete product contract.
 - A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
   M5 time/platform, M6 observability, M7 determinism/replay, and M8 device
   suites plus the CPU-only M9 CUDA state machine.
-  It also runs the M16 reference-plan and cross-rate selection/store,
-  two-runtime, inspection, host/periodic, and mock-device regressions; this does
-  not make the plan an active dispatcher.
+  It also runs the M16 reference-plan, cross-rate selection/store, and complete
+  `RateDispatch` functional suite, including two-runtime, inspection,
+  host/periodic, failure, and no-allocation regressions.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -198,6 +205,8 @@ predeclared thresholds, and the measurement procedure.
   `rt/src/rate_timeline.cpp`, `tests/test_rate_timeline.cpp`
 - M16-02 cross-rate compiler and bounded store:
   `rt/src/cross_rate_data.cpp`, `tests/test_cross_rate_data.cpp`
+- M16-03 admission and active dispatcher:
+  `rt/src/rate_dispatch.cpp`, `tests/test_rate_dispatch.cpp`
 - Stable ABI/export and installed-package gates:
   `tools/check_c_abi.py`, `abi/rtfw_c_abi_v8.exports`,
   `tests/package_consumer`

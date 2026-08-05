@@ -102,8 +102,8 @@ instance-owned graph, then compiled into fixed domain/binding records and an
 epoch-zero `[0, lcm)` release vector. The compiler uses checked integer
 arithmetic and deterministic registration/compiled-phase/substep ordering.
 All storage remains runtime-owned and is counted within the existing runtime-
-control extent. Execution does not consume the reference vector yet: the
-complete compiled graph still runs once per host or periodic frame.
+control extent. Reference-only execution retains complete-graph once-per-frame
+behavior.
 
 M16-02 compiles a second immutable layer over that vector. A copied channel
 connects one CPU producer and one CPU consumer in different explicit domains.
@@ -114,7 +114,18 @@ the former uses copied initial bytes when no producer is eligible. Exact age,
 held provenance, and freshness are metadata only. Each channel also owns a
 two-slot packed-atomic SPSC store whose payload becomes visible only after a
 release publication and cannot be copied while the producer owns the slot.
-Neither selections nor stores enter callback dispatch in this batch.
+
+M16-03 adds a finalization-only active dispatch compiler after those immutable
+plans. The opt-in policy admits only D0 mandatory CPU records on one
+conservative serialized declared-budget lane, groups reference records by
+atomic domain release, and rejects cross-domain ordinary dependencies. During
+an active step, the host thread maps a checked logical window to a contiguous
+nominal epoch, evaluates one bounded late action per group, and sends selected
+phase records serially through the existing executor. There is no added worker
+pool or service lane. Producer bytes stage until all required publications are
+complete, then enter the exact-generation stores; hold preserves the current
+alias. Cursor, fault, alias, generation, and payload state remains runtime-
+owned and participates in generic checkpoint state.
 
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
@@ -231,10 +242,10 @@ service, reverse executor instances, watchdog, fragmented controls, and
 trace/task/phase rollback while retaining the first error and every unresolved
 owner.
 M16-01 adds the bounded reference-plan compiler. M16-02 adds cross-rate
-selection and snapshot-store construction plus graph/replay identity and exact
-runtime-control accounting, without adding a lane, active owner, provider
-region, telemetry field, or dispatch branch. M16-03 and M16-04 own active
-dispatch, admission/late behavior, and deterministic shedding/recovery/telemetry.
+selection and snapshot-store construction. M16-03 adds opt-in active admission,
+selected CPU dispatch, transfer, and late actions without adding a lane,
+provider region, or telemetry field. M16-04 owns optional shedding/recovery and
+versioned per-release telemetry.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [CUDA backend contract](cuda_backend.md),

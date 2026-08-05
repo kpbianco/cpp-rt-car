@@ -1173,3 +1173,73 @@ TEST(TraceNoAlloc, RatePlanInspectionAndCpuFramesDoNotAllocateCrossRate) {
     EXPECT_TRUE(complete);
     EXPECT_EQ(allocation_count(), 0u);
 }
+
+namespace {
+
+struct ActiveNoAllocClock final : rt::RuntimeClock {
+    std::uint64_t now = 1'000;
+    std::uint64_t now_ns() noexcept override { return now; }
+};
+
+rt::CallbackResult active_noalloc_callback(
+    void* user_data,
+    const rt::CallbackContext& context) {
+    auto& count = *static_cast<std::size_t*>(user_data);
+    if (!context.rate_release) {
+        return rt::CallbackResult::error;
+    }
+    ++count;
+    return rt::CallbackResult::ok;
+}
+
+} // namespace
+
+TEST(TraceNoAlloc, RateDispatchOnTimeAndLateDegradeDoNotAllocate) {
+    ActiveNoAllocClock clock;
+    rt::Runtime runtime(clock);
+    rt::RuntimeConfig config;
+    config.callback_capacity = 1;
+    config.executor_queue_capacity = 2;
+    config.task_scratch_slots = 2;
+    config.watchdog_max_degradation_level = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(runtime.set_rate_execution_policy({2}), rt::Status::ok);
+    std::size_t calls = 0;
+    rt::PhaseHandle phase;
+    rt::RateDomainHandle domain;
+    ASSERT_EQ(runtime.register_callback(
+                  {"active", &active_noalloc_callback, &calls}, phase),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.register_rate_domain(
+                  {"rate", 100, 1, 100, 10,
+                   rt::RateCriticality::normal, false,
+                   rt::RateLateAction::degrade, 0},
+                  domain),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.bind_phase_to_rate_domain(phase, domain), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    rt::StepResult first;
+    rt::StepResult second;
+    bool complete = false;
+    {
+        AllocationGuard guard;
+        complete = runtime.step(
+                       {0, std::chrono::nanoseconds{100},
+                        std::nullopt, 1'000},
+                       &first) == rt::Status::ok;
+        clock.now = 10'000;
+        complete = runtime.step(
+                       {1, std::chrono::nanoseconds{100},
+                        std::nullopt, 1'100},
+                       &second) == rt::Status::ok &&
+            complete;
+    }
+    EXPECT_TRUE(complete);
+    EXPECT_EQ(allocation_count(), 0u);
+    EXPECT_EQ(calls, 2u);
+    EXPECT_EQ(first.rate.on_time_domain_releases, 1u);
+    EXPECT_EQ(second.rate.degraded_domain_releases, 1u);
+    ASSERT_EQ(runtime.stop(), rt::Status::ok);
+}

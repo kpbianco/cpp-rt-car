@@ -34,7 +34,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14 | Complete | Professional SDK target, package boundary, and consumer-isolation contract |
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
-| M16 | In progress | M16-01 reference plans and M16-02 deterministic cross-rate selection/storage are present; active dispatch, admission/late policy, and shedding/recovery remain |
+| M16 | In progress | M16-01 reference plans, M16-02 deterministic cross-rate selection/storage, and M16-03 opt-in admission/CPU dispatch/late policy are present; M16-04 shedding/recovery and versioned telemetry remain |
 | M17 | Planned | HAL v2, heterogeneous memory, and isolated accelerator submission lanes |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
@@ -573,7 +573,7 @@ Exit gates:
 
 ## M16 — Multi-rate simulation
 
-M16-01 and M16-02 are implemented in this worktree, subject to their local, CI,
+M16-01, M16-02, and M16-03 are implemented in this worktree, subject to their local, CI,
 and human review gates:
 
 - bounded copied rate domains and exactly-one phase ownership;
@@ -587,13 +587,16 @@ and human review gates:
   exact-generation SPSC store per channel;
 - conditional cross-rate graph/replay identity and exact runtime-control
   accounting without a seventh plan row or provider-region expansion.
+- opt-in D0 mandatory-CPU admission on one conservative serialized lane;
+- checked logical/nominal active windows, exact reference-order dispatch, and
+  bounded skip, catch-up, hold, degrade, and fail actions;
+- staged exact-generation channel transfer, functional step/periodic summaries,
+  and one canonical active checkpoint state record without schema evolution.
 
 Remaining M16 outcome:
 
-- active rate-domain dispatch and cross-rate payload transfer using the
-  compiled contracts;
-- bounded overrun policy, release/deadline observability, and host-driven plus
-  self-paced coordination without constructing hidden worker pools.
+- optional-domain shedding/recovery and versioned per-release policy telemetry;
+- an action-aware replay format if approved beyond schema-1 input logs.
 
 Exit gates:
 
@@ -602,9 +605,8 @@ Exit gates:
 - overload never creates unbounded catch-up work or silently skips mandatory
   releases.
 
-M16 and CAP-M16 remain incomplete until active dispatch/transfer, admission and
-late-frame policy, and shedding/recovery with versioned telemetry are delivered
-and their gates pass.
+M16 and CAP-M16 remain incomplete until M16-04 shedding/recovery with versioned
+telemetry is delivered and its gates pass.
 
 ## M17 — HAL v2 and heterogeneous memory
 
