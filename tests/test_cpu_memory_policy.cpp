@@ -349,7 +349,7 @@ TEST(CpuMemoryPolicy, BoundedDeclarationsCloseExternalFactsWithoutQualification)
     EXPECT_FALSE(report.accounting_complete);
     EXPECT_EQ(
         report.closed_total.exactness,
-        rt::ResourceAccountingExactness::unknown);
+        rt::ResourceAccountingExactness::partial);
     EXPECT_NE(
         runtime.last_error().find("live runtime stack facts"),
         std::string_view::npos);

@@ -220,7 +220,7 @@
     "tests/package_consumer/xdma_consumer.cpp": "6f224f6def4435529eb9dc36f685bdcd522266fc75b7877da168815f295ba5ab",
     "tests/package_consumer/xdma_linux_consumer.cpp": "45f1e444bf2c38b5a032b88bf296e424a85924297d62a90ff04e618ce28ce3a9",
     "tests/runtime_profile_tests.cpp": "6a81d25172de67b60d676bfc5abefbaac333a26b485a6d4d2c324b68e6c39669",
-    "tests/test_cpu_memory_policy.cpp": "0fb0f8aaa3bc26b95a3cb500e92cc629594e8921c9f2e42177c4f680bfe215ed",
+    "tests/test_cpu_memory_policy.cpp": "51c2aee153a9428fe1b69663889aa24de89898c3c31ffd7a0623fc6afe7ad83a",
     "tests/test_determinism_replay.cpp": "e6152b9ac4540f5582f9a452f5fcaa08d7c7bfafd40e4f787f509ac3f049db27",
     "tests/test_memory_policy.cpp": "d9dcfb266168b6ee5728b9488b333cf1b7227700a5975a8494d015072a2a7202",
     "tests/test_periodic_runtime.cpp": "8121b33f3f18f58239d4ac53587532deafabb555cb3e8e2c7ab8c1ba3f070229",
