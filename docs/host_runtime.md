@@ -5,8 +5,8 @@ extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
 plan, M5 time/platform controls, M6 versioned observability, M7
 determinism/replay, the M8 bounded device ABI and deterministic mock, and the
 M11 stable C ABI plus host job-system adapter, M12 portable distribution, and
-the M13 complete runtime-profile loader, M15 CPU/memory closure, and the M16-01
-rate-domain reference plan. It
+the M13 complete runtime-profile loader, M15 CPU/memory closure, the M16
+multi-rate work, and the M17-01 HAL v2 core/device-ABI-v1 compatibility path. It
 provides explicit host-driven and finite self-paced operation without adopting
 the legacy `SimCore` scheduler or pacing loop.
 
@@ -17,7 +17,9 @@ memory plan, self-paced time, the frame watchdog, and strict platform preflight
 as available. They also report versioned observability and deterministic replay
 as available; the latter means the implemented D0/D1 surface, not D2 or D3.
 They report `host_executor_adapter` for the borrowed engine job-system policy
-and `bounded_device_backend` for the poll-only M8 runtime path. Those
+and `bounded_device_backend` for the poll-only canonical HAL v2 runtime path.
+That capability includes unchanged v1 backends through the adapter but no
+heterogeneous-memory or batch/timeline surface. Those
 capabilities do not imply engine, CUDA, Vulkan, or XDMA qualification. The
 optional M9 CUDA and M10 XDMA candidates are separately linked backends with
 independent support matrices and evidence gates.
@@ -98,6 +100,22 @@ Selection inspection distinguishes the first supercycle from repeating steady
 state, and each compiled channel owns one two-slot SPSC store. M16-03 uses it
 only when the configuring-only active execution policy is present.
 
+M17-01 adds a second `register_device_backend()` overload for copied native
+`HalV2BackendRegistration` records beside the existing positional
+`DeviceBackendRegistration` source surface. Both are configuring-only, enforce
+the same duplicate, capacity, handle-owner, and freeze rules, and publish no
+partial handle on failure. A v1 registration creates one runtime-owned,
+address-stable adapter; its canonical HAL v2 table cannot be invalidated by
+later configuring-vector growth.
+
+Capability discovery and all malformed-table/output validation complete while
+configuring. Finalization accounts fixed adapter/table/context and translation
+storage before provider, native-policy, thread, backend-init, or callback side
+effects. Start and stop retain the existing startup barrier, one device-service
+lane, reverse buffer/backend cleanup, first-error retention, and unresolved-only
+retry. The supported manager invokes only HAL v2 operations; direct v1 calls
+occur only inside the adapter. See [the HAL v2 contract](hal_v2.md).
+
 ## Typed configuration
 
 `rt::RuntimeConfig` has twenty-five schema keys:
@@ -125,7 +143,7 @@ only when the configuring-only active execution policy is present.
 | `snapshot_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded checkpoint bytes |
 | `replay_input_capacity` | nonnegative integer, `4096` | Maximum records accepted in one encoded or replayed input log |
 | `input_log_max_bytes` | positive integer, `1048576` | Per-runtime upper bound for encoded input-log bytes |
-| `device_backend_capacity` | positive integer, `1` | Maximum backend tables accepted before finalization; accepted range is 1–256 |
+| `device_backend_capacity` | positive integer, `1` | Maximum combined native-v2 and adapted-v1 backend tables accepted before finalization; accepted range is 1–256 |
 | `device_buffer_capacity` | nonnegative integer, `64` | Maximum borrowed device buffers accepted before finalization; accepted maximum is 65,536 |
 | `device_outstanding_capacity` | positive integer, `64` | Runtime-wide preallocated outstanding submission slots; every backend must report at least this capacity |
 | `device_completion_batch` | positive integer, `16` | Preallocated completion records supplied to each bounded poll; it cannot exceed outstanding capacity |
@@ -174,11 +192,13 @@ start/finish timestamps, deadline miss, watchdog event, and committed
 degradation level.
 
 A device command provider is scheduled like a CPU callback but does not finish
-its graph phase when it returns. An accepted submission retains the phase
-token until the runtime-owned service lane polls its completion. Independent
-CPU phases remain runnable; dependent phases are released only by completion.
-Submission saturation or a device failure becomes the typed step result. See
-the [device backend contract](device_backend.md).
+its graph phase when it returns. The worker validates and translates its
+runtime-local buffer handles, then performs one bounded canonical HAL v2 core
+submission. An accepted submission retains the phase token until the existing
+runtime-owned service lane polls its completion. Independent CPU phases remain
+runnable; dependent phases are released only by completion. Submission
+saturation or a device failure becomes the typed step result. See the
+[device backend contract](device_backend.md).
 
 Use `Runtime::now_ns()` or `rtfw_now_ns()` to form a deadline in the correct
 clock domain. The default clock epoch is local to the runtime instance. C++ tests
@@ -254,8 +274,9 @@ Each runtime owns:
 - its copied memory-provider table, live region tokens, backing spans, policy
   observations, and rollback state, while provider `user_data` remains
   borrowed;
-- its copied backend tables, device registration metadata, outstanding slots,
-  completion batch, service lane, and device telemetry counters.
+- its copied canonical HAL v2 backend tables, address-stable v1 adapter
+  contexts and translation scratch, device registration metadata, outstanding
+  slots, completion batch, service lane, and device telemetry counters.
 
 Callback user data remains host-owned and must outlive every step that can use
 it. A phase's scratch contents may persist across frames, but no phase sees
@@ -265,9 +286,11 @@ application state.
 Registered canonical state storage also remains host-owned and must remain
 stable for the runtime lifetime. Checkpoint and input-log buffers are
 caller-owned and need exist only for the duration of the relevant call.
-Backend instances, registered device-buffer bytes, and device command
-`user_data` are borrowed through backend shutdown. The service lane is joined
-before buffers are unregistered and backend shutdown returns.
+Native HAL v2 and device-ABI-v1 backend instances, registered device-buffer
+bytes, and device command `user_data` are borrowed through successful backend
+shutdown. Adapter state remains runtime-owned throughout unresolved cleanup.
+The service lane is joined before buffers are unregistered and backend shutdown
+returns.
 
 The memory provider and its `user_data` must remain valid until checked
 `stop()` succeeds. Stop quiesces device, executor, and watchdog lanes before
@@ -375,6 +398,11 @@ checkpoint and replay control operations; see the
 submission/poll, graph-held completions, health/reset/shutdown, and a
 fault-injectable mock; see the
 [device backend contract](device_backend.md).
+M17-01 makes that path canonical HAL v2 for both registration kinds while
+preserving the v1 mock/CUDA/XDMA implementations, lifecycle, identity, and
+observable results. It adds no device-rate execution, memory domain, command
+batch, timeline, vendor lane, or qualification claim; see the
+[HAL v2 contract](hal_v2.md).
 M16-01 adds rate-model/reference-plan inspection. M16-02 adds CPU-only
 cross-rate declarations, immutable first/repeating selection inspection,
 copied initial-sample inspection, and preallocated snapshot stores. M16-03 adds
@@ -412,6 +440,7 @@ bounded loss-aware inspection without changing global observability schema 2.
 - Observability tests: `tests/test_observability.cpp`
 - Determinism/replay tests: `tests/test_determinism_replay.cpp`
 - Device ABI/runtime tests: `tests/test_device_runtime.cpp`
+- HAL v2/compatibility tests: `tests/test_hal_v2.cpp`
 - Artifact parser fuzz target: `tests/snapshot_fuzz.cpp`
 - Dynamic C ABI test: `tests/test_cabi_dlopen.c`
 - C sample: `samples/embed_c/mini_app.c`

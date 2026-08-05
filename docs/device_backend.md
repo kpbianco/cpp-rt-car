@@ -1,10 +1,14 @@
 # Bounded Device Backend Contract
 
 RTFW 1.2 retains the M8 target `rt::Runtime` device contract introduced in
-0.9. The base contract adds a
-size/versioned C backend ABI, device phases in the compiled graph, one
-runtime-owned completion-service lane, and a deterministic fault-injectable
-CPU mock. This base is portable RT0 functional behavior. It is not itself
+0.9. The base contract adds a size/versioned C backend ABI, device phases in
+the compiled graph, one runtime-owned completion-service lane, and a
+deterministic fault-injectable CPU mock. M17-01 adds an additive C++ HAL v2
+core and routes both native HAL v2 registrations and every unchanged
+device-ABI-v1 registration through one canonical HAL v2 device manager. The
+complete v1 translation contract is in [the HAL v2 contract](hal_v2.md).
+
+This base is portable RT0 functional behavior. It is not itself
 CUDA, Vulkan, XDMA, driver, latency, or RT2 qualification. The optional M9
 CUDA implementation and its separate hardware-evidence boundary are in
 [the CUDA backend contract](cuda_backend.md). The M10 Xilinx Linux XDMA AXI-MM
@@ -17,23 +21,30 @@ outside this contract. `rt::Runtime` does not invoke it.
 
 ## Ownership and lifecycle
 
-A host registers a `rtfw_device_backend_api` while the runtime is configuring.
-The function table and its `instance` are borrowed through backend
-`shutdown()`. Registered buffer storage and device-phase `user_data` are also
-borrowed until runtime shutdown has completed. The runtime copies names,
-capabilities, graph metadata, and the function table; it does not take
-ownership of backend or application storage.
+A host registers either the existing `rtfw_device_backend_api` through
+`DeviceBackendRegistration` or a native `HalV2BackendApi` through
+`HalV2BackendRegistration` while the runtime is configuring. The function
+table and its `instance` are borrowed through successful backend `shutdown()`.
+Registered buffer storage and device-phase `user_data` are also borrowed until
+runtime shutdown has completed. The runtime copies names, capabilities, graph
+metadata, and the function table; it does not take ownership of backend or
+application storage. The v1 table is additionally held by one runtime-owned,
+address-stable compatibility adapter whose HAL v2 table is the only table seen
+by the device manager.
 
 The target lifecycle is:
 
-1. `register_device_backend()` validates ABI version 1, every required
-   function, reserved fields, identifiers, and reported capacities.
+1. The selected `register_device_backend()` overload validates device ABI
+   version 1 or HAL API version 2, every required function, reserved field,
+   identifier, and reported capacity. A v1 registration is wrapped exactly
+   once before entering the canonical manager.
 2. `register_device_buffer()` records a nonempty, nonoverlapping host span and
    access flags. The backend does not see it yet.
 3. `register_device_phase()` adds a command-provider phase to the same graph as
    CPU phases.
-4. `finalize()` validates backend limits and commits manager, outstanding-slot,
-   completion-batch, and graph storage to the memory plan.
+4. `finalize()` validates backend limits and commits canonical registrations,
+   adapter/table/context storage, outstanding-slot, completion-batch, and graph
+   storage to the memory plan.
 5. `start()` starts the fixed CPU team, initializes each backend, registers
    buffers, then starts one runtime-owned device service lane. Failure performs
    a checked reverse rollback. An initialization failure is
@@ -66,7 +77,21 @@ retry. A C++ destructor cannot report a cleanup result and is only a
 best-effort fallback, so device integrations must use the checked `stop()`
 path.
 
-## ABI shape
+## HAL and ABI shape
+
+The supported manager invokes only HAL v2 core records. A native-v2 table and
+an adapted-v1 table receive equivalent validation and lifecycle handling.
+Direct calls to device ABI v1 are confined to the compatibility adapter; the
+mock, CUDA candidate, and XDMA candidate continue to implement their frozen v1
+surface unchanged.
+
+The HAL v2 C++ records use API version 2, the existing 64-byte backend
+identifier, 128-byte inline payload, and eight-reference limit. The required
+table covers capability discovery, initialization, host-buffer registration
+and unregistration, one core submission, bounded completion polling,
+cancellation, health, reset, and shutdown. It has a non-null borrowed instance
+and a zero reserved tail. See [the HAL v2 contract](hal_v2.md) for the complete
+records, v1 field/status map, malformed-output rules, and deferred features.
 
 `rt/include/rt/device_abi.h` is a C-compatible backend boundary with device ABI
 version 1. All extensible records carry `struct_size`; ABI-bearing records also
@@ -102,6 +127,13 @@ blocking either caller. The manager uses an explicit submitting/early-ready
 handshake: successful accounting and `device.submitted` are published before
 an early completion is applied, so a completion cannot overtake its submission
 record.
+
+The adapter catches every exception before it crosses either table boundary,
+validates every returned v1 status and output record, and preserves
+`UNSUPPORTED` as a failure rather than promoting it. Native-v2 outputs receive
+the same fail-closed validation. A malformed completion, health record, token,
+output count, enum, boolean, identifier, or reserved field publishes no partial
+result or ownership transition.
 
 The current fixed submission contains:
 
@@ -177,18 +209,22 @@ hardware deterministic.
 
 ## Memory and observability
 
-The finalized memory equation now includes `device_control_bytes`. The plan
-reports backend/buffer counts, outstanding capacity, completion batch, and
-backend-reported private control bytes. Backend-reported storage is
+The finalized memory equation includes `device_control_bytes`. The plan reports
+backend/buffer counts, outstanding capacity, completion batch, and
+backend-reported private control bytes. Adapter context, copied v1 table, HAL
+v2 table, and fixed translation scratch are runtime-owned device controls and
+are counted exactly once in `device_control_bytes`. Backend-reported storage is
 informational and excluded from `planned_bytes` because the backend owns it.
 Registered buffer payload bytes are borrowed and excluded.
 
 M15-04 reconciles the runtime-owned device-manager object and constructed
-registration, outstanding, completion, and service-control allocations as
-non-overlapping logical extents against `device_control_bytes`. Backend-private
-`control_storage_bytes` remains device-ABI-v1 metadata: a matching declaration
-is `declared_only`, and a contradiction fails finalization. Neither mechanism
-authorizes access to backend-owned memory or changes device ABI v1.
+registration, adapter, outstanding, completion, and service-control
+allocations as non-overlapping logical extents against `device_control_bytes`.
+Backend-private `control_storage_bytes` remains capability metadata: a matching
+declaration is `declared_only`, and a contradiction fails finalization. Neither
+mechanism authorizes access to backend-owned memory or changes device ABI v1.
+The six-row `MemoryPlan` equation and three provider-capable regions are
+unchanged.
 
 Checked cleanup preserves M14.1 backend and buffer ownership before the
 device-service lane performs stack cleanup on its owning quiescent thread and
@@ -202,14 +238,22 @@ service-start metrics. Trace IDs 12–14 report submission from its CPU worker,
 completion from `device_service`, and reset from `host`. Telemetry is
 diagnostic and does not establish a completion deadline.
 
+Adapted v1 backends retain the exact pre-M17 graph/replay identity byte path.
+Native-v2 backends conditionally contribute their backend kind and API version
+2 to compatibility identity. Checkpoint/input-log schemas and codecs remain
+version 1.
+
 ## Evidence and exclusions
 
-Automated evidence covers queue saturation, cancellation, delayed dependency
-release, timeout, error, loss, reset, reverse/retryable shutdown, failed-start
-rollback, malformed tables, C ABI dynamic loading, memory-plan accounting,
-steady-state allocation, and sanitizer execution in
-`tests/test_device_runtime.cpp`, `tests/test_trace_noalloc.cpp`, and
-`tests/test_cabi_dlopen.c`. `samples/device_mock.cpp` is the minimal C++ flow.
+Automated evidence covers native-v2 and adapted-v1 validation and equivalence,
+queue saturation, early completion, cancellation, delayed dependency release,
+timeout, error, loss, reset, reverse/retryable shutdown, failed-start rollback,
+malformed tables and outputs, compatibility identity, C ABI dynamic loading,
+memory-plan accounting, steady-state allocation, and sanitizer execution in
+`tests/test_hal_v2.cpp`, `tests/test_device_runtime.cpp`,
+`tests/test_determinism_replay.cpp`, `tests/test_trace_noalloc.cpp`, and
+`tests/test_cabi_dlopen.c`. `samples/device_mock.cpp` remains the minimal v1
+C++ flow and runs through the adapter.
 
 M9 remains separately gated even though 1.2 contains a real CUDA Driver API
 adapter candidate. It still needs a named driver, toolkit, hardware, OS, and
@@ -218,3 +262,9 @@ latency-decomposition evidence before its support matrix can contain a
 qualified tuple. M10 likewise provides a bounded XDMA candidate but no
 qualified hardware tuple. Neither backend inherits a portable completion-time
 claim from M8.
+
+M17-01 does not establish heterogeneous memory, topology/coherency, timestamp
+correlation, command batching, timeline completion, an isolated vendor lane,
+CUDA Graph, XDMA controls, peer memory, physical accelerator behavior, HIL,
+field performance, worst-case latency, RT1, RT2, signing, release, deployment,
+or production readiness. M17 and CAP-M17 remain incomplete.

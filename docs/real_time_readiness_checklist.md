@@ -51,6 +51,12 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   rate-action ring with exact loss/cursors/counters, accounting reconciliation,
   allocation instrumentation, and synthetic concurrency coverage. Mandatory CI
   and human review remain completion gates.
+- [x] M17-01 adds a versioned C++ HAL v2 core and routes native-v2 and every
+  unchanged device-ABI-v1 backend through one canonical bounded manager path.
+  Adapter/table/context storage is fixed and exactly accounted; compatibility,
+  malformed/failure, lifecycle-retry, isolation, sanitizer, and no-allocation
+  tests are portable RT0 evidence only. M17-01 adds no heterogeneous memory,
+  command batch, timeline completion, isolated vendor lane, or hardware claim.
 - [ ] A named deployment independently verifies requested memory locking,
   NUMA/huge-page outcomes, residency under load, and worst-case behavior;
   M15 provider/declaration injection, `mlock`, `mincore`, preflight, and hosted CI do not
@@ -94,8 +100,12 @@ observation. None of this changes any unchecked deployment gate above.
 Provider-backed checked stop releases trace backing, so post-stop trace export
 must occur before that cleanup or be treated as unavailable.
 M16 declared-budget admission and fake-clock late/catch-up/shedding/recovery
-results are not measured WCET, latency, RT1, or RT2 evidence. The M16-04
-mandatory CI and human review gates remain unchecked in this worktree.
+results are not measured WCET, latency, RT1, or RT2 evidence. M17-01 mock,
+fake-driver, compatibility-adapter, hosted CI, and documentation results are
+likewise not heterogeneous-memory, physical accelerator, HIL, field, latency,
+RT1, or RT2 evidence. Mandatory M17-01 CI and human API, compatibility,
+concurrency, accounting, lifecycle, and claim-boundary review remain required;
+M17 and CAP-M17 remain incomplete.
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its
@@ -103,4 +113,5 @@ limits are specified in the [time/platform contract](time_platform.md); M6
 schema and exporter boundaries are in the
 [observability contract](observability.md); M7 artifact and replay boundaries
 are in the [determinism/replay contract](determinism_replay.md); M8 backend and
-mock boundaries are in the [device backend contract](device_backend.md).
+mock boundaries are in the [device backend contract](device_backend.md). The
+native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).

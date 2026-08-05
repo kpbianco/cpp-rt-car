@@ -1,123 +1,87 @@
 # Current state
 
 Last audited: 2026-08-05
-Batch baseline: `9c350ab5b66e37e90aef7e96939c71df04101b27`
+Batch baseline: `e264278557866acbf3bda1e6b4a436a6e0fd704f`
 
 ## Product state
 
-- Release: 1.2.1 portable RT0.
-- Stable boundary: C ABI v8 with 70 exports and SONAME 8; device ABI v1.
-- Runtime/profile boundary: schema 7 with 25 keys; observability schema 2;
-  checkpoint and input-log schema 1.
-- License: Apache-2.0.
-- M14, M14.1, and M15 are complete at the audited baseline.
-- M16 is active and remains incomplete. The current approved implementation
-  contract is `contracts/active-batch.yaml` (`M16-04`).
+- Release 1.2.1 remains the supported portable RT0 product.
+- Stable C ABI v8 remains exactly 70 exports with SONAME 8 and its frozen
+  fingerprint. Device ABI v1 is unchanged.
+- Runtime-profile schema 7 and its 25 keys, global observability schema 2,
+  checkpoint/input-log schema 1, and rate-action schema 1 are unchanged.
+- The installed header/target inventory and 1.x compatibility aliases remain
+  unchanged. The license remains Apache-2.0.
+- M14, M14.1, M15, and M16 are complete in merged default-branch history.
+  The retained M16 evidence contains its original pre-merge gate language;
+  merge history is authoritative, and no absent CI identifier, check count, or
+  separate human-review object is inferred.
+- M17 is active and incomplete. The approved batch is M17-01, HAL v2 core and
+  device-ABI-v1 compatibility.
 
-## M16-01 and M16-02 implementation
+## M17-01 implementation
 
-The worktree adds an additive C++ rate-domain model without changing the
-installed header or target inventory. A runtime can copy up to 64 stable
-domains, bind each CPU or device phase to exactly one instance-owned domain,
-and finalize an immutable epoch-zero reference interval. Periods and releases
-use integral nanoseconds. Domain names, periods, substeps, deadlines,
-non-binding budget/WCET metadata, criticality, optionality, and phase ownership
-are validated and frozen.
+The already installed `rt/device.hpp` now contains an additive C++ HAL API
+version 2 core contract. Distinct fixed-width records and a copied function
+table cover capabilities, initialization, borrowed host-buffer registration,
+one bounded core submission, bounded polling, cancellation, health, reset, and
+shutdown. The core keeps the 64-byte identifier, 128-byte inline payload, and
+eight-reference limits. Tables and records are size/version checked where
+applicable and require zero reserved tails.
 
-The reference interval is `[0, lcm(periods))`. Checked integer gcd/lcm,
-multiplication, addition, and count arithmetic reject overflow or more than
-65,536 release entries before any provider, device, native-policy, thread, or
-callback action. Equal-time releases are ordered by domain registration,
-compiled phase order, then substep ordinal. Inspectors copy fixed records and
-do not allocate or mutate the plan after start.
+`Runtime::register_device_backend()` has a configuring-only overload for a
+native `HalV2BackendRegistration`. It preserves the existing handle, naming,
+capacity, freeze, graph-phase, health/reset, and borrowed-lifetime semantics.
+The pre-M17 `DeviceBackendRegistration` aggregate and overload retain their
+source meaning.
 
-Explicit rate semantics participate in graph/replay compatibility identity.
-A runtime with no explicit model follows the pre-M16 identity path exactly.
-Rate storage is counted once inside `MemoryPlan::runtime_control_bytes` and the
-existing M15 runtime-control extent; the six-row plan equation and three-region
-provider boundary are unchanged.
+Every accepted device-ABI-v1 table is copied once into a Runtime-owned,
+address-stable compatibility object. Capability discovery and every later
+operation traverse that adapter into the same HAL v2 table path used by a
+native backend. The device manager contains no direct v1 table call. The
+adapter maps all core capability, initialization, buffer, submission,
+completion, health, status, cancellation, reset, and shutdown fields, catches
+callback exceptions, preserves `UNSUPPORTED`, and publishes no partial output
+for malformed results.
 
-M16-02 adds copied, bounded C++ cross-rate channels between CPU phases in
-different explicit rate domains. Finalization emits immutable first-cycle and
-repeating-cycle sample-and-hold selections for every consumer release. The
-existing total reference order decides same-time visibility; initial samples,
-real prior-cycle sources (`source_cycle_offset == -1`), held generations, and
-fresh/stale metadata remain distinct. Maximum age is inclusive, with zero
-accepting only age zero and `UINT64_MAX` explicitly unbounded.
+The existing submission/early-ready handshake, runtime-assigned nonzero IDs,
+logical-to-native buffer-token translation, range/access checks, completion
+matching, service-lane-only polling, graph dependency release, reset gating,
+and cross-instance isolation remain in the canonical manager. Completion
+batches are validated as a whole before publication. Startup and checked stop
+retain their existing ordering, reverse cleanup, first-error retention, and
+unresolved-only retry behavior.
 
-Each compiled channel owns a two-slot, exact-generation SPSC snapshot store.
-Publication copies into a non-visible slot before a release publication; copy
-claims a committed generation before reading. Calls are single-attempt and
-return typed capacity, not-ready, stale, or malformed results without waiting,
-allocation, searching, or substituting another generation. Runtime dispatch
-does not invoke these stores yet.
+Adapter/table/context and translation-scratch storage is fixed before start,
+owned by one Runtime, and counted exactly once in `device_control_bytes` and
+the M15 device-control extent. Backend-private bytes remain informational.
+The existing six-row MemoryPlan equation and three provider regions do not
+change. Adapted-v1 backends take the exact legacy graph/replay hash path;
+native HAL v2 registrations add a conditional kind/API-version marker.
 
-## M16-03 implementation
-
-M16-03 adds an opt-in configuring-only C++ `RateExecutionPolicy`. Without that
-policy, the M16-01/M16-02 model retains exact reference-only identity and
-complete-graph once-per-frame dispatch. With it, finalization accepts only D0,
-mandatory CPU domains with positive feasible budgets/deadlines and same-domain
-ordinary dependencies. A conservative serialized integer admission pass checks
-every reference record and the idle supercycle boundary before runtime-side
-provider, thread, device, callback, or checkpoint effects.
-
-Active steps require positive half-open `[cursor, cursor + delta)` windows and
-contiguous nominal timestamps. Due reference records repeat by checked
-supercycle arithmetic and execute serially through the existing executor.
-Per-domain skip, bounded catch-up, hold, degrade, and fail actions are explicit;
-aggregate counting handles large omitted prefixes, and the positive global
-record cap rejects overflow without backlog or spill execution. Periodic mode
-passes its absolute release as the nominal timestamp.
-
-Active callbacks receive a nullable rate-release view. Producers stage one
-exact-size payload per outgoing channel, and successful releases publish
-complete generations through the existing two-slot stores. Consumers copy the
-exact current initial, produced, or held generation with age/freshness results.
-The cursor, nominal epoch, degradation/fault state, generation aliases, and
-committed channel bytes are retained in one internal canonical state record
-through the unchanged checkpoint schema-1 generic record mechanism. Active
-schema-1 input-log export and replay are rejected explicitly.
-
-## M16-04 implementation
-
-M16-04 appends a copied policy version, positive late/recovery hysteresis
-thresholds, and a bounded telemetry capacity. Active finalization now accepts
-optional CPU D0 domains while admission remains mandatory-only. Optional work
-starts active, sheds by increasing criticality and reverse registration order,
-and recovers in the exact reverse order. Only settled mandatory releases drive
-the streaks; transitions affect the next release in total order, including at
-the same timestamp. Optional cross-rate endpoints remain rejected.
-
-The runtime owns a separate fixed-capacity rate-action schema-1 ring and 20
-counters/gauges. Publication is one bounded nonblocking attempt with explicit
-overwrite, contention, and zero-capacity loss. Runtime-bound cursors report
-exact gaps and inspection rejects an active step or periodic loop. This stream
-does not change global observability schema 2 and is not checkpointed or an
-action-replay log.
-
-The canonical active generic checkpoint record conditionally retains policy
-version, thresholds, streaks, deterministic optional order, and shed state.
-Reference-only and mandatory-only records remain byte-identical. Finalization
-accounts policy, checkpoint, ring, slot, and counter storage once inside the
-existing rate-plan/runtime-control extent and six-row memory equation.
+The unchanged deterministic mock, CUDA candidate, and XDMA candidate continue
+to register as device ABI v1 backends and therefore exercise the compatibility
+path. Native-v2 and adapted-v1 functional, malformed-input, exception,
+lifecycle, isolation, identity, accounting, package, and boundedness tests are
+the local evidence boundary.
 
 ## Boundary and remaining work
 
-M16-04 establishes portable RT0 functional optional-work shedding/recovery and
-versioned rate-action observation. Action-aware replay, active D1, device-rate
-execution, and qualification remain outside this batch. M16 and CAP-M16 remain
-incomplete until mandatory CI and human review pass.
+M17-01 implements only the portable RT0 HAL v2 core envelope and v1
+compatibility. M17 remains incomplete. M17-02 owns heterogeneous memory,
+topology, coherency, and timestamp correlation; M17-03 owns command batches,
+timeline completions, and isolated submission lanes; M17-04 owns CUDA Graph
+and XDMA control/MMIO/event facilities; M17-05 owns the combined sample. M18
+owns named physical hardware and RT qualification.
 
-Local deterministic verification can establish exact integer compilation,
-functional lifecycle, package compatibility, bounded storage, replay identity,
-and allocation-free inspection/frames on the named host. Mandatory GitHub CI
-and human API/arithmetic/identity/accounting/determinism/lifecycle review remain
-merge gates. No physical hardware, HIL, field, latency, RT1, RT2, Unreal,
-signing, release, staging, deployment, or production validation is claimed.
+Local builds, mocks, fake drivers, fixtures, sanitizers, package consumers,
+preflight, and documentation are not physical hardware, HIL, field, latency,
+RT1, RT2, signing, release, deployment, or production evidence. Mandatory
+GitHub CI and human public-API, compatibility-map, lifetime, concurrency,
+accounting, lifecycle, and claim-boundary review remain external merge gates.
 
 ## Next action
 
-Complete the M16-04 local verification contract, retain
-`docs/evidence/M16-04-2026-08-05.md`, and submit the bounded diff for mandatory
-CI and human review. Do not mark M16 or CAP-M16 complete before those gates.
+Complete every M17-01 local validation command, retain exact results in
+`docs/evidence/M17-01-2026-08-05.md`, and submit the bounded diff for external
+gates only when separately authorized. Do not mark M17 or CAP-M17 complete.

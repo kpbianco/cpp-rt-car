@@ -45,6 +45,22 @@ rules. Optional shed releases never enter the executor or invoke callbacks;
 mandatory releases are never shed. No second pool, helper lane, inline spill,
 or retry loop is introduced.
 
+M17-01 does not add an executor or submission lane. A device command provider
+still runs as one ordinary bounded CPU phase and fills the existing
+device-ABI-v1 `DeviceSubmission` source record. The runtime validates its
+logical handles and ranges, translates buffer tokens, and invokes one
+canonical HAL v2 core submission. Native-v2 registrations enter that path
+directly; v1 registrations enter it through one runtime-owned compatibility
+adapter. Provider return still cannot release the graph token, and only the
+existing device-service lane polls and publishes completion.
+
+The adapter does not retry, spill, allocate, wait for device completion, invoke
+a callback from poll, or create a helper thread. The submitting/early-ready
+handshake publishes acceptance before applying a synchronous completion.
+Potentially blocking vendor-operation isolation and fixed per-backend
+submission/I/O lanes belong to M17-03; M17-01 neither creates such a lane nor
+qualifies a vendor call as bounded in time.
+
 The positive policy cap bounds executed reference records per step. Callback
 failure, missing/duplicate publication, finite generation exhaustion, or a
 configured fail action cancels later active work. Skip, hold, and rejected
@@ -196,4 +212,6 @@ best-effort destruction.
   `tests/test_rate_telemetry.cpp`,
   `tests/test_trace_noalloc.cpp`;
 - dynamic C ABI coverage: `tests/test_cabi_dlopen.c`;
+- native HAL v2/adapted-v1 single-path and causal-order coverage:
+  `tests/test_hal_v2.cpp`, `tests/test_device_runtime.cpp`;
 - sanitizer configuration: `.github/workflows/ci.yml`.

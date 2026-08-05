@@ -87,6 +87,7 @@ HASHED_CONTRACT_PATHS = {
     "docs/devex_governance.md",
     "docs/device_backend.md",
     "docs/executor.md",
+    "docs/hal_v2.md",
     "docs/host_runtime.md",
     "docs/limp_mode.md",
     "docs/memory_plan.md",
@@ -135,6 +136,8 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/cross_rate_data.hpp",
     "rt/src/executor.cpp",
     "rt/src/executor.hpp",
+    "rt/src/hal_v2.cpp",
+    "rt/src/hal_v2.hpp",
     "rt/src/host_runtime.cpp",
     "rt/src/memory_policy.cpp",
     "rt/src/memory_policy.hpp",
@@ -179,6 +182,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_compiled_graph.cpp",
     "tests/test_cross_rate_data.cpp",
     "tests/test_host_runtime.cpp",
+    "tests/test_hal_v2.cpp",
     "tests/test_memory_plan.cpp",
     "tests/test_periodic_runtime.cpp",
     "tests/test_rate_dispatch.cpp",
@@ -745,6 +749,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "if (RTFW_TOP_LEVEL)",
         "rtfwCudaTargets",
         "rtfwXdmaTargets",
+        "rt/src/hal_v2.cpp",
     ):
         if token not in cmake:
             errors.append(f"CMakeLists.txt: missing release token {token!r}")
@@ -781,9 +786,65 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "RTFW_EXPECT_TESTS=ON",
         "CMAKE_INSTALL_INCLUDEDIR=sdk/include",
         "CMAKE_INSTALL_DATADIR=sdk/data",
+        "HalV2.*",
+        "m17_hal_v2_compatibility",
     ):
         if token not in ci:
             errors.append(f"CI: missing portable release gate {token!r}")
+
+    # Retain the permanent M17-01 HAL-v2/device-ABI-v1 product facts without
+    # coupling release validation to the moving active milestone frontier.
+    device_header = load_text(root, "rt/include/rt/device.hpp", errors)
+    for token in (
+        "hal_v2_api_version = 2u",
+        "enum class HalV2Status",
+        "struct HalV2Capabilities",
+        "struct HalV2Submission",
+        "struct HalV2Completion",
+        "struct HalV2Health",
+        "struct HalV2BackendApi",
+        "struct HalV2BackendRegistration",
+    ):
+        if token not in device_header:
+            errors.append(f"HAL v2 public contract: missing token {token!r}")
+
+    hal_v2_test = load_text(root, "tests/test_hal_v2.cpp", errors)
+    for test_name in (
+        "ApiVersionDefaultsAndLayoutsAreExact",
+        "NativeRegistrationAndOperationTranslationAreExact",
+        "MalformedTablesAndCapabilitiesFailTransactionally",
+        "NativeAndV1StatusesAndExceptionsAreEquivalent",
+        "DeviceAbiV1AdapterPreservesEveryCoreFieldAndFailsClosed",
+        "NativeIdentityIsSeparateAndV1IdentityRemainsStable",
+        "AdaptedV1StorageIsExactInsideSixRowMemoryPlan",
+        "AdaptedV1StorageSurvivesConfiguringGrowthAndIsIsolated",
+    ):
+        if test_name not in hal_v2_test:
+            errors.append(f"HAL v2 release tests: missing {test_name!r}")
+
+    package_cpp = load_text(
+        root,
+        "tests/package_consumer/cpp_consumer.cpp",
+        errors,
+    )
+    for token in ("InstalledHalV2Backend", "HalV2BackendRegistration"):
+        if token not in package_cpp:
+            errors.append(f"HAL v2 package consumer: missing {token!r}")
+    package_compat = load_text(
+        root,
+        "tests/package_consumer/compat_consumer.cpp",
+        errors,
+    )
+    for token in ("pre_m17_device_backend", "pre_m17_device_buffer"):
+        if token not in package_compat:
+            errors.append(f"device ABI v1 package consumer: missing {token!r}")
+    for path in (
+        "tests/package_consumer/cuda_consumer.cpp",
+        "tests/package_consumer/xdma_consumer.cpp",
+    ):
+        consumer = load_text(root, path, errors)
+        if "DeviceBackendRegistration" not in consumer:
+            errors.append(f"{path}: missing device ABI v1 compatibility gate")
 
     workflow_paths = sorted(
         set((root / ".github/workflows").glob("*.yml"))

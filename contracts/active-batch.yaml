@@ -1,23 +1,24 @@
 schema_version: 1
 batch:
-  id: M16-04
-  title: Add shedding recovery and versioned telemetry
-  goal: Close M16 by admitting opt-in CPU-only optional domains beside the already admitted mandatory schedule, applying deterministic bounded shedding and hysteretic recovery from exact mandatory-release lateness decisions, and retaining a separate fixed-capacity versioned rate-action trace and counter stream without changing stable C ABI v8, global observability schema 2, or checkpoint/input-log codecs.
+  id: M17-01
+  title: Add HAL v2 and device ABI v1 compatibility
+  goal: Add a versioned additive C++ HAL v2 core backend contract, make the supported runtime use one canonical HAL v2 operation path, and preserve every existing device-ABI-v1 backend through a complete bounded compatibility adapter without adding heterogeneous memory, command batches, timeline completions, vendor control facilities, new submission lanes, or hardware claims.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
-    - products/cpp-rt-car/PRD.md#cap-m16--multi-rate-simulation
-    - products/cpp-rt-car/acceptance.yaml#CAP-M16
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-16
-  milestone: products/cpp-rt-car/roadmap.yaml#M16
+    - products/cpp-rt-car/PRD.md#cap-m17--hal-v2-and-heterogeneous-memory
+    - products/cpp-rt-car/acceptance.yaml#CAP-M17
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-17
+  milestone: products/cpp-rt-car/roadmap.yaml#M17
   target_contracts:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/compiled_graph.md
+    - docs/device_backend.md
+    - docs/cuda_backend.md
+    - docs/xdma_backend.md
     - docs/host_runtime.md
     - docs/executor.md
-    - docs/time_platform.md
     - docs/memory_plan.md
     - docs/observability.md
     - docs/determinism_replay.md
@@ -25,6 +26,8 @@ sources:
     - docs/c_abi.md
     - docs/release_policy.md
     - docs/real_time_readiness_checklist.md
+    - docs/security_supply_chain.md
+    - docs/threat_model.md
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -32,41 +35,37 @@ sources:
     - docs/evidence/M16-01-2026-08-05.md
     - docs/evidence/M16-02-2026-08-05.md
     - docs/evidence/M16-03-2026-08-05.md
-  baseline_commit: 9c350ab5b66e37e90aef7e96939c71df04101b27
+    - docs/evidence/M16-04-2026-08-05.md
+  baseline_commit: e264278557866acbf3bda1e6b4a436a6e0fd704f
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M16-04.yaml
-  control_plane_revision: 92abc5d737b95133a4dd9e68170f29cf55d26371  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M17-01.yaml
+  control_plane_revision: 7726a89440df85ce9ff4b2e4af77deb173b9fda2  # pragma: allowlist secret
 dependencies:
-  - M16-03
+  - M16-04
 scope:
   allowed_paths:
     - .portfolio-harness.json
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
-    - rt/include/rt/config.hpp
+    - rt/include/rt/device.hpp
     - rt/include/rt/runtime.hpp
-    - rt/src/rate_dispatch.cpp
-    - rt/src/rate_dispatch.hpp
-    - rt/src/rate_timeline.cpp
-    - rt/src/rate_timeline.hpp
-    - rt/src/rate_telemetry.cpp
-    - rt/src/rate_telemetry.hpp
+    - rt/src/hal_v2.cpp
+    - rt/src/hal_v2.hpp
+    - rt/src/device_manager.cpp
+    - rt/src/device_manager.hpp
     - rt/src/host_runtime.cpp
     - rt/src/resource_policy.cpp
     - rt/src/resource_policy.hpp
-    - tests/test_rate_dispatch.cpp
-    - tests/test_rate_telemetry.cpp
-    - tests/test_rate_timeline.cpp
-    - tests/test_cross_rate_data.cpp
-    - tests/test_host_runtime.cpp
-    - tests/test_periodic_runtime.cpp
+    - tests/test_hal_v2.cpp
+    - tests/test_device_runtime.cpp
     - tests/test_memory_plan.cpp
     - tests/test_determinism_replay.cpp
-    - tests/test_observability.cpp
     - tests/test_trace_noalloc.cpp
     - tests/package_consumer/cpp_consumer.cpp
     - tests/package_consumer/compat_consumer.cpp
+    - tests/package_consumer/cuda_consumer.cpp
+    - tests/package_consumer/xdma_consumer.cpp
     - tests/package_consumer/package_contract.cmake
     - tests/CMakeLists.txt
     - CMakeLists.txt
@@ -76,17 +75,17 @@ scope:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/compiled_graph.md
+    - docs/device_backend.md
+    - docs/hal_v2.md
     - docs/host_runtime.md
     - docs/executor.md
-    - docs/time_platform.md
     - docs/memory_plan.md
     - docs/observability.md
-    - docs/rate_telemetry.md
     - docs/determinism_replay.md
     - docs/testing_ci.md
+    - docs/c_abi.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M16-04-*.md
+    - docs/evidence/M17-01-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -96,26 +95,39 @@ scope:
     - abi/rtfw_c_abi_v8.sha256
     - rt/include/rt/c_api.h
     - rt/include/rt/device_abi.h
+    - rt/include/rt/status.hpp
     - src/c_abi.cpp
     - core/include/core/config.hpp
     - core/include/core/config_hot_reload.hpp
     - configs/*.json
+    - rt/include/rt/config.hpp
     - rt/include/rt/profile.hpp
     - rt/src/runtime_profile.cpp
-    - rt/src/telemetry.cpp
-    - rt/src/telemetry.hpp
-    - rt/src/observability_export.cpp
-    - rt/src/snapshot_codec.cpp
-    - rt/src/snapshot_codec.hpp
-    - rt/src/device_manager.cpp
-    - rt/src/device_manager.hpp
     - rt/src/mock_device.cpp
+    - rt/include/rt/mock_device.hpp
     - rt/src/cuda_backend.cpp
     - rt/src/cuda_driver.cpp
     - rt/src/xdma_backend.cpp
     - rt/src/xdma_linux.cpp
     - rt/include/rt/cuda_backend.hpp
+    - rt/include/rt/cuda_driver.hpp
     - rt/include/rt/xdma_backend.hpp
+    - rt/include/rt/xdma_linux.hpp
+    - rt/src/executor.cpp
+    - rt/src/executor.hpp
+    - rt/src/telemetry.cpp
+    - rt/src/telemetry.hpp
+    - rt/src/observability_export.cpp
+    - rt/src/snapshot_codec.cpp
+    - rt/src/snapshot_codec.hpp
+    - rt/src/rate_dispatch.cpp
+    - rt/src/rate_dispatch.hpp
+    - rt/src/rate_telemetry.cpp
+    - rt/src/rate_telemetry.hpp
+    - rt/src/rate_timeline.cpp
+    - rt/src/rate_timeline.hpp
+    - rt/src/cross_rate_data.cpp
+    - rt/src/cross_rate_data.hpp
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
@@ -126,6 +138,7 @@ scope:
     - docs/evidence/M16-01-2026-08-05.md
     - docs/evidence/M16-02-2026-08-05.md
     - docs/evidence/M16-03-2026-08-05.md
+    - docs/evidence/M16-04-2026-08-05.md
     - .github/workflows/cuda-qualification.yml
     - .github/workflows/xdma-qualification.yml
     - .github/workflows/release.yml
@@ -134,6 +147,8 @@ scope:
     - LICENSE
     - VERSION.txt
     - include/simcore/**
+    - hal/**
+    - gpu/**
     - rt/include/rt/scheduler.hpp
     - rt/include/rt/fiber_pool.hpp
     - rt/include/rt/plugin_api.h
@@ -141,89 +156,94 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The existing inactive reference-only path and mandatory-only active M16-03 path remain exact defaults. Append-only C++ tails add one copied optional-work shedding policy to RateExecutionPolicy, including a nonzero host policy version, positive consecutive-late and consecutive-on-time thresholds, and a bounded rate-telemetry capacity; pre-M16-04 aggregate prefixes and plans with no optional domain retain their exact behavior and compatibility identity. Zero telemetry capacity is valid and counts every publication attempt as an explicit drop.
-  - Active finalization may now accept bounded optional CPU D0 domains with the existing positive budget/deadline and same-domain ordinary-dependency rules. Conservative admission still simulates every mandatory reference record only and must reject an infeasible mandatory schedule even if every optional domain were shed. Optional budgets remain untrusted planning inputs and are neither admitted capacity nor measured WCET.
-  - "Every optional domain starts active. Optional domains are ordered without host timing, pointer, or container iteration: lower criticality is shed first, ties shed later registration first, and recovery reverses that exact order. Mandatory domains are never shed. An optional domain is rejected if it is a producer or consumer of an M16-02 channel, so shedding cannot create an absent, newer, or ambiguously aged cross-rate generation in this batch."
-  - One mandatory domain release is the only shedding-policy observation unit. A pre-dispatch late mandatory decision increments the consecutive-late count and resets the on-time count; an on-time mandatory decision does the reverse. Reaching the configured late threshold sheds exactly one currently active optional domain, and reaching the configured on-time threshold recovers exactly one shed optional domain; the triggering counter resets after a transition. A terminal fail action records its failure but causes no later shedding or recovery transition.
-  - A shed or recovered state transition becomes effective immediately after the triggering mandatory release is settled and therefore affects the next release in the existing total order, including a later registration at the same logical timestamp. An active optional release retains its configured bounded M16-03 late action, but optional lateness never drives the global shedding or recovery streaks. A shed optional release is consumed without callback, cross-rate transfer, backlog, or degradation and is reported distinctly from skip and hold.
-  - Large windows and aggregate skip/hold prefixes update late/on-time streaks, shed state, recovery state, transition counts, and due dispositions with checked arithmetic. Processing and telemetry attempts are bounded by the fixed domain count, configured thresholds, and existing dispatch cap rather than by every omitted supercycle; no policy loop, backlog, retry, allocation, spill, or helper lane scales without an explicit finite bound.
-  - StepResult and periodic summary tails append exact optional-due, optional-executed, shed-release, shed-transition, recovery-transition, currently-shed-domain, and policy-version fields. Existing due/executed/late/skip/hold/degrade/fail meanings remain unchanged, rejected counts stay exact, and cursor advancement remains unambiguous on callback, capacity, telemetry-loss, or terminal-failure paths.
-  - M16-04 adds a separate C++ rate-action telemetry schema version 1 rather than changing global observability schema 2. Fixed-size records and fixed numeric action/reason/counter IDs carry the host policy version, runtime identity, frame, domain and first release sequence, logical and nominal release, exact contiguous release count, reference-record count, optionality, late state, disposition, transition before/after state, status, and degradation level. A range record may represent consecutive identical omitted or shed decisions; expanding its count reconstructs each covered release exactly.
-  - The rate-action stream uses finalization-time fixed-capacity runtime-owned storage, monotonic record sequences, one nonblocking publication attempt, explicit overwrite/contention/zero-capacity loss accounting, runtime-bound cursors, and cumulative fixed-schema counters and gauges. Emission never waits, allocates, calls host code, performs I/O, or changes dispatch because a reader is slow. Inspection is a non-RT host operation and rejects an active step or periodic loop.
-  - "Schema-1 numeric tables are exact: action IDs 0-6 are execute_on_time, execute_catch_up, skip, hold, execute_degraded, fail, and optional_shed; transition IDs 0-2 are none, shed, and recover; reason IDs 0-7 are on_time, deadline_late, already_shed, late_threshold, on_time_threshold, callback_failure, dispatch_capacity, and arithmetic_failure. The record optional flag distinguishes mandatory from optional execution, while transition fields represent shedding or recovery caused by the same triggering record."
-  - "Rate counter IDs 0-19 are due_domain_releases, executed_reference_records, late_domain_releases, caught_up_domain_releases, skipped_domain_releases, held_domain_releases, degraded_domain_releases, failed_domain_releases, optional_due_domain_releases, optional_executed_domain_releases, shed_domain_releases, shed_transitions, recovery_transitions, records_emitted, records_overwritten, records_dropped, currently_shed_domains, policy_version, rejected_reference_records, and stale_reads; IDs 16-17 are gauges and all others are counters. Policy-version, trace-schema, record-size, counter-count, capacity, emitted/overwritten/dropped totals, and runtime identity are present in metadata; malformed or foreign cursors fail without advancing, and gaps are reported exactly rather than hidden or relabeled as complete action history."
-  - Shedding policy fields, optional ordering, and policy version participate in active graph/replay identity. The existing canonical active checkpoint record transactionally retains late/on-time streaks, the exact optional-domain shed bitset/order state, and policy version beside the M16-03 cursor/fault/channel state; corruption or mismatch rejects before any live state changes. Checkpoint schema 1 and its generic record codec remain unchanged. Rate telemetry history, counters, and caller cursors are process-local observation state, are not checkpointed, and never affect callback or policy decisions.
-  - Active D1, schema-1 input-log export/replay, and action-aware replay remain explicitly unsupported because current input records cannot encode nominal-time decisions or rate actions. Rate telemetry is evidence and observability, not an authenticated replay log, and M16-04 must not place data in reserved artifact bytes or silently claim schedule-independent reproduction.
-  - Shedding state, checkpoint bytes, telemetry slots, counters, cursors, and policy metadata are allocated during configuration/finalization and counted exactly once inside rate_plan_bytes, the M15 runtime-control logical extent, and the existing six-row MemoryPlan equation. Active dispatch, optional omission/execution, transition, record emission, counter update, inspection, stop, and two-runtime concurrency preserve zero ordinary heap allocation and bounded operations after successful start.
-  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, runtime-profile schema 7 and its 25 keys, global observability schema 2 with trace IDs 1-14 and metric IDs 0-31, checkpoint/input-log schema 1 and codecs, default installed header/target inventory, compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. The C ABI cannot configure or inspect active rates and retains exact legacy behavior.
-  - Target governance, current-state, handoff, roadmap, component contracts, release digest ledger, and retained M16-04 evidence describe only portable RT0 functional optional-work and versioned rate-action results. After all focused, full local, mandatory CI, and human gates pass, the target may mark M16/CAP-M16 functionally complete, but no mock, fake clock, declared budget, hosted runner, preflight, or document is physical hardware, HIL, field, worst-case latency, RT1, RT2, signing, release, deployment, or production evidence.
+  - The existing installed `rt/device.hpp` C++ source API adds a distinct HAL API version 2 core contract without changing the installed header or target inventory. Its public versioned records and nonthrowing function table cover capability discovery, initialization, borrowed host-buffer registration and unregistration, one bounded core submission, bounded completion polling, cancellation, health, reset, and shutdown; the table has `struct_size`, API version 2, a non-null borrowed instance, every required operation, and a zero reserved tail.
+  - HAL v2 core records use fixed-width values, explicit sizes/versions where applicable, the existing 64-byte backend identifier, 128-byte inline payload, and eight-reference core limits, and zero reserved fields. Capability data preserves maximum in-flight work, registered-buffer count and bytes, cancellation/reset support, deterministic-mock declaration, and backend control-storage bytes. M17-01 does not add or pretend to discover memory domains, topology, coherency, timestamp correlation, batch/timeline, CUDA Graph, XDMA control/MMIO/event, peer-memory, or factory/plugin capabilities.
+  - A copied configuring-only native HAL v2 registration and Runtime registration overload are additive beside the existing `DeviceBackendRegistration` and `register_device_backend` source surface. Both produce the same instance-owned `DeviceBackendHandle`, duplicate-name rules, freeze behavior, capacity limits, device-phase graph behavior, health/reset surface, and borrowed-lifetime obligation; pre-M17-01 positional aggregates and installed C++ consumers retain their meaning.
+  - Every device-ABI-v1 registration is copied and wrapped exactly once into a runtime-owned HAL v2 compatibility object before entering the canonical device manager. After registration, initialization, buffer handling, submission, polling, cancellation, health, reset, and shutdown calls from the supported runtime all traverse the canonical HAL v2 operation path; direct device-ABI-v1 calls are confined to the compatibility adapter.
+  - The v1 adapter validates the complete frozen v1 function table and capability record exactly as the baseline does, catches any exception before it crosses either boundary, and maps every v1 status without success promotion. It preserves backend ID and all core capacity/support/control-storage facts; requested in-flight and buffer counts; names, borrowed pointers, byte counts and access flags; submission/frame/timeout/opcode/flags/payload/reference fields; completion ID/status/timestamp/value; complete health counters/state; and cancel/reset/shutdown results. It never invents a v2 capability, retries an operation, translates `UNSUPPORTED` to success, or claims ownership release after a failed cleanup.
+  - Native HAL v2 core registrations and adapted v1 registrations receive equivalent fail-closed validation. Short or wrong-version records, nonzero reserved bytes, null operations or instances, invalid identifiers/enums/booleans, zero or over-limit capacities, oversized buffers, malformed submissions/completions/health, unknown status values, and callback exceptions fail with the existing stable Runtime status meanings and without publishing a partial backend, handle, completion, health result, or ownership transition.
+  - Existing device lifecycle ordering is unchanged. Capability query occurs while configuring; finalization is transactional; start creates the existing runtime-owned device-service lane, initializes backends and registers buffers behind the existing startup barrier; submissions remain bounded and nonblocking on executor workers; only the service lane polls; and checked stop quiesces graph/device work, unregisters buffers in reverse order, and shuts backends down in reverse order with first-error retention and unresolved-only retry.
+  - The compatibility adapter preserves the submitting/early-ready causal handshake, runtime-assigned nonzero submission IDs, buffer-token translation, exact range/access validation, completion matching, independent-phase progress, failure propagation, reset gating, and cross-instance isolation. A synchronous or early v1 completion cannot precede its accepted submission record, release the wrong graph token, or be applied twice.
+  - Adapter/function-table/context storage is fixed after finalization, remains address-stable despite configuring-time vector growth, is owned by exactly one Runtime, and is represented once in `device_control_bytes`, the M15 logical control ledger, and the existing six-row MemoryPlan equation. Registration/finalization capacity or allocation failure is transactional; steady-state submit, poll, completion, health, reset, checked stop, and full CPU-plus-device frames add no ordinary heap allocation, hidden thread, blocking mutex, unbounded wait/retry, spill path, callback from poll, or file/network I/O.
+  - Existing device-ABI-v1 mock, CUDA candidate, and XDMA candidate backends run unchanged through the compatibility path. Permanent tests prove the deterministic mock's success, saturation, delay, timeout, error, loss/reset, early completion, buffer operations, failed initialization/registration/unregistration/shutdown retry, destruction fallback, two-runtime isolation, and no-allocation behavior without modifying those backends. Existing CUDA fake-driver and portable XDMA suites remain required, but no vendor or physical hardware execution is part of M17-01.
+  - Native HAL v2 and adapted v1 core backends with equivalent declared behavior produce equivalent Runtime results, phase/dependency order, health values, device trace/metric meanings, cleanup transitions, and observable borrowed-buffer bytes. Backend kind/API version participates in native-v2 compatibility identity, while the adapted v1 path retains the exact pre-M17-01 graph/replay identity and checkpoint/input-log compatibility bytes for otherwise identical configurations.
+  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, the complete `rt/include/rt/device_abi.h` version-1 declarations/layout/values, runtime-profile schema 7 and 25 keys, global observability schema 2 with existing trace and metric IDs, checkpoint/input-log schema 1 and codecs, M16 rate-action schema 1, installed target/header inventory and compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. HAL v2 is a C++ source contract with recompilation required and no C++ binary ABI promise.
+  - Target governance, active batch, current state, handoff, roadmap, HAL/device/host/memory/testing contracts, release digest ledger, and retained M17-01 evidence describe only the HAL v2 core and v1 compatibility path. They keep M17 incomplete and do not convert a mock, fake driver, fixture, hosted CI, preflight, or document into heterogeneous-memory, command-batch, timeline, physical hardware, HIL, field, latency, RT1, RT2, signing, release, deployment, or production evidence.
+  - Focused tests, clean installed-package consumers, complete deterministic local verification, mandatory GitHub CI, and human public-API, compatibility-map, exception/lifetime, concurrency, accounting, lifecycle, and claim-boundary review pass before merge.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='RateShedding.*:RateTelemetry.*:RateDispatch.*Optional*:RateDispatch.*Shedding*:RateTimeline.*Optional*:HostRuntime.*RateTelemetry*:PeriodicRuntime.*RateTelemetry*:MemoryPlan.*RateTelemetry*:DeterminismReplay.*RateTelemetry*:Observability.*Rate*:TraceNoAlloc.*RateTelemetry*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm16_shedding_telemetry|m16_rate_dispatch|m16_rate_timeline|m16_cross_rate_data'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='HalV2.*:DeviceRuntime.*Hal*:DeviceRuntime.*Compatibility*:DeviceMock.*Hal*:MemoryPlan.*Hal*:DeterminismReplay.*Hal*:TraceNoAlloc.*Hal*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm17_hal_v2_compatibility|m15_accounting_closure|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|xdma_backend'
+    - cmake -S . -B build/m17-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
+    - cmake --build build/m17-package --parallel 2
+    - cmake --install build/m17-package --prefix build/m17-install
+    - cmake -S tests/package_consumer -B build/m17-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=build/m17-install
+    - cmake --build build/m17-package-consumer --parallel 2
+    - ctest --test-dir build/m17-package-consumer --output-on-failure
     - ./scripts/agent-verify.sh full
+    - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
+    - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
   focused_tests_to_add:
-    - append-only policy/default construction and preferred/compatibility installed consumers, including unchanged inactive and mandatory-only identity and behavior
-    - optional-domain validation, mandatory-only admission oracle, infeasible mandatory rejection, stable criticality/registration shed order, reverse recovery order, and optional cross-rate endpoint rejection
-    - exact threshold boundary, streak reset, one-transition-per-trigger, immediate next-release effect at the same timestamp, terminal-fail precedence, and active optional late-action behavior under a fake clock
-    - arithmetic aggregate handling across many supercycles with bounded domain work, exact summaries, no backlog, and no iteration proportional to omitted releases
-    - version-1 record and counter numeric IDs, record/range field completeness, every action/reason mapping, exact range expansion, policy-version identity, and malformed enum/version/capacity rejection
-    - nonblocking telemetry publication, overwrite/contention/zero-capacity loss, cursor first-window/gap/runtime binding, failed-read cursor transactionality, two-runtime isolation, and host inspection rejection during active execution
-    - optional shed/recovery state checkpoint round trip plus valid-checksum semantic corruption, policy-version, bitset/order, threshold, and identity mismatch rejection with unchanged destination state
-    - exact shedding/telemetry/checkpoint storage reconciliation inside rate-plan/runtime-control bytes and the six-row MemoryPlan, capacity rejection before provider calls, and zero post-start allocation across optional execute, shed, recover, late actions, loss, inspection, and stop
-    - ThreadSanitizer coverage for active dispatcher, policy counters, telemetry producer/readers, cursor isolation, stop, failure, and two runtime instances without weakening permanent M15/M16 gates
-    - permanent M14.1/M15/M16-01/M16-02/M16-03 lifecycle, cleanup, reference, selection/store, admission, late-action, checkpoint, package, schema-2 observability, no-allocation, determinism, and compatibility regressions
+    - exact HAL v2 numeric version, default constructors, complete record/table layout expectations, required operation presence, zero reserved fields, copied registration, freeze, duplicate, capacity, malformed version/size/enum/boolean/identifier, and two-runtime ownership cases
+    - complete field-by-field device-ABI-v1 capability, init, buffer, submission, completion, health, status, cancel, reset, and shutdown translation table including unknown values, callback exceptions, and `UNSUPPORTED` preservation
+    - proof that every existing v1 Runtime operation traverses the compatibility adapter exactly once and no supported runtime/device-manager call bypasses the canonical HAL v2 path
+    - native HAL v2 versus adapted-v1 behavioral equivalence for success, queue saturation, early completion, delay, timeout, error, loss/reset, cancellation, buffer mutation, dependency release, trace/metrics, and checked stop
+    - failed initialize with certain and uncertain ownership, partial buffer registration, unregister failure, shutdown failure, independent reverse cleanup, first-error retention, unresolved-only retry, callback gating, and destructor fail-safe regressions for both registration kinds
+    - address stability and exact adapter ownership across configuring-time backend-vector growth, corrected failed finalization, start/stop/restart, destruction, and two concurrent Runtime instances
+    - exact adapter/table/context storage reconciliation inside `device_control_bytes`, the M15 control ledger, and six-row MemoryPlan with overflow/capacity rejection before provider/native/thread/device side effects
+    - steady-state no-allocation and bounded-call-count coverage for submission, early and polled completion, saturation, health, reset, cleanup retry, and complete graph frames with no callback from poll or new lane/thread
+    - unchanged v1 graph/replay identity and artifact compatibility plus native-v2 version/kind identity sensitivity, unchanged observability IDs/meanings, and permanent M16 checkpoint/rate-action regressions
+    - preferred and compatibility installed C++ consumers for old v1 aggregate prefixes and the new native v2 registration, plus unchanged C, CUDA-backend, XDMA-backend, header-inventory, warning-isolation, and pure-C consumers
   required_ci:
-    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, exact SDK inventory, permanent M16-01 through M16-03 gates, and truthful M16-04/M16 completion claims
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of optional validation, shedding/recovery, range arithmetic, rate telemetry, checkpoint restore, and lifecycle
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical integer policy order/results, fixed record layout, source compatibility, and installed consumers
-    - Unified executor GCC ThreadSanitizer job executing complete RateShedding, RateTelemetry, RateDispatch, active CrossRateData, cursor/two-runtime/failure/stop suites and permanent M15/M16 fresh-process gates
-    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving unchanged legacy/reference-only/mandatory-active fixtures and explicit active D1/action-replay rejection
-    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and existing autotune/scaling smoke jobs
-    - Existing no-allocation, bounded-memory-plan/control-ledger, M14.1 recovery, M15 rollback, all M16 timeline/selection/store/admission/late-action, sanitizer, fuzz-smoke, global observability schema-2, documentation, release-contract, and package gates; no hosted timing or controlled-hardware claim is authorized
+    - Documentation contract workflow including HAL-v2/v1 compatibility claims, quick-start, release-contract, frozen C ABI/device ABI fingerprint, exact SDK inventory, and permanent M15/M16 gates
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of both registration kinds, translations, malformed outputs, early completion, failure/cleanup retry, identity, accounting, and lifecycle
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical HAL version/translation/status results, intentional layout/alignment diagnostics, source compatibility, and installed consumers
+    - Unified executor GCC ThreadSanitizer job executing complete HalV2, adapted DeviceRuntime/DeviceMock, early-ready, concurrent submit/poll, cleanup/retry, two-runtime, CUDA fake-driver, portable XDMA, and permanent M15/M16 processes without weakening exclusions or timeouts
+    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving unchanged adapted-v1 legacy/reference/active-rate fixtures and explicit identity separation for a native HAL v2 registration
+    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, unchanged v1 CUDA/XDMA consumers, exact 70-export C ABI consumers, and existing autotune/scaling smoke jobs
+    - Existing no-allocation, bounded-memory/control-ledger, M14.1 device recovery, M15 rollback, M16 timeline/data/dispatch/shedding/telemetry, sanitizer, fuzz-smoke, observability-schema, documentation, release-contract, package, CUDA fake-driver, and XDMA portable gates; no hosted timing or controlled-hardware claim is authorized
   manual:
-    - Human review must approve the append-only C++ policy/summary/telemetry shape, mandatory-only admission boundary, exact shedding and recovery ordering/hysteresis, aggregate arithmetic, terminal-fail precedence, checkpoint state, active replay rejection, and preservation of C ABI v8/device ABI v1/global observability and artifact schemas.
-    - Human concurrency and safety review must confirm bounded nonblocking telemetry publication/readback, exact loss and cursor semantics, no callback for shed work, no mandatory omission, no cross-rate optional endpoint, state/identity/accounting completeness, post-start allocation freedom, and checked lifecycle/rollback behavior.
-    - Performance review is limited to deterministic counts and existing hosted smoke jobs. Any measured latency threshold, RT1/RT2 promotion, controlled-hardware regression, physical recovery, or support-matrix change requires a separately approved named tuple and retained raw evidence.
+    - Human public-API and compatibility review must approve the additive C++ HAL v2 core shape, exact v1-to-v2 field/status/capability map, source/identity compatibility, absence of v2-only feature invention, and preservation of C ABI v8, device ABI v1, package, schema, release, support, and license boundaries.
+    - Human concurrency, lifetime, and safety review must confirm table/instance borrowing, adapter address stability, exception containment, single traversal, submitting/early-ready ordering, bounded nonblocking executor/service behavior, exact ownership markers, reverse retryable cleanup, MemoryPlan/control-ledger closure, and no post-start allocation or new lane.
+    - Promotion review is explicitly deferred. Heterogeneous memory/topology/coherency/timestamp work requires M17-02; batches/timelines and isolated submission lanes require M17-03; CUDA Graph/XDMA controls require M17-04; combined execution requires M17-05; and any physical hardware or RT support claim requires named M18 evidence and separate human approval.
 risk:
   class: high
   hazards:
-    - ambiguous streak boundaries, same-time transition effect, or priority ties can make shedding and recovery depend on incidental execution order
-    - optional work can accidentally enter mandatory admission, or an infeasible mandatory schedule can be hidden behind a policy that sheds everything
-    - shedding a channel endpoint can expose a missing, old, newer, or falsely fresh generation to mandatory work
-    - large elapsed windows can turn threshold processing or telemetry emission into unbounded per-release work or overflow counters and cursor state
-    - telemetry loss can be mistaken for absence of an action, or a run-length record can encode a range that crosses a different disposition or transition
-    - checkpoint restore can accept a different policy version/order or partially restore streak and shed state before rejecting malformed input
-    - telemetry or counter atomics can race with dispatch, readers, stop, or another Runtime, or can introduce false sharing and post-start allocation
-    - append-only C++ declarations or new logical storage can break source consumers, exact MemoryPlan accounting, package isolation, or M16-03 behavior while C ABI tests stay green
-    - functional fake-clock shedding and versioned records can be overstated as measured overload recovery, latency, physical hardware, RT1, or RT2 evidence
+    - a partial v1 translation can silently drop a status, reserved-field violation, access flag, range, timeout, completion timestamp/value, health counter, or ownership failure while happy-path mock tests still pass
+    - an adapter context stored inside a reallocating container can leave the canonical function table holding a dangling self pointer after a later backend registration or corrected finalization
+    - dual native-v2 and adapted-v1 paths can diverge in validation, error mapping, graph-token release, trace/metric publication, reset gating, or cleanup order and create two device runtimes instead of one canonical path
+    - wrapping failed initialization or cleanup can clear or duplicate ownership, call shutdown before registered buffers release, retry already successful work, or let borrowed backend storage die while still reachable
+    - a synchronous v1 completion can overtake submission accounting through the new adapter and release a dependency before acceptance is causally published
+    - new public C++ tables or records can break positional initialization, installed consumers, warning-clean Windows layout, default SDK inventory, graph/replay identity, or M15 accounting while stable C ABI checks remain green
+    - canonical adapter storage can be omitted or double counted in device control, allocate after start, share mutable state across Runtime instances, or introduce unbounded translation/retry work
+    - naming a core envelope HAL v2 can be overstated as heterogeneous memory, topology/coherency, batch/timeline, vendor-control, physical accelerator, latency, or qualification evidence
   stop_conditions:
-    - the exact baseline commit is unavailable, dirty, or lacks merged M16-03 commit 9c350ab5b66e37e90aef7e96939c71df04101b27 and all retained M15/M16 evidence
-    - target contracts at the exact baseline contradict mandatory-only admission, CPU-only optional domains, criticality/registration ordering, threshold hysteresis, or a separate C++ rate-action telemetry schema and require a different product decision
-    - implementation requires changing stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema 7/25 keys, global observability schema 2/IDs, checkpoint/input-log schema numbers or codecs, installed header/target inventory, support matrices, release version, or license
-    - optional correctness requires a cross-rate optional endpoint, device phase, cross-domain ordinary dependency, callback preemption, or silent mandatory release omission in this batch
-    - shedding/recovery cannot remain deterministic and bounded under aggregate elapsed windows without iteration proportional to unbounded omitted releases, unbounded backlog, retry, allocation, blocking, spill, or hidden threads
-    - versioned rate-action records cannot represent every disposition and transition exactly, including loss and range boundaries, within a fixed-capacity nonblocking runtime-owned stream
-    - policy/checkpoint state cannot be represented canonically and accounted exactly without changing schema-1 encoding or allowing partial restore
+    - the exact baseline commit is unavailable, dirty, or lacks merged M16-04 commit e264278557866acbf3bda1e6b4a436a6e0fd704f and every retained M15/M16 evidence record
+    - target contracts at the exact baseline contradict a C++ HAL v2 core with a complete device-ABI-v1 adapter or require a different ownership, status, exception, identity, or compatibility decision
+    - implementation requires changing stable C ABI v8, SONAME 8, any declaration/layout/value in device ABI v1, Runtime status values, runtime-profile schema 7/25 keys, observability or artifact schemas/IDs, M16 rate-action schema, installed header/target inventory, support matrices, release version, or license
+    - correct v1 compatibility cannot preserve every capability, operation, status, buffer/submission/completion/health field, early-completion order, borrowed lifetime, and retryable ownership transition without guessing or reporting false success
+    - the supported runtime cannot use one canonical HAL v2 manager path for both registration kinds, or the adapter cannot remain address-stable, fixed-capacity, instance-isolated, exactly accounted, and allocation-free after start
+    - heterogeneous memory/topology/coherency/timestamp semantics, command batching, timeline completions, a new submission/I/O lane, CUDA Graph, XDMA control/MMIO/event, peer memory, plugin/factory loading, or device-rate dispatch becomes necessary to satisfy this batch
+    - implementation requires modifying the existing mock, CUDA, or XDMA backend to make v1 compatibility appear to pass instead of adapting the frozen v1 surface unchanged
     - deterministic functional tests require timing sleeps/tolerances, root privilege, fixed topology, physical CUDA or FPGA/XDMA hardware, controlled timing hosts, secrets, signing, release, deployment, or production access
     - a required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the append-only optional-work/shedding policy and summaries, deterministic policy state machine, versioned rate-action trace/counters, checkpoint and accounting integration, tests/CI, documentation/governance, release digests, and retained M16-04 evidence as one batch. Before discarding a running integration, require existing checked stop to quiesce callbacks and every device/lane/stack/memory owner. The exact M16-03 mandatory-only active path and M16-01/M16-02 reference-only path remain the fallback; no data migration, persistent host setting, support promotion, release, or deployment rollback is authorized.
+  strategy: Revert the additive HAL v2 C++ records/table/registration, canonical manager conversion, device-ABI-v1 compatibility adapter, adapter identity/accounting integration, tests/CI, documentation/governance, release digests, and retained M17-01 evidence as one batch. Before discarding a running integration, require existing checked stop to quiesce graph work and resolve every backend, registered-buffer, service-lane, stack, control, and selected-region owner; never detach, force-release, or relabel uncertain v1 or v2 ownership. The exact e264278 device-ABI-v1 manager path remains the fallback, with no persistent data, host setting, support promotion, release, or deployment rollback.
   data_migration: none
-  release_action: Do not publish a release, promote a support/qualification tuple, alter hardware or RT records, or mark M16/CAP-M16 complete until all required focused, full local, mandatory CI, and human gates pass and retained evidence supports that state.
+  release_action: Do not publish a release, promote a CUDA/XDMA/combined/RT tuple, alter support or qualification records, or mark M17/CAP-M17 complete from this core compatibility batch.
 evidence:
   output:
-    - docs/evidence/M16-04-<date>.md
+    - docs/evidence/M17-01-<date>.md
     - exact baseline, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public optional-work/shedding policy with defaults, policy version, thresholds, bounds, ordering, source compatibility, identity, and every rejected configuration
-    - mandatory-only admission inputs/results plus exact optional execute, late, shed, recovery, same-time, threshold, aggregate-window, terminal-fail, summary, and cursor outcomes
-    - rate-action schema and fixed ID tables, normalized record/range and counter examples for every action/reason, loss/cursor behavior, policy-version metadata, and two-runtime isolation
-    - checkpoint state layout and round trip/rejection evidence for streak, shed order/bitset, policy version, and unchanged checkpoint/input-log codecs plus explicit active D1/action-replay boundary
-    - policy/telemetry/checkpoint storage reconciliation inside rate-plan/runtime-control bytes and MemoryPlan, post-start allocation proof, ThreadSanitizer results, and executor/lifecycle/cleanup behavior
-    - C++ source, C ABI/device ABI/package/profile/global-observability/artifact/support/release/license compatibility status plus changed and preserved invariants
-    - residual risks and all unperformed controlled performance, privileged native, physical shedding/recovery, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static, unit, independent integer-policy, fake-clock shedding/recovery, synthetic fixed-stream concurrency/loss, sanitizer, checkpoint-state, package, bounded-memory/no-allocation, and portable RT0 functional telemetry behavior only. Declared budget/WCET values are untrusted inputs, not measurements or deadline guarantees; records observe runtime decisions but are not authenticated or an action-replay format; and mocks, fixtures, hosted CI, preflight, or documentation do not establish physical hardware, HIL, field performance, worst-case latency, RT1, RT2, signing, release, deployment, or production readiness.
+    - public HAL v2 core record/table/registration definitions with exact version, sizes, defaults, capacities, ownership, exception, freeze, source-compatibility, and rejected-input rules
+    - complete device-ABI-v1-to-HAL-v2 capability, lifecycle, buffer, submission, completion, health, status, cancel/reset/shutdown mapping table with malformed, exception, unsupported, and unknown-value results
+    - proof that the supported manager has one canonical HAL v2 call path, plus native-v2/adapted-v1 behavioral comparisons for success, saturation, early completion, faults, dependency release, health, reset, and cleanup
+    - failed-start and checked-stop ordering, retained ownership markers, first-error behavior, unresolved-only retry, borrowed-object lifetime, destructor fallback, and two-runtime isolation evidence
+    - adapter/table/context storage and extent reconciliation inside device control and the six-row MemoryPlan, address-stability results, post-start allocation proof, ThreadSanitizer results, and exact bounded call counts
+    - adapted-v1 identity/artifact compatibility, native-v2 version identity, unchanged trace/metric meanings, existing mock/CUDA/XDMA v1 regression results, installed package consumers, and C++/C/device ABI status
+    - changed and preserved invariants, rollback path, residual risks, and all unperformed heterogeneous-memory, topology, coherency, timestamp-correlation, batch, timeline, isolated-vendor-lane, CUDA Graph, XDMA control, peer-memory, controlled-performance, privileged-native, physical hardware, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish static, unit, malformed/failure-injected, mock and fake-driver, sanitizer, package, bounded-memory/no-allocation, lifecycle-recovery, cross-instance, and portable RT0 functional HAL-v2-core/device-ABI-v1 compatibility behavior only. A native core table or compatibility adapter does not establish heterogeneous memory, topology/coherency, timestamp correlation, command batching, timeline completion, isolated blocking-vendor execution, CUDA Graph, XDMA control, peer DMA, physical accelerator behavior, HIL, field performance, worst-case latency, RT1, RT2, signing, release, deployment, or production readiness; mocks, fixtures, hosted CI, preflight, and documentation remain non-physical evidence.

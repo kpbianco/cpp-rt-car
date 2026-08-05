@@ -87,6 +87,13 @@ ID in `value`, and the originating frame. Reset has no callback index and
 carries the backend index in `value`. Submission records identify their CPU
 worker, completions use producer `device_service`, and reset uses `host`.
 
+M17-01 preserves these exact meanings for native HAL v2 and adapted
+device-ABI-v1 backends. Both registration kinds traverse the same manager event
+path; adapter entry, translation, or backend kind does not add an event, metric,
+producer, or schema field. An early completion is published only after its
+accepted `device.submitted` record, and malformed output publishes neither a
+completion event nor a successful reset/health result.
+
 Trace slots are cache-line aligned. The implementation fails compilation on a
 target whose 16-, 32-, or 64-bit standard atomics are not always lock-free,
 rather than silently routing an RT-lane operation through a library lock.
@@ -203,6 +210,8 @@ host sink.
 - complete post-start CPU and mock-device frames with tracing and counters
   under allocation instrumentation: `tests/test_trace_noalloc.cpp`;
 - device event ordering and counters: `tests/test_device_runtime.cpp`;
+- native-v2/adapted-v1 successful event and metric equivalence:
+  `tests/test_hal_v2.cpp`;
 - ThreadSanitizer coverage includes `Observability.*`;
 - implementation: `rt/src/telemetry.cpp`,
   `rt/src/host_runtime.cpp`, and

@@ -74,6 +74,22 @@ latency qualification and does not prove the complete product contract.
   accounting, trace ordering, all 32 metrics, and concurrent state isolation
   between independent runtime/backend/buffer instances. A named isolation gate
   also runs explicitly in every supported Linux build tuple.
+- M17-01 HAL tests cover exact API version/default records and core limits;
+  complete native-v2 and device-ABI-v1 table/capability/status/operation
+  translation; malformed size, version, enum, boolean, identifier, reserved,
+  output-count, completion, and health data; callback exceptions; duplicate,
+  capacity, freeze, rollback, cleanup retry, address stability, and two-runtime
+  isolation. One direct native/adapted scenario compares submission, polled
+  completion, health/reset, trace/metrics, borrowed-buffer observations, and
+  checked stop. Permanent adapted-v1 manager tests separately retain early
+  completion, fault, mutation, dependency-release, recovery, and isolation
+  coverage on the same canonical manager path.
+- Identity tests retain exact adapted-v1 pre-M17 graph/replay and artifact
+  bytes while requiring native-v2 kind/API separation. Memory tests reconcile
+  adapter/table/context storage exactly once in `device_control_bytes`, the
+  M15 logical ledger, and the unchanged six-row plan. Installed preferred and
+  compatibility consumers retain old v1 aggregate prefixes and compile the
+  additive native-v2 registration.
 - Allocation instrumentation covers 64 post-warmup mock-device frames, and the
   dynamic C ABI test defines and drives a backend solely through loaded v7
   symbols.
@@ -99,6 +115,10 @@ latency qualification and does not prove the complete product contract.
   It also runs the M16 reference-plan, cross-rate selection/store, and complete
   `RateDispatch` functional suite, including two-runtime, inspection,
   host/periodic, failure, and no-allocation regressions.
+  M17-01 adds complete `HalV2`, adapted `DeviceRuntime`/`DeviceMock`,
+  early-ready, concurrent submit/poll, cleanup/retry, two-runtime, CUDA
+  fake-driver, and portable XDMA processes without weakening permanent M15 or
+  M16 gates.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -146,6 +166,11 @@ latency qualification and does not prove the complete product contract.
   architectures, standard libraries, or D2/D3 determinism.
 - Passing deterministic mock-device tests do not exercise a hardware device,
   driver, DMA path, or completion-latency bound.
+- Passing HAL v2, compatibility-adapter, package, sanitizer, hosted CI, or
+  deterministic artifact tests does not establish heterogeneous memory,
+  topology/coherency, timestamp correlation, command batches, timelines,
+  isolated blocking-vendor execution, physical hardware, HIL, field behavior,
+  latency, RT1, or RT2.
 - Passing fake-driver CUDA tests establish the backend state machine, not a
   CUDA toolkit build, physical GPU behavior, resource stability, recovery
   behavior, or completion-latency bound. The opt-in self-hosted CUDA workflow
@@ -209,6 +234,11 @@ predeclared thresholds, and the measurement procedure.
   `rt/src/rate_dispatch.cpp`, `tests/test_rate_dispatch.cpp`
 - M16-04 shedding recovery and versioned rate-action telemetry:
   `rt/src/rate_telemetry.cpp`, `tests/test_rate_telemetry.cpp`
+- M17-01 HAL v2 core and v1 compatibility path:
+  `rt/src/hal_v2.cpp`, `rt/src/device_manager.cpp`,
+  `tests/test_hal_v2.cpp`, `tests/test_device_runtime.cpp`,
+  `tests/test_determinism_replay.cpp`, `tests/test_memory_plan.cpp`,
+  `tests/test_trace_noalloc.cpp`
 - Stable ABI/export and installed-package gates:
   `tools/check_c_abi.py`, `abi/rtfw_c_abi_v8.exports`,
   `tests/package_consumer`

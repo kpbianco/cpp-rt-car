@@ -55,10 +55,12 @@ in `runtime_control_bytes`.
 
 `device_backend_count`, `device_buffer_count`,
 `device_outstanding_capacity`, and `device_completion_batch` report the frozen
-device plan. `device_control_bytes` includes copied registrations, the
-outstanding/early-completion table, completion batch, counters, and service-lane
-object. `device_backend_reported_bytes` is informational and excluded because
-each backend owns that storage.
+device plan. `device_control_bytes` includes copied canonical HAL v2
+registrations, device-ABI-v1 adapter contexts/tables and fixed translation
+scratch, the outstanding/early-completion table, completion batch, counters,
+and service-lane object. Each adapter byte is represented once.
+`device_backend_reported_bytes` is informational and excluded because each
+backend owns that storage.
 
 With the M11 `host_adapter` executor policy, `queue_slots` equals the declared
 total host reservation rather than `worker_count * executor_queue_capacity`,
@@ -265,17 +267,42 @@ remain unchanged. Zero telemetry capacity owns no slots but still records
 publication drops in the fixed counter bank. Execute, shed, recover, loss,
 inspection, and stop remain allocation-free after successful start.
 
+M17-01 routes native HAL v2 and adapted device-ABI-v1 registrations into one
+canonical device manager. A v1 adapter owns its copied v1 table, HAL v2 table,
+context, and completion-translation scratch in address-stable storage. These
+controls are included exactly once in `device_control_bytes` and enumerated as
+device-owned logical extents. The estimator and constructed inventory must
+agree on every byte; a missing, duplicate, overlapping, overflowing, or
+estimate-mismatched adapter extent fails finalization before report
+publication.
+
+Configuring metadata remains in the existing runtime-control inventory, while
+the finalized manager and adapter controls remain device-control. A borrowed
+native instance, borrowed registered-buffer payload, and backend-reported
+`control_storage_bytes` are not adopted as runtime-owned controls. The latter
+remains the informational backend-control fact and is excluded from
+`planned_bytes`.
+
+No seventh plan row or fourth provider region is added. The six-row equation,
+the exact M15 runtime/executor/device ledger, and the phase-scratch,
+task-scratch, and trace-only provider boundary remain unchanged. Checked
+adapter arithmetic and capacity rejection occur before provider acquisition,
+native policy, thread creation, backend initialization, or callback execution.
+After start, submission, early or polled completion, health, reset, cleanup
+retry, and complete CPU-plus-device frames allocate no ordinary heap.
+
 Before `start()` creates a thread, M15-03 applies and observes resident-memory
 policy for phase scratch, task scratch, and trace storage. It then creates the
 configured fixed worker team, an optional M5 watchdog lane, and one M8 device
-service lane when backends exist. After it returns, the
+service lane when backends exist. M17-01 adds no submission or I/O lane. After
+it returns, the
 target CPU/device frame path uses preallocated graph, queue, scratch, trace,
 outstanding, and completion storage. It contains no file I/O, blocking mutex,
 hidden per-frame thread creation, heap fallback, or intentional heap
 allocation. M6 trace producers make one atomic slot-claim attempt and drop on
 contention rather than waiting. Watchdog waiting and device polling are
 confined to runtime-owned service lanes. CPU device submission and completion
-publication use fixed-capacity backend/manager state without waiting.
+publication use fixed-capacity canonical HAL v2 manager state without waiting.
 Workers use bounded queue operations and yield when idle or waiting for nested
 work. M15-04 holds the startup barrier until requested runtime-stack
 application and live observation are acceptable. On stop, stack cleanup
@@ -298,6 +325,10 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
 - active admission/storage accounting and allocation-free dispatch:
   `tests/test_memory_plan.cpp`, `tests/test_rate_dispatch.cpp`,
   `tests/test_rate_telemetry.cpp`,
+  `tests/test_trace_noalloc.cpp`;
+- HAL v2 adapter/table/context accounting, overflow rejection, address
+  stability, and allocation-free native/adapted device frames:
+  `tests/test_hal_v2.cpp`, `tests/test_memory_plan.cpp`, and
   `tests/test_trace_noalloc.cpp`;
 - C ABI plan, scratch, malformed discriminator, and reserved-field checks:
   `tests/test_cabi_dlopen.c`;

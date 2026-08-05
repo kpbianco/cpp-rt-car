@@ -141,6 +141,22 @@ reports overwrite/contention/zero-capacity loss, and exposes only non-RT
 runtime-bound cursor inspection. It is deliberately separate from global
 observability schema 2 and from checkpoint/replay artifacts.
 
+M17-01 inserts one versioned HAL v2 core boundary between device registration
+and the existing device manager. Native v2 registrations copy the public table
+directly. Device-ABI-v1 registrations create exactly one separately allocated,
+Runtime-owned compatibility object; the manager then sees only its HAL v2
+table. This keeps adapter self pointers stable across configuring-vector growth
+and confines every direct v1 call and field translation to `hal_v2.cpp`.
+
+The canonical manager retains its fixed outstanding and completion storage,
+submitting/early-ready handshake, single poll lane, graph-token release, health
+and reset surface, and reverse retryable cleanup. Adapter objects and v1 poll
+scratch are device-control extents, while borrowed instances, buffers, and
+backend-private bytes remain outside owned plan rows. Adapted v1 follows the
+legacy identity byte path; only native v2 adds a kind/API marker. No memory
+domain, batch, timeline, vendor-control, plugin, or new-lane architecture is
+introduced by M17-01.
+
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
 run on static-assignment, bounded-throughput, or borrowed-host policy.
@@ -259,9 +275,12 @@ M16-01 adds the bounded reference-plan compiler. M16-02 adds cross-rate
 selection and snapshot-store construction. M16-03 adds opt-in active admission,
 selected CPU dispatch, transfer, and late actions. M16-04 adds optional CPU
 shedding/recovery and a separate versioned per-release telemetry component
-without adding a lane or provider region.
+without adding a lane or provider region. M17-01 adds the HAL v2 core boundary
+and complete device-ABI-v1 compatibility adapter while retaining the same
+manager and service lane.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
+[HAL v2 contract](hal_v2.md),
 [CUDA backend contract](cuda_backend.md),
 [XDMA backend contract](xdma_backend.md),
 [ADR-0001](adr/0001-one-executor-boundary.md),

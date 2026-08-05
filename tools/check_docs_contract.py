@@ -257,6 +257,7 @@ def check_runtime_contract() -> None:
     samples_cmake = read("samples/CMakeLists.txt")
     tests_cmake = read("tests/CMakeLists.txt")
     runtime_header = read("rt/include/rt/runtime.hpp")
+    device_header = read("rt/include/rt/device.hpp")
     config_header = read("rt/include/rt/config.hpp")
     status_header = read("rt/include/rt/status.hpp")
     canonical_bytes_header = read("rt/include/rt/canonical_bytes.hpp")
@@ -311,6 +312,9 @@ def check_runtime_contract() -> None:
     cuda_header = read("rt/include/rt/cuda_backend.hpp")
     xdma_header = read("rt/include/rt/xdma_backend.hpp")
     xdma_linux_header = read("rt/include/rt/xdma_linux.hpp")
+    hal_v2_header = read("rt/src/hal_v2.hpp")
+    hal_v2_source = read("rt/src/hal_v2.cpp")
+    device_manager_header = read("rt/src/device_manager.hpp")
     device_manager = read("rt/src/device_manager.cpp")
     mock_device = read("rt/src/mock_device.cpp")
     cuda_backend = read("rt/src/cuda_backend.cpp")
@@ -335,6 +339,7 @@ def check_runtime_contract() -> None:
     observability_test = read("tests/test_observability.cpp")
     determinism_test = read("tests/test_determinism_replay.cpp")
     device_test = read("tests/test_device_runtime.cpp")
+    hal_v2_test = read("tests/test_hal_v2.cpp")
     cuda_test = read("tests/test_cuda_backend.cpp")
     xdma_test = read("tests/xdma_backend_tests.cpp")
     host_adapter_test = read("tests/host_adapter_tests.cpp")
@@ -368,6 +373,7 @@ def check_runtime_contract() -> None:
     release_test = read("tests/test_release_tools.py")
     portable_matrix = read("docs/portable_support_matrix.json")
     release_policy = read("docs/release_policy.md")
+    hal_v2_doc = read("docs/hal_v2.md")
 
     for method in (
         "Status configure(",
@@ -1450,6 +1456,132 @@ def check_runtime_contract() -> None:
         if phrase not in normalized_m16_04_docs:
             fail(f"M16-04 component contracts are missing phrase {phrase!r}")
 
+    # M17-01 gates retain permanent HAL-v2 and device-ABI-v1 compatibility
+    # facts. The moving active/latest milestone frontier is intentionally not
+    # part of this owned-batch check.
+    for token in (
+        "hal_v2_api_version = 2u",
+        "hal_v2_identifier_capacity",
+        "hal_v2_inline_payload_capacity",
+        "hal_v2_buffer_ref_capacity",
+        "enum class HalV2Status",
+        "enum class HalV2HealthState",
+        "struct HalV2Capabilities",
+        "struct HalV2InitializeConfig",
+        "struct HalV2BufferRegistration",
+        "struct HalV2BufferReference",
+        "struct HalV2Submission",
+        "struct HalV2Completion",
+        "struct HalV2Health",
+        "struct HalV2BackendApi",
+        "struct HalV2BackendRegistration",
+    ):
+        if token not in device_header:
+            fail(f"public HAL v2 header is missing permanent token {token!r}")
+    if "const HalV2BackendRegistration&" not in runtime_header:
+        fail("runtime header is missing the additive HAL v2 registration overload")
+    for token in (
+        "enum class HalBackendKind",
+        "adapted_device_abi_v1",
+        "native_hal_v2",
+        "validate_device_v1_api",
+        "validate_hal_v2_api",
+        "validate_hal_v2_capabilities",
+        "validate_hal_v2_health",
+        "validate_hal_v2_completion",
+        "hal_v2_status_to_runtime",
+        "class DeviceV1CompatibilityAdapter",
+        "prepare_completion_storage",
+    ):
+        if token not in hal_v2_header and token not in hal_v2_source:
+            fail(f"HAL v2 compatibility core is missing {token!r}")
+    for token in (
+        "HalV2BackendApi",
+        "HalV2Capabilities",
+        "HalV2Completion",
+        "v1_adapter",
+        "estimate_control_storage",
+        "append_control_extents",
+    ):
+        if token not in device_manager_header and token not in device_manager:
+            fail(f"canonical HAL v2 device manager is missing {token!r}")
+    for token in (
+        "device_v1_adapters",
+        "HalBackendKind::adapted_device_abi_v1",
+        "HalBackendKind::native_hal_v2",
+        "prepare_completion_storage",
+        "hal_v2_api_version",
+    ):
+        if token not in runtime_source:
+            fail(f"HAL v2 runtime integration is missing {token!r}")
+    for test_name in (
+        "ApiVersionDefaultsAndLayoutsAreExact",
+        "NativeRegistrationAndOperationTranslationAreExact",
+        "MalformedTablesAndCapabilitiesFailTransactionally",
+        "NativeAndV1StatusesAndExceptionsAreEquivalent",
+        "DeviceAbiV1AdapterPreservesEveryCoreFieldAndFailsClosed",
+        "NativeIdentityIsSeparateAndV1IdentityRemainsStable",
+        "AdaptedV1StorageIsExactInsideSixRowMemoryPlan",
+        "AdaptedV1StorageSurvivesConfiguringGrowthAndIsIsolated",
+    ):
+        if test_name not in hal_v2_test:
+            fail(
+                "tests/test_hal_v2.cpp: missing permanent "
+                f"M17-01 gate {test_name!r}"
+            )
+    for token in (
+        "rt/src/hal_v2.cpp",
+        "test_hal_v2.cpp",
+        "m17_hal_v2_compatibility",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"M17-01 CMake integration is missing {token!r}")
+    for token in ("HalV2.*", "m17_hal_v2_compatibility"):
+        if token not in ci_workflow:
+            fail(f"M17-01 TSan/CI coverage is missing {token!r}")
+    for token in ("InstalledHalV2Backend", "HalV2BackendRegistration"):
+        if token not in package_cpp_consumer:
+            fail(f"preferred package consumer is missing M17-01 token {token!r}")
+    for token in ("pre_m17_device_backend", "pre_m17_device_buffer"):
+        if token not in package_compat_consumer:
+            fail(f"compatibility package consumer is missing {token!r}")
+    for consumer, backend in (
+        (read("tests/package_consumer/cuda_consumer.cpp"), "CUDA"),
+        (read("tests/package_consumer/xdma_consumer.cpp"), "XDMA"),
+    ):
+        if "DeviceBackendRegistration" not in consumer:
+            fail(f"{backend} package consumer no longer covers device ABI v1")
+    normalized_hal_docs = " ".join(
+        (
+            hal_v2_doc
+            + " "
+            + device_doc
+            + " "
+            + memory_doc
+            + " "
+            + determinism_doc
+            + " "
+            + host_doc
+            + " "
+            + executor_doc
+            + " "
+            + observability_doc
+            + " "
+            + c_abi_doc
+        ).lower().split()
+    )
+    for phrase in (
+        "canonical hal v2",
+        "device-abi-v1",
+        "exact pre-m17",
+        "six-row",
+        "global schema 2",
+        "no c++ binary abi promise",
+        "no submission or i/o lane",
+    ):
+        if phrase not in normalized_hal_docs:
+            fail(f"M17-01 component contracts are missing phrase {phrase!r}")
+
     for token in (
         "Runtime::run_periodic(",
         "clock_sleep_until(",
@@ -2308,6 +2440,7 @@ def main() -> int:
             "docs/rate_telemetry.md",
             "docs/determinism_replay.md",
             "docs/device_backend.md",
+            "docs/hal_v2.md",
             "docs/cuda_backend.md",
             "docs/cuda_support_matrix.json",
             "docs/xdma_backend.md",
@@ -2361,6 +2494,8 @@ def main() -> int:
             "rt/src/snapshot_codec.cpp",
             "rt/src/device_manager.hpp",
             "rt/src/device_manager.cpp",
+            "rt/src/hal_v2.hpp",
+            "rt/src/hal_v2.cpp",
             "rt/src/mock_device.cpp",
             "rt/src/cuda_backend.cpp",
             "rt/src/cuda_driver.cpp",
@@ -2386,6 +2521,7 @@ def main() -> int:
             "tests/test_observability.cpp",
             "tests/test_determinism_replay.cpp",
             "tests/test_device_runtime.cpp",
+            "tests/test_hal_v2.cpp",
             "tests/test_release_tools.py",
             "tests/test_cuda_backend.cpp",
             "tests/xdma_backend_tests.cpp",
