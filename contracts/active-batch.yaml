@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M16-01
-  title: Add rate-domain model and reference timeline
-  goal: Add a bounded, additive C++ rate-domain and phase-ownership model and compile an immutable epoch-zero reference supercycle during finalization, with exact harmonic and non-harmonic release inspection, checked capacity and arithmetic, legacy single-rate compatibility, and no change yet to runtime dispatch, cross-rate storage, admission, late behavior, shedding, or telemetry schemas.
+  id: M16-02
+  title: Add deterministic cross-rate data semantics
+  goal: Add a bounded additive C++ cross-rate channel model for explicit M16 rate plans, compile an immutable sample-and-hold and freshness-selection plan over the exact reference supercycle, and provide preallocated race-free snapshot storage primitives without yet changing host-driven or periodic callback dispatch, admission, late behavior, shedding, recovery, or telemetry schemas.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -27,12 +27,13 @@ sources:
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
     - docs/evidence/M15-04-2026-08-05.md
-  baseline_commit: 9dfcee7bc8092de768292ba35ad9bd74e5a5992e
+    - docs/evidence/M16-01-2026-08-05.md
+  baseline_commit: 8dabeb3747a20717ce02c99a3d3c0d9deb1a3532
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M16-01.yaml
-  control_plane_revision: e00e41f067672bfe98209746ce4fc30780fdd160  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M16-02.yaml
+  control_plane_revision: 0a74f2134d4ae08a6c55975c8497b2c4c01de371  # pragma: allowlist secret
 dependencies:
-  - M15-04
+  - M16-01
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -42,6 +43,8 @@ scope:
     - rt/include/rt/config.hpp
     - rt/include/rt/graph.hpp
     - rt/include/rt/runtime.hpp
+    - rt/src/cross_rate_data.cpp
+    - rt/src/cross_rate_data.hpp
     - rt/src/rate_timeline.cpp
     - rt/src/rate_timeline.hpp
     - rt/src/compiled_graph.cpp
@@ -49,10 +52,10 @@ scope:
     - rt/src/host_runtime.cpp
     - rt/src/resource_policy.cpp
     - rt/src/resource_policy.hpp
+    - tests/test_cross_rate_data.cpp
     - tests/test_rate_timeline.cpp
     - tests/test_compiled_graph.cpp
     - tests/test_host_runtime.cpp
-    - tests/test_periodic_runtime.cpp
     - tests/test_memory_plan.cpp
     - tests/test_determinism_replay.cpp
     - tests/test_trace_noalloc.cpp
@@ -75,7 +78,7 @@ scope:
     - docs/determinism_replay.md
     - docs/testing_ci.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M16-01-*.md
+    - docs/evidence/M16-02-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -114,6 +117,7 @@ scope:
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
     - docs/evidence/M15-04-2026-08-05.md
+    - docs/evidence/M16-01-2026-08-05.md
     - .github/workflows/cuda-qualification.yml
     - .github/workflows/xdma-qualification.yml
     - .github/workflows/release.yml
@@ -129,83 +133,89 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The installed C++ source API adds bounded rate-domain, phase-binding, compiled-domain, and reference-release types in the existing SDK header inventory. The model covers a stable domain identity and name, a positive integral-nanosecond period, phase ownership, positive bounded substeps, relative deadline, non-binding budget/WCET estimate, criticality, and optionality; it is separate from runtime-profile schema 7 and stable C ABI v8.
-  - While configuring, the host can copy/register a bounded set of rate domains and bind each valid CPU or device phase to exactly one domain. Domain and binding identities are Runtime-instance-owned, configuration freezes at finalization, and malformed names/enums, zero periods or substeps, duplicate domains, duplicate/rebound phases, foreign or stale handles, missing ownership in an enabled rate model, capacity excess, and inconsistent references fail deterministically without a partial finalized plan.
-  - Finalization compiles positive integral-nanosecond domain periods using only checked integer gcd/lcm, multiplication, addition, and count arithmetic. The immutable reference interval starts at relative epoch zero, ends before the least common multiple supercycle boundary, and contains every due release exactly once; overflow, an unrepresentable supercycle, or a release count above the explicit bounded capacity fails before start.
-  - Reference-release inspection exposes relative release time, domain identity, domain release sequence, owned phase identity, substep ordinal/count, relative deadline, budget/WCET metadata, criticality, and optionality. Equal-time entries are ordered deterministically by domain registration order, compiled phase order, and substep ordinal, with no dependence on floating point, wall-clock timing, thread scheduling, pointer values, or unordered-container iteration.
-  - Harmonic and non-harmonic examples and a separately implemented reference generator produce byte-for-byte equivalent compiled timeline fields for the complete supercycle. Period ratios are reduced and compared exactly; no approximation, drift, timing sleep, or tolerance-based assertion is used.
-  - "M16-01 is model-and-reference-plan only: host-driven step and self-paced run_periodic continue to execute the existing complete compiled graph once per host frame, and no domain release changes callback dispatch. Cross-rate sample/hold or freshness storage, admission feasibility, late skip/catch-up/hold/degrade/fail behavior, optional-work shedding/recovery, and new trace/metric schema fields remain deferred to M16-02 through M16-04 and are not implied by reference-plan presence."
-  - The compiled rate model and phase bindings participate in the finalized graph/replay compatibility identity so checkpoints or input logs cannot be accepted against a semantically different explicit rate plan. A runtime with no explicit rate model retains the exact pre-M16-01 graph/replay identity and behavior.
-  - Rate-plan construction and inspection remain bounded and Runtime-instance-owned. Any dynamic storage is acquired only during configuration/finalization, represented exactly once in the M15 logical control ledger and MemoryPlan, and never allocated, resized, or mutated by post-start reference inspection; two runtimes cannot share handles, mutable plan state, or release storage.
-  - Failed rate compilation leaves the runtime configuring and replaceable without publishing a partial plan, starting threads, acquiring device ownership, applying native policy, or invoking callbacks. Existing M14.1 and M15 checked cleanup, provider-token, live-stack, accounting, and retry invariants remain unchanged because this batch adds no start/stop resource owner.
-  - Default and explicit-reference-plan configurations preserve current lifecycle, compiled dependency/resource order, host-adapter behavior, periodic absolute cadence, watchdog, mock-device operation, deterministic replay, zero ordinary heap allocation after successful start, and source compatibility for pre-M16-01 aggregate initialization and installed consumers.
-  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, runtime configuration schema 7 and its 25 keys, observability/checkpoint/input-log schemas, installed target/header inventory, compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged.
-  - Target governance, active-batch, current-state, handoff, roadmap, architecture/component contracts, release digest ledger, and retained M16-01 evidence describe the exact implemented model/reference boundary and do not present a compiled timeline, mock, hosted runner, deterministic replay, preflight, or documentation as latency, physical hardware, HIL, field, RT1, RT2, signing, release, deployment, or production evidence.
-  - Focused tests, complete deterministic local verification, mandatory GitHub CI, and human public-API, integer-arithmetic, identity, memory-accounting, determinism, lifecycle, and compatibility review pass before merge; M16 and CAP-M16 remain incomplete after this batch.
+  - The installed C++ source API adds bounded cross-rate channel declarations, instance-owned channel identities, compiled channel and consumer-selection records, and fixed-copy inspectors in the existing SDK header inventory. Each channel has a stable restricted name, one CPU producer phase, one CPU consumer phase in a different explicit rate domain, a positive fixed payload size, a copied exact-size initial sample, sample-and-hold mode, and an integral-nanosecond maximum-age threshold; zero maximum age means only an age-zero sample is fresh and UINT64_MAX is the explicit unbounded threshold.
+  - Channel registration is configuring-only and copied. Finalization rejects an absent explicit rate model, malformed or duplicate names, self edges, same-domain edges, missing/foreign/stale/cross-instance handles, non-CPU endpoints, duplicate semantic edges, invalid modes, empty or mismatched initial payloads, per-channel or aggregate capacity excess, checked-size overflow, and an endpoint that is not bound exactly once by M16-01, without publishing a partial channel or snapshot plan.
+  - "For every consumer phase/substep release in the exact M16-01 reference interval, finalization deterministically selects the latest producer phase/substep that precedes it in the existing total reference order: release time, domain registration, compiled phase, then substep ordinal. A producer earlier in that order at the same timestamp is eligible with age zero; a producer later at that timestamp is not. Before the first eligible producer in the first supercycle the copied initial sample is selected, and the repeated steady-state plan represents a prior-supercycle source with an exact negative-one cycle offset rather than inventing an epoch-zero production."
+  - Every compiled selection exposes channel and endpoint identities, consumer and selected producer reference indexes and substep/sequence identities when applicable, source-cycle offset, exact non-overflowing age in nanoseconds, initial-versus-produced provenance, whether the selected generation is held across consumer releases, and fresh-versus-stale classification from the declared maximum age. Initial, fresh, held, and stale facts remain distinct; stale is observable metadata and does not yet trigger skip, fail, degrade, shed, or another late-policy action.
+  - Harmonic, non-harmonic, co-prime, simultaneous-release, multi-substep, domain-registration permutation, compiled-phase-order permutation, first-supercycle, and wraparound examples match a separately implemented reference selector field for field across the complete supercycle. No floating point, tolerance, sleep, wall clock, pointer order, unordered iteration, or observed worker completion order participates in selection or freshness.
+  - The implementation contains one fixed-capacity runtime-owned snapshot-store primitive for each compiled channel. It copies a producer payload into a non-visible slot and publishes the complete generation atomically, copies a selected committed generation to the consumer without exposing a partial write, never overwrites a generation whose compiled lifetime is still live, and returns a bounded typed capacity/not-ready/stale result rather than spinning, blocking, allocating, falling back, or silently substituting a newer sample. Synthetic producer/consumer concurrency under ThreadSanitizer proves the primitive's single-producer/single-consumer race freedom and deterministic selected bytes; the primitive is not yet invoked automatically by Runtime::step or Runtime::run_periodic.
+  - Channel declaration, reference-selection, immutable descriptor, initial-sample, slot, and snapshot bytes are acquired only during configuration/finalization, bounded by explicit constants and checked arithmetic, isolated per Runtime, and represented exactly once inside M16 rate-plan bytes, M15 runtime-control logical extents, and MemoryPlan without adding a seventh planned row or extending the phase/task/trace MemoryProvider acquisition boundary.
+  - Cross-rate names, endpoint bindings, mode, payload size, maximum age, and copied initial-sample bytes participate in explicit-plan graph/replay compatibility identity. A runtime with no cross-rate channels retains its exact M16-01 graph/replay identity and checkpoint/input-log schema-v1 encoding. This batch adds no mutable cross-rate state to checkpoint or input-log artifacts because active runtime transfer is deferred; any need to persist progressed channel state is an M16-03 design gate rather than permission to silently change artifact schemas here.
+  - Failed cross-rate compilation or storage construction leaves the runtime configuring and correctable, with no partial inspectors, provider acquisition, native policy, thread, device ownership, callback, or externally visible snapshot mutation. Existing M14.1 and M15 cleanup, accounting, provider-token, stack, and checked-stop retry invariants remain unchanged because M16-02 adds no active start/stop owner.
+  - M16-02 is a data-contract and bounded-storage-primitive batch only. Existing step and run_periodic continue to execute the complete compiled graph once per host frame and do not automatically consume the selection plan or snapshot store. Active rate release dispatch, host/self-paced coordination, admission feasibility, late skip/bounded-catch-up/hold/degrade/fail behavior, optional-work shedding/recovery, and trace/metric schema changes remain M16-03/M16-04 work and are not implied by compiled cross-rate descriptors.
+  - Default and explicit-channel configurations preserve lifecycle, graph dependency/resource validation, M16-01 domain/reference output, host-adapter behavior, periodic absolute cadence, watchdog, mock-device behavior, deterministic replay, no ordinary heap allocation after successful start, Runtime-instance isolation, pre-M16 aggregate initialization, and preferred/compatibility installed consumers.
+  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, runtime configuration schema 7 and its 25 keys, observability/checkpoint/input-log schemas, installed target/header inventory, compatibility aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. Device-producer or device-consumer channels are rejected rather than inventing completion-data semantics that device ABI v1 does not provide.
+  - Target AGENTS, active-batch, current-state, handoff, roadmap, architecture/component contracts, release digest ledger, and retained M16-02 evidence describe the exact compiled-selection and storage-primitive boundary and do not present a fixture, copied initial value, synthetic concurrency test, mock, hosted runner, deterministic replay, preflight, or documentation as active multi-rate dispatch, latency, physical hardware, HIL, field, RT1, RT2, signing, release, deployment, or production evidence.
+  - Focused tests, complete deterministic local verification, mandatory GitHub CI, and human public-API, selection-semantics, bounded-storage, concurrency/lifetime, identity, memory-accounting, determinism, lifecycle, and compatibility review pass before merge. M16 and CAP-M16 remain incomplete after M16-02.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='RateTimeline.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:MemoryPlan.*Rate*:DeterminismReplay.*Rate*:TraceNoAlloc.*Rate*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm16_rate_timeline'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='CrossRateData.*:RateTimeline.*CrossRate*:CompiledGraph.*CrossRate*:HostRuntime.*CrossRate*:MemoryPlan.*CrossRate*:DeterminismReplay.*CrossRate*:TraceNoAlloc.*CrossRate*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm16_cross_rate_data'
     - ./scripts/agent-verify.sh full
   focused_tests_to_add:
-    - additive default construction and pre-M16-01 positional aggregate/source compatibility in direct, preferred installed, and compatibility installed C++ consumers
-    - bounded rate-domain copy and phase binding for CPU and mock-device phases, including freeze, duplicate, missing, rebound, foreign-handle, malformed enum/name, zero, capacity, and two-runtime isolation cases
-    - checked gcd/lcm supercycle and release-count compilation at zero, unit, maximum valid, overflow, unrepresentable, and configured-capacity boundaries
-    - exact harmonic and non-harmonic full-supercycle agreement with an independent reference generator, including simultaneous-release ordering, co-prime periods, domain registration order, compiled phase order, and substep ordinals
-    - exact inspection of release time, domain and phase identities, release sequence, substeps, deadline, budget/WCET metadata, criticality, and optionality before start, while running, and after stop without mutation or allocation
-    - transactional failed finalization with absent partial plan, configuring-state replacement, zero callbacks, zero thread/native/device/provider mutation, and successful corrected retry
-    - unchanged no-plan graph/replay identity plus explicit rate-plan identity sensitivity to each semantic domain and binding field
-    - proof that explicit reference plans do not yet filter, repeat, skip, catch up, hold, degrade, shed, or reorder callbacks in host-driven or self-paced execution
-    - exact rate-plan storage reconciliation in the M15 logical control ledger and MemoryPlan, two-runtime storage isolation, and no ordinary heap allocation during post-start inspection and complete CPU or mock-device frames
-    - regression coverage for graph dependency/resource ordering, periodic absolute epoch, watchdog, host adapter, mock device, checkpoint/replay, failed-start/checked-stop retry, and all frozen compatibility boundaries
+    - additive channel/default construction plus pre-M16-02 positional aggregate and preferred/compatibility installed C++ source consumers
+    - copied stable channel registration and freeze, including malformed, duplicate, self, same-domain, foreign/stale/cross-instance, non-CPU, payload, initial-sample, mode, endpoint-binding, capacity, and overflow rejection
+    - complete independent sample-and-hold selection for harmonic, co-prime non-harmonic, simultaneous, reordered-domain, reordered-compiled-phase, multi-phase, and multi-substep plans
+    - exact same-timestamp visibility, first-supercycle initial selection, prior-supercycle wrap selection, held-generation reuse, maximum-age zero/boundary/UINT64_MAX, and fresh/stale classification
+    - immutable compiled channel and selection inspection before start, while running, and after stop with invalid index rejection and no mutation or allocation
+    - fixed snapshot-store exact-size commit/copy, atomic publication, partial-write invisibility, stale/not-ready/capacity status, live-generation retention, wrap, deterministic bytes, and bounded single-producer/single-consumer concurrency
+    - transactional failed finalization with absent channel/selection/storage publication, zero provider/callback/worker/device side effects, configuring-state correction, and successful retry
+    - unchanged no-channel M16-01 graph/replay identity plus explicit identity sensitivity to channel name, endpoints, mode, payload size, maximum age, and every initial-sample byte
+    - exact channel descriptor/selection/slot/payload storage reconciliation inside rate-plan bytes, M15 runtime control, and the six-row MemoryPlan equation, including two-runtime isolation and capacity rejection
+    - proof that explicit channels do not yet alter callback count/order, complete-graph host/periodic/mock-device dispatch, checkpoint/input-log encoding, telemetry schemas, or post-start allocation behavior
   required_ci:
-    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, exact SDK inventory, and truthful M16 claim checks
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of rate validation, checked arithmetic, finalization, inspection, identity, and lifecycle
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical integer timeline/order results, source compatibility, and installed consumers
-    - Unified executor GCC ThreadSanitizer job retaining M15 cleanup gates and executing rate-plan two-runtime, finalization, inspection, host-driven, periodic, and mock-device regressions even though M16-01 adds no new lane
-    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving the unchanged no-plan fixture and explicit rate-plan identity tests
+    - Documentation contract workflow including quick-start, release-contract, frozen C ABI, exact SDK inventory, permanent M16-01 gates, and truthful M16-02 claim checks
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of channel validation, selection, storage bounds, finalization, inspection, identity, and lifecycle
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical integer selection/classification, source compatibility, fixed storage, and installed consumers
+    - Unified executor GCC ThreadSanitizer job executing CrossRateData, two-runtime, synthetic producer/consumer, finalization, inspection, host/periodic, and mock-device regressions while retaining M15 cleanup and M16-01 reference gates
+    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving unchanged no-channel artifacts and explicit cross-rate identity tests
     - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and existing autotune/scaling smoke jobs
-    - Existing no-allocation, bounded-memory-plan/control-ledger, M14.1 device recovery, M15 rollback, sanitizer, documentation, release-contract, and package gates; no controlled-hardware performance or timing claim is authorized
+    - Existing no-allocation, bounded-memory-plan/control-ledger, M14.1 device recovery, M15 rollback, M16-01 timeline, sanitizer, documentation, release-contract, and package gates; no controlled-hardware performance, active-dispatch, or timing claim is authorized
   manual:
-    - Human review must confirm the additive C++ model and query shape, exact epoch/supercycle and tie-order semantics, checked arithmetic/capacity, phase ownership/freeze behavior, graph/replay identity boundary, M15 accounting preservation, deferred execution semantics, and frozen C/device ABI/package/schema boundaries before merge.
-    - The reviewer must confirm that budget/WCET values are untrusted planning inputs only and that reference-timeline agreement is functional deterministic evidence, not a feasibility, worst-case latency, RT1, or RT2 result.
+    - Human review must confirm the additive C++ channel/inspector shape, exact same-time/initial/wrap/held/fresh/stale semantics, checked arithmetic and capacities, fixed-store publication/lifetime proof, graph/replay identity, M15 accounting preservation, deferred active-dispatch boundary, and frozen C/device ABI/package/schema surfaces before merge.
+    - The reviewer must confirm that copied payloads and reference-selection agreement are portable functional evidence only, that device endpoints remain unsupported in this batch, and that no mock, fixture, hosted CI, or documentation result is promoted to hardware, HIL, latency, RT1, or RT2 evidence.
 risk:
   class: high
   hazards:
-    - lcm or release-count growth can overflow or turn a small domain set into unbounded finalization time or memory
-    - ambiguous epoch, interval-end, simultaneous-release, or substep ordering can make independent implementations disagree while simple harmonic examples still pass
-    - a phase can be omitted, multiply owned, or associated through a foreign/stale handle, yielding a plausible but incomplete plan
-    - adding rate fields to graph/replay identity can reject legacy artifacts unintentionally, while omitting a semantic field can accept an incompatible artifact
-    - reference-only types can be mistaken for active multi-rate dispatch, deadline admission, freshness, overload, shedding, or RT qualification
-    - new finalization storage can escape the exact M15 control ledger, double count MemoryPlan bytes, allocate after start, or leak mutable state across Runtime instances
-    - public aggregate edits or a new installed header/target can break 1.x C++ source consumers or the exact package inventory despite leaving the C ABI unchanged
-    - changes in common graph/finalization paths can regress dependencies, host/periodic execution, watchdog, device cleanup, provider ownership, no-allocation, determinism, sanitizers, or package behavior
+    - ambiguous same-timestamp, substep, initial-epoch, or supercycle-wrap rules can make two correct-looking selectors choose different generations
+    - a snapshot slot can be published before its payload is complete, overwritten while a consumer copies it, or reused for the wrong release after wrap
+    - an unbounded retry loop, blocking lock, dynamic allocation, or silent newest-sample fallback can enter the future RT data path under contention
+    - freshness age can underflow/overflow across a supercycle or conflate initial, held, stale, unavailable, and late-policy state
+    - copied initial bytes, channel endpoints, or maximum age can be omitted from compatibility identity and permit replay against different data semantics
+    - channel payload and slot storage can escape the M15 logical extent ledger, double count MemoryPlan, extend the provider boundary, or leak across Runtime instances
+    - device phases can be accepted even though device ABI v1 exposes no generic completion-payload publication contract
+    - public aggregate edits or a new installed header/target can break 1.x C++ source consumers while leaving stable C ABI checks green
+    - compiled descriptors or synthetic store tests can be overstated as active dispatch, overload handling, hardware, latency, RT1, or RT2 evidence
+    - common finalization, identity, or accounting changes can regress M14.1 cleanup, M15 rollback, M16-01 reference output, determinism, sanitizers, package behavior, or legacy complete-graph dispatch
   stop_conditions:
-    - the exact baseline commit is unavailable, not cleanly inspectable, or does not contain merged M15-04 commit ddf3f879b20e72975b81274541a7c6cf1925d9c5 and the retained M15 evidence
-    - implementing the model requires changing stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema 7/25 keys, observability or replay artifact schemas, default installed header/target inventory, support matrices, release version, or license
-    - an exact finite supercycle and release count cannot be bounded with checked integer arithmetic for the approved integral-nanosecond period model
-    - a product decision is required to define a different clock unit, fractional-nanosecond release, absolute epoch, dispatch, cross-rate data, admission, late, catch-up, shedding, recovery, or telemetry semantic outside this reference-only batch
-    - explicit rate metadata cannot participate in graph/replay compatibility identity while preserving the exact no-plan identity and existing checkpoint/input-log formats
-    - rate storage cannot remain configuration/finalization-only, exact in the M15 ledger/MemoryPlan, isolated per Runtime, and allocation-free after successful start
-    - deterministic tests require timing sleeps/tolerances, root privilege, a fixed topology, physical CUDA or FPGA/XDMA hardware, controlled performance hosts, secrets, signing, release, deployment, or production access
-    - any required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
-    - target repository contracts at the exact baseline contradict the reference-only vertical boundary or require an incompatible public architecture decision
+    - the exact baseline commit is unavailable, not cleanly inspectable, or does not contain merged M16-01 commit 8dabeb3747a20717ce02c99a3d3c0d9deb1a3532 and retained M15/M16-01 evidence
+    - target repository contracts at the exact baseline contradict the compiled-selection/storage-primitive boundary or require a different same-time, initial, wrap, freshness, payload-ownership, or device-endpoint product decision
+    - implementing deterministic cross-rate semantics requires changing stable C ABI v8, SONAME 8, device ABI v1, runtime-profile schema 7/25 keys, observability/checkpoint/input-log schemas, default installed header/target inventory, support matrices, release version, or license
+    - exact first-supercycle and repeated-supercycle source selection or freshness age cannot be represented with checked integer arithmetic and a finite explicitly bounded descriptor/slot plan
+    - race-free snapshot publication would require unbounded spinning, blocking mutexes, heap allocation after start, silent sample substitution, or overwrite of a generation that a compiled consumer can still select
+    - the storage primitive cannot preserve exact payload size, complete-before-visible publication, deterministic selected bytes, bounded capacity failure, and Runtime-instance isolation under ThreadSanitizer
+    - active step/run_periodic filtering, callback repetition/substeps, admission, wall-clock lateness, catch-up, skip/hold/degrade/fail action, shedding/recovery, or telemetry-schema evolution becomes necessary to satisfy this batch instead of remaining explicitly deferred
+    - checkpoint/replay correctness would require persisting progressed mutable cross-rate state or changing artifact encoding before active dispatch; stop for the M16-03 architecture decision instead of silently expanding M16-02
+    - implementation requires changing executor/device/CUDA/XDMA code, invoking vendor or blocking operations, privileged or machine-wide mutation, physical hardware, a controlled timing host, secrets, signing, release, deployment, or production access
+    - deterministic tests require timing sleeps/tolerances, root privilege, a fixed topology, weakening an existing sanitizer/compatibility gate, or relabeling a mock, fixture, hosted runner, preflight, or document as stronger evidence
+    - a required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the additive rate-domain and phase-binding API, reference timeline compiler and storage, identity/accounting integration, tests/CI, documentation, governance refresh, release-contract digests, and retained M16-01 evidence as one batch. Explicit rate plans create no persistent data migration, host setting, thread, device ownership, deployed state, or active dispatch behavior; preserve and use the existing checked stop path for any running integration before discarding its Runtime instance.
+  strategy: Revert the additive cross-rate channel and inspector API, selection compiler, bounded snapshot-store primitive, identity/accounting integration, tests/CI, documentation, governance refresh, release-contract digests, and retained M16-02 evidence as one batch. M16-02 creates no active callback dispatch, persistent data migration, host setting, thread, device ownership, deployed state, telemetry schema, or support promotion; preserve and use the existing checked stop path for any running Runtime before discarding it.
   data_migration: none
   release_action: Do not publish a release, promote a support/qualification tuple, alter hardware or RT records, or mark M16/CAP-M16 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M16-01-<date>.md
+    - docs/evidence/M16-02-<date>.md
     - exact baseline, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public rate-domain and phase-binding model with all bounds, units, defaults, ownership, freeze, deadline, budget/WCET, criticality, optionality, and deferred-semantics decisions
-    - harmonic and non-harmonic input domains, exact reduced relationships, supercycle, release count, full ordered reference output digest, independent-generator comparison, and every rejected overflow/capacity case
-    - graph/replay identity comparisons for no-plan compatibility and every explicit semantic field, plus unchanged checkpoint/input-log schema status
-    - timeline storage and M15 control-ledger/MemoryPlan reconciliation, two-runtime isolation, post-start allocation results, and proof that current host/periodic dispatch remains unchanged
-    - default and explicit-plan lifecycle, graph, host-adapter, watchdog, mock-device, determinism/replay, failed-finalize retry, checked cleanup, C++ source, C ABI/device ABI/package/schema compatibility, and changed/preserved invariants
-    - residual risks and all unperformed cross-rate freshness, admission, late/catch-up, shedding/recovery, versioned telemetry, controlled performance, privileged native, physical hardware, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static, unit, property/reference-generator, sanitizer, package, portable RT0, exact integer timeline-compilation, identity, bounded-memory, and unchanged-dispatch behavior only. The compiled reference plan does not establish active multi-rate execution, cross-rate freshness, admission feasibility, overload behavior, optional-work shedding/recovery, worst-case timing, physical accelerator behavior, HIL, field performance, RT1, RT2, signing, release, deployment, or production readiness.
+    - public channel model and all name, endpoint, payload, initial-sample, mode, maximum-age, capacity, ownership, freeze, and unsupported-device decisions
+    - complete harmonic/non-harmonic reference inputs, every consumer-to-source selection including first-cycle and wrap provenance, normalized output digest, independent-selector comparison, and every rejected arithmetic/capacity case
+    - fixed snapshot-store layout and generation-lifetime proof, publication/copy memory ordering, exact bytes, bounded capacity/not-ready/stale outcomes, concurrency/ThreadSanitizer results, and two-runtime isolation
+    - graph/replay identity comparisons for no-channel M16-01 compatibility and every channel semantic/initial byte, plus unchanged checkpoint/input-log schema and no-progressed-state boundary
+    - channel descriptor/selection/slot/payload storage reconciliation inside rate-plan bytes, M15 runtime-control extents, and MemoryPlan, plus post-start allocation and unchanged-dispatch results
+    - default/explicit-channel lifecycle, graph, host-adapter, watchdog, mock-device, determinism/replay, failed-finalize retry, checked cleanup, C++ source, C ABI/device ABI/package/schema compatibility, and changed/preserved invariants
+    - residual risks and all unperformed active multi-rate dispatch, admission, late/skip/catch-up/hold/degrade/fail action, shedding/recovery, versioned telemetry, controlled performance, privileged native, physical hardware, CUDA, FPGA/XDMA, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish static, unit, property/reference-selector, synthetic bounded-storage concurrency, sanitizer, package, portable RT0, exact integer sample-selection/freshness, identity, bounded-memory, and unchanged-dispatch behavior only. Compiled descriptors and the storage primitive do not establish active multi-rate callback execution, admission feasibility, late/overload action, shedding/recovery, physical accelerator behavior, HIL, field performance, worst-case timing, RT1, RT2, signing, release, deployment, or production readiness.

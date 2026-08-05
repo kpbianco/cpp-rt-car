@@ -1096,7 +1096,7 @@ TEST(TraceNoAlloc, CudaSubmitAndPollDoNotAllocateAfterInitialization) {
     EXPECT_EQ(api.shutdown(api.instance), RTFW_DEVICE_STATUS_OK);
 }
 
-TEST(TraceNoAlloc, RatePlanInspectionAndCpuFramesDoNotAllocate) {
+TEST(TraceNoAlloc, RatePlanInspectionAndCpuFramesDoNotAllocateCrossRate) {
     rt::Runtime runtime;
     rt::RuntimeConfig config;
     config.callback_capacity = 2;
@@ -1117,6 +1117,14 @@ TEST(TraceNoAlloc, RatePlanInspectionAndCpuFramesDoNotAllocate) {
     ASSERT_EQ(runtime.register_rate_domain({"slow", 3, 1, 1, 0}, slow), rt::Status::ok);
     ASSERT_EQ(runtime.bind_phase_to_rate_domain(first_phase, fast), rt::Status::ok);
     ASSERT_EQ(runtime.bind_phase_to_rate_domain(second_phase, slow), rt::Status::ok);
+    const std::array initial{
+        std::byte{0x11}, std::byte{0x22}, std::byte{0x33}};
+    rt::CrossRateChannelHandle channel;
+    ASSERT_EQ(
+        runtime.register_cross_rate_channel(
+            {"first.to.second", first_phase, second_phase, initial.size(), initial},
+            channel),
+        rt::Status::ok);
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
     ASSERT_EQ(runtime.start(), rt::Status::ok);
 
@@ -1135,6 +1143,18 @@ TEST(TraceNoAlloc, RatePlanInspectionAndCpuFramesDoNotAllocate) {
             rt::ReferenceRelease release;
             complete = runtime.reference_release_at(index, release) && complete;
         }
+        for (std::size_t index = 0; index < runtime.cross_rate_channel_count(); ++index) {
+            rt::CompiledCrossRateChannel descriptor;
+            complete = runtime.compiled_cross_rate_channel_at(index, descriptor) && complete;
+            std::array<std::byte, 3> copied{};
+            complete = runtime.copy_cross_rate_initial_sample(index, copied) ==
+                    rt::Status::ok &&
+                copied == initial && complete;
+        }
+        for (std::size_t index = 0; index < runtime.cross_rate_selection_count(); ++index) {
+            rt::CompiledCrossRateSelection selection;
+            complete = runtime.compiled_cross_rate_selection_at(index, selection) && complete;
+        }
         complete = runtime.step({0, std::chrono::nanoseconds{1}, std::nullopt}) ==
                 rt::Status::ok &&
             complete;
@@ -1146,7 +1166,9 @@ TEST(TraceNoAlloc, RatePlanInspectionAndCpuFramesDoNotAllocate) {
     {
         AllocationGuard guard;
         rt::ReferenceRelease release;
-        complete = runtime.reference_release_at(0, release);
+        rt::CompiledCrossRateChannel descriptor;
+        complete = runtime.reference_release_at(0, release) &&
+            runtime.compiled_cross_rate_channel_at(0, descriptor);
     }
     EXPECT_TRUE(complete);
     EXPECT_EQ(allocation_count(), 0u);

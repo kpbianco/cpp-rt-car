@@ -47,9 +47,11 @@ int main() {
     const rt::CpuMemoryPolicyReport pre_m15_04_report{
         rt::cpu_memory_policy_schema_version, 1, {pre_m15_04_thread}, 0, {}};
     const rt::MemoryPlan pre_m16_plan{1024, 512};
+    const rt::CrossRateChannelRegistration additive_cross_rate{};
     if (pre_m15_04_report.threads[0].role != rt::thread_role_frame ||
         pre_m15_04_report.accounting_complete ||
-        pre_m16_plan.rate_plan_bytes != 0) {
+        pre_m16_plan.rate_plan_bytes != 0 ||
+        additive_cross_rate.payload_size != 0) {
         return 3;
     }
     if (legacy_pipeline_factory == nullptr) {

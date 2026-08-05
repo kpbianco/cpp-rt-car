@@ -535,6 +535,96 @@ struct ReferenceRelease {
     bool optional = false;
 };
 
+inline constexpr std::size_t invalid_reference_release_index =
+    std::numeric_limits<std::size_t>::max();
+inline constexpr std::uint64_t invalid_cross_rate_sequence =
+    std::numeric_limits<std::uint64_t>::max();
+inline constexpr std::uint32_t invalid_cross_rate_substep =
+    std::numeric_limits<std::uint32_t>::max();
+
+enum class CrossRateMode : std::uint8_t {
+    sample_and_hold,
+};
+
+enum class CrossRateSelectionHorizon : std::uint8_t {
+    first_supercycle,
+    repeating_supercycle,
+};
+
+enum class CrossRateSampleProvenance : std::uint8_t {
+    initial_sample,
+    produced,
+};
+
+enum class CrossRateFreshness : std::uint8_t {
+    fresh,
+    stale,
+};
+
+// M16-02 channels are copied while configuring. Initial bytes must exactly
+// match payload_size. Device endpoints remain unsupported until a completion-
+// payload contract exists beyond device ABI v1.
+struct CrossRateChannelRegistration {
+    std::string_view name{};
+    PhaseHandle producer{};
+    PhaseHandle consumer{};
+    std::size_t payload_size = 0;
+    std::span<const std::byte> initial_sample{};
+    CrossRateMode mode = CrossRateMode::sample_and_hold;
+    // Zero accepts only an age-zero sample. UINT64_MAX is explicitly
+    // unbounded; all other values are inclusive integral-nanosecond limits.
+    std::uint64_t maximum_age_ns =
+        std::numeric_limits<std::uint64_t>::max();
+};
+
+struct CompiledCrossRateChannel {
+    CrossRateChannelHandle channel{};
+    std::array<char, cross_rate_channel_name_capacity> name{};
+    std::size_t registration_index = 0;
+    PhaseHandle producer{};
+    PhaseHandle consumer{};
+    RateDomainHandle producer_domain{};
+    RateDomainHandle consumer_domain{};
+    std::size_t producer_compiled_phase_index = 0;
+    std::size_t consumer_compiled_phase_index = 0;
+    std::size_t payload_size = 0;
+    CrossRateMode mode = CrossRateMode::sample_and_hold;
+    std::uint64_t maximum_age_ns =
+        std::numeric_limits<std::uint64_t>::max();
+    std::size_t first_selection_index = 0;
+    std::size_t selection_count = 0;
+    std::size_t snapshot_slot_count = 0;
+    std::size_t snapshot_bytes = 0;
+};
+
+// Two records are emitted for each consumer reference release: one for the
+// first supercycle and one for the repeated steady-state supercycle. This
+// keeps an initial sample distinct from a real prior-cycle generation.
+struct CompiledCrossRateSelection {
+    CrossRateChannelHandle channel{};
+    std::size_t channel_registration_index = 0;
+    PhaseHandle producer{};
+    PhaseHandle consumer{};
+    RateDomainHandle producer_domain{};
+    RateDomainHandle consumer_domain{};
+    CrossRateSelectionHorizon horizon =
+        CrossRateSelectionHorizon::first_supercycle;
+    std::size_t consumer_reference_index =
+        invalid_reference_release_index;
+    std::uint64_t consumer_release_sequence = invalid_cross_rate_sequence;
+    std::uint32_t consumer_substep_ordinal = invalid_cross_rate_substep;
+    std::size_t producer_reference_index =
+        invalid_reference_release_index;
+    std::uint64_t producer_release_sequence = invalid_cross_rate_sequence;
+    std::uint32_t producer_substep_ordinal = invalid_cross_rate_substep;
+    std::int32_t source_cycle_offset = 0;
+    std::uint64_t age_ns = 0;
+    CrossRateSampleProvenance provenance =
+        CrossRateSampleProvenance::initial_sample;
+    bool held = false;
+    CrossRateFreshness freshness = CrossRateFreshness::fresh;
+};
+
 struct MemoryPlan {
     // planned_bytes is the sum of the three control fields and the three
     // *_total/storage fields. It describes requested runtime storage, not RSS.
@@ -577,6 +667,13 @@ struct MemoryPlan {
     std::size_t rate_binding_count = 0;
     std::size_t reference_release_count = 0;
     std::size_t rate_plan_bytes = 0;
+    // M16-02 cross-rate storage is included once in rate_plan_bytes and the
+    // existing runtime_control_bytes row.
+    std::size_t cross_rate_channel_count = 0;
+    std::size_t cross_rate_selection_count = 0;
+    std::size_t cross_rate_initial_sample_bytes = 0;
+    std::size_t cross_rate_snapshot_slot_count = 0;
+    std::size_t cross_rate_snapshot_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
@@ -968,6 +1065,14 @@ public:
         RateDomainHandle domain) noexcept;
     [[nodiscard]] Status bind_phase_to_rate_domain(
         const RatePhaseBinding& binding) noexcept;
+    [[nodiscard]] Status register_cross_rate_channel(
+        const CrossRateChannelRegistration& registration,
+        CrossRateChannelHandle& out_channel) noexcept;
+    // Replaces copied semantics without changing the instance-owned handle,
+    // allowing correction after transactional finalization rejection.
+    [[nodiscard]] Status replace_cross_rate_channel(
+        CrossRateChannelHandle channel,
+        const CrossRateChannelRegistration& registration) noexcept;
     [[nodiscard]] Status register_resource(
         std::string_view name,
         ResourceHandle& out_resource) noexcept;
@@ -1031,6 +1136,20 @@ public:
     [[nodiscard]] bool reference_release_at(
         std::size_t release_index,
         ReferenceRelease& release) const noexcept;
+    [[nodiscard]] bool cross_rate_model_enabled() const noexcept;
+    [[nodiscard]] std::size_t cross_rate_channel_count() const noexcept;
+    [[nodiscard]] std::size_t cross_rate_selection_count() const noexcept;
+    [[nodiscard]] bool compiled_cross_rate_channel_at(
+        std::size_t registration_index,
+        CompiledCrossRateChannel& channel) const noexcept;
+    [[nodiscard]] bool compiled_cross_rate_selection_at(
+        std::size_t selection_index,
+        CompiledCrossRateSelection& selection) const noexcept;
+    // Copies only into an exact-size caller span. Failure leaves output
+    // unchanged and no inspector allocates or mutates the frozen plan.
+    [[nodiscard]] Status copy_cross_rate_initial_sample(
+        std::size_t registration_index,
+        std::span<std::byte> output) const noexcept;
     [[nodiscard]] bool static_phase_assignment_at(
         std::size_t registration_index,
         StaticPhaseAssignment& assignment) const noexcept;

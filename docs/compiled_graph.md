@@ -9,8 +9,9 @@ Release 0.4 added parallel execution without changing the M2 validation rules.
 Release 0.5 includes the committed graph and executor storage in the M4 memory
 plan. Release 1.2 runs the same frozen graph from host-driven or finite
 self-paced M5 calls. Latency qualification remains deployment-specific work.
-M16-01 adds a separate C++ rate-domain kind and reference-plan compiler without
-changing graph execution or the stable C ABI.
+M16-01 adds a separate C++ rate-domain kind and reference-plan compiler. M16-02
+adds a distinct instance-owned cross-rate channel kind and immutable selection
+records without changing graph execution or the stable C ABI.
 
 ## Graph vocabulary
 
@@ -38,6 +39,13 @@ While the runtime is `configuring`, a host may:
 2. register uniquely named logical resources;
 3. add a directed `prerequisite -> dependent` edge;
 4. declare one `read` or `write` access per phase/resource pair.
+
+The additive C++ configuration path may also register a copied cross-rate
+channel between distinct CPU phases after registering explicit domain
+ownership. Finalization rejects foreign/stale endpoints, same-phase or
+same-domain edges, unsupported device endpoints, duplicate name/semantic
+edges, malformed payload/initial bytes, and bounded-capacity/arithmetic errors
+before publishing any descriptor or store.
 
 Duplicate names, edges, and phase/resource declarations are rejected. A
 self-dependency is rejected immediately. Longer cycles are diagnosed by
@@ -152,9 +160,11 @@ freezes this graph surface under the M11 compatibility policy.
 
 - Compiler: `rt/src/compiled_graph.cpp`
 - Rate compiler: `rt/src/rate_timeline.cpp`
+- Cross-rate compiler/store: `rt/src/cross_rate_data.cpp`
 - Runtime integration: `rt/src/host_runtime.cpp`
 - C++ graph tests: `tests/test_compiled_graph.cpp`
 - Rate/reference tests: `tests/test_rate_timeline.cpp`
+- Cross-rate selection/storage tests: `tests/test_cross_rate_data.cpp`
 - First-frame allocation instrumentation: `tests/test_trace_noalloc.cpp`
 - Dynamic C ABI coverage: `tests/test_cabi_dlopen.c`
 - C and C++ embedding samples: `samples/embed_c/mini_app.c`,

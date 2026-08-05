@@ -287,6 +287,9 @@ def check_runtime_contract() -> None:
     rate_header = read("rt/src/rate_timeline.hpp")
     rate_source = read("rt/src/rate_timeline.cpp")
     rate_test = read("tests/test_rate_timeline.cpp")
+    cross_rate_header = read("rt/src/cross_rate_data.hpp")
+    cross_rate_source = read("rt/src/cross_rate_data.cpp")
+    cross_rate_test = read("tests/test_cross_rate_data.cpp")
     executor_doc = read("docs/executor.md")
     memory_doc = read("docs/memory_plan.md")
     cpu_memory_policy_doc = read("docs/cpu_memory_policy.md")
@@ -1184,6 +1187,88 @@ def check_runtime_contract() -> None:
     ):
         if phrase not in normalized_rate_docs:
             fail(f"M16-01 component contracts are missing phrase {phrase!r}")
+
+    # M16-02 checks assert permanent owned behavior, not the moving milestone
+    # frontier, so later M16 batches may advance without invalidating them.
+    for token in (
+        "cross_rate_channel_capacity = 256",
+        "cross_rate_payload_capacity = 64 * 1024",
+        "cross_rate_snapshot_slot_count = 2",
+        "cross_rate_selection_capacity = 262'144",
+    ):
+        if token not in config_header:
+            fail(f"rt/config.hpp: missing permanent M16-02 token {token!r}")
+    graph_header = read("rt/include/rt/graph.hpp")
+    for token in (
+        "struct CrossRateChannelHandle",
+        "struct CrossRateChannelRegistration",
+        "struct CompiledCrossRateChannel",
+        "struct CompiledCrossRateSelection",
+        "register_cross_rate_channel(",
+        "copy_cross_rate_initial_sample(",
+        "cross_rate_snapshot_bytes",
+    ):
+        if token not in runtime_header and token not in graph_header:
+            fail(f"public SDK headers: missing permanent M16-02 token {token!r}")
+    for token in (
+        "class SnapshotStore",
+        "SnapshotStoreResult",
+        "compile_cross_rate_data(",
+        "std::memory_order_release",
+        "source_cycle_offset = has_in_cycle ? 0 : -1",
+    ):
+        if token not in cross_rate_header and token not in cross_rate_source:
+            fail(f"cross-rate compiler/store is missing {token!r}")
+    for test_name in (
+        "PublicModelCopiesAndFreezesWithLifecycleInspectors",
+        "SelectionMatchesIndependentCompleteSupercycle",
+        "SelectionAgreementCoversRateAndRegistrationPermutations",
+        "SameTimestampVisibilityAndFreshnessBoundariesAreExact",
+        "ValidationIsOwnedBoundedTransactionalAndCorrectable",
+        "AggregateCapacityFailsBeforeProviderAndCanBeCorrected",
+        "DeviceEndpointIsRejectedBeforeOwnershipOrExecution",
+        "SnapshotStoreIsExactBoundedAndNeverSubstitutes",
+        "SnapshotStoreSpscConcurrencyHasDeterministicBytes",
+        "SnapshotStoreSpscContentionPublishesCompleteGenerations",
+        "CrossRateStorageIsExactlyInsideRateAndRuntimeControl",
+        "CrossRatePlanDoesNotChangeHostOrPeriodicDispatch",
+        "CrossRateIdentityCoversEverySemanticAndInitialByte",
+        "TwoRuntimeHandlesSamplesAndStoresRemainIsolated",
+    ):
+        if test_name not in cross_rate_test:
+            fail(f"tests/test_cross_rate_data.cpp: missing permanent M16-02 gate {test_name!r}")
+    for token in (
+        "rt/src/cross_rate_data.cpp",
+        "test_cross_rate_data.cpp",
+        "m16_cross_rate_data",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"M16-02 CMake integration is missing {token!r}")
+    for token in ("CrossRateData.*", "m16_cross_rate_data"):
+        if token not in ci_workflow:
+            fail(f"M16-02 TSan/CI coverage is missing {token!r}")
+    for token in (
+        "register_cross_rate_channel(",
+        "compiled_cross_rate_channel_at(",
+        "copy_cross_rate_initial_sample(",
+    ):
+        if token not in package_cpp_consumer:
+            fail(f"preferred package consumer is missing M16-02 token {token!r}")
+    if "additive_cross_rate" not in package_compat_consumer:
+        fail("compatibility package consumer is missing the additive M16-02 gate")
+    normalized_cross_docs = " ".join(
+        (graph_doc + " " + host_doc + " " + executor_doc + " " +
+         memory_doc + " " + time_doc + " " + determinism_doc).lower().split()
+    )
+    for phrase in (
+        "first supercycle",
+        "repeating steady state",
+        "two-slot",
+        "no seventh planned row",
+        "does not change cadence",
+    ):
+        if phrase not in normalized_cross_docs:
+            fail(f"M16-02 component contracts are missing phrase {phrase!r}")
 
     for token in (
         "Runtime::run_periodic(",

@@ -25,6 +25,20 @@ latency qualification and does not prove the complete product contract.
   transactional retry, identity sensitivity, runtime isolation, unchanged
   host/periodic/mock-device dispatch, exact MemoryPlan reconciliation, and
   allocation-free inspection plus CPU/device frames.
+- M16-02 tests compare every selection field against an independent integer
+  selector across harmonic, co-prime, non-harmonic, simultaneous, reordered,
+  wrap, and multi-substep cases. They cover copied/frozen API semantics,
+  malformed/foreign/device/same-domain/duplicate/capacity failure, exact
+  zero/boundary/unbounded freshness, first-cycle initial and prior-cycle
+  provenance, held generations, transactional retry/provider ordering, exact
+  accounting, identity, two-runtime isolation, unchanged dispatch, and
+  allocation-free inspection.
+- Snapshot-store tests cover exact generation/size, retain/retire lifetime,
+  capacity, not-ready and stale results, no substitution, and deterministic
+  bytes under synthetic SPSC concurrency. A separate contended test removes
+  the per-generation handoff, so payload visibility depends only on the store's
+  publication atomics and each copied generation is checked byte-for-byte. The
+  GCC ThreadSanitizer gate runs the complete `CrossRateData` suite.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent
@@ -75,8 +89,9 @@ latency qualification and does not prove the complete product contract.
 - A focused GCC ThreadSanitizer job runs the unified-executor, M4 memory-plan,
   M5 time/platform, M6 observability, M7 determinism/replay, and M8 device
   suites plus the CPU-only M9 CUDA state machine.
-  It also runs the M16 reference-plan, two-runtime, inspection, host/periodic,
-  and mock-device regressions; this does not make the plan an active dispatcher.
+  It also runs the M16 reference-plan and cross-rate selection/store,
+  two-runtime, inspection, host/periodic, and mock-device regressions; this does
+  not make the plan an active dispatcher.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -181,6 +196,8 @@ predeclared thresholds, and the measurement procedure.
   `tests/test_cabi_dlopen.c`
 - M16-01 rate model and reference compiler:
   `rt/src/rate_timeline.cpp`, `tests/test_rate_timeline.cpp`
+- M16-02 cross-rate compiler and bounded store:
+  `rt/src/cross_rate_data.cpp`, `tests/test_cross_rate_data.cpp`
 - Stable ABI/export and installed-package gates:
   `tools/check_c_abi.py`, `abi/rtfw_c_abi_v8.exports`,
   `tests/package_consumer`

@@ -3,9 +3,10 @@
 ## Restart context
 
 RTFW 1.2.1 is a portable RT0 C++20 runtime. M14, M14.1, and M15 are complete
-at baseline `9dfcee7bc8092de768292ba35ad9bd74e5a5992e`. M16 is active, and this
-worktree implements approved batch M16-01: the rate-domain model and immutable
-reference timeline. `contracts/active-batch.yaml` is binding.
+at baseline `8dabeb3747a20717ce02c99a3d3c0d9deb1a3532`. M16 is active, and this
+worktree implements approved batch M16-02: deterministic cross-rate data
+semantics over the M16-01 reference timeline. `contracts/active-batch.yaml` is
+binding.
 
 ## Read first
 
@@ -50,14 +51,23 @@ only during configuration/finalization, accounted once within runtime control,
 and never mutated by inspection. Host and periodic dispatch remain complete-
 graph, once-per-frame behavior.
 
+M16-02 copies fixed-payload sample-and-hold channels between CPU phases in
+different explicit domains. It compiles two immutable selections per consumer
+release: first-supercycle selection, including the copied initial sample, and
+repeating-supercycle selection, including exact prior-cycle provenance. Each
+record exposes endpoint/reference/substep identities, signed cycle offset,
+integer age, held state, provenance, and inclusive freshness classification.
+One two-slot exact-generation SPSC store is preallocated per channel. Store
+operations are bounded single attempts and are not connected to execution.
+
 ## Protected decisions
 
 - C ABI v8, 70 exports/fingerprint, SONAME 8, and device ABI v1 are unchanged.
 - Runtime schema 7/25 keys, observability and artifact schemas, installed
   headers/targets, aliases, support matrices, 1.2.1, and Apache-2.0 are unchanged.
 - The M15 six-row MemoryPlan and provider boundary remain unchanged.
-- Cross-rate data, admission, late/catch-up, shedding/recovery, and telemetry
-  evolution remain outside M16-01.
+- Active cross-rate transfer, admission, late/catch-up, shedding/recovery, and
+  telemetry evolution remain outside M16-02.
 - No compiled plan, mock, hosted CI, or local run is hardware, latency, RT1,
   RT2, signing, release, deployment, or production evidence.
 
@@ -65,6 +75,6 @@ graph, once-per-frame behavior.
 
 Run every local command in the active batch, ending with
 `./scripts/agent-verify.sh full`. Retain exact results and acceptance mapping in
-`docs/evidence/M16-01-2026-08-05.md`. Mandatory GitHub CI and human public-API,
-integer-arithmetic, identity, accounting, determinism, lifecycle, and
+`docs/evidence/M16-02-2026-08-05.md`. Mandatory GitHub CI and human public-API,
+selection, store lifetime/memory-ordering, identity, accounting, determinism, lifecycle, and
 compatibility review remain external gates. M16 and CAP-M16 remain incomplete.

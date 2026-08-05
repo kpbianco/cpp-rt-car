@@ -21,6 +21,14 @@ inline constexpr std::size_t rate_domain_capacity = 64;
 inline constexpr std::size_t rate_domain_name_capacity = 64;
 inline constexpr std::uint32_t rate_domain_substep_capacity = 64;
 inline constexpr std::size_t reference_release_capacity = 65'536;
+inline constexpr std::size_t cross_rate_channel_capacity = 256;
+inline constexpr std::size_t cross_rate_channel_name_capacity = 64;
+inline constexpr std::size_t cross_rate_payload_capacity = 64 * 1024;
+inline constexpr std::size_t cross_rate_initial_bytes_capacity = 1024 * 1024;
+inline constexpr std::size_t cross_rate_selection_capacity = 262'144;
+inline constexpr std::size_t cross_rate_snapshot_slot_count = 2;
+inline constexpr std::size_t cross_rate_snapshot_bytes_capacity =
+    2 * 1024 * 1024;
 
 enum class RateCriticality : std::uint8_t {
     background,

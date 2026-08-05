@@ -48,8 +48,11 @@ baseline after mandatory CI and maintainer merge. M16-01 adds an additive C++
 rate-domain and phase-ownership model plus an immutable epoch-zero reference
 timeline. It uses exact checked integer arithmetic and changes graph/replay
 compatibility identity only for an explicit rate model. It does not yet change
-callback dispatch or implement cross-rate storage, admission, late behavior,
-shedding/recovery, or telemetry fields.
+callback dispatch. M16-02 adds bounded copied CPU-to-CPU cross-rate channel
+declarations, deterministic first/repeating-supercycle sample-and-hold and
+freshness selections, and preallocated exact-generation SPSC stores. The stores
+are not invoked by runtime execution; admission, late behavior,
+shedding/recovery, and telemetry fields remain deferred.
 
 ## Claim policy
 
@@ -298,6 +301,7 @@ callback expressions.
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
 | CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Rate-domain reference plan | M16-01 implemented; external gates pending | Bounded copied domains and ownership, exact epoch-zero supercycle, immutable inspection, identity/accounting integration, and unchanged complete-graph dispatch; later M16 semantics remain incomplete |
+| Cross-rate data contract | M16-02 implemented; external gates pending | CPU-only fixed-payload channels, exact initial/wrap/held/fresh/stale selection metadata, and bounded two-slot SPSC storage; active data transfer and rate dispatch remain absent |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

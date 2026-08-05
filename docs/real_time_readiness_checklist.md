@@ -38,6 +38,10 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   checked arithmetic, phase ownership, immutable inspection, identity, and
   accounting tests. This is a functional plan gate only; it is not active
   multi-rate dispatch, admission, overload policy, or timing qualification.
+- [x] M16-02 compiles exact initial/wrap/held/fresh/stale cross-rate selections
+  and constructs a two-slot exact-generation SPSC primitive with synthetic
+  ThreadSanitizer coverage. The primitive is inactive and is not evidence of
+  active payload transfer, callback-rate execution, latency, RT1, or RT2.
 - [ ] A named deployment independently verifies requested memory locking,
   NUMA/huge-page outcomes, residency under load, and worst-case behavior;
   M15 provider/declaration injection, `mlock`, `mincore`, preflight, and hosted CI do not

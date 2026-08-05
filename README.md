@@ -27,6 +27,7 @@ versioned observability/replay, and asynchronous device integration.
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
 | Rate-domain reference plan | M16-01 implemented; external gates pending | Existing C++ SDK headers expose bounded instance-owned domains and phase bindings plus exact checked `[0, lcm)` inspection; host and periodic frames still run the complete graph once |
+| Cross-rate data contract | M16-02 implemented; external gates pending | Existing C++ SDK headers expose copied CPU-only channels, exact first/repeating sample-and-hold and freshness selections, and inactive bounded SPSC stores |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -218,8 +219,11 @@ schema 7 or C ABI v8. Up to 64 copied domains use positive integral-nanosecond
 periods and 1–64 same-time substeps; finalization rejects malformed ownership,
 checked arithmetic overflow, or more than 65,536 reference releases before
 start. Fixed-copy inspectors remain immutable and allocation-free after start.
-The plan does not yet drive callbacks or implement cross-rate freshness,
-admission, late/catch-up policy, shedding/recovery, or telemetry evolution.
+M16-02 additionally freezes CPU-only cross-rate channels, exact initial/wrap/
+held/fresh/stale selection metadata, and a two-slot exact-generation SPSC store
+per channel. The plan and stores do not yet drive callbacks or payload transfer;
+admission, late/catch-up policy, shedding/recovery, and telemetry evolution are
+deferred.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -281,7 +285,8 @@ three-region provider/resident transaction without changing steady-state
 callbacks. M15-04 adds exact logical control extents, live runtime-stack
 accounting and observation, declared-only opaque accounting, and retryable
 cross-category cleanup. M15 is complete at the audited baseline. M16-01 adds
-the bounded rate-domain/reference-plan boundary; M16 and CAP-M16 remain
+the bounded rate-domain/reference-plan boundary and M16-02 adds deterministic
+cross-rate selection plus inactive bounded stores; M16 and CAP-M16 remain
 incomplete. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.

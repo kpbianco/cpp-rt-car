@@ -42,6 +42,12 @@ or change `run_periodic()` releases. Each periodic host frame still runs the
 complete graph once under the absolute cadence above; rate-domain late,
 skip/catch-up/hold/degrade/fail behavior remains deferred.
 
+M16-02 selection ages are exact differences within that relative reference
+model, including checked prior-supercycle wrap. They use no runtime clock,
+sleep, tolerance, floating point, callback completion order, or wall time.
+Fresh/stale is immutable selection metadata and does not change cadence or
+trigger timeout, cancellation, skip, hold, degradation, or failure.
+
 `PeriodicFrameResult` reports status, frame index, release, wake, start, finish,
 signed deadline slack, miss state, watchdog state, and degradation level.
 `PeriodicRunResult` reports executed frames, deadline misses, watchdog events,

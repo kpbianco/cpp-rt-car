@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-05
-Batch baseline: `9dfcee7bc8092de768292ba35ad9bd74e5a5992e`
+Batch baseline: `8dabeb3747a20717ce02c99a3d3c0d9deb1a3532`
 
 ## Product state
 
@@ -12,9 +12,9 @@ Batch baseline: `9dfcee7bc8092de768292ba35ad9bd74e5a5992e`
 - License: Apache-2.0.
 - M14, M14.1, and M15 are complete at the audited baseline.
 - M16 is active and remains incomplete. The current approved implementation
-  contract is `contracts/active-batch.yaml` (`M16-01`).
+  contract is `contracts/active-batch.yaml` (`M16-02`).
 
-## M16-01 implementation
+## M16-01 and M16-02 implementation
 
 The worktree adds an additive C++ rate-domain model without changing the
 installed header or target inventory. A runtime can copy up to 64 stable
@@ -37,12 +37,27 @@ Rate storage is counted once inside `MemoryPlan::runtime_control_bytes` and the
 existing M15 runtime-control extent; the six-row plan equation and three-region
 provider boundary are unchanged.
 
+M16-02 adds copied, bounded C++ cross-rate channels between CPU phases in
+different explicit rate domains. Finalization emits immutable first-cycle and
+repeating-cycle sample-and-hold selections for every consumer release. The
+existing total reference order decides same-time visibility; initial samples,
+real prior-cycle sources (`source_cycle_offset == -1`), held generations, and
+fresh/stale metadata remain distinct. Maximum age is inclusive, with zero
+accepting only age zero and `UINT64_MAX` explicitly unbounded.
+
+Each compiled channel owns a two-slot, exact-generation SPSC snapshot store.
+Publication copies into a non-visible slot before a release publication; copy
+claims a committed generation before reading. Calls are single-attempt and
+return typed capacity, not-ready, stale, or malformed results without waiting,
+allocation, searching, or substituting another generation. Runtime dispatch
+does not invoke these stores yet.
+
 ## Boundary and remaining work
 
-M16-01 is model-and-reference-plan only. `step()` and `run_periodic()` still
+M16-02 remains a compiled-data-contract batch. `step()` and `run_periodic()` still
 execute the complete compiled graph once per host frame. The reference plan
-does not dispatch domains and does not implement cross-rate sample/hold or
-freshness, admission feasibility, late skip/catch-up/hold/degrade/fail policy,
+does not dispatch domains or transfer channel payloads, and it does not implement
+admission feasibility, late skip/catch-up/hold/degrade/fail policy,
 optional-work shedding/recovery, or new trace/metric fields. Those remain M16
 work, so M16 and CAP-M16 are incomplete.
 
@@ -55,6 +70,6 @@ signing, release, staging, deployment, or production validation is claimed.
 
 ## Next action
 
-Complete the M16-01 local verification contract, retain
-`docs/evidence/M16-01-2026-08-05.md`, and submit the bounded diff for mandatory
+Complete the M16-02 local verification contract, retain
+`docs/evidence/M16-02-2026-08-05.md`, and submit the bounded diff for mandatory
 CI and human review. Do not mark M16 or CAP-M16 complete from this batch.

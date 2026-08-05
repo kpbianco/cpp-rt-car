@@ -1,6 +1,7 @@
 #include <rt/runtime.hpp>
 
 #include "compiled_graph.hpp"
+#include "cross_rate_data.hpp"
 #include "device_manager.hpp"
 #include "executor.hpp"
 #include "memory_policy.hpp"
@@ -857,6 +858,12 @@ struct Runtime::Impl {
                domain.index() < rate_domains.size();
     }
 
+    [[nodiscard]] bool valid_cross_rate_channel(
+        CrossRateChannelHandle channel) const noexcept {
+        return channel.valid() && channel.owner() == graph_owner &&
+               channel.index() < cross_rate_channels.size();
+    }
+
     [[nodiscard]] bool valid_device_backend(
         DeviceBackendHandle backend) const noexcept {
         return backend.valid() &&
@@ -945,6 +952,28 @@ struct Runtime::Impl {
                 hash_u64(
                     hash,
                     static_cast<std::uint64_t>(binding.phase_kind));
+            }
+        }
+        if (!cross_rate_channels.empty()) {
+            // Conditional marker preserves both the legacy no-rate identity
+            // and the exact M16-01 explicit-rate identity when no channel is
+            // declared.
+            hash_u64(hash, 0x4d31362d78726174ull);
+            hash_u64(hash, cross_rate_channels.size());
+            for (const auto& channel : cross_rate_channels) {
+                hash_string(hash, channel.name);
+                hash_u64(hash, channel.producer.index());
+                hash_u64(hash, channel.consumer.index());
+                hash_u64(hash, channel.payload_size);
+                hash_u64(
+                    hash,
+                    static_cast<std::uint64_t>(channel.mode));
+                hash_u64(hash, channel.maximum_age_ns);
+                hash_bytes(
+                    hash,
+                    std::span<const std::byte>(
+                        channel.initial_sample.data(),
+                        channel.initial_sample.size()));
             }
         }
         return hash;
@@ -1445,6 +1474,8 @@ struct Runtime::Impl {
     std::vector<detail::RateDomainSpec> rate_domains;
     std::vector<detail::RateBindingSpec> rate_bindings;
     detail::CompiledRatePlan compiled_rate_plan;
+    std::vector<detail::CrossRateChannelSpec> cross_rate_channels;
+    detail::CompiledCrossRatePlan compiled_cross_rate_plan;
     std::unique_ptr<detail::ResidentRegionSet> resident_regions;
     std::unique_ptr<detail::TelemetryRing> telemetry;
     detail::TelemetryCounters telemetry_counters;
@@ -2115,6 +2146,152 @@ Status Runtime::bind_phase_to_rate_domain(
     return bind_phase_to_rate_domain(binding.phase, binding.domain);
 }
 
+Status Runtime::register_cross_rate_channel(
+    const CrossRateChannelRegistration& registration,
+    CrossRateChannelHandle& out_channel) noexcept {
+    out_channel = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "cross-rate channel registration is frozen");
+    }
+    std::array<char, cross_rate_channel_name_capacity> name{};
+    if (!set_identifier(name, registration.name)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "cross-rate channel name is malformed");
+    }
+    if (!impl_->valid_phase(registration.producer) ||
+        !impl_->valid_phase(registration.consumer)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "cross-rate channel endpoint handle is invalid or foreign");
+    }
+    if (registration.producer == registration.consumer ||
+        registration.payload_size == 0 ||
+        registration.payload_size > cross_rate_payload_capacity ||
+        registration.initial_sample.size() != registration.payload_size ||
+        registration.mode != CrossRateMode::sample_and_hold) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "cross-rate channel endpoints, payload, initial sample, or mode is invalid");
+    }
+    if (impl_->cross_rate_channels.size() >= cross_rate_channel_capacity) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "cross-rate channel capacity exceeded");
+    }
+    for (const auto& channel : impl_->cross_rate_channels) {
+        if (channel.name == registration.name) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "cross-rate channel names must be unique");
+        }
+        if (channel.producer == registration.producer &&
+            channel.consumer == registration.consumer) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "duplicate cross-rate semantic edge");
+        }
+    }
+    try {
+        detail::CrossRateChannelSpec candidate;
+        candidate.name = std::string(registration.name);
+        candidate.producer = registration.producer;
+        candidate.consumer = registration.consumer;
+        candidate.payload_size = registration.payload_size;
+        candidate.initial_sample.assign(
+            registration.initial_sample.begin(),
+            registration.initial_sample.end());
+        candidate.mode = registration.mode;
+        candidate.maximum_age_ns = registration.maximum_age_ns;
+        const auto index = static_cast<std::uint32_t>(
+            impl_->cross_rate_channels.size());
+        impl_->cross_rate_channels.push_back(std::move(candidate));
+        out_channel = CrossRateChannelHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::replace_cross_rate_channel(
+    CrossRateChannelHandle channel,
+    const CrossRateChannelRegistration& registration) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "cross-rate channel replacement is frozen");
+    }
+    if (!impl_->valid_cross_rate_channel(channel) ||
+        !impl_->valid_phase(registration.producer) ||
+        !impl_->valid_phase(registration.consumer)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "cross-rate channel or endpoint handle is invalid or foreign");
+    }
+    std::array<char, cross_rate_channel_name_capacity> name{};
+    if (!set_identifier(name, registration.name) ||
+        registration.producer == registration.consumer ||
+        registration.payload_size == 0 ||
+        registration.payload_size > cross_rate_payload_capacity ||
+        registration.initial_sample.size() != registration.payload_size ||
+        registration.mode != CrossRateMode::sample_and_hold) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "replacement cross-rate channel is malformed");
+    }
+    for (std::size_t index = 0;
+         index < impl_->cross_rate_channels.size();
+         ++index) {
+        if (index == channel.index()) {
+            continue;
+        }
+        const auto& existing = impl_->cross_rate_channels[index];
+        if (existing.name == registration.name ||
+            (existing.producer == registration.producer &&
+             existing.consumer == registration.consumer)) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "replacement duplicates a channel name or semantic edge");
+        }
+    }
+    try {
+        detail::CrossRateChannelSpec candidate;
+        candidate.name = std::string(registration.name);
+        candidate.producer = registration.producer;
+        candidate.consumer = registration.consumer;
+        candidate.payload_size = registration.payload_size;
+        candidate.initial_sample.assign(
+            registration.initial_sample.begin(),
+            registration.initial_sample.end());
+        candidate.mode = registration.mode;
+        candidate.maximum_age_ns = registration.maximum_age_ns;
+        impl_->cross_rate_channels[channel.index()] = std::move(candidate);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
 Status Runtime::register_resource(
     std::string_view name,
     ResourceHandle& out_resource) noexcept {
@@ -2461,6 +2638,21 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(rate_status, rate_diagnostic.message);
     }
 
+    detail::CompiledCrossRatePlan compiled_cross_rate_plan;
+    detail::CrossRateCompileDiagnostic cross_rate_diagnostic;
+    const auto cross_rate_status = detail::compile_cross_rate_data(
+        impl_->graph_owner,
+        impl_->callbacks.size(),
+        compiled_rate_plan,
+        impl_->cross_rate_channels,
+        compiled_cross_rate_plan,
+        cross_rate_diagnostic);
+    if (cross_rate_status != Status::ok) {
+        return impl_->fail(
+            cross_rate_status,
+            cross_rate_diagnostic.message);
+    }
+
     const auto minimum_graph_queue_capacity =
         impl_->callbacks.empty()
         ? std::size_t{0}
@@ -2571,8 +2763,31 @@ Status Runtime::finalize() noexcept {
     memory_plan.rate_domain_count = compiled_rate_plan.domains.size();
     memory_plan.rate_binding_count = compiled_rate_plan.bindings.size();
     memory_plan.reference_release_count = compiled_rate_plan.releases.size();
+    memory_plan.cross_rate_channel_count =
+        compiled_cross_rate_plan.channels.size();
+    memory_plan.cross_rate_selection_count =
+        compiled_cross_rate_plan.selections.size();
+    bool plan_valid = true;
+    for (std::size_t index = 0;
+         index < impl_->cross_rate_channels.size();
+         ++index) {
+        const auto& channel = impl_->cross_rate_channels[index];
+        const auto& store = compiled_cross_rate_plan.stores[index];
+        plan_valid = plan_valid && detail::checked_add(
+            memory_plan.cross_rate_initial_sample_bytes,
+            channel.initial_sample.size(),
+            memory_plan.cross_rate_initial_sample_bytes);
+        plan_valid = plan_valid && detail::checked_add(
+            memory_plan.cross_rate_snapshot_slot_count,
+            store.slot_count(),
+            memory_plan.cross_rate_snapshot_slot_count);
+        plan_valid = plan_valid && detail::checked_add(
+            memory_plan.cross_rate_snapshot_bytes,
+            store.payload_storage_bytes(),
+            memory_plan.cross_rate_snapshot_bytes);
+    }
 
-    bool plan_valid = detail::checked_align_up(
+    plan_valid = plan_valid && detail::checked_align_up(
         memory_plan.phase_scratch_bytes,
         memory_plan.scratch_alignment,
         memory_plan.phase_scratch_stride);
@@ -2661,12 +2876,10 @@ Status Runtime::finalize() noexcept {
                    add_runtime_bytes(bytes);
         };
 
-    const auto add_rate_plan_array =
-        [&](std::size_t count, std::size_t element_size) {
-            std::size_t bytes = 0;
+    const auto add_rate_plan_bytes =
+        [&](std::size_t bytes) {
             std::size_t total = 0;
-            if (!detail::checked_multiply(count, element_size, bytes) ||
-                !detail::checked_add(
+            if (!detail::checked_add(
                     memory_plan.rate_plan_bytes,
                     bytes,
                     total) ||
@@ -2675,6 +2888,12 @@ Status Runtime::finalize() noexcept {
             }
             memory_plan.rate_plan_bytes = total;
             return true;
+        };
+    const auto add_rate_plan_array =
+        [&](std::size_t count, std::size_t element_size) {
+            std::size_t bytes = 0;
+            return detail::checked_multiply(count, element_size, bytes) &&
+                add_rate_plan_bytes(bytes);
         };
 
     plan_valid = plan_valid && add_runtime_array(
@@ -2738,14 +2957,7 @@ Status Runtime::finalize() noexcept {
             domain.name.data());
         if (name_begin < object_begin || name_begin >= object_end) {
             const auto bytes = domain.name.capacity() + 1;
-            std::size_t total = 0;
-            plan_valid = plan_valid &&
-                detail::checked_add(
-                    memory_plan.rate_plan_bytes,
-                    bytes,
-                    total) &&
-                add_runtime_bytes(bytes);
-            memory_plan.rate_plan_bytes = total;
+            plan_valid = plan_valid && add_rate_plan_bytes(bytes);
         }
     }
     plan_valid = plan_valid && add_rate_plan_array(
@@ -2760,6 +2972,38 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_rate_plan_array(
         compiled_rate_plan.releases.capacity(),
         sizeof(ReferenceRelease));
+    plan_valid = plan_valid && add_rate_plan_array(
+        impl_->cross_rate_channels.capacity(),
+        sizeof(detail::CrossRateChannelSpec));
+    for (const auto& channel : impl_->cross_rate_channels) {
+        const auto object_begin = reinterpret_cast<std::uintptr_t>(&channel);
+        const auto object_end = object_begin + sizeof(channel);
+        const auto name_begin = reinterpret_cast<std::uintptr_t>(
+            channel.name.data());
+        if (name_begin < object_begin || name_begin >= object_end) {
+            plan_valid = plan_valid &&
+                add_rate_plan_bytes(channel.name.capacity() + 1);
+        }
+        plan_valid = plan_valid && add_rate_plan_array(
+            channel.initial_sample.capacity(),
+            sizeof(std::byte));
+    }
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_cross_rate_plan.channels.capacity(),
+        sizeof(CompiledCrossRateChannel));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_cross_rate_plan.selections.capacity(),
+        sizeof(CompiledCrossRateSelection));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_cross_rate_plan.stores.capacity(),
+        sizeof(detail::SnapshotStore));
+    for (const auto& store : compiled_cross_rate_plan.stores) {
+        plan_valid = plan_valid && add_rate_plan_array(
+            store.slot_count(),
+            sizeof(detail::SnapshotSlotControl));
+        plan_valid = plan_valid &&
+            add_rate_plan_bytes(store.payload_storage_bytes());
+    }
     plan_valid = plan_valid && add_runtime_array(
         compiled_order.capacity(),
         sizeof(PhaseHandle));
@@ -2968,6 +3212,39 @@ Status Runtime::finalize() noexcept {
             compiled_rate_plan.releases.capacity(),
             sizeof(ReferenceRelease));
         add_runtime_extent(
+            impl_->cross_rate_channels.data(),
+            impl_->cross_rate_channels.capacity(),
+            sizeof(detail::CrossRateChannelSpec));
+        for (const auto& channel : impl_->cross_rate_channels) {
+            add_external_string(channel, channel.name);
+            add_runtime_extent(
+                channel.initial_sample.data(),
+                channel.initial_sample.capacity(),
+                sizeof(std::byte));
+        }
+        add_runtime_extent(
+            compiled_cross_rate_plan.channels.data(),
+            compiled_cross_rate_plan.channels.capacity(),
+            sizeof(CompiledCrossRateChannel));
+        add_runtime_extent(
+            compiled_cross_rate_plan.selections.data(),
+            compiled_cross_rate_plan.selections.capacity(),
+            sizeof(CompiledCrossRateSelection));
+        add_runtime_extent(
+            compiled_cross_rate_plan.stores.data(),
+            compiled_cross_rate_plan.stores.capacity(),
+            sizeof(detail::SnapshotStore));
+        for (const auto& store : compiled_cross_rate_plan.stores) {
+            add_runtime_extent(
+                store.control_data(),
+                store.control_storage_bytes(),
+                1);
+            add_runtime_extent(
+                store.payload_data(),
+                store.payload_storage_bytes(),
+                1);
+        }
+        add_runtime_extent(
             compiled_order.data(),
             compiled_order.capacity(),
             sizeof(PhaseHandle));
@@ -3030,6 +3307,7 @@ Status Runtime::finalize() noexcept {
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
     impl_->compiled_order = std::move(compiled_order);
     impl_->compiled_rate_plan = std::move(compiled_rate_plan);
+    impl_->compiled_cross_rate_plan = std::move(compiled_cross_rate_plan);
     impl_->resident_regions = std::move(resident_regions);
     impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
@@ -4215,6 +4493,72 @@ bool Runtime::reference_release_at(
     }
     release = impl_->compiled_rate_plan.releases[release_index];
     return true;
+}
+
+bool Runtime::cross_rate_model_enabled() const noexcept {
+    return impl_ && !impl_->provider_callback_active() &&
+        impl_->state != RuntimeState::configuring &&
+        !impl_->compiled_cross_rate_plan.channels.empty();
+}
+
+std::size_t Runtime::cross_rate_channel_count() const noexcept {
+    return cross_rate_model_enabled()
+        ? impl_->compiled_cross_rate_plan.channels.size()
+        : 0;
+}
+
+std::size_t Runtime::cross_rate_selection_count() const noexcept {
+    return cross_rate_model_enabled()
+        ? impl_->compiled_cross_rate_plan.selections.size()
+        : 0;
+}
+
+bool Runtime::compiled_cross_rate_channel_at(
+    std::size_t registration_index,
+    CompiledCrossRateChannel& channel) const noexcept {
+    channel = {};
+    if (!cross_rate_model_enabled() ||
+        registration_index >=
+            impl_->compiled_cross_rate_plan.channels.size()) {
+        return false;
+    }
+    channel = impl_->compiled_cross_rate_plan.channels[registration_index];
+    return true;
+}
+
+bool Runtime::compiled_cross_rate_selection_at(
+    std::size_t selection_index,
+    CompiledCrossRateSelection& selection) const noexcept {
+    selection = {};
+    if (!cross_rate_model_enabled() ||
+        selection_index >=
+            impl_->compiled_cross_rate_plan.selections.size()) {
+        return false;
+    }
+    selection = impl_->compiled_cross_rate_plan.selections[selection_index];
+    return true;
+}
+
+Status Runtime::copy_cross_rate_initial_sample(
+    std::size_t registration_index,
+    std::span<std::byte> output) const noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (!cross_rate_model_enabled() ||
+        registration_index >= impl_->cross_rate_channels.size()) {
+        return Status::invalid_argument;
+    }
+    const auto& initial =
+        impl_->cross_rate_channels[registration_index].initial_sample;
+    if (output.size() < initial.size()) {
+        return Status::capacity_exceeded;
+    }
+    if (output.size() != initial.size()) {
+        return Status::invalid_argument;
+    }
+    std::copy(initial.begin(), initial.end(), output.begin());
+    return Status::ok;
 }
 
 bool Runtime::static_phase_assignment_at(
