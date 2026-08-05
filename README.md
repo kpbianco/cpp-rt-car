@@ -25,7 +25,7 @@ versioned observability/replay, and asynchronous device integration.
 | Host job-system adapter | Implemented RT0 surface | A third executor policy submits the same immutable graph/range/reduction jobs to a borrowed fixed-capacity engine queue with explicit runtime scratch and generation-tagged completion context |
 | Nested CPU work | Implemented RT0 surface | C and C++ callbacks can submit synchronous range/reduction work through their callback-local task context |
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
-| CPU/memory policy model | Implemented through M15-03 at RT0 | Additive bounded C++ reports inventory every role/category; Linux runtime-owned lanes apply/read back policy, and a copied provider or native path transactionally backs phase scratch, task scratch, and trace storage; external/deferred rows remain verify-only or unmodified |
+| CPU/memory policy model | M15-04 implemented; external gates pending | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -180,7 +180,7 @@ boundary in `<rt/runtime.hpp>`,
 11. call `stop()` and require success before releasing borrowed provider user
     data, backend, buffer, callback, state, clock, or host-executor storage.
 
-The M15-03 memory provider is an exact size/versioned table with acquire,
+The M15 memory provider is an exact size/versioned table with acquire,
 apply, observe, rollback, and nonthrowing release callbacks. It is used only on
 configure/finalize/start/stop control paths for active phase scratch, task
 scratch, and trace storage. The default path retains aligned-new behavior.
@@ -190,11 +190,25 @@ fallback, caller/prefault page touch, `mlock`, and `mincore` residency
 observation. Live token and allocation extents cannot alias across runtime
 instances, and locking-only native storage uses independent page-backed
 mappings. `mlock` is not independent lock readback or device/DMA pinning.
-Native physical NUMA placement is not independently observed in M15-03, so a
+Native physical NUMA placement is not independently observed, so a
 strict runtime-provider NUMA request is rejected and best effort falls back;
 an injected provider must advertise and independently observe NUMA binding.
 Checked provider-backed stop destroys trace/executor owners and releases tokens
-in reverse order; trace is unavailable afterward.
+in reverse order; trace is unavailable afterward. M15-04 separately validates
+a non-overlapping logical extent ledger for runtime, executor, and device
+controls against the immutable `MemoryPlan`, and reports exact, declared-only,
+partial, unknown, or not-applicable accounting without treating logical bytes
+as allocator commitment or physical residency. Bounded configuring-time
+declarations are copied metadata for opaque external/backend resources; they
+authorize no mutation and establish no qualification.
+
+Runtime-owned executor, watchdog, and device-service lanes publish live native
+stack and guard commitment. Supported Linux stack locking/residency requests
+participate in the startup barrier. Stack cleanup runs on the owning quiescent
+lane before join and is status-bearing and retryable. A failed device, lane,
+stack, or selected-region cleanup retains ownership, prevents provider-token
+release, and requires checked `stop()` retry; destruction with unresolved
+ownership fails closed.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
 concurrently. The static policy freezes worker placement; the throughput policy
@@ -253,8 +267,10 @@ path. M12 adds the named support matrix, cross-instance device-isolation gate,
 finalization validation, Linux runtime-owned thread apply/readback, stable
 role/category identities, external verify-only ownership, and the bounded
 three-region provider/resident transaction without changing steady-state
-callbacks. Fragmented control storage, stack residency, and complete byte
-closure remain M15-04 work. The
+callbacks. M15-04 adds exact logical control extents, live runtime-stack
+accounting and observation, declared-only opaque accounting, and retryable
+cross-category cleanup. Mandatory CI and human compatibility/concurrency
+review remain completion gates. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.
 

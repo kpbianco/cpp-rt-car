@@ -26,7 +26,7 @@ public:
         ThreadPolicyProvider& provider,
         ThreadStartupGate& gate,
         const ThreadRolePlan& plan) noexcept;
-    void stop() noexcept;
+    Status stop() noexcept;
     void wait_started() const noexcept;
     [[nodiscard]] const ThreadStartupResult& startup_result() const noexcept {
         return startup_result_;

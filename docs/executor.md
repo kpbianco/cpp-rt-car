@@ -29,7 +29,9 @@ joins workers in reverse index order before resident-memory rollback. With a
 provider-backed task-scratch span, it destroys the executor before releasing
 the token. If the M5 watchdog is configured,
 `start()` also creates one separate service lane; it never executes graph or
-nested CPU work.
+nested CPU work. M15-04 quiesces workers and completes status-bearing stack
+cleanup on each owning lane in reverse index order before join and
+resident-memory rollback.
 
 The `host_adapter` policy is the explicit exception to runtime-owned worker and
 queue storage. The host attaches a fixed callback table before finalization,
@@ -37,9 +39,10 @@ declares capacities equal to the runtime configuration, and keeps its job
 system live through `stop()`. `start()` creates no CPU worker for that policy;
 the host owns worker threads, queue memory, affinity, priority, and shutdown.
 Runtime-owned graph state and aligned task scratch remain fully planned.
-The host adapter does not change the M15-03 provider boundary: task scratch can
+The host adapter does not change the M15 provider boundary: task scratch can
 use the selected provider, but host-owned queues, workers, stacks, affinity,
-and job-system state are never adopted or mutated.
+and job-system state are never adopted or mutated. Their accounting remains
+unknown or partial unless the host supplies bounded declared-only metadata.
 
 Workers use bounded lock-free local rings. The resolved role policy selects
 spin, yield, or per-worker atomic park waiting, with queue publication and stop

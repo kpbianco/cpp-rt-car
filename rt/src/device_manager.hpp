@@ -89,7 +89,9 @@ public:
         const ThreadRolePlan& plan) noexcept;
     [[nodiscard]] Status initialize() noexcept;
     void wait_started() const noexcept;
-    void stop_lane() noexcept;
+    Status quiesce_lane() noexcept;
+    Status cleanup_lane() noexcept;
+    Status stop_lane() noexcept;
     [[nodiscard]] Status stop() noexcept;
     [[nodiscard]] bool cleanup_pending() const noexcept;
 
@@ -115,9 +117,13 @@ public:
     [[nodiscard]] std::size_t buffer_count() const noexcept {
         return buffers_.size();
     }
+    void append_control_extents(
+        std::vector<LogicalControlExtent>& extents,
+        std::uint64_t& next_extent_id) const;
 
     [[nodiscard]] static bool estimate_control_storage(
         std::size_t backend_count,
+        std::size_t backend_name_bytes,
         std::size_t buffer_count,
         std::size_t outstanding_capacity,
         std::size_t completion_batch,

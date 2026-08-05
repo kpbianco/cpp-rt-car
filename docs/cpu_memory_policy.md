@@ -3,9 +3,11 @@
 M15-01 added the additive C++ policy and report model, and M15-02 applied and
 read back runtime-owned thread policy through a fail-closed startup
 transaction. M15-03 adds a bounded resident-region transaction for exactly
-phase scratch, task scratch, and trace storage. This is portable RT0 and
+phase scratch, task scratch, and trace storage. M15-04 adds exact logical
+control extents, live runtime-owned stack accounting, declared-only opaque
+facts, and retryable cross-category cleanup. This is portable RT0 and
 named-host Linux functional behavior, not hardware, latency, RT1, or RT2
-qualification.
+qualification. Mandatory CI and human review remain M15 completion gates.
 
 `Runtime::set_cpu_memory_policy()` copies one bounded `CpuMemoryPolicy` while
 the runtime is configuring. `Runtime::finalize()` validates the complete model,
@@ -19,6 +21,10 @@ provider and retry.
 The model is separate from runtime-config schema 7 and its 25 JSON/profile
 keys. It is an additive C++ source API in the installed `<rt/config.hpp>` and
 `<rt/runtime.hpp>` headers. Stable C ABI v8 and device ABI v1 are unchanged.
+M15-04 appends fields after the pre-existing aggregate prefixes in
+`CpuMemoryPolicy`, `ThreadPolicyReport`, `MemoryPolicyReport`, and
+`CpuMemoryPolicyReport`; prior positional aggregate initialization retains its
+meaning, and default initialization selects best-effort incomplete accounting.
 
 ## Bounded requests
 
@@ -26,6 +32,17 @@ A policy contains at most 16 thread-role requests and 16 memory-region
 requests. CPU sets contain at most 256 explicit CPU identifiers and thread
 names contain at most 31 characters plus a terminating NUL. Names use
 `A-Za-z0-9._-`.
+
+M15-04 also accepts at most 32 copied `ResourceAccountingDeclaration` records.
+Each uses an existing stable thread or memory accounting key and supplies a
+bounded logical cardinality and byte total for an external or opaque owner.
+Duplicate, malformed, overflowing, runtime-owned, mixed aggregate/role, and
+device-ABI-v1-contradicting declarations fail finalization. A declaration is
+trusted host metadata only: it never applies policy, authorizes mutation, or
+qualifies the declared resource. A declaration also cannot contradict a known
+caller or host-adapter cardinality. The reserved `memory.host-provider` row is
+not declarable: provider commitment remains on the selected planned rows so it
+cannot be counted twice in aggregate totals.
 
 Thread policy covers CPU sets, scheduler class/priority, NUMA selection, wait
 strategy, stack/guard size, bounded name, and best-effort or strict
@@ -119,8 +136,8 @@ task scratch + trace storage = planned_bytes
 | `memory.registered-state` | informational external | Borrowed canonical state bytes; never mutated by memory policy |
 | `memory.backend-control` | informational external | Backend-reported private control bytes; never mutated by memory policy |
 | `memory.registered-device-buffer` | informational external | Checked sum of borrowed registered buffer spans; never mutated by memory policy |
-| `memory.runtime-thread-stack` | excluded | Known runtime-owned thread count; stack/guard attributes are reported per thread, but committed/resident bytes remain outside the memory ledger |
-| `memory.external-thread-stack` | excluded | Known caller/host lanes plus explicitly unknown vendor cardinality |
+| `memory.runtime-thread-stack` | excluded | Exact live executor/watchdog/device-service cardinality and native stack/guard commitment after startup; supported Linux residency is observed while mappings are live |
+| `memory.external-thread-stack` | excluded | Caller/host/vendor stacks remain unknown or partial unless bounded declared-only metadata closes their logical facts |
 | `memory.host-provider` | excluded | Reserved accounting row; provider outcomes are reported on selected backing rows and are not double-counted here |
 
 `accounted_bytes` retains finalized plan or informational payload identity, and
@@ -130,6 +147,21 @@ resident, verified-locked, and provider-confirmed pinned bytes are distinct
 observations. Actual guards/page size, explicit huge-page outcome, fallback,
 acquired/applied/verified states, and provider/native errors remain on the same
 row. These fields do not change or double count the plan.
+
+Each row and each planned, informational, excluded, and closed aggregate has a
+`ResourceAccountingExactness`: `exact`, `declared_only`, `partial`, `unknown`,
+or `not_applicable`. Exactness describes the provenance/completeness of logical
+accounting, not physical allocation or residency. `accounting_complete` becomes
+true only when required facts are closed; portable best effort remains usable
+with explicit incomplete totals.
+
+After persistent objects are constructed, finalization inventories their
+actual runtime, executor, and device control extents. Extent identities and
+addresses must be nonzero, unique, non-overlapping, and non-overflowing. Each
+owner's extent count and checked byte sum must match the corresponding
+construction-derived `MemoryPlan` control term. A missing, duplicate,
+overlapping, overflowing, or estimate-mismatched extent fails before the
+report is published or callbacks can run.
 
 ## Resolution and validation
 
@@ -143,17 +175,20 @@ externally owned and verify-only.
 
 Finalization rejects out-of-capacity counts, unknown identities, duplicates,
 invalid names/discriminators, contradictory scheduler/stack/guard/huge-page
-requests, and arithmetic overflow. A strict non-default request for fragmented
-runtime/executor/device control, either stack row, borrowed registered state or
-device buffers, backend control, or the reserved host-provider row fails
-instead of claiming application. Best-effort unsupported fields retain usable
-default allocation with explicit fallback or unsupported state. Owner-thread
-first touch and any other unobservable strict request are rejected rather than
-inferred.
+requests, and arithmetic overflow. Fragmented control extents are logical
+accounting only: a request that would lock, guard, remap, touch, move, or unlock
+allocator-shared controls, configuring-state `Runtime::Impl`, borrowed memory,
+or backend storage fails strict validation and remains unsupported in best
+effort. Runtime-stack policy supports only live operations the platform can
+safely apply and observe; custom host stack substitution and provider-backed
+stacks are not introduced. Other unobservable strict requests are rejected
+rather than inferred.
 
-Strict thread creation, apply, or read-back failures leave the runtime
-finalized and retryable. Best-effort unsupported, failed, or mismatched
-operations remain visible and are never promoted to success. Portable
+Strict thread creation, apply, read-back, or live-stack failures leave the
+runtime finalized and retryable. Best-effort unsupported, failed, or mismatched
+operations remain visible and are never promoted to success. If native stack
+metadata itself is unavailable, best effort retains an `unknown` logical total
+instead of blocking startup or presenting a zero-byte total as exact. Portable
 non-Linux builds retain default behavior and report unsupported non-default
 native policy truthfully.
 
@@ -171,6 +206,17 @@ success is not independent lock readback, and `mlock` never establishes
 provider, CUDA, device, or DMA pinning. Provider pinning is reportable only
 from an advertised capability and independent provider observation.
 
+Every runtime-owned executor, watchdog, and device-service lane supplies its
+live native stack mapping, committed stack bytes, guard bytes, and supported
+observation to the startup transaction before the gate commits. The public
+runtime-stack row aggregates the exact finalized cardinality and checked byte
+totals once. Linux NPTL includes the guard inside the stack-size allocation,
+so the reported commitment is the complete `pthread_getattr_np` stack extent
+and the guard is a classified subspan, not an added second commitment. Linux
+locking or residency requests operate only on the live usable stack pages. `mlock`
+success is still not independent lock readback or device/DMA pinning; an
+unobservable fact remains unsupported rather than inferred.
+
 A strict memory apply, observation, or mismatch failure rolls back attempted
 memory operations in reverse region order and leaves the runtime finalized and
 retryable. A rollback error remains inspectable and blocks a new apply or token
@@ -181,14 +227,18 @@ provider, or periodic observer runs before commit. Existing M14.1 retryable
 device ownership markers remain authoritative when backend cleanup cannot
 complete.
 
-Successful stop first quiesces device, executor, and watchdog lanes, rolls
-back resident-region operations, destroys provider-backed trace/executor
-objects, and releases trace, task, then phase tokens. Provider-backed trace is
-therefore unavailable after checked stop releases its token. Destruction is a
-best-effort fallback. A rollback failure makes checked stop fail without
-releasing tokens; retrying stop must complete rollback first. Provider callbacks
-occur only on configure/finalize/start/stop control paths, never from
-steady-state phase, task, device, watchdog, or periodic-observer execution.
+Successful stop resolves device/backend ownership, quiesces the device-service
+lane, executor workers in reverse instance order, and watchdog, and completes
+stack cleanup on each owning quiescent lane before join. It then reverses any
+safely applied control-policy state and the selected resident regions before destroying owners and releasing
+trace, task, then phase tokens. The first error is retained while independent
+safe cleanup continues. A failed stack or region cleanup keeps its owner and
+bytes explicit, prevents token release, and retries only unresolved work.
+Provider-backed trace is unavailable after checked stop releases its token.
+Destruction cannot return cleanup status and fails closed if ownership remains
+unresolved. Provider callbacks occur only on configure/finalize/start/stop
+control paths, never from steady-state phase, task, device, watchdog, or
+periodic-observer execution.
 
 Resolved `spin`, `yield`, or `park` controls only its matching worker/service
 idle loop. Bounded wake sequences prevent lost work/stop notifications. No
@@ -202,14 +252,18 @@ spans and token aliasing, failure rollback/retry, truthful observations,
 default and Linux native allocation, selected backing behavior, zero-byte rows,
 no-allocation frames, and two-runtime isolation. Thread-policy tests cover
 role sequencing, failure rollback/retry, wait strategies, external ownership,
-and Linux application/readback on already allowed resources.
+and Linux application/readback on already allowed resources. M15-04 tests add
+control-ledger rejection, bounded declaration validation, exactness totals,
+live stack aggregation/observation, owning-lane cleanup failure and retry,
+first-error retention, provider-boundary preservation, and pre-M15-04 aggregate
+prefix compatibility.
 
 The earlier thread-policy evidence establishes named-host Linux native functional application/readback only; it is not a deployment or latency result.
 
-These tests can establish injected-provider semantics and named-host Linux
-functional allocation/OS-observed residency for the selected rows only. They
-do not establish privileged lock/NUMA/huge-page availability, device or DMA
-pinning, complete M15 byte closure, worst-case latency, physical hardware or
-HIL behavior, field results, RT1, RT2, signing, release, deployment, or
-production validation. Fragmented control allocations, runtime stack
-residency, and exact external/backend accounting remain M15-04 work.
+These tests can establish logical accounting, injected declarations/providers,
+rollback ownership, and named-host Linux functional allocation/OS-observed
+residency only. Declared bytes are not independent observation, and one-host
+stack/control observation is not qualification. The tests do not establish
+privileged lock/NUMA/huge-page availability, device or DMA pinning, worst-case
+latency, physical hardware or HIL behavior, field results, RT1, RT2, signing,
+release, deployment, or production validation.

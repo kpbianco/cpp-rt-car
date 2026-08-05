@@ -111,6 +111,24 @@ TEST(CpuMemoryPolicy, ReportRetainsPreM15_03AggregatePrefix) {
     EXPECT_EQ(row.applied, rt::PolicyOperationState::succeeded);
     EXPECT_EQ(row.verified, rt::PolicyOperationState::succeeded);
     EXPECT_EQ(row.acquired, rt::PolicyOperationState::not_attempted);
+    EXPECT_EQ(
+        row.accounting_exactness,
+        rt::ResourceAccountingExactness::unknown);
+
+    const rt::CpuMemoryPolicy old_policy{1, {}, 1, {}};
+    EXPECT_EQ(old_policy.thread_policy_count, 1u);
+    EXPECT_EQ(old_policy.memory_policy_count, 1u);
+    EXPECT_EQ(
+        old_policy.accounting_requirement,
+        rt::PolicyRequirement::best_effort);
+    EXPECT_EQ(old_policy.accounting_declaration_count, 0u);
+
+    const rt::CpuMemoryPolicyReport old_report{
+        rt::cpu_memory_policy_schema_version, 0, {}, 0, {}};
+    EXPECT_EQ(
+        old_report.closed_total.exactness,
+        rt::ResourceAccountingExactness::not_applicable);
+    EXPECT_FALSE(old_report.accounting_complete);
 }
 
 TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
@@ -230,6 +248,33 @@ TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
         }
     }
     EXPECT_EQ(planned_sum, plan.planned_bytes);
+    EXPECT_EQ(report.planned_total.accounted_bytes, plan.planned_bytes);
+    EXPECT_EQ(
+        report.planned_total.exactness,
+        rt::ResourceAccountingExactness::exact);
+    EXPECT_FALSE(report.accounting_complete);
+
+    const auto* runtime_control =
+        find_memory(report, rt::memory_region_runtime_control);
+    const auto* executor_control =
+        find_memory(report, rt::memory_region_executor_control);
+    const auto* device_control =
+        find_memory(report, rt::memory_region_device_control);
+    ASSERT_NE(runtime_control, nullptr);
+    ASSERT_NE(executor_control, nullptr);
+    ASSERT_NE(device_control, nullptr);
+    EXPECT_EQ(runtime_control->accounted_bytes, plan.runtime_control_bytes);
+    EXPECT_EQ(executor_control->accounted_bytes, plan.executor_control_bytes);
+    EXPECT_EQ(device_control->accounted_bytes, plan.device_control_bytes);
+    EXPECT_EQ(
+        runtime_control->accounting_exactness,
+        rt::ResourceAccountingExactness::exact);
+    EXPECT_EQ(
+        executor_control->accounting_exactness,
+        rt::ResourceAccountingExactness::exact);
+    EXPECT_EQ(
+        device_control->accounting_exactness,
+        rt::ResourceAccountingExactness::exact);
 
     const auto* state_row =
         find_memory(report, rt::memory_region_registered_state);
@@ -257,6 +302,237 @@ TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
     EXPECT_EQ(
         external_stacks->resolution,
         rt::PolicyResolutionState::portable_default);
+}
+
+TEST(CpuMemoryPolicy, BoundedDeclarationsCloseExternalFactsWithoutQualification) {
+    rt::Runtime runtime;
+    rt::CpuMemoryPolicy policy;
+    policy.accounting_requirement = rt::PolicyRequirement::strict;
+    policy.accounting_declaration_count = 1;
+    policy.accounting_declarations[0] = {
+        rt::thread_resource_accounting_key(rt::thread_role_frame),
+        1,
+        8u * 1024u * 1024u,
+    };
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* frame = find_thread(report, rt::thread_role_frame);
+    const auto* external =
+        find_memory(report, rt::memory_region_external_thread_stack);
+    ASSERT_NE(frame, nullptr);
+    ASSERT_NE(external, nullptr);
+    EXPECT_EQ(frame->declared_accounted_bytes, 8u * 1024u * 1024u);
+    EXPECT_EQ(
+        frame->accounting_exactness,
+        rt::ResourceAccountingExactness::declared_only);
+    EXPECT_EQ(external->logical_region_count, 1u);
+    EXPECT_EQ(external->accounted_bytes, 8u * 1024u * 1024u);
+    EXPECT_EQ(
+        external->accounting_exactness,
+        rt::ResourceAccountingExactness::declared_only);
+    EXPECT_FALSE(report.accounting_complete);
+
+#if defined(__linux__)
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    EXPECT_TRUE(report.accounting_complete);
+    EXPECT_EQ(
+        report.closed_total.exactness,
+        rt::ResourceAccountingExactness::declared_only);
+#else
+    EXPECT_EQ(runtime.start(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    EXPECT_FALSE(report.accounting_complete);
+    EXPECT_EQ(
+        report.closed_total.exactness,
+        rt::ResourceAccountingExactness::partial);
+    EXPECT_NE(
+        runtime.last_error().find("live runtime stack facts"),
+        std::string_view::npos);
+#endif
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(CpuMemoryPolicy, StrictClosureRejectsMissingFactsBeforeNativeMutation) {
+    rt::Runtime runtime;
+    rt::CpuMemoryPolicy policy;
+    policy.accounting_requirement = rt::PolicyRequirement::strict;
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+    EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::configuring);
+    EXPECT_NE(
+        runtime.last_error().find("external declarations"),
+        std::string_view::npos);
+}
+
+TEST(CpuMemoryPolicy, FullyDeclaredHostAdapterClosesWithoutNativeOwnership) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.executor_policy = rt::ExecutorPolicy::host_adapter;
+    config.worker_count = 2;
+    config.executor_queue_capacity = 8;
+    config.task_scratch_slots = 8;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.set_host_executor({
+            nullptr,
+            2,
+            8,
+            &host_submit,
+            &host_try_execute_one,
+        }),
+        rt::Status::ok);
+    rt::CpuMemoryPolicy policy;
+    policy.accounting_requirement = rt::PolicyRequirement::strict;
+    policy.accounting_declaration_count = 2;
+    policy.accounting_declarations[0] = {
+        rt::thread_resource_accounting_key(rt::thread_role_frame),
+        1,
+        8u * 1024u * 1024u,
+    };
+    policy.accounting_declarations[1] = {
+        rt::thread_resource_accounting_key(
+            rt::thread_role_executor_worker),
+        2,
+        16u * 1024u * 1024u,
+    };
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* executor = find_thread(
+        report,
+        rt::thread_role_executor_worker);
+    const auto* external = find_memory(
+        report,
+        rt::memory_region_external_thread_stack);
+    const auto* runtime_stack = find_memory(
+        report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(executor, nullptr);
+    ASSERT_NE(external, nullptr);
+    ASSERT_NE(runtime_stack, nullptr);
+    EXPECT_EQ(executor->ownership, rt::ResourceOwnership::host_executor);
+    EXPECT_EQ(
+        executor->accounting_exactness,
+        rt::ResourceAccountingExactness::declared_only);
+    EXPECT_EQ(external->logical_region_count, 3u);
+    EXPECT_EQ(external->accounted_bytes, 24u * 1024u * 1024u);
+    EXPECT_EQ(
+        external->accounting_exactness,
+        rt::ResourceAccountingExactness::declared_only);
+    EXPECT_EQ(runtime_stack->logical_region_count, 0u);
+    EXPECT_EQ(
+        runtime_stack->accounting_exactness,
+        rt::ResourceAccountingExactness::exact);
+    EXPECT_TRUE(report.accounting_complete);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(CpuMemoryPolicy, RejectsDuplicateOwnedAndContradictoryDeclarations) {
+    rt::CpuMemoryPolicy capacity;
+    capacity.accounting_declaration_count =
+        rt::resource_accounting_declaration_capacity + 1;
+    expect_invalid_policy(capacity, "capacity");
+
+    rt::CpuMemoryPolicy malformed;
+    malformed.accounting_declaration_count = 1;
+    malformed.accounting_declarations[0] = {
+        rt::thread_resource_accounting_key(rt::thread_role_frame),
+        1,
+        std::numeric_limits<std::size_t>::max(),
+    };
+    expect_invalid_policy(malformed, "malformed or exceeds bounds");
+
+    rt::CpuMemoryPolicy duplicate;
+    duplicate.accounting_declaration_count = 2;
+    duplicate.accounting_declarations[0].accounting_key =
+        rt::thread_resource_accounting_key(rt::thread_role_frame);
+    duplicate.accounting_declarations[0].logical_region_count = 1;
+    duplicate.accounting_declarations[1] =
+        duplicate.accounting_declarations[0];
+    expect_invalid_policy(duplicate, "duplicate key");
+
+    rt::CpuMemoryPolicy owned;
+    owned.accounting_declaration_count = 1;
+    owned.accounting_declarations[0] = {
+        rt::memory_resource_accounting_key(
+            rt::memory_region_runtime_control),
+        1,
+        1,
+    };
+    expect_invalid_policy(owned, "owned identity");
+
+    rt::CpuMemoryPolicy aggregate_cardinality;
+    aggregate_cardinality.accounting_declaration_count = 1;
+    aggregate_cardinality.accounting_declarations[0] = {
+        rt::memory_resource_accounting_key(
+            rt::memory_region_external_thread_stack),
+        2,
+        16u * 1024u * 1024u,
+    };
+    expect_invalid_policy(aggregate_cardinality, "known cardinality");
+
+    rt::Runtime host_runtime;
+    rt::RuntimeConfig host_config;
+    host_config.executor_policy = rt::ExecutorPolicy::host_adapter;
+    host_config.worker_count = 2;
+    host_config.executor_queue_capacity = 8;
+    host_config.task_scratch_slots = 8;
+    ASSERT_EQ(host_runtime.configure(host_config), rt::Status::ok);
+    ASSERT_EQ(
+        host_runtime.set_host_executor({
+            nullptr,
+            2,
+            8,
+            &host_submit,
+            &host_try_execute_one,
+        }),
+        rt::Status::ok);
+    rt::CpuMemoryPolicy host_cardinality;
+    host_cardinality.accounting_declaration_count = 1;
+    host_cardinality.accounting_declarations[0] = {
+        rt::thread_resource_accounting_key(
+            rt::thread_role_executor_worker),
+        3,
+        24u * 1024u * 1024u,
+    };
+    ASSERT_EQ(
+        host_runtime.set_cpu_memory_policy(host_cardinality),
+        rt::Status::ok);
+    EXPECT_EQ(host_runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_NE(
+        host_runtime.last_error().find("known cardinality"),
+        std::string_view::npos);
+
+    rt::Runtime runtime;
+    rt::MockDeviceBackend backend({2, 1, 1, 1'000});
+    rt::RuntimeConfig config;
+    config.device_backend_capacity = 1;
+    config.device_buffer_capacity = 1;
+    config.device_outstanding_capacity = 2;
+    config.device_completion_batch = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    rt::DeviceBackendHandle handle;
+    ASSERT_EQ(
+        runtime.register_device_backend({"decl.mock", backend.api()}, handle),
+        rt::Status::ok);
+    rt::CpuMemoryPolicy contradiction;
+    contradiction.accounting_declaration_count = 1;
+    contradiction.accounting_declarations[0] = {
+        rt::memory_resource_accounting_key(rt::memory_region_backend_control),
+        1,
+        1,
+    };
+    ASSERT_EQ(runtime.set_cpu_memory_policy(contradiction), rt::Status::ok);
+    EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_NE(runtime.last_error().find("device ABI v1"), std::string_view::npos);
 }
 
 TEST(CpuMemoryPolicy, BestEffortRequestsResolveToExplicitPortableNoops) {

@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <limits>
 #include <new>
 #include <string>
@@ -778,19 +779,29 @@ struct Runtime::Impl {
     }
 
     ~Impl() {
+        bool lanes_clean = true;
         if (devices) {
-            (void)devices->stop();
+            lanes_clean = devices->stop() == Status::ok;
         }
         if (executor) {
-            executor->stop();
+            lanes_clean = executor->stop() == Status::ok && lanes_clean;
         }
-        watchdog.stop();
-        if (resident_regions) {
-            (void)resident_regions->rollback(cpu_memory_policy_report);
+        lanes_clean = watchdog.stop() == Status::ok && lanes_clean;
+        bool memory_clean = lanes_clean;
+        if (resident_regions && lanes_clean) {
+            memory_clean = resident_regions->rollback(
+                cpu_memory_policy_report);
+        }
+        if (!lanes_clean || !memory_clean) {
+            // A destructor cannot return cleanup status. Returning here would
+            // destroy ownership records and provider tokens while a lane,
+            // backend, or stack cleanup is unresolved. Checked stop is the
+            // recoverable path; misuse at destruction fails closed.
+            std::terminate();
         }
         telemetry.reset();
         executor.reset();
-        if (resident_regions) {
+        if (resident_regions && memory_clean) {
             resident_regions->release();
         }
     }
@@ -1423,6 +1434,9 @@ struct Runtime::Impl {
     std::atomic<std::uint32_t> degradation_level{0};
     bool watchdog_started = false;
     bool stop_pending = false;
+    bool lane_cleanup_pending = false;
+    bool memory_cleanup_pending = false;
+    bool runtime_stack_results_available = false;
     const HostFrameContext* active_frame = nullptr;
     std::array<char, 256> error{};
     mutable std::atomic_flag error_lock = ATOMIC_FLAG_INIT;
@@ -2395,9 +2409,26 @@ Status Runtime::finalize() noexcept {
             impl_->config.task_scratch_slots,
             memory_plan.executor_control_bytes);
     if (!impl_->device_backends.empty()) {
+        std::size_t backend_name_bytes = 0;
+        for (const auto& backend : impl_->device_backends) {
+            const auto object_begin =
+                reinterpret_cast<std::uintptr_t>(&backend);
+            const auto object_end = object_begin + sizeof(backend);
+            const auto name_begin = reinterpret_cast<std::uintptr_t>(
+                backend.name.data());
+            if ((name_begin < object_begin || name_begin >= object_end) &&
+                !detail::checked_add(
+                    backend_name_bytes,
+                    backend.name.capacity() + 1,
+                    backend_name_bytes)) {
+                plan_valid = false;
+                break;
+            }
+        }
         plan_valid = plan_valid &&
             detail::DeviceManager::estimate_control_storage(
                 impl_->device_backends.size(),
+                backend_name_bytes,
                 impl_->device_buffers.size(),
                 impl_->config.device_outstanding_capacity,
                 impl_->config.device_completion_batch,
@@ -2431,15 +2462,27 @@ Status Runtime::finalize() noexcept {
         impl_->callbacks.capacity(),
         sizeof(Impl::RegisteredCallback));
     for (const auto& callback : impl_->callbacks) {
-        plan_valid = plan_valid &&
-            add_runtime_bytes(callback.name.capacity() + 1);
+        const auto object_begin = reinterpret_cast<std::uintptr_t>(&callback);
+        const auto object_end = object_begin + sizeof(callback);
+        const auto name_begin = reinterpret_cast<std::uintptr_t>(
+            callback.name.data());
+        if (name_begin < object_begin || name_begin >= object_end) {
+            plan_valid = plan_valid &&
+                add_runtime_bytes(callback.name.capacity() + 1);
+        }
     }
     plan_valid = plan_valid && add_runtime_array(
         impl_->device_backends.capacity(),
         sizeof(detail::DeviceBackendSpec));
     for (const auto& backend : impl_->device_backends) {
-        plan_valid = plan_valid &&
-            add_runtime_bytes(backend.name.capacity() + 1);
+        const auto object_begin = reinterpret_cast<std::uintptr_t>(&backend);
+        const auto object_end = object_begin + sizeof(backend);
+        const auto name_begin = reinterpret_cast<std::uintptr_t>(
+            backend.name.data());
+        if (name_begin < object_begin || name_begin >= object_end) {
+            plan_valid = plan_valid &&
+                add_runtime_bytes(backend.name.capacity() + 1);
+        }
     }
     plan_valid = plan_valid && add_runtime_array(
         impl_->device_buffers.capacity(),
@@ -2448,8 +2491,14 @@ Status Runtime::finalize() noexcept {
         impl_->resources.capacity(),
         sizeof(Impl::RegisteredResource));
     for (const auto& resource : impl_->resources) {
-        plan_valid = plan_valid &&
-            add_runtime_bytes(resource.name.capacity() + 1);
+        const auto object_begin = reinterpret_cast<std::uintptr_t>(&resource);
+        const auto object_end = object_begin + sizeof(resource);
+        const auto name_begin = reinterpret_cast<std::uintptr_t>(
+            resource.name.data());
+        if (name_begin < object_begin || name_begin >= object_end) {
+            plan_valid = plan_valid &&
+                add_runtime_bytes(resource.name.capacity() + 1);
+        }
     }
     plan_valid = plan_valid && add_runtime_array(
         impl_->states.capacity(),
@@ -2464,6 +2513,7 @@ Status Runtime::finalize() noexcept {
         compiled_order.capacity(),
         sizeof(PhaseHandle));
     plan_valid = plan_valid &&
+        add_runtime_bytes(sizeof(detail::ResidentRegionSet)) &&
         add_runtime_bytes(sizeof(detail::TelemetryRing));
 
     memory_plan.planned_bytes =
@@ -2575,6 +2625,134 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(Status::internal_error, nullptr);
     }
 
+    std::vector<detail::LogicalControlExtent> control_extents;
+    try {
+        control_extents.reserve(
+            32 + impl_->config.worker_count +
+            impl_->callbacks.size() + impl_->device_backends.size() +
+            impl_->resources.size());
+        std::uint64_t next_extent_id = 1;
+        const auto add_runtime_extent =
+            [&](const void* data, std::size_t count, std::size_t size) {
+                if (count == 0) {
+                    return;
+                }
+                control_extents.push_back({
+                    next_extent_id++,
+                    detail::ControlExtentOwner::runtime,
+                    data,
+                    count * size,
+                });
+            };
+        const auto add_external_string =
+            [&](const auto& owner, const std::string& value) {
+                const auto object_begin =
+                    reinterpret_cast<std::uintptr_t>(&owner);
+                const auto object_end = object_begin + sizeof(owner);
+                const auto data_begin = reinterpret_cast<std::uintptr_t>(
+                    value.data());
+                if (data_begin < object_begin || data_begin >= object_end) {
+                    add_runtime_extent(value.data(), value.capacity() + 1, 1);
+                }
+            };
+        add_runtime_extent(impl_.get(), 1, sizeof(Impl));
+        add_runtime_extent(
+            impl_->callbacks.data(),
+            impl_->callbacks.capacity(),
+            sizeof(Impl::RegisteredCallback));
+        for (const auto& callback : impl_->callbacks) {
+            add_external_string(callback, callback.name);
+        }
+        add_runtime_extent(
+            impl_->device_backends.data(),
+            impl_->device_backends.capacity(),
+            sizeof(detail::DeviceBackendSpec));
+        for (const auto& backend : impl_->device_backends) {
+            add_external_string(backend, backend.name);
+        }
+        add_runtime_extent(
+            impl_->device_buffers.data(),
+            impl_->device_buffers.capacity(),
+            sizeof(detail::DeviceBufferSpec));
+        add_runtime_extent(
+            impl_->resources.data(),
+            impl_->resources.capacity(),
+            sizeof(Impl::RegisteredResource));
+        for (const auto& resource : impl_->resources) {
+            add_external_string(resource, resource.name);
+        }
+        add_runtime_extent(
+            impl_->states.data(),
+            impl_->states.capacity(),
+            sizeof(Impl::RegisteredState));
+        add_runtime_extent(
+            impl_->dependencies.data(),
+            impl_->dependencies.capacity(),
+            sizeof(detail::GraphDependency));
+        add_runtime_extent(
+            impl_->resource_accesses.data(),
+            impl_->resource_accesses.capacity(),
+            sizeof(detail::GraphResourceAccess));
+        add_runtime_extent(
+            compiled_order.data(),
+            compiled_order.capacity(),
+            sizeof(PhaseHandle));
+        add_runtime_extent(
+            resident_regions.get(),
+            1,
+            sizeof(detail::ResidentRegionSet));
+        add_runtime_extent(
+            telemetry.get(),
+            1,
+            sizeof(detail::TelemetryRing));
+        executor->append_control_extents(control_extents, next_extent_id);
+        if (devices) {
+            devices->append_control_extents(control_extents, next_extent_id);
+        }
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    std::array<detail::ControlExtentExpectation, 3> extent_expectations{};
+    for (const auto& extent : control_extents) {
+        const auto owner = static_cast<std::size_t>(extent.owner);
+        if (owner < extent_expectations.size()) {
+            ++extent_expectations[owner].extent_count;
+        }
+    }
+    extent_expectations[static_cast<std::size_t>(
+        detail::ControlExtentOwner::runtime)].accounted_bytes =
+        memory_plan.runtime_control_bytes;
+    extent_expectations[static_cast<std::size_t>(
+        detail::ControlExtentOwner::executor)].accounted_bytes =
+        memory_plan.executor_control_bytes;
+    extent_expectations[static_cast<std::size_t>(
+        detail::ControlExtentOwner::device)].accounted_bytes =
+        memory_plan.device_control_bytes;
+    detail::ControlExtentLedger control_ledger;
+    const char* extent_diagnostic = nullptr;
+    const auto extent_status = detail::validate_control_extent_ledger(
+        control_extents,
+        extent_expectations,
+        control_ledger,
+        extent_diagnostic);
+    if (extent_status != Status::ok) {
+        return impl_->fail(extent_status, extent_diagnostic);
+    }
+    for (std::size_t index = 0;
+         index < cpu_memory_policy_report.memory_count;
+         ++index) {
+        auto& row = cpu_memory_policy_report.memory[index];
+        if (row.region == memory_region_runtime_control ||
+            row.region == memory_region_executor_control ||
+            row.region == memory_region_device_control) {
+            row.accounting_exactness =
+                ResourceAccountingExactness::exact;
+        }
+    }
+    detail::refresh_accounting_totals(cpu_memory_policy_report);
+
     impl_->numerics = NumericalPolicy(impl_->config.numerical_mode);
     impl_->compiled_order = std::move(compiled_order);
     impl_->resident_regions = std::move(resident_regions);
@@ -2631,10 +2809,21 @@ Status Runtime::start() noexcept {
     if (impl_->state != RuntimeState::finalized) {
         return impl_->fail(Status::invalid_state, "start requires finalized state");
     }
-    if (impl_->stop_pending) {
+    if (impl_->lane_cleanup_pending) {
         return impl_->fail(
             Status::invalid_state,
-            "device teardown is pending; retry stop");
+            "device or runtime-lane cleanup is pending; retry stop");
+    }
+    if (impl_->memory_cleanup_pending) {
+        if (!impl_->resident_regions ||
+            !impl_->resident_regions->rollback(
+                impl_->cpu_memory_policy_report)) {
+            return impl_->fail(
+                Status::internal_error,
+                "resident-memory rollback is pending; retry start or stop");
+        }
+        impl_->memory_cleanup_pending = false;
+        impl_->stop_pending = false;
     }
     if (!impl_->executor) {
         return impl_->fail(
@@ -2790,44 +2979,99 @@ Status Runtime::start() noexcept {
             Status::internal_error,
             "finalized thread policy inventory is incomplete");
     }
+    MemoryPolicyReport* runtime_stack_report = nullptr;
+    for (std::size_t index = 0;
+         index < impl_->cpu_memory_policy_report.memory_count;
+         ++index) {
+        auto& row = impl_->cpu_memory_policy_report.memory[index];
+        if (row.region == memory_region_runtime_thread_stack) {
+            runtime_stack_report = &row;
+            break;
+        }
+    }
+    if (!runtime_stack_report) {
+        (void)rollback_memory();
+        return impl_->fail(
+            Status::internal_error,
+            "finalized memory policy inventory has no runtime stack row");
+    }
     const auto executor_plan =
-        detail::make_thread_role_plan(*executor_report);
+        detail::make_thread_role_plan(*executor_report, *runtime_stack_report);
     const auto watchdog_plan =
-        detail::make_thread_role_plan(*watchdog_report);
+        detail::make_thread_role_plan(*watchdog_report, *runtime_stack_report);
     const auto device_plan =
-        detail::make_thread_role_plan(*device_report);
+        detail::make_thread_role_plan(*device_report, *runtime_stack_report);
 
     impl_->thread_startup_gate.reset();
     impl_->degradation_level.store(0, std::memory_order_release);
+    impl_->runtime_stack_results_available = false;
     const auto rollback_startup =
         [&](Status failure,
             const char* diagnostic,
             bool retry_device_cleanup = true) {
             impl_->thread_startup_gate.abort();
+            const bool watchdog_lane_present =
+                impl_->runtime_stack_results_available &&
+                impl_->config.watchdog_timeout_ns != 0;
             Status cleanup_status = Status::ok;
             if (impl_->devices) {
                 if (retry_device_cleanup) {
                     cleanup_status = impl_->devices->stop();
                 } else {
-                    impl_->devices->stop_lane();
+                    cleanup_status = impl_->devices->stop_lane();
                 }
             }
-            impl_->executor->stop();
-            impl_->watchdog.stop();
-            impl_->watchdog_started = false;
-            const bool memory_rollback_complete = rollback_memory();
-            impl_->stop_pending = impl_->devices &&
-                (cleanup_status != Status::ok ||
-                 impl_->devices->cleanup_pending());
+            const auto executor_cleanup = impl_->executor->stop();
+            if (cleanup_status == Status::ok &&
+                executor_cleanup != Status::ok) {
+                cleanup_status = executor_cleanup;
+            }
+            const auto watchdog_cleanup = impl_->watchdog.stop();
+            if (cleanup_status == Status::ok &&
+                watchdog_cleanup != Status::ok) {
+                cleanup_status = watchdog_cleanup;
+            }
+            if (watchdog_cleanup == Status::ok) {
+                impl_->watchdog_started = false;
+            }
+            if (impl_->runtime_stack_results_available) {
+                (void)detail::aggregate_runtime_stack_startup_results(
+                    *runtime_stack_report,
+                    impl_->config.executor_policy ==
+                            ExecutorPolicy::host_adapter
+                        ? nullptr
+                        : impl_->executor->startup_results(),
+                    impl_->config.executor_policy ==
+                            ExecutorPolicy::host_adapter
+                        ? 0
+                        : impl_->config.worker_count,
+                    watchdog_lane_present
+                        ? &impl_->watchdog.startup_result()
+                        : nullptr,
+                    watchdog_lane_present ? 1 : 0,
+                    impl_->devices
+                        ? &impl_->devices->startup_result()
+                        : nullptr,
+                    impl_->devices ? 1 : 0);
+                detail::refresh_accounting_totals(
+                    impl_->cpu_memory_policy_report);
+            }
+            const bool lanes_clean = cleanup_status == Status::ok &&
+                (!impl_->devices || !impl_->devices->cleanup_pending());
+            const bool memory_rollback_complete =
+                lanes_clean ? rollback_memory() : false;
+            impl_->lane_cleanup_pending = !lanes_clean;
+            impl_->memory_cleanup_pending =
+                lanes_clean && !memory_rollback_complete;
+            impl_->stop_pending = impl_->lane_cleanup_pending ||
+                impl_->memory_cleanup_pending;
             return impl_->fail(
-                memory_rollback_complete
-                    ? failure
-                    : Status::internal_error,
-                impl_->stop_pending
-                    ? "thread-policy startup failed and device rollback is pending; retry stop"
-                    : memory_rollback_complete
-                        ? diagnostic
-                        : "startup failed and resident-memory rollback is pending; retry start or stop");
+                failure,
+                impl_->lane_cleanup_pending
+                    ? "startup failed and device/thread/stack cleanup is pending; retry stop"
+                    : impl_->memory_cleanup_pending
+                        ? "startup failed and resident-memory rollback is pending; retry start or stop"
+                        : diagnostic);
         };
 
     if (impl_->config.watchdog_timeout_ns != 0) {
@@ -2895,6 +3139,57 @@ Status Runtime::start() noexcept {
                 Status::internal_error,
                 "strict device-service thread policy failed apply or readback");
         }
+    }
+
+    const auto stack_status = detail::aggregate_runtime_stack_startup_results(
+        *runtime_stack_report,
+        impl_->config.executor_policy == ExecutorPolicy::host_adapter
+            ? nullptr
+            : impl_->executor->startup_results(),
+        impl_->config.executor_policy == ExecutorPolicy::host_adapter
+            ? 0
+            : impl_->config.worker_count,
+        impl_->watchdog_started
+            ? &impl_->watchdog.startup_result()
+            : nullptr,
+        impl_->watchdog_started ? 1 : 0,
+        impl_->devices
+            ? &impl_->devices->startup_result()
+            : nullptr,
+        impl_->devices ? 1 : 0);
+    impl_->runtime_stack_results_available = true;
+    detail::refresh_accounting_totals(
+        impl_->cpu_memory_policy_report);
+    if (stack_status != Status::ok ||
+        (runtime_stack_report->requested.requirement ==
+             PolicyRequirement::strict &&
+         (runtime_stack_report->applied !=
+              PolicyOperationState::succeeded ||
+          runtime_stack_report->verified !=
+              PolicyOperationState::succeeded))) {
+        return rollback_startup(
+            stack_status == Status::ok
+                ? Status::internal_error
+                : stack_status,
+            "strict runtime-stack policy failed live apply or observation");
+    }
+    if (impl_->cpu_memory_policy_report.accounting_requirement ==
+        PolicyRequirement::strict) {
+        const char* closure_diagnostic = nullptr;
+        const auto closure_status = detail::validate_accounting_closure(
+            impl_->cpu_memory_policy_report,
+            true,
+            closure_diagnostic);
+        if (closure_status != Status::ok) {
+            return rollback_startup(
+                closure_status,
+                closure_diagnostic
+                    ? closure_diagnostic
+                    : "strict accounting closure is incomplete");
+        }
+    }
+
+    if (impl_->devices) {
         const auto initialize_status = impl_->devices->initialize();
         if (initialize_status != Status::ok) {
             return rollback_startup(
@@ -2913,6 +3208,8 @@ Status Runtime::start() noexcept {
         impl_->devices->wait_started();
     }
     impl_->stop_pending = false;
+    impl_->lane_cleanup_pending = false;
+    impl_->memory_cleanup_pending = false;
     impl_->state = RuntimeState::running;
     impl_->clear_error();
     impl_->record(
@@ -3332,32 +3629,84 @@ Status Runtime::stop() noexcept {
         return impl_->fail(Status::invalid_state, "stop requires finalized or running state");
     }
 
-    Status device_status = Status::ok;
+    const bool watchdog_lane_present =
+        impl_->runtime_stack_results_available &&
+        impl_->config.watchdog_timeout_ns != 0;
+    Status device_cleanup_status = Status::ok;
     if (impl_->devices) {
-        device_status = impl_->devices->stop();
+        device_cleanup_status = impl_->devices->stop();
     }
+    Status cleanup_status = device_cleanup_status;
     if (impl_->executor) {
-        impl_->executor->stop();
+        const auto status = impl_->executor->stop();
+        if (cleanup_status == Status::ok && status != Status::ok) {
+            cleanup_status = status;
+        }
     }
     if (impl_->watchdog_started) {
-        impl_->watchdog.stop();
-        impl_->watchdog_started = false;
+        const auto status = impl_->watchdog.stop();
+        if (cleanup_status == Status::ok && status != Status::ok) {
+            cleanup_status = status;
+        }
+        if (status == Status::ok) {
+            impl_->watchdog_started = false;
+        }
     }
-    if (device_status != Status::ok) {
+    if (impl_->runtime_stack_results_available) {
+        MemoryPolicyReport* runtime_stack_report = nullptr;
+        for (std::size_t index = 0;
+             index < impl_->cpu_memory_policy_report.memory_count;
+             ++index) {
+            auto& row = impl_->cpu_memory_policy_report.memory[index];
+            if (row.region == memory_region_runtime_thread_stack) {
+                runtime_stack_report = &row;
+                break;
+            }
+        }
+        const auto aggregation_status = runtime_stack_report
+            ? detail::aggregate_runtime_stack_startup_results(
+                  *runtime_stack_report,
+                  impl_->config.executor_policy == ExecutorPolicy::host_adapter
+                      ? nullptr
+                      : impl_->executor->startup_results(),
+                  impl_->config.executor_policy == ExecutorPolicy::host_adapter
+                      ? 0
+                      : impl_->config.worker_count,
+                  watchdog_lane_present
+                      ? &impl_->watchdog.startup_result()
+                      : nullptr,
+                  watchdog_lane_present ? 1 : 0,
+                  impl_->devices
+                      ? &impl_->devices->startup_result()
+                      : nullptr,
+                  impl_->devices ? 1 : 0)
+            : Status::internal_error;
+        detail::refresh_accounting_totals(
+            impl_->cpu_memory_policy_report);
+        if (cleanup_status == Status::ok &&
+            aggregation_status != Status::ok) {
+            cleanup_status = aggregation_status;
+        }
+    }
+    const bool lanes_clean = cleanup_status == Status::ok &&
+        (!impl_->devices || !impl_->devices->cleanup_pending());
+    if (!lanes_clean) {
+        impl_->lane_cleanup_pending = true;
+        impl_->memory_cleanup_pending = false;
         impl_->stop_pending = true;
         return impl_->fail(
-            device_status,
-            "device teardown failed; retry stop before releasing borrowed resources");
+            cleanup_status == Status::ok
+                ? Status::internal_error
+                : cleanup_status,
+            device_cleanup_status != Status::ok
+                ? "device teardown failed; device/thread/stack cleanup failed; retry stop before releasing borrowed resources"
+                : "thread/stack cleanup failed; retry stop before releasing borrowed resources");
     }
-    impl_->stop_pending = false;
-    impl_->record(
-        RuntimeTraceEventType::stopped,
-        Status::ok,
-        impl_->clock_now(),
-        0);
+    impl_->lane_cleanup_pending = false;
     if (impl_->resident_regions) {
         if (!impl_->resident_regions->rollback(
                 impl_->cpu_memory_policy_report)) {
+            impl_->memory_cleanup_pending = true;
             impl_->stop_pending = true;
             return impl_->fail(
                 Status::internal_error,
@@ -3369,6 +3718,13 @@ Status Runtime::stop() noexcept {
             impl_->resident_regions->release();
         }
     }
+    impl_->memory_cleanup_pending = false;
+    impl_->stop_pending = false;
+    impl_->record(
+        RuntimeTraceEventType::stopped,
+        Status::ok,
+        impl_->clock_now(),
+        0);
     impl_->state = RuntimeState::stopped;
     impl_->clear_error();
     return Status::ok;

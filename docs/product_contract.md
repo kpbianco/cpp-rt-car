@@ -39,7 +39,13 @@ size/versioned, five-callback C++ memory provider and a resident transaction for
 exactly phase scratch, task scratch, and trace storage. Caller/external roles
 remain verify-only, deferred and borrowed memory is not mutated, and schema 7,
 C ABI v8, device ABI v1, release, package, and qualification claims remain
-unchanged.
+unchanged. M15-04 adds an exact logical extent ledger for constructed runtime,
+executor, and device controls; live runtime-owned stack commitment and
+supported observation; copied bounded declarations for opaque external and
+backend accounting; and status-bearing retryable cleanup across device, lane,
+stack, control, and selected-region ownership. The implementation is not an
+RT, hardware, release, deployment, or production qualification, and M15
+completion remains gated on mandatory CI and human review.
 
 ## Claim policy
 
@@ -155,7 +161,7 @@ paths reject overload instead of spilling. Representative complete CPU and
 mock-device frames observe no heap allocation after start. The plan's exact
 accounting scope and exclusions are in [the memory contract](memory_plan.md).
 
-M15-03 preserves the memory-plan equation while allowing exactly phase
+M15 preserves the memory-plan equation while allowing exactly phase
 scratch, task scratch, and trace storage to use a copied C++ provider table.
 Finalization acquires them in stable order; startup applies and independently
 observes policy before threads commit; failure and checked stop reverse
@@ -163,8 +169,13 @@ operations and token ownership. Default allocations retain aligned-new
 behavior. Linux page policy uses process-local mappings with rounded guards,
 explicit `MAP_HUGETLB` attempt/fallback, caller/prefault touch, `mlock`, and
 `mincore` residency sampling. `mlock` is not lock readback or device/DMA
-pinning. Fragmented controls, stack residency, and complete external/backend
-byte closure remain M15-04 work.
+pinning. M15-04 validates fragmented control allocations as non-overlapping
+logical extents against the three existing control terms. Runtime-owned stack
+commitment is aggregated exactly once from live executor, watchdog, and
+device-service lanes; observable Linux residency is sampled only while the
+mapping is live. Opaque host/vendor/backend facts may be copied through bounded
+configuring-time declarations and remain `declared_only`, never independently
+verified or qualified. Missing facts remain `partial` or `unknown`.
 
 ### Observability
 
@@ -259,7 +270,7 @@ callback expressions.
 | Host-driven callbacks | Implemented RT0 surface | Synchronous host wait; dependency-ready callbacks may overlap without step-time pacing or worker creation |
 | Unified CPU executor | Implemented RT0 surface | Static assignments, bounded local-queue throughput, and a borrowed host job-system adapter share one graph/range/reduction representation |
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
-| CPU/memory policy and resident backing | Implemented through M15-03 at RT0 | Bounded role/region requests, Linux runtime-owned thread apply/readback, copied provider callbacks, three-region acquisition/application/observation/reverse cleanup, exact-once accounting keys, and external verify-only ownership; no complete byte-closure, hardware, latency, RT1, or RT2 claim |
+| CPU/memory policy and resident backing | M15-04 implemented; external gates pending | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

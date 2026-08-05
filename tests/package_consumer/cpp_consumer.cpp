@@ -52,6 +52,14 @@ rt::CallbackResult phase(void* opaque, const rt::CallbackContext&) {
 } // namespace
 
 int main() {
+    const rt::CpuMemoryPolicy pre_m15_04_policy{0, {}, 0, {}};
+    const rt::CpuMemoryPolicyReport pre_m15_04_report{
+        rt::cpu_memory_policy_schema_version, 0, {}, 0, {}};
+    if (pre_m15_04_policy.accounting_declaration_count != 0 ||
+        pre_m15_04_report.accounting_complete) {
+        return 3;
+    }
+
     HostQueue queue;
     rt::Runtime runtime;
     rt::RuntimeConfig config;
@@ -59,9 +67,17 @@ int main() {
     config.worker_count = 2;
     config.executor_queue_capacity = 8;
     config.task_scratch_slots = 8;
+    rt::CpuMemoryPolicy accounting;
+    accounting.accounting_declaration_count = 1;
+    accounting.accounting_declarations[0] = {
+        rt::thread_resource_accounting_key(rt::thread_role_frame),
+        1,
+        8u * 1024u * 1024u,
+    };
     std::size_t calls = 0;
 
     if (runtime.configure(config) != rt::Status::ok ||
+        runtime.set_cpu_memory_policy(accounting) != rt::Status::ok ||
         runtime.set_host_executor({
             &queue,
             2,
@@ -70,7 +86,13 @@ int main() {
             &HostQueue::try_execute_one}) != rt::Status::ok ||
         runtime.register_callback({"consumer.phase", &phase, &calls}) !=
             rt::Status::ok ||
-        runtime.finalize() != rt::Status::ok ||
+        runtime.finalize() != rt::Status::ok) {
+        return 1;
+    }
+    rt::CpuMemoryPolicyReport accounting_report;
+    if (!runtime.cpu_memory_policy_report(accounting_report) ||
+        accounting_report.thread_count == 0 ||
+        accounting_report.threads[0].accounting_key.value == 0 ||
         runtime.start() != rt::Status::ok ||
         runtime.step({
             1,

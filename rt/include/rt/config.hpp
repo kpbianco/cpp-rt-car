@@ -15,6 +15,7 @@ inline constexpr std::size_t cpu_set_capacity = 256;
 inline constexpr std::size_t thread_name_capacity = 32;
 inline constexpr std::size_t thread_policy_request_capacity = 16;
 inline constexpr std::size_t memory_policy_request_capacity = 16;
+inline constexpr std::size_t resource_accounting_declaration_capacity = 32;
 inline constexpr std::uint32_t memory_provider_api_version = 1;
 
 enum class NumericalMode : std::uint8_t {
@@ -63,6 +64,12 @@ inline constexpr ThreadRoleId thread_role_device_service{4};
 inline constexpr ThreadRoleId thread_role_xdma_io{5};
 inline constexpr std::uint32_t thread_role_custom_first = 0x0001'0000u;
 
+[[nodiscard]] constexpr std::uint64_t thread_resource_accounting_key(
+    ThreadRoleId role) noexcept {
+    return (std::uint64_t{1} << 32u) |
+        static_cast<std::uint64_t>(role.value);
+}
+
 // Stable memory accounting identities. Each resolved report contains exactly
 // one row for every identifier below, including zero-cardinality categories.
 struct MemoryRegionId {
@@ -84,6 +91,12 @@ inline constexpr MemoryRegionId memory_region_registered_device_buffer{9};
 inline constexpr MemoryRegionId memory_region_runtime_thread_stack{10};
 inline constexpr MemoryRegionId memory_region_external_thread_stack{11};
 inline constexpr MemoryRegionId memory_region_host_provider{12};
+
+[[nodiscard]] constexpr std::uint64_t memory_resource_accounting_key(
+    MemoryRegionId region) noexcept {
+    return (std::uint64_t{2} << 32u) |
+        static_cast<std::uint64_t>(region.value);
+}
 
 enum class PolicyRequirement : std::uint8_t {
     best_effort,
@@ -194,6 +207,17 @@ struct MemoryPolicyRequest {
     MemoryPolicy policy{};
 };
 
+// Trusted configuring-time accounting metadata for storage the runtime does
+// not own and cannot inspect. The key must identify one of the stable thread
+// or memory rows above. A declaration reports logical bytes only: it never
+// authorizes mutation or establishes residency, locking, pinning, or hardware
+// qualification.
+struct ResourceAccountingDeclaration {
+    std::uint64_t accounting_key = 0;
+    std::size_t logical_region_count = 0;
+    std::size_t accounted_bytes = 0;
+};
+
 enum class MemoryProviderCapability : std::uint64_t {
     none = 0,
     guard_pages = std::uint64_t{1} << 0,
@@ -302,6 +326,14 @@ struct CpuMemoryPolicy {
     std::size_t memory_policy_count = 0;
     std::array<MemoryPolicyRequest, memory_policy_request_capacity>
         memory_policies{};
+    // Appended M15-04 closure fields preserve the pre-M15-04 aggregate prefix.
+    PolicyRequirement accounting_requirement =
+        PolicyRequirement::best_effort;
+    std::size_t accounting_declaration_count = 0;
+    std::array<
+        ResourceAccountingDeclaration,
+        resource_accounting_declaration_capacity>
+        accounting_declarations{};
 };
 
 struct RuntimeConfig {

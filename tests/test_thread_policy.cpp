@@ -34,6 +34,9 @@ enum class InjectedOutcome : std::uint8_t {
     apply_failure,
     unsupported,
     mismatch,
+    stack_success,
+    stack_failure,
+    stack_mismatch,
 };
 
 constexpr std::size_t event_capacity = 128;
@@ -56,6 +59,11 @@ public:
     rt::ThreadRoleId failure_role{};
     std::size_t failure_instance = 0;
     InjectedOutcome outcome = InjectedOutcome::success;
+    rt::ThreadRoleId cleanup_failure_role =
+        rt::thread_role_executor_worker;
+    std::size_t cleanup_failure_instance = 0;
+    std::size_t cleanup_failures_remaining = 0;
+    std::size_t cleanup_attempt_count = 0;
 
     void clear_events() noexcept {
         event_count_.store(0, std::memory_order_relaxed);
@@ -201,6 +209,76 @@ public:
         result.read_back = plan.resolved;
     }
 
+    void apply_and_verify_stack_current(
+        rt::ThreadRoleId role,
+        std::size_t instance,
+        const rt::detail::ThreadRolePlan& plan,
+        rt::detail::ThreadStartupResult& result) noexcept override {
+        if (!matches_failure(role, instance, InjectedOutcome::stack_success) &&
+            !matches_failure(role, instance, InjectedOutcome::stack_failure) &&
+            !matches_failure(role, instance, InjectedOutcome::stack_mismatch)) {
+            ThreadPolicyProvider::apply_and_verify_stack_current(
+                role,
+                instance,
+                plan,
+                result);
+            return;
+        }
+        const bool unavailable = matches_failure(
+            role,
+            instance,
+            InjectedOutcome::stack_failure);
+        if (!unavailable) {
+            result.stack_mapping_base = reinterpret_cast<std::byte*>(0x10000u);
+            result.stack_mapping_bytes = 8192;
+            result.stack_usable_bytes = 4096;
+            result.stack_guard_bytes = 4096;
+            result.stack_resident_bytes = 4096;
+        }
+        result.stack_applied = unavailable
+            ? rt::PolicyOperationState::failed
+            : rt::PolicyOperationState::succeeded;
+        result.stack_verified =
+            unavailable
+                ? rt::PolicyOperationState::failed
+                : matches_failure(
+                      role,
+                      instance,
+                      InjectedOutcome::stack_mismatch)
+                    ? rt::PolicyOperationState::mismatched
+                    : rt::PolicyOperationState::succeeded;
+        result.stack_apply_error = result.stack_applied ==
+                rt::PolicyOperationState::failed
+            ? EPERM
+            : 0;
+        result.stack_verify_error = result.stack_verified ==
+                rt::PolicyOperationState::succeeded
+            ? 0
+            : EPROTO;
+    }
+
+    [[nodiscard]] rt::Status cleanup_stack_current(
+        rt::ThreadRoleId role,
+        std::size_t instance,
+        const rt::detail::ThreadRolePlan& plan,
+        rt::detail::ThreadStartupResult& result) noexcept override {
+        if (role == cleanup_failure_role &&
+            instance == cleanup_failure_instance) {
+            ++cleanup_attempt_count;
+            if (cleanup_failures_remaining != 0) {
+                --cleanup_failures_remaining;
+                result.stack_cleanup = rt::PolicyOperationState::failed;
+                result.stack_cleanup_error = EIO;
+                return rt::Status::internal_error;
+            }
+        }
+        return ThreadPolicyProvider::cleanup_stack_current(
+            role,
+            instance,
+            plan,
+            result);
+    }
+
     void after_join(
         rt::ThreadRoleId role,
         std::size_t instance) noexcept override {
@@ -238,6 +316,17 @@ const rt::ThreadPolicyReport* find_thread(
     return nullptr;
 }
 
+const rt::MemoryPolicyReport* find_memory(
+    const rt::CpuMemoryPolicyReport& report,
+    rt::MemoryRegionId region) {
+    for (std::size_t index = 0; index < report.memory_count; ++index) {
+        if (report.memory[index].region == region) {
+            return &report.memory[index];
+        }
+    }
+    return nullptr;
+}
+
 rt::CallbackResult count_callback(
     void* data,
     const rt::CallbackContext&) {
@@ -265,6 +354,14 @@ void add_strict_role(rt::CpuMemoryPolicy& policy, rt::ThreadRoleId role) {
     auto& request = policy.thread_policies[policy.thread_policy_count++];
     request.role = role;
     request.policy.requirement = rt::PolicyRequirement::strict;
+}
+
+void add_runtime_stack_policy(
+    rt::CpuMemoryPolicy& policy,
+    rt::PolicyRequirement requirement) {
+    auto& request = policy.memory_policies[policy.memory_policy_count++];
+    request.region = rt::memory_region_runtime_thread_stack;
+    request.policy.requirement = requirement;
 }
 
 } // namespace
@@ -415,6 +512,242 @@ TEST(ThreadPolicy, BestEffortFailureRemainsObservableAndContinues) {
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }
 
+TEST(ThreadPolicy, LiveRuntimeStackAccountingIsExactBoundedAndIsolated) {
+    rt::Runtime first;
+    auto first_config = threaded_config();
+    first_config.worker_count = 1;
+    first_config.watchdog_timeout_ns = 0;
+    ASSERT_EQ(first.configure(first_config), rt::Status::ok);
+    ASSERT_EQ(first.finalize(), rt::Status::ok);
+
+    rt::Runtime second;
+    auto second_config = threaded_config();
+    second_config.worker_count = 2;
+    ASSERT_EQ(second.configure(second_config), rt::Status::ok);
+    ASSERT_EQ(second.finalize(), rt::Status::ok);
+
+    ASSERT_EQ(first.start(), rt::Status::ok);
+    ASSERT_EQ(second.start(), rt::Status::ok);
+    rt::CpuMemoryPolicyReport first_report;
+    rt::CpuMemoryPolicyReport second_report;
+    ASSERT_TRUE(first.cpu_memory_policy_report(first_report));
+    ASSERT_TRUE(second.cpu_memory_policy_report(second_report));
+    const auto* first_stack = find_memory(
+        first_report,
+        rt::memory_region_runtime_thread_stack);
+    const auto* second_stack = find_memory(
+        second_report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(first_stack, nullptr);
+    ASSERT_NE(second_stack, nullptr);
+    EXPECT_EQ(first_stack->logical_region_count, 1u);
+    EXPECT_EQ(second_stack->logical_region_count, 3u);
+#if defined(__linux__)
+    EXPECT_EQ(
+        first_stack->accounting_exactness,
+        rt::ResourceAccountingExactness::exact);
+    EXPECT_EQ(
+        second_stack->accounting_exactness,
+        rt::ResourceAccountingExactness::exact);
+    EXPECT_GT(first_stack->committed_bytes, 0u);
+    EXPECT_GT(second_stack->committed_bytes, first_stack->committed_bytes);
+    EXPECT_EQ(first_stack->accounted_bytes, first_stack->committed_bytes);
+    EXPECT_EQ(second_stack->accounted_bytes, second_stack->committed_bytes);
+    EXPECT_LE(
+        first_stack->resident_bytes,
+        first_stack->committed_bytes - first_stack->actual_guard_bytes_before);
+    EXPECT_LE(
+        second_stack->resident_bytes,
+        second_stack->committed_bytes - second_stack->actual_guard_bytes_before);
+#else
+    EXPECT_EQ(
+        first_stack->accounting_exactness,
+        rt::ResourceAccountingExactness::unknown);
+    EXPECT_EQ(
+        second_stack->accounting_exactness,
+        rt::ResourceAccountingExactness::unknown);
+#endif
+
+    const auto second_bytes = second_stack->accounted_bytes;
+    ASSERT_EQ(first.stop(), rt::Status::ok);
+    ASSERT_TRUE(second.cpu_memory_policy_report(second_report));
+    second_stack = find_memory(
+        second_report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(second_stack, nullptr);
+    EXPECT_EQ(second_stack->accounted_bytes, second_bytes);
+    ASSERT_EQ(second.stop(), rt::Status::ok);
+}
+
+TEST(ThreadPolicy, StrictRuntimeStackMismatchRollsBackAndRecovers) {
+    InjectedPolicyProvider provider;
+    provider.failure_role = rt::thread_role_executor_worker;
+    provider.outcome = InjectedOutcome::stack_mismatch;
+    rt::Runtime runtime;
+    rt::detail::RuntimeThreadPolicyTestAccess::set_provider(runtime, provider);
+    auto config = threaded_config();
+    config.worker_count = 1;
+    config.watchdog_timeout_ns = 0;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    std::size_t callbacks = 0;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"stack.strict", &count_callback, &callbacks}),
+        rt::Status::ok);
+    rt::CpuMemoryPolicy policy;
+    add_runtime_stack_policy(policy, rt::PolicyRequirement::strict);
+    policy.memory_policies[0].policy.residency_verification =
+        rt::PolicyToggle::enabled;
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+#if defined(__linux__)
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.start(), rt::Status::internal_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_EQ(callbacks, 0u);
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* stack = find_memory(
+        report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->verified, rt::PolicyOperationState::mismatched);
+    EXPECT_EQ(stack->verify_error, EPROTO);
+
+    provider.outcome = InjectedOutcome::stack_success;
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.step({0, std::chrono::nanoseconds(1), std::nullopt}),
+        rt::Status::ok);
+    EXPECT_EQ(callbacks, 1u);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+#else
+    EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::configuring);
+    EXPECT_EQ(callbacks, 0u);
+    EXPECT_EQ(provider.count_kind(event_create), 0u);
+    EXPECT_EQ(provider.count_kind(event_apply), 0u);
+    EXPECT_EQ(provider.count_kind(event_verify), 0u);
+    EXPECT_EQ(provider.count_kind(event_join), 0u);
+#endif
+}
+
+TEST(ThreadPolicy, FailedStartCleanupRetryClearsRetainedStackError) {
+    InjectedPolicyProvider provider;
+    provider.failure_role = rt::thread_role_executor_worker;
+    provider.outcome = InjectedOutcome::stack_mismatch;
+    provider.cleanup_failures_remaining = 1;
+    rt::Runtime runtime;
+    rt::detail::RuntimeThreadPolicyTestAccess::set_provider(runtime, provider);
+    auto config = threaded_config();
+    config.worker_count = 1;
+    config.watchdog_timeout_ns = 0;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    rt::CpuMemoryPolicy policy;
+    add_runtime_stack_policy(policy, rt::PolicyRequirement::strict);
+    policy.memory_policies[0].policy.residency_verification =
+        rt::PolicyToggle::enabled;
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+#if defined(__linux__)
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.start(), rt::Status::internal_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_EQ(provider.cleanup_attempt_count, 1u);
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* stack = find_memory(
+        report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->rollback_error, EIO);
+
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
+    EXPECT_EQ(provider.cleanup_attempt_count, 2u);
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    stack = find_memory(report, rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->rollback_error, 0);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+#else
+    EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::configuring);
+    EXPECT_EQ(provider.cleanup_attempt_count, 0u);
+    EXPECT_EQ(provider.count_kind(event_create), 0u);
+    EXPECT_EQ(provider.count_kind(event_apply), 0u);
+    EXPECT_EQ(provider.count_kind(event_verify), 0u);
+    EXPECT_EQ(provider.count_kind(event_join), 0u);
+#endif
+}
+
+TEST(ThreadPolicy, BestEffortRuntimeStackFailureIsReportedWithoutCommitBlock) {
+    InjectedPolicyProvider provider;
+    provider.failure_role = rt::thread_role_executor_worker;
+    provider.outcome = InjectedOutcome::stack_failure;
+    rt::Runtime runtime;
+    rt::detail::RuntimeThreadPolicyTestAccess::set_provider(runtime, provider);
+    auto config = threaded_config();
+    config.worker_count = 1;
+    config.watchdog_timeout_ns = 0;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    rt::CpuMemoryPolicy policy;
+    add_runtime_stack_policy(policy, rt::PolicyRequirement::best_effort);
+    policy.memory_policies[0].policy.locking = rt::PolicyToggle::enabled;
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* stack = find_memory(
+        report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->applied, rt::PolicyOperationState::failed);
+    EXPECT_EQ(stack->verified, rt::PolicyOperationState::failed);
+    EXPECT_EQ(stack->apply_error, EPERM);
+    EXPECT_EQ(stack->verify_error, EPROTO);
+    EXPECT_EQ(stack->accounted_bytes, 0u);
+    EXPECT_EQ(
+        stack->accounting_exactness,
+        rt::ResourceAccountingExactness::unknown);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+#if defined(__linux__)
+TEST(ThreadPolicy, StrictStackLockingCannotClaimIndependentReadback) {
+    rt::Runtime runtime;
+    auto config = threaded_config();
+    config.worker_count = 1;
+    config.watchdog_timeout_ns = 0;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    std::size_t callbacks = 0;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"stack.lock-readback", &count_callback, &callbacks}),
+        rt::Status::ok);
+    rt::CpuMemoryPolicy policy;
+    add_runtime_stack_policy(policy, rt::PolicyRequirement::strict);
+    policy.memory_policies[0].policy.locking = rt::PolicyToggle::enabled;
+    ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+
+    EXPECT_EQ(runtime.start(), rt::Status::internal_error);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    EXPECT_EQ(callbacks, 0u);
+    rt::CpuMemoryPolicyReport report;
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    const auto* stack = find_memory(
+        report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(stack->locked_bytes, 0u);
+    EXPECT_NE(stack->verified, rt::PolicyOperationState::succeeded);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+#endif
+
 TEST(ThreadPolicy, SpinYieldAndParkWakeForWorkAndStop) {
     for (const auto wait : {
              rt::WaitStrategy::spin,
@@ -541,6 +874,18 @@ TEST(ThreadPolicy, LinuxAppliesAndReadsBackAvailableNativeFields) {
     EXPECT_EQ(executor->read_back.stack_bytes, requested.stack_bytes);
     EXPECT_EQ(executor->read_back.guard_bytes, requested.guard_bytes);
     EXPECT_EQ(executor->read_back.name, requested.name);
+    const auto* stack = find_memory(
+        report,
+        rt::memory_region_runtime_thread_stack);
+    ASSERT_NE(stack, nullptr);
+    EXPECT_EQ(
+        stack->committed_bytes,
+        requested.stack_bytes);
+    EXPECT_EQ(stack->actual_guard_bytes_before, requested.guard_bytes);
+    EXPECT_EQ(stack->logical_region_count, 1u);
+    EXPECT_EQ(
+        stack->accounting_exactness,
+        rt::ResourceAccountingExactness::exact);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }
 #endif
