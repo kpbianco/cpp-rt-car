@@ -599,6 +599,7 @@ TEST(ThreadPolicy, StrictRuntimeStackMismatchRollsBackAndRecovers) {
     policy.memory_policies[0].policy.residency_verification =
         rt::PolicyToggle::enabled;
     ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+#if defined(__linux__)
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
 
     EXPECT_EQ(runtime.start(), rt::Status::internal_error);
@@ -620,6 +621,15 @@ TEST(ThreadPolicy, StrictRuntimeStackMismatchRollsBackAndRecovers) {
         rt::Status::ok);
     EXPECT_EQ(callbacks, 1u);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
+#else
+    EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::configuring);
+    EXPECT_EQ(callbacks, 0u);
+    EXPECT_EQ(provider.count_kind(event_create), 0u);
+    EXPECT_EQ(provider.count_kind(event_apply), 0u);
+    EXPECT_EQ(provider.count_kind(event_verify), 0u);
+    EXPECT_EQ(provider.count_kind(event_join), 0u);
+#endif
 }
 
 TEST(ThreadPolicy, FailedStartCleanupRetryClearsRetainedStackError) {
@@ -638,6 +648,7 @@ TEST(ThreadPolicy, FailedStartCleanupRetryClearsRetainedStackError) {
     policy.memory_policies[0].policy.residency_verification =
         rt::PolicyToggle::enabled;
     ASSERT_EQ(runtime.set_cpu_memory_policy(policy), rt::Status::ok);
+#if defined(__linux__)
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
 
     EXPECT_EQ(runtime.start(), rt::Status::internal_error);
@@ -659,6 +670,15 @@ TEST(ThreadPolicy, FailedStartCleanupRetryClearsRetainedStackError) {
     ASSERT_NE(stack, nullptr);
     EXPECT_EQ(stack->rollback_error, 0);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
+#else
+    EXPECT_EQ(runtime.finalize(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::configuring);
+    EXPECT_EQ(provider.cleanup_attempt_count, 0u);
+    EXPECT_EQ(provider.count_kind(event_create), 0u);
+    EXPECT_EQ(provider.count_kind(event_apply), 0u);
+    EXPECT_EQ(provider.count_kind(event_verify), 0u);
+    EXPECT_EQ(provider.count_kind(event_join), 0u);
+#endif
 }
 
 TEST(ThreadPolicy, BestEffortRuntimeStackFailureIsReportedWithoutCommitBlock) {

@@ -335,12 +335,25 @@ TEST(CpuMemoryPolicy, BoundedDeclarationsCloseExternalFactsWithoutQualification)
         rt::ResourceAccountingExactness::declared_only);
     EXPECT_FALSE(report.accounting_complete);
 
+#if defined(__linux__)
     ASSERT_EQ(runtime.start(), rt::Status::ok);
     ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
     EXPECT_TRUE(report.accounting_complete);
     EXPECT_EQ(
         report.closed_total.exactness,
         rt::ResourceAccountingExactness::declared_only);
+#else
+    EXPECT_EQ(runtime.start(), rt::Status::invalid_config);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
+    EXPECT_FALSE(report.accounting_complete);
+    EXPECT_EQ(
+        report.closed_total.exactness,
+        rt::ResourceAccountingExactness::unknown);
+    EXPECT_NE(
+        runtime.last_error().find("live runtime stack facts"),
+        std::string_view::npos);
+#endif
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }
 
