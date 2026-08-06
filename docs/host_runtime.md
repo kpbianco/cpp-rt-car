@@ -6,7 +6,8 @@ plan, M5 time/platform controls, M6 versioned observability, M7
 determinism/replay, the M8 bounded device ABI and deterministic mock, and the
 M11 stable C ABI plus host job-system adapter, M12 portable distribution, and
 the M13 complete runtime-profile loader, M15 CPU/memory closure, the M16
-multi-rate work, and the M17-01 HAL v2 core/device-ABI-v1 compatibility path. It
+multi-rate work, the M17-01 HAL v2 core/device-ABI-v1 compatibility path, and
+the M17-02 bounded heterogeneous-memory/topology extension. It
 provides explicit host-driven and finite self-paced operation without adopting
 the legacy `SimCore` scheduler or pacing loop.
 
@@ -18,9 +19,9 @@ as available. They also report versioned observability and deterministic replay
 as available; the latter means the implemented D0/D1 surface, not D2 or D3.
 They report `host_executor_adapter` for the borrowed engine job-system policy
 and `bounded_device_backend` for the poll-only canonical HAL v2 runtime path.
-That capability includes unchanged v1 backends through the adapter but no
-heterogeneous-memory or batch/timeline surface. Those
-capabilities do not imply engine, CUDA, Vulkan, or XDMA qualification. The
+That capability includes unchanged v1 backends through the adapter and the
+M17-02 C++ memory/topology surface, but no command-batch or timeline surface.
+Those capabilities do not imply engine, CUDA, Vulkan, or XDMA qualification. The
 optional M9 CUDA and M10 XDMA candidates are separately linked backends with
 independent support matrices and evidence gates.
 
@@ -115,6 +116,18 @@ effects. Start and stop retain the existing startup barrier, one device-service
 lane, reverse buffer/backend cleanup, first-error retention, and unresolved-only
 retry. The supported manager invokes only HAL v2 operations; direct v1 calls
 occur only inside the adapter. See [the HAL v2 contract](hal_v2.md).
+
+M17-02 optionally discovers one bounded native memory/topology snapshot while
+configuring. Discovery and validation are transactional. Core-only native v2
+and adapted-v1 backends receive one implicit borrowed-host, host-coherent,
+no-sync domain. Explicit heterogeneous buffer registration accepts one
+same-instance domain plus a host span or opaque handle and validates the
+declaration before publication. Start registers native memory after backend
+initialization; checked stop unregisters it in reverse order before backend
+shutdown and retains unresolved ownership for retry. Instance-local inspectors
+expose copied domain, node, link, timestamp, completion-domain, and memory
+object facts. Timestamp correlation is a bounded running-state control call.
+See the [heterogeneous-memory contract](heterogeneous_memory.md).
 
 ## Typed configuration
 
@@ -277,6 +290,8 @@ Each runtime owns:
 - its copied canonical HAL v2 backend tables, address-stable v1 adapter
   contexts and translation scratch, device registration metadata, outstanding
   slots, completion batch, service lane, and device telemetry counters.
+- its copied memory/topology extension tables and snapshots, heterogeneous
+  declarations, native memory tokens, and unresolved cleanup state.
 
 Callback user data remains host-owned and must outlive every step that can use
 it. A phase's scratch contents may persist across frames, but no phase sees
@@ -286,9 +301,10 @@ application state.
 Registered canonical state storage also remains host-owned and must remain
 stable for the runtime lifetime. Checkpoint and input-log buffers are
 caller-owned and need exist only for the duration of the relevant call.
-Native HAL v2 and device-ABI-v1 backend instances, registered device-buffer
-bytes, and device command `user_data` are borrowed through successful backend
-shutdown. Adapter state remains runtime-owned throughout unresolved cleanup.
+Native HAL v2 and device-ABI-v1 backend instances, borrowed host spans, opaque
+handles, and device command `user_data` remain externally valid through
+successful checked cleanup according to their declared ownership. Adapter and
+native-token state remains runtime-owned throughout unresolved cleanup.
 The service lane is joined before buffers are unregistered and backend shutdown
 returns.
 
@@ -400,9 +416,12 @@ fault-injectable mock; see the
 [device backend contract](device_backend.md).
 M17-01 makes that path canonical HAL v2 for both registration kinds while
 preserving the v1 mock/CUDA/XDMA implementations, lifecycle, identity, and
-observable results. It adds no device-rate execution, memory domain, command
-batch, timeline, vendor lane, or qualification claim; see the
-[HAL v2 contract](hal_v2.md).
+observable results. M17-02 adds bounded memory/topology discovery,
+heterogeneous registration, inspection, and timestamp correlation while
+preserving that core path. It adds no device-rate execution, command batch,
+timeline, vendor lane, or qualification claim; see the
+[HAL v2 contract](hal_v2.md) and
+[heterogeneous-memory contract](heterogeneous_memory.md).
 M16-01 adds rate-model/reference-plan inspection. M16-02 adds CPU-only
 cross-rate declarations, immutable first/repeating selection inspection,
 copied initial-sample inspection, and preallocated snapshot stores. M16-03 adds

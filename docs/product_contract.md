@@ -58,9 +58,14 @@ recovery, and exposes a separate fixed-capacity versioned rate-action stream.
 M16 is complete in merged target history. M17-01 adds a distinct additive C++
 HAL v2 core table and one canonical manager path while preserving every
 device-ABI-v1 backend through a complete runtime-owned compatibility adapter.
-It does not add heterogeneous memory, topology/coherency, command batches,
-timeline completions, vendor controls, another submission lane, or hardware
-qualification; M17 and CAP-M17 remain incomplete.
+M17-02 appends an optional, separately versioned memory/topology extension and
+a Runtime registration and inspection surface. It defines exactly six bounded
+memory-domain kinds, explicit ownership/access/coherency/synchronization
+semantics, topology and timestamp domains, and running-state timestamp
+correlation. Core-only v2 and adapted-v1 backends keep one implicit borrowed
+host domain and the exact M17-01 path. M17-02 does not add command batches,
+timeline completions, vendor controls, another submission lane, physical
+adapters, or hardware qualification; M17 and CAP-M17 remain incomplete.
 
 ## Claim policy
 
@@ -273,6 +278,7 @@ backend I/O workers, and timed-out work remains quarantined until the driver
 call physically returns. No CUDA or XDMA hardware tuple and no Vulkan backend
 is qualified. See [the device contract](device_backend.md),
 [the HAL v2 contract](hal_v2.md),
+[the heterogeneous-memory contract](heterogeneous_memory.md),
 [the CUDA contract](cuda_backend.md),
 [the XDMA contract](xdma_backend.md), and
 [ADR-0003](adr/0003-device-backend-boundary.md).
@@ -333,7 +339,7 @@ callback expressions.
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
 | CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Multi-rate simulation | M16 complete in merged history | Bounded reference domains, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
-| HAL v2 core and device ABI v1 compatibility | M17-01 implemented locally; external gates pending | Additive C++ HAL API v2 records/table, one canonical manager path, complete bounded v1 adapter, legacy identity preservation, native-v2 identity separation, and unchanged mock/CUDA/XDMA v1 backends; later M17 capabilities remain incomplete |
+| HAL v2 memory/topology and device ABI v1 compatibility | M17-02 implemented locally; external gates pending | Preserved HAL v2 core and complete v1 adapter; additive bounded six-domain memory/topology extension, explicit heterogeneous registration and inspection, timestamp-domain correlation, exact accounting/identity, and retryable cleanup; later M17 capabilities remain incomplete |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

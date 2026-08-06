@@ -157,6 +157,24 @@ legacy identity byte path; only native v2 adds a kind/API marker. No memory
 domain, batch, timeline, vendor-control, plugin, or new-lane architecture is
 introduced by M17-01.
 
+M17-02 appends one separately versioned memory/topology extension pointer to a
+native HAL v2 registration. Configuring-time discovery copies a bounded
+snapshot of memory domains, topology nodes and directed links, timestamp
+domains, and the completion timestamp-domain choice. A native extension and
+its snapshot are validated transactionally before publication. A core-only v2
+or adapted-v1 backend instead receives one synthetic borrowed-host,
+host-coherent, no-sync domain so the legacy path remains semantically exact.
+
+Explicit heterogeneous-memory declarations bind one same-instance domain to
+either a host span or an opaque handle. Start registers those declarations in
+forward order and checked stop unregisters them in reverse order before backend
+shutdown. Native tokens and ownership-uncertain failures remain in fixed
+instance-local state for retry. Read-only Runtime inspectors expose copied
+semantic records; a bounded running-state control call performs declared
+timestamp-domain correlation. None of those paths creates a scheduler lane,
+changes runtime monotonic time, or extends global observability schema 2. See
+the [heterogeneous-memory contract](heterogeneous_memory.md).
+
 Host-driven `step()` receives frame index, simulation delta, and an optional
 deadline. It waits synchronously without pacing while dependency-ready phases
 run on static-assignment, bounded-throughput, or borrowed-host policy.
@@ -277,10 +295,13 @@ selected CPU dispatch, transfer, and late actions. M16-04 adds optional CPU
 shedding/recovery and a separate versioned per-release telemetry component
 without adding a lane or provider region. M17-01 adds the HAL v2 core boundary
 and complete device-ABI-v1 compatibility adapter while retaining the same
-manager and service lane.
+manager and service lane. M17-02 adds pre-start heterogeneous-memory and
+topology state, native memory-token cleanup, and non-RT inspection/correlation
+while retaining that same manager and service lane.
 See the [determinism/replay contract](determinism_replay.md),
 [device backend contract](device_backend.md),
 [HAL v2 contract](hal_v2.md),
+[heterogeneous-memory contract](heterogeneous_memory.md),
 [CUDA backend contract](cuda_backend.md),
 [XDMA backend contract](xdma_backend.md),
 [ADR-0001](adr/0001-one-executor-boundary.md),

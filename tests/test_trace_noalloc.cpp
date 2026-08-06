@@ -823,17 +823,14 @@ struct NoAllocNativeHalV2Backend {
         void* instance,
         const rt::HalV2InitializeConfig* config) noexcept {
         auto* backend = self(instance);
-        if (!backend || !config ||
-            config->struct_size < sizeof(*config) ||
+        if (!backend || !config || config->struct_size < sizeof(*config) ||
             config->api_version != rt::hal_v2_api_version ||
             config->requested_in_flight == 0 ||
             config->requested_in_flight > 4 ||
-            config->requested_registered_buffers != 0 ||
-            !std::all_of(
-                config->reserved.begin(),
-                config->reserved.end(),
-                [](std::uint64_t value) { return value == 0; })) {
-            return rt::HalV2Status::invalid_argument;
+            config->requested_registered_buffers > 1 ||
+            !std::all_of(config->reserved.begin(), config->reserved.end(),
+                         [](std::uint64_t value) { return value == 0; })) {
+          return rt::HalV2Status::invalid_argument;
         }
         bool expected = false;
         if (!backend->initialized.compare_exchange_strong(
@@ -1004,6 +1001,104 @@ struct NoAllocNativeHalV2Backend {
     std::atomic<std::uint64_t> queue_rejections{0};
 };
 
+struct NoAllocHeterogeneousExtension {
+  rt::HalV2MemoryTopologyExtension api() noexcept {
+    rt::HalV2MemoryTopologyExtension table;
+    table.instance = this;
+    table.discover = &discover;
+    table.register_memory = &register_memory;
+    table.unregister_memory = &unregister_memory;
+    table.query_timestamp_correlation = &query_correlation;
+    return table;
+  }
+
+  static NoAllocHeterogeneousExtension *self(void *instance) noexcept {
+    return static_cast<NoAllocHeterogeneousExtension *>(instance);
+  }
+
+  static rt::HalV2Status
+  discover(void *instance, rt::HalV2MemoryTopologySnapshot *output) noexcept {
+    if (!self(instance) || !output || output->struct_size < sizeof(*output)) {
+      return rt::HalV2Status::invalid_argument;
+    }
+    *output = {};
+    output->memory_domain_count = 1;
+    output->topology_node_count = 1;
+    output->timestamp_domain_count = 1;
+    output->completion_timestamp_domain_identity = 1;
+    auto &memory = output->memory_domains[0];
+    memory.identity = 1;
+    memory.kind = static_cast<std::uint32_t>(rt::HalV2MemoryDomainKind::host);
+    memory.ownership_modes = rt::hal_v2_memory_ownership_borrowed_host;
+    memory.maximum_bytes = 4096;
+    memory.byte_granularity = 1;
+    memory.alignment = 64;
+    memory.offset_granularity = 1;
+    memory.access =
+        RTFW_DEVICE_BUFFER_HOST_READ | RTFW_DEVICE_BUFFER_HOST_WRITE |
+        RTFW_DEVICE_BUFFER_DEVICE_READ | RTFW_DEVICE_BUFFER_DEVICE_WRITE;
+    memory.coherency =
+        static_cast<std::uint32_t>(rt::HalV2MemoryCoherency::host_coherent);
+    memory.topology_node_identity = 1;
+    memory.timestamp_domain_identity = 1;
+    auto &node = output->topology_nodes[0];
+    node.identity = 1;
+    node.kind = static_cast<std::uint32_t>(rt::HalV2TopologyNodeKind::host);
+    auto &timestamp = output->timestamp_domains[0];
+    timestamp.identity = 1;
+    timestamp.kind = static_cast<std::uint32_t>(
+        rt::HalV2TimestampDomainKind::backend_device);
+    timestamp.tick_numerator_ns = 1;
+    timestamp.tick_denominator = 1;
+    timestamp.monotonic = 1;
+    timestamp.resets_on_backend_reset = 1;
+    return rt::HalV2Status::ok;
+  }
+
+  static rt::HalV2Status
+  register_memory(void *instance,
+                  const rt::HalV2MemoryRegistration *registration,
+                  rt::HalV2MemoryToken *token) noexcept {
+    auto *extension = self(instance);
+    if (!extension || !registration || !token ||
+        registration->struct_size < sizeof(*registration) ||
+        registration->domain_identity != 1 || registration->bytes != 64 ||
+        !registration->host_data) {
+      return rt::HalV2Status::invalid_argument;
+    }
+    bool expected = false;
+    if (!extension->registered.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel)) {
+      return rt::HalV2Status::invalid_state;
+    }
+    *token = {};
+    token->submission_token = 41;
+    return rt::HalV2Status::ok;
+  }
+
+  static rt::HalV2Status
+  unregister_memory(void *instance, const rt::HalV2MemoryRegistration *,
+                    const rt::HalV2MemoryToken *token) noexcept {
+    auto *extension = self(instance);
+    if (!extension || !token || token->submission_token != 41) {
+      return rt::HalV2Status::invalid_argument;
+    }
+    bool expected = true;
+    return extension->registered.compare_exchange_strong(
+               expected, false, std::memory_order_acq_rel)
+               ? rt::HalV2Status::ok
+               : rt::HalV2Status::invalid_state;
+  }
+
+  static rt::HalV2Status
+  query_correlation(void *, const rt::HalV2TimestampCorrelationQuery *,
+                    rt::HalV2TimestampCorrelation *) noexcept {
+    return rt::HalV2Status::unsupported;
+  }
+
+  std::atomic<bool> registered{false};
+};
+
 } // namespace
 
 void run_complete_device_frames_noalloc(
@@ -1154,6 +1249,71 @@ TEST(TraceNoAlloc, NativeHalV2FramesAndStopDoNotAllocateAfterStart) {
     EXPECT_EQ(
         backend.queue_rejections.load(std::memory_order_acquire),
         0u);
+}
+
+TEST(TraceNoAlloc, HeterogeneousInspectorsHealthAndStopDoNotAllocate) {
+  NoAllocNativeHalV2Backend backend;
+  NoAllocHeterogeneousExtension extension;
+  auto extension_api = extension.api();
+  rt::Runtime runtime;
+  rt::RuntimeConfig config;
+  config.trace_capacity = 64;
+  config.executor_queue_capacity = 8;
+  config.task_scratch_slots = 8;
+  config.device_backend_capacity = 1;
+  config.device_buffer_capacity = 1;
+  config.device_outstanding_capacity = 4;
+  config.device_completion_batch = 4;
+  ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+  rt::DeviceBackendHandle backend_handle;
+  ASSERT_EQ(runtime.register_device_backend(
+                {"native.heterogeneous.noalloc", backend.api(), &extension_api},
+                backend_handle),
+            rt::Status::ok);
+  rt::DeviceMemoryDomainHandle domain;
+  rt::HalV2MemoryDomain descriptor;
+  ASSERT_TRUE(
+      runtime.device_memory_domain_at(backend_handle, 0, domain, descriptor));
+  alignas(64) std::array<std::byte, 64> storage{};
+  rt::DeviceBufferHandle buffer;
+  ASSERT_EQ(runtime.register_device_buffer(
+                {
+                    "native.heterogeneous.noalloc.buffer",
+                    backend_handle,
+                    domain,
+                    storage,
+                    {},
+                    storage.size(),
+                    rt::HalV2MemoryOwnership::borrowed_host,
+                    descriptor.access,
+                    rt::HalV2MemoryCoherency::host_coherent,
+                    rt::hal_v2_memory_sync_none,
+                },
+                buffer),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+  ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+  bool complete = true;
+  {
+    AllocationGuard guard;
+    for (std::size_t index = 0; index < 64; ++index) {
+      rt::DeviceMemoryDomainHandle inspected_domain;
+      rt::HalV2MemoryDomain inspected_descriptor;
+      rt::DeviceMemoryObjectInfo object;
+      rt::DeviceHealth health;
+      complete = complete &&
+                 runtime.device_memory_domain_at(
+                     backend_handle, 0, inspected_domain, inspected_descriptor);
+      complete = complete && runtime.device_memory_object_at(0, object);
+      complete = complete && runtime.device_health(backend_handle, health) ==
+                                 rt::Status::ok;
+    }
+    complete = runtime.stop() == rt::Status::ok && complete;
+  }
+  EXPECT_TRUE(complete);
+  EXPECT_EQ(allocation_count(), 0u);
+  EXPECT_FALSE(extension.registered.load(std::memory_order_acquire));
 }
 
 namespace {

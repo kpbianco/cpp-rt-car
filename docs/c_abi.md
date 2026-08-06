@@ -15,6 +15,14 @@ copies each accepted v1 table into an internal compatibility adapter before
 the canonical HAL v2 manager sees it. Native-v2 users must recompile and
 receive no C++ binary ABI promise. See [the HAL v2 contract](hal_v2.md).
 
+M17-02 likewise changes only C++ declarations in the existing installed
+headers. Its optional memory/topology extension, six-domain taxonomy,
+heterogeneous buffer overload, inspectors, and correlation query add no C
+symbol, record, status, capability bit, export, target, header, fingerprint, or
+SONAME change. C hosts and device-ABI-v1 backends continue through the exact
+M17-01 adapter and implicit borrowed-host mapping. See the
+[heterogeneous-memory contract](heterogeneous_memory.md).
+
 ## Compatibility handshake
 
 An integration should compile against one installed header set and check the

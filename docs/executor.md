@@ -57,9 +57,16 @@ existing device-service lane polls and publishes completion.
 The adapter does not retry, spill, allocate, wait for device completion, invoke
 a callback from poll, or create a helper thread. The submitting/early-ready
 handshake publishes acceptance before applying a synchronous completion.
+M17-02 does not add an executor or lane. Its discovery, registration, cleanup,
+inspection, and correlation operations are control-path calls. A
+heterogeneous memory reference reaches the existing core submission only when
+the declared object is device accessible and requires no explicit
+synchronization. Explicit flush, invalidate, copy, and timeline semantics await
+later command-batch work.
+
 Potentially blocking vendor-operation isolation and fixed per-backend
-submission/I/O lanes belong to M17-03; M17-01 neither creates such a lane nor
-qualifies a vendor call as bounded in time.
+submission/I/O lanes belong to M17-03; neither M17-01 nor M17-02 creates such a
+lane or qualifies a vendor call as bounded in time.
 
 The positive policy cap bounds executed reference records per step. Callback
 failure, missing/duplicate publication, finite generation exhaustion, or a

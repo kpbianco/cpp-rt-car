@@ -35,6 +35,8 @@ LegacyTickDuration volatile legacy_tick_duration =
 #endif
 
 int main() {
+    const rt::HalV2BackendRegistration pre_m17_02_hal_backend{
+        "legacy.hal.v2", {}};
     const rt::DeviceBackendRegistration pre_m17_device_backend{
         "legacy.device.v1", {}};
     const rt::DeviceBufferRegistration pre_m17_device_buffer{
@@ -62,7 +64,10 @@ int main() {
     const rt::CompiledRateDomain pre_m16_03_compiled{
         {}, {}, 0, 1, 1, 1, 1, rt::RateCriticality::normal,
         false, 1, 1, 1};
-    if (pre_m17_device_backend.name != "legacy.device.v1" ||
+    if (pre_m17_02_hal_backend.name != "legacy.hal.v2" ||
+        pre_m17_02_hal_backend.api.api_version != rt::hal_v2_api_version ||
+        pre_m17_02_hal_backend.memory_topology != nullptr ||
+        pre_m17_device_backend.name != "legacy.device.v1" ||
         pre_m17_device_backend.api.abi_version != 0 ||
         pre_m17_device_buffer.name != "legacy.buffer.v1" ||
         pre_m17_device_buffer.flags !=

@@ -2,6 +2,7 @@
 
 #include "executor.hpp"
 #include "hal_v2.hpp"
+#include "heterogeneous_memory.hpp"
 
 #include <array>
 #include <atomic>
@@ -24,6 +25,7 @@ struct DeviceBackendSpec {
     HalV2Capabilities capabilities{};
     HalBackendKind kind = HalBackendKind::adapted_device_abi_v1;
     DeviceV1CompatibilityAdapter* v1_adapter = nullptr;
+    HeterogeneousMemoryState *memory_state = nullptr;
 };
 
 struct DeviceBufferSpec {
@@ -31,6 +33,15 @@ struct DeviceBufferSpec {
     std::uint32_t backend_index = 0;
     std::span<std::byte> storage{};
     rtfw_device_buffer_flags flags = 0;
+    std::uint64_t bytes = 0;
+    std::uint64_t domain_identity = 0;
+    std::uint32_t ownership =
+        static_cast<std::uint32_t>(HalV2MemoryOwnership::borrowed_host);
+    std::uint32_t coherency =
+        static_cast<std::uint32_t>(HalV2MemoryCoherency::host_coherent);
+    std::uint32_t synchronization = hal_v2_memory_sync_none;
+    bool heterogeneous = false;
+    HalV2OpaqueHandle opaque_handle{};
 };
 
 enum class DeviceEventKind : std::uint8_t {
@@ -143,6 +154,12 @@ private:
         HalV2Completion early_completion{};
     };
 
+    struct NativeMemoryState {
+      std::uint64_t legacy_token = 0;
+      HalV2MemoryToken heterogeneous_token{};
+      std::uint8_t heterogeneous_owned = 0;
+    };
+
     [[nodiscard]] Status initialize_backends() noexcept;
     [[nodiscard]] Status shutdown_backends() noexcept;
     [[nodiscard]] bool backend_has_registered_buffers(
@@ -168,7 +185,7 @@ private:
     std::vector<DeviceBackendSpec> backends_;
     std::vector<std::uint8_t> initialized_backends_;
     std::vector<DeviceBufferSpec> buffers_;
-    std::vector<std::uint64_t> native_buffer_tokens_;
+    std::vector<NativeMemoryState> native_memory_;
     std::unique_ptr<Outstanding[]> outstanding_slots_;
     std::size_t outstanding_capacity_ = 0;
     std::unique_ptr<HalV2Completion[]> completion_buffer_;

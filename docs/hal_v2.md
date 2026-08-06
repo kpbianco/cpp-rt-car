@@ -1,4 +1,4 @@
-# HAL v2 Core and Device-ABI-v1 Compatibility Contract
+# HAL v2 Core, Memory/Topology, and Device-ABI-v1 Compatibility Contract
 
 M17-01 adds an additive C++ HAL v2 core contract to the already installed
 `rt/device.hpp` header. The HAL API version is exactly 2. It is a source API:
@@ -6,12 +6,15 @@ applications must recompile, and RTFW makes no C++ binary ABI promise. Stable C
 ABI v8, SONAME 8, and every declaration, value, and layout in
 `rt/device_abi.h` version 1 remain unchanged.
 
-This batch establishes portable RT0 functional behavior only. M17 and CAP-M17
-remain incomplete. Memory domains, topology, coherency, timestamp correlation,
-command batches, timeline completions, isolated vendor submission lanes, CUDA
-Graph, XDMA control/MMIO/event facilities, peer memory, plugin or factory
-loading, device-rate execution, and combined CPU/GPU/FPGA execution are not
-part of the M17-01 core.
+M17-02 preserves that core and appends one optional, separately versioned C++
+memory/topology extension pointer to `HalV2BackendRegistration`. The extension
+adds bounded memory-domain, topology, timestamp-domain, native-memory, and
+correlation contracts; it does not change HAL API version 2 or any M17-01 core
+record/table behavior. Both batches establish portable RT0 functional behavior
+only. M17 and CAP-M17 remain incomplete. Command batches, timeline
+completions, isolated vendor submission lanes, CUDA Graph, XDMA
+control/MMIO/event facilities, physical peer DMA, plugin or factory loading,
+device-rate execution, and combined CPU/GPU/FPGA execution remain deferred.
 
 ## Public core shape
 
@@ -50,6 +53,42 @@ work, maximum registered-buffer count, maximum buffer bytes, inline and
 reference capacities, cancellation/reset support, deterministic-mock
 declaration, and backend-owned control-storage bytes. Boolean capability bytes
 are exactly zero or one. M17-01 does not infer any unreported v2 capability.
+
+## Optional memory/topology extension
+
+`HalV2MemoryTopologyExtension` has extension version 1, a borrowed non-null
+instance, four required operations, and a zero reserved tail. It is copied
+during configuring independently of the HAL core table:
+
+1. `discover` publishes one complete `HalV2MemoryTopologySnapshot`;
+2. `register_memory` converts one validated declaration into a nonzero private
+   token;
+3. `unregister_memory` releases that token;
+4. `query_timestamp_correlation` samples one declared timestamp relation.
+
+All four operations are required when the extension is present. Unsupported
+runtime calls return `HalV2Status::unsupported`; a null function never denotes
+optional behavior. Output records publish only after whole-record validation,
+and callback exceptions fail closed. A failed or exceptional cleanup call does
+not prove ownership release.
+
+The copied snapshot has hard capacities of 16 memory domains, 32 topology
+nodes, 64 directed links, and 8 timestamp domains. Identities are positive and
+unique within their kind, references resolve within the same snapshot, counts
+cannot exceed their public capacities, and reserved storage is zero.
+The exact memory kinds are host, pinned host, CUDA device, imported, DMA
+mapped, and peer. Ownership, host/device access, coherency, required
+synchronization, maximum bytes, alignment, byte granularity, and opaque-handle
+shape are explicit domain properties. The complete rules are in the
+[heterogeneous-memory contract](heterogeneous_memory.md).
+
+A core-only native v2 backend and every adapted-v1 backend expose one runtime
+synthetic borrowed-host domain: identity 1, borrowed-host ownership,
+host-coherent behavior, no synchronization requirement, byte/alignment
+granularity 1, and the core capability's maximum buffer bytes. This synthetic
+mapping is not a call into the backend and adds no topology or timestamp
+assertion. The legacy buffer API continues through the unchanged core
+`register_buffer`/`unregister_buffer` operations.
 
 Initialization receives the runtime's requested in-flight and per-backend
 registered-buffer counts. Buffer registration borrows one nonempty host span,
@@ -163,12 +202,24 @@ The existing six-row plan equation and three provider-capable regions do not
 change. Borrowed buffer bytes and backend-owned `control_storage_bytes` remain
 informational and excluded from `planned_bytes`.
 
+M17-02 also counts the copied extension table and snapshot, bounded semantic
+records, heterogeneous registration specifications, native tokens, and fixed
+translation state exactly once in `device_control_bytes`. Declared host spans
+and opaque/device storage remain borrowed or backend-owned according to their
+domain and are not converted into Runtime-owned payload bytes.
+
 An adapted-v1 registration follows the exact pre-M17 graph/replay hash byte
 path, preserving checkpoint and input-log compatibility for an otherwise
 identical configuration. A native-v2 registration conditionally contributes
 its backend kind and API version 2 to graph identity, so it cannot impersonate
 an adapted v1 backend. Table/context addresses and control capacities are not
 compatibility semantics. Checkpoint and input-log schemas remain version 1.
+
+When a native extension exists, its semantic domain/topology/timestamp snapshot
+and every explicit heterogeneous-memory declaration are appended
+conditionally to graph/replay identity. Callback, instance, pointer, and
+runtime-private token values are excluded. Core-only and adapted-v1 legacy
+configurations retain their exact M17-01 identity bytes.
 
 Native and adapted backends use the same existing observability meanings.
 Global schema 2, trace IDs 1-14, metric IDs 0-31, producers, counters, and
@@ -178,9 +229,11 @@ telemetry schema or callback.
 After successful start, submission, early and polled completion, health,
 reset, checked cleanup, and complete CPU-plus-device frames use fixed storage.
 They add no ordinary heap allocation, hidden thread, blocking mutex, unbounded
-wait or retry, spill path, poll callback, or file/network I/O. M17-01 creates no
-new submission lane; potentially blocking vendor-operation isolation belongs
-to M17-03.
+wait or retry, spill path, poll callback, or file/network I/O. M17-01 and
+M17-02 create no new submission lane; potentially blocking vendor-operation
+isolation belongs to M17-03. A heterogeneous object reaches the existing core
+submission only if it is device accessible and requires no explicit
+synchronization.
 
 ## Evidence and claim boundary
 
@@ -191,11 +244,13 @@ compatibility, exact accounting, sanitizers, and steady-state allocation
 freedom. Existing mock, CUDA fake-driver, and portable XDMA suites remain v1
 compatibility evidence without modifying those backends.
 
-Neither a native table nor a compatibility adapter establishes heterogeneous
-memory, topology/coherency, timestamp correlation, command batching, timeline
-completion, isolated blocking-vendor execution, CUDA Graph, XDMA controls,
-peer DMA, physical accelerator behavior, HIL, field performance, worst-case
-latency, RT1, RT2, signing, release, deployment, or production readiness.
-Mocks, fixtures, hosted CI, preflight, and documentation remain non-physical
-evidence. M17 and CAP-M17 stay incomplete after M17-01; later M17 batches and
+Synthetic tests can establish the M17-02 memory/topology record contract,
+registration and cleanup behavior, bounded correlation validation, identity,
+accounting, compatibility, and cross-instance isolation. They do not establish
+physical CUDA/XDMA allocation, coherency, synchronization, topology, peer DMA,
+device-clock behavior, command batching, timeline completion, isolated
+blocking-vendor execution, CUDA Graph, XDMA controls, HIL, field performance,
+worst-case latency, RT1, RT2, signing, release, deployment, or production
+readiness. Mocks, fixtures, hosted CI, preflight, and documentation remain
+non-physical evidence. M17 and CAP-M17 stay incomplete; later M17 batches and
 named M18 qualification evidence own those claims.

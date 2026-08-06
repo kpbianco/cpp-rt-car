@@ -94,6 +94,14 @@ producer, or schema field. An early completion is published only after its
 accepted `device.submitted` record, and malformed output publishes neither a
 completion event nor a successful reset/health result.
 
+M17-02 adds no global event, metric, producer, or schema field. Memory-domain,
+topology, timestamp-domain, completion-domain, and memory-object facts are
+available through bounded C++ Runtime inspectors. Timestamp correlations are
+explicit running-state control results; they are not trace timestamps, are not
+emitted automatically, and are not retained in checkpoint, replay, or rate
+telemetry. Synthetic device timestamps do not establish correlation accuracy
+or physical clock behavior.
+
 Trace slots are cache-line aligned. The implementation fails compilation on a
 target whose 16-, 32-, or 64-bit standard atomics are not always lock-free,
 rather than silently routing an RT-lane operation through a library lock.

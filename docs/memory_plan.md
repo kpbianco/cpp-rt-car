@@ -283,6 +283,16 @@ native instance, borrowed registered-buffer payload, and backend-reported
 remains the informational backend-control fact and is excluded from
 `planned_bytes`.
 
+M17-02 adds copied extension tables, the fixed 16-domain/32-node/64-link/
+8-timestamp snapshot envelope, heterogeneous registration records, native
+tokens, and translation/cleanup state to the same `device_control_bytes` term.
+The estimator and constructed logical extents must again agree exactly. Host
+spans and opaque/device allocations are not adopted; their checked declared
+bytes are the informational registered-device-buffer fact. Domain maximums and
+granularities bound registration but do not become payload allocation rows.
+Core-only and adapted-v1 implicit-domain state is also fixed device control and
+does not create a seventh plan row or fourth provider region.
+
 No seventh plan row or fourth provider region is added. The six-row equation,
 the exact M15 runtime/executor/device ledger, and the phase-scratch,
 task-scratch, and trace-only provider boundary remain unchanged. Checked
@@ -294,8 +304,8 @@ retry, and complete CPU-plus-device frames allocate no ordinary heap.
 Before `start()` creates a thread, M15-03 applies and observes resident-memory
 policy for phase scratch, task scratch, and trace storage. It then creates the
 configured fixed worker team, an optional M5 watchdog lane, and one M8 device
-service lane when backends exist. M17-01 adds no submission or I/O lane. After
-it returns, the
+service lane when backends exist. M17-01 and M17-02 add no submission or I/O
+lane. After it returns, the
 target CPU/device frame path uses preallocated graph, queue, scratch, trace,
 outstanding, and completion storage. It contains no file I/O, blocking mutex,
 hidden per-frame thread creation, heap fallback, or intentional heap
@@ -329,6 +339,10 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
 - HAL v2 adapter/table/context accounting, overflow rejection, address
   stability, and allocation-free native/adapted device frames:
   `tests/test_hal_v2.cpp`, `tests/test_memory_plan.cpp`, and
+  `tests/test_trace_noalloc.cpp`;
+- heterogeneous snapshot/specification/token accounting, opaque logical-byte
+  reporting, overflow/capacity rejection, and unchanged six-row reconciliation:
+  `tests/test_heterogeneous_memory.cpp`, `tests/test_memory_plan.cpp`, and
   `tests/test_trace_noalloc.cpp`;
 - C ABI plan, scratch, malformed discriminator, and reserved-field checks:
   `tests/test_cabi_dlopen.c`;

@@ -88,6 +88,7 @@ HASHED_CONTRACT_PATHS = {
     "docs/device_backend.md",
     "docs/executor.md",
     "docs/hal_v2.md",
+    "docs/heterogeneous_memory.md",
     "docs/host_runtime.md",
     "docs/limp_mode.md",
     "docs/memory_plan.md",
@@ -138,6 +139,8 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/executor.hpp",
     "rt/src/hal_v2.cpp",
     "rt/src/hal_v2.hpp",
+    "rt/src/heterogeneous_memory.cpp",
+    "rt/src/heterogeneous_memory.hpp",
     "rt/src/host_runtime.cpp",
     "rt/src/memory_policy.cpp",
     "rt/src/memory_policy.hpp",
@@ -183,6 +186,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_cross_rate_data.cpp",
     "tests/test_host_runtime.cpp",
     "tests/test_hal_v2.cpp",
+    "tests/test_heterogeneous_memory.cpp",
     "tests/test_memory_plan.cpp",
     "tests/test_periodic_runtime.cpp",
     "tests/test_rate_dispatch.cpp",
@@ -750,6 +754,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "rtfwCudaTargets",
         "rtfwXdmaTargets",
         "rt/src/hal_v2.cpp",
+        "rt/src/heterogeneous_memory.cpp",
     ):
         if token not in cmake:
             errors.append(f"CMakeLists.txt: missing release token {token!r}")
@@ -787,7 +792,9 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "CMAKE_INSTALL_INCLUDEDIR=sdk/include",
         "CMAKE_INSTALL_DATADIR=sdk/data",
         "HalV2.*",
+        "HeterogeneousMemory.*",
         "m17_hal_v2_compatibility",
+        "m17_heterogeneous_memory_topology",
     ):
         if token not in ci:
             errors.append(f"CI: missing portable release gate {token!r}")
@@ -845,6 +852,121 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         consumer = load_text(root, path, errors)
         if "DeviceBackendRegistration" not in consumer:
             errors.append(f"{path}: missing device ABI v1 compatibility gate")
+
+    # M17-02 adds only a C++ source extension. These checks retain permanent
+    # memory/topology compatibility facts without coupling release validation
+    # to whichever later M17 batch is active.
+    for token in (
+        "hal_v2_memory_topology_extension_version = 1u",
+        "hal_v2_memory_domain_capacity = 16u",
+        "hal_v2_topology_node_capacity = 32u",
+        "hal_v2_topology_link_capacity = 64u",
+        "hal_v2_timestamp_domain_capacity = 8u",
+        "hal_v2_opaque_handle_capacity = 64u",
+        "enum class HalV2MemoryDomainKind",
+        "struct HalV2MemoryTopologySnapshot",
+        "struct HalV2MemoryTopologyExtension",
+        "struct HeterogeneousDeviceBufferRegistration",
+        "struct DeviceMemoryObjectInfo",
+    ):
+        if token not in device_header:
+            errors.append(
+                f"HAL v2 memory/topology public contract: missing {token!r}"
+            )
+    for domain_kind in (
+        "host = 1",
+        "pinned_host = 2",
+        "cuda_device = 3",
+        "imported = 4",
+        "dma_mapped = 5",
+        "peer = 6",
+    ):
+        if domain_kind not in device_header:
+            errors.append(
+                "HAL v2 memory-domain taxonomy: "
+                f"missing {domain_kind!r}"
+            )
+
+    runtime_header = load_text(root, "rt/include/rt/runtime.hpp", errors)
+    for token in (
+        "const HeterogeneousDeviceBufferRegistration&",
+        "device_memory_domain_at(",
+        "device_topology_node_at(",
+        "device_topology_link_at(",
+        "device_timestamp_domain_at(",
+        "device_memory_object_at(",
+        "query_device_timestamp_correlation(",
+    ):
+        if token not in runtime_header:
+            errors.append(
+                f"runtime memory/topology source contract: missing {token!r}"
+            )
+
+    heterogeneous_header = load_text(
+        root, "rt/src/heterogeneous_memory.hpp", errors
+    )
+    heterogeneous_source = load_text(
+        root, "rt/src/heterogeneous_memory.cpp", errors
+    )
+    for token in (
+        "validate_memory_topology_extension",
+        "validate_memory_topology_snapshot",
+        "validate_opaque_handle",
+        "validate_memory_token",
+        "discover_memory_topology",
+        "make_implicit_host_memory_state",
+        "validate_timestamp_correlation",
+    ):
+        if token not in heterogeneous_header and token not in heterogeneous_source:
+            errors.append(
+                f"heterogeneous-memory validation: missing {token!r}"
+            )
+
+    tests_cmake = load_text(root, "tests/CMakeLists.txt", errors)
+    for token in (
+        "test_heterogeneous_memory.cpp",
+        "m17_heterogeneous_memory_topology",
+        "HeterogeneousMemory.*",
+        "TraceNoAlloc.*Heterogeneous*",
+    ):
+        if token not in tests_cmake:
+            errors.append(f"M17-02 CMake tests: missing {token!r}")
+    heterogeneous_tests = "\n".join(
+        load_text(root, path, errors)
+        for path in (
+            "tests/test_heterogeneous_memory.cpp",
+            "tests/test_hal_v2.cpp",
+            "tests/test_device_runtime.cpp",
+            "tests/test_memory_plan.cpp",
+            "tests/test_determinism_replay.cpp",
+            "tests/test_trace_noalloc.cpp",
+        )
+    )
+    for token in ("HeterogeneousMemory", "Correlation", "Rollback", "Identity"):
+        if token not in heterogeneous_tests:
+            errors.append(
+                f"M17-02 permanent test coverage: missing {token!r}"
+            )
+
+    for token in (
+        "HalV2MemoryTopologyExtension",
+        "HeterogeneousDeviceBufferRegistration",
+        "device_memory_domain_at",
+        "device_memory_object_at",
+    ):
+        if token not in package_cpp:
+            errors.append(
+                f"HAL v2 memory/topology package consumer: missing {token!r}"
+            )
+    for token in (
+        "pre_m17_02_hal_backend",
+        "pre_m17_device_backend",
+        "pre_m17_device_buffer",
+    ):
+        if token not in package_compat:
+            errors.append(
+                f"M17-02 aggregate compatibility consumer: missing {token!r}"
+            )
 
     workflow_paths = sorted(
         set((root / ".github/workflows").glob("*.yml"))

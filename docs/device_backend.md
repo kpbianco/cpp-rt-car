@@ -7,6 +7,9 @@ deterministic fault-injectable CPU mock. M17-01 adds an additive C++ HAL v2
 core and routes both native HAL v2 registrations and every unchanged
 device-ABI-v1 registration through one canonical HAL v2 device manager. The
 complete v1 translation contract is in [the HAL v2 contract](hal_v2.md).
+M17-02 adds the optional memory/topology extension and Runtime registration,
+inspection, and correlation surface described in the
+[heterogeneous-memory contract](heterogeneous_memory.md).
 
 This base is portable RT0 functional behavior. It is not itself
 CUDA, Vulkan, XDMA, driver, latency, or RT2 qualification. The optional M9
@@ -38,8 +41,9 @@ The target lifecycle is:
    version 1 or HAL API version 2, every required function, reserved field,
    identifier, and reported capacity. A v1 registration is wrapped exactly
    once before entering the canonical manager.
-2. `register_device_buffer()` records a nonempty, nonoverlapping host span and
-   access flags. The backend does not see it yet.
+2. `register_device_buffer()` records either the legacy nonempty,
+   nonoverlapping borrowed-host span or one explicit same-backend heterogeneous
+   declaration. The backend does not see it yet.
 3. `register_device_phase()` adds a command-provider phase to the same graph as
    CPU phases.
 4. `finalize()` validates backend limits and commits canonical registrations,
@@ -217,6 +221,12 @@ are counted exactly once in `device_control_bytes`. Backend-reported storage is
 informational and excluded from `planned_bytes` because the backend owns it.
 Registered buffer payload bytes are borrowed and excluded.
 
+M17-02 extension tables, copied domain/topology/timestamp snapshots,
+heterogeneous registration records, native tokens, and translation state are
+also counted exactly once in `device_control_bytes`. Host spans and opaque or
+device allocations remain excluded payloads; their declared logical byte
+counts do not confer Runtime ownership.
+
 M15-04 reconciles the runtime-owned device-manager object and constructed
 registration, adapter, outstanding, completion, and service-control
 allocations as non-overlapping logical extents against `device_control_bytes`.
@@ -243,6 +253,12 @@ Native-v2 backends conditionally contribute their backend kind and API version
 2 to compatibility identity. Checkpoint/input-log schemas and codecs remain
 version 1.
 
+Native extension semantics and explicit heterogeneous registrations also enter
+identity conditionally. Adapted-v1 and core-only v2 legacy registrations retain
+their exact M17-01 path. Global observability schema 2 remains unchanged;
+timestamp-domain inspectors and correlation results are control-plane data, not
+trace timestamps or new metrics.
+
 ## Evidence and exclusions
 
 Automated evidence covers native-v2 and adapted-v1 validation and equivalence,
@@ -263,8 +279,10 @@ qualified tuple. M10 likewise provides a bounded XDMA candidate but no
 qualified hardware tuple. Neither backend inherits a portable completion-time
 claim from M8.
 
-M17-01 does not establish heterogeneous memory, topology/coherency, timestamp
-correlation, command batching, timeline completion, an isolated vendor lane,
-CUDA Graph, XDMA controls, peer memory, physical accelerator behavior, HIL,
+M17-02 establishes bounded heterogeneous-memory, topology, coherency,
+synchronization-declaration, and timestamp-correlation contracts with synthetic
+functional tests. It does not establish physical CUDA/XDMA memory, peer DMA,
+device-clock accuracy, command batching, timeline completion, an isolated
+vendor lane, CUDA Graph, XDMA controls, physical accelerator behavior, HIL,
 field performance, worst-case latency, RT1, RT2, signing, release, deployment,
 or production readiness. M17 and CAP-M17 remain incomplete.

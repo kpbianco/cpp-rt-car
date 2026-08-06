@@ -107,6 +107,7 @@ if (SIM_GTEST_AVAILABLE)
     # M15 CPU/memory policy is part of the supported runtime and must remain in both the
     # default and experimental-enabled GoogleTest configurations.
     list(APPEND TEST_SOURCES
+        test_heterogeneous_memory.cpp
         test_hal_v2.cpp
         test_cross_rate_data.cpp
         test_rate_dispatch.cpp
@@ -192,6 +193,12 @@ if (SIM_GTEST_AVAILABLE)
         COMMAND simcore_tests
             --gtest_filter=HalV2.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.RuntimeGraphAcceptsCandidateBackendAtD0:MemoryPlan.*Hal*:DeterminismReplay.*Hal*:TraceNoAlloc.*Hal*)
     set_tests_properties(m17_hal_v2_compatibility PROPERTIES TIMEOUT 60)
+    add_test(
+        NAME m17_heterogeneous_memory_topology
+        COMMAND simcore_tests
+            --gtest_filter=HeterogeneousMemory.*:HalV2.*Memory*:DeviceRuntime.*Memory*:MemoryPlan.*Heterogeneous*:DeterminismReplay.*Heterogeneous*:TraceNoAlloc.*Heterogeneous*)
+    set_tests_properties(
+        m17_heterogeneous_memory_topology PROPERTIES TIMEOUT 60)
     add_test(
         NAME m16_rate_timeline
         COMMAND simcore_tests

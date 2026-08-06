@@ -84,6 +84,14 @@ latency qualification and does not prove the complete product contract.
   checked stop. Permanent adapted-v1 manager tests separately retain early
   completion, fault, mutation, dependency-release, recovery, and isolation
   coverage on the same canonical manager path.
+- M17-02 tests cover the exact six-domain taxonomy and fixed snapshot limits;
+  positive discovery, registration, inspection, correlation, and submission;
+  invalid size/version/reserved/enumeration/reference/count/alignment/
+  granularity/capacity/ownership/access/coherency/sync/opaque-handle records;
+  foreign handles, overlap, unsupported calls, callback exceptions, timeout,
+  cancellation, failed-start rollback, reverse cleanup retry/recovery, and
+  two-runtime isolation. Legacy adapted-v1 and core-only-v2 cases prove the
+  implicit borrowed-host mapping and permanent M17-01 equivalence.
 - Identity tests retain exact adapted-v1 pre-M17 graph/replay and artifact
   bytes while requiring native-v2 kind/API separation. Memory tests reconcile
   adapter/table/context storage exactly once in `device_control_bytes`, the
@@ -119,6 +127,9 @@ latency qualification and does not prove the complete product contract.
   early-ready, concurrent submit/poll, cleanup/retry, two-runtime, CUDA
   fake-driver, and portable XDMA processes without weakening permanent M15 or
   M16 gates.
+  M17-02 adds the heterogeneous-memory suite and its registration/correlation,
+  cleanup-retry, submission-translation, and cross-instance processes without
+  weakening those permanent gates.
 - `test_differential_output.cpp` compares a sample numerical kernel with a
   checked-in golden result under an absolute drift threshold.
 - fault-injection tests exercise selected allocator, delay, and transient-error
@@ -166,11 +177,12 @@ latency qualification and does not prove the complete product contract.
   architectures, standard libraries, or D2/D3 determinism.
 - Passing deterministic mock-device tests do not exercise a hardware device,
   driver, DMA path, or completion-latency bound.
-- Passing HAL v2, compatibility-adapter, package, sanitizer, hosted CI, or
-  deterministic artifact tests does not establish heterogeneous memory,
-  topology/coherency, timestamp correlation, command batches, timelines,
-  isolated blocking-vendor execution, physical hardware, HIL, field behavior,
-  latency, RT1, or RT2.
+- Passing HAL v2, heterogeneous-memory, compatibility-adapter, package,
+  sanitizer, hosted CI, or deterministic artifact tests establishes only the
+  portable record/lifecycle behavior exercised. It does not establish physical
+  allocation, pinning, DMA, coherency, synchronization, topology, peer access,
+  timestamp accuracy, command batches, timelines, isolated blocking-vendor
+  execution, physical hardware, HIL, field behavior, latency, RT1, or RT2.
 - Passing fake-driver CUDA tests establish the backend state machine, not a
   CUDA toolkit build, physical GPU behavior, resource stability, recovery
   behavior, or completion-latency bound. The opt-in self-hosted CUDA workflow
