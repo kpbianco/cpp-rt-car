@@ -135,7 +135,7 @@ task scratch + trace storage = planned_bytes
 | `memory.trace-storage` | planned/provider-capable | Fixed telemetry slot storage |
 | `memory.registered-state` | informational external | Borrowed canonical state bytes; never mutated by memory policy |
 | `memory.backend-control` | informational external | Backend-reported private control bytes; never mutated by memory policy |
-| `memory.registered-device-buffer` | informational external | Checked sum of borrowed registered buffer spans; never mutated by memory policy |
+| `memory.registered-device-buffer` | informational external | Checked sum of declared logical bytes for legacy host spans and explicit heterogeneous objects; storage is externally/backend owned and never mutated by memory policy |
 | `memory.runtime-thread-stack` | excluded | Exact live executor/watchdog/device-service cardinality and native stack/guard commitment after startup; supported Linux residency is observed while mappings are live |
 | `memory.external-thread-stack` | excluded | Caller/host/vendor stacks remain unknown or partial unless bounded declared-only metadata closes their logical facts |
 | `memory.host-provider` | excluded | Reserved accounting row; provider outcomes are reported on selected backing rows and are not double-counted here |
@@ -147,6 +147,13 @@ resident, verified-locked, and provider-confirmed pinned bytes are distinct
 observations. Actual guards/page size, explicit huge-page outcome, fallback,
 acquired/applied/verified states, and provider/native errors remain on the same
 row. These fields do not change or double count the plan.
+
+M17-02 does not reinterpret resident, locked, pinned, or DMA-accessible memory.
+A pinned-host, imported, DMA-mapped, CUDA-device, or peer domain is a backend
+contract declaration, not an M15 native-policy observation. Its logical bytes
+are reported as external registered-device-buffer accounting; opaque handles
+never authorize the Runtime to inspect or apply host memory policy to the
+underlying allocation.
 
 Each row and each planned, informational, excluded, and closed aggregate has a
 `ResourceAccountingExactness`: `exact`, `declared_only`, `partial`, `unknown`,

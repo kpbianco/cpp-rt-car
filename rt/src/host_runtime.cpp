@@ -933,6 +933,59 @@ struct Runtime::Impl {
                     static_cast<std::uint64_t>(backend.kind));
                 hash_u64(hash, hal_v2_api_version);
             }
+            if (backend.memory_state &&
+                backend.memory_state->native_extension) {
+              hash_u64(hash, 0x4d31372d6d656d32ull);
+              const auto &snapshot = backend.memory_state->snapshot;
+              hash_u64(hash, snapshot.memory_domain_count);
+              for (std::size_t index = 0; index < snapshot.memory_domain_count;
+                   ++index) {
+                const auto &domain = snapshot.memory_domains[index];
+                hash_u64(hash, domain.identity);
+                hash_u64(hash, domain.kind);
+                hash_u64(hash, domain.ownership_modes);
+                hash_u64(hash, domain.maximum_bytes);
+                hash_u64(hash, domain.byte_granularity);
+                hash_u64(hash, domain.alignment);
+                hash_u64(hash, domain.offset_granularity);
+                hash_u64(hash, domain.access);
+                hash_u64(hash, domain.coherency);
+                hash_u64(hash, domain.required_synchronization);
+                hash_u64(hash, domain.topology_node_identity);
+                hash_u64(hash, domain.timestamp_domain_identity);
+              }
+              hash_u64(hash, snapshot.topology_node_count);
+              for (std::size_t index = 0; index < snapshot.topology_node_count;
+                   ++index) {
+                const auto &node = snapshot.topology_nodes[index];
+                hash_u64(hash, node.identity);
+                hash_u64(hash, node.kind);
+              }
+              hash_u64(hash, snapshot.topology_link_count);
+              for (std::size_t index = 0; index < snapshot.topology_link_count;
+                   ++index) {
+                const auto &link = snapshot.topology_links[index];
+                hash_u64(hash, link.identity);
+                hash_u64(hash, link.source_node_identity);
+                hash_u64(hash, link.destination_node_identity);
+                hash_u64(hash, link.kind);
+              }
+              hash_u64(hash, snapshot.timestamp_domain_count);
+              for (std::size_t index = 0;
+                   index < snapshot.timestamp_domain_count; ++index) {
+                const auto &domain = snapshot.timestamp_domains[index];
+                hash_u64(hash, domain.identity);
+                hash_u64(hash, domain.kind);
+                hash_u64(hash, domain.tick_numerator_ns);
+                hash_u64(hash, domain.tick_denominator);
+                hash_u64(hash, domain.wrap_ticks);
+                hash_u64(hash, domain.correlation_destination_identity);
+                hash_u64(hash, domain.monotonic);
+                hash_u64(hash, domain.resets_on_backend_reset);
+                hash_u64(hash, domain.supports_correlation);
+              }
+              hash_u64(hash, snapshot.completion_timestamp_domain_identity);
+            }
         }
         hash_u64(hash, device_buffers.size());
         for (const auto& buffer : device_buffers) {
@@ -943,8 +996,22 @@ struct Runtime::Impl {
                     std::char_traits<char>::length(
                         buffer.name.data())));
             hash_u64(hash, buffer.backend_index);
-            hash_u64(hash, buffer.storage.size());
-            hash_u64(hash, buffer.flags);
+            if (!buffer.heterogeneous) {
+              hash_u64(hash, buffer.storage.size());
+              hash_u64(hash, buffer.flags);
+            } else {
+              hash_u64(hash, 0x4d31372d6f626a32ull);
+              hash_u64(hash, buffer.bytes);
+              hash_u64(hash, buffer.domain_identity);
+              hash_u64(hash, buffer.ownership);
+              hash_u64(hash, buffer.flags);
+              hash_u64(hash, buffer.coherency);
+              hash_u64(hash, buffer.synchronization);
+              hash_u64(hash, buffer.opaque_handle.size);
+              hash_bytes(hash, std::span<const std::byte>(
+                                   buffer.opaque_handle.bytes.data(),
+                                   buffer.opaque_handle.size));
+            }
         }
         hash_u64(hash, resources.size());
         for (const auto& resource : resources) {
@@ -3184,6 +3251,8 @@ struct Runtime::Impl {
     std::vector<detail::DeviceBackendSpec> device_backends;
     std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
         device_v1_adapters;
+    std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
+        device_memory_states;
     std::vector<detail::DeviceBufferSpec> device_buffers;
     std::vector<RegisteredResource> resources;
     std::vector<RegisteredState> states;
@@ -3564,23 +3633,34 @@ Status Runtime::register_device_backend(
             "device backend reported malformed capabilities");
     }
 
+    std::unique_ptr<detail::HeterogeneousMemoryState> memory_state;
     try {
-        const auto index = static_cast<std::uint32_t>(
-            impl_->device_backends.size());
-        auto* adapter_instance = adapter.get();
-        impl_->device_v1_adapters.push_back(std::move(adapter));
+      memory_state = std::make_unique<detail::HeterogeneousMemoryState>();
+      detail::make_implicit_host_memory_state(capabilities, *memory_state);
+      const auto index =
+          static_cast<std::uint32_t>(impl_->device_backends.size());
+      auto *adapter_instance = adapter.get();
+      auto *memory_instance = memory_state.get();
+      impl_->device_v1_adapters.push_back(std::move(adapter));
+      try {
+        impl_->device_memory_states.push_back(std::move(memory_state));
+      } catch (...) {
+        impl_->device_v1_adapters.pop_back();
+        throw;
+      }
         try {
-            impl_->device_backends.push_back(
-                detail::DeviceBackendSpec{
-                    std::string(registration.name),
-                    adapter_instance->api(),
-                    capabilities,
-                    detail::HalBackendKind::adapted_device_abi_v1,
-                    adapter_instance,
-                });
+          impl_->device_backends.push_back(detail::DeviceBackendSpec{
+              std::string(registration.name),
+              adapter_instance->api(),
+              capabilities,
+              detail::HalBackendKind::adapted_device_abi_v1,
+              adapter_instance,
+              memory_instance,
+          });
         } catch (...) {
-            impl_->device_v1_adapters.pop_back();
-            throw;
+          impl_->device_memory_states.pop_back();
+          impl_->device_v1_adapters.pop_back();
+          throw;
         }
         out_backend =
             DeviceBackendHandle{impl_->graph_owner, index};
@@ -3654,16 +3734,43 @@ Status Runtime::register_device_backend(
             Status::invalid_argument,
             "HAL v2 backend reported malformed capabilities");
     }
+    std::unique_ptr<detail::HeterogeneousMemoryState> memory_state;
+    try {
+      memory_state = std::make_unique<detail::HeterogeneousMemoryState>();
+    } catch (const std::bad_alloc &) {
+      return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+      return impl_->fail(Status::internal_error, nullptr);
+    }
+    if (registration.memory_topology) {
+      const auto memory_status = detail::discover_memory_topology(
+          *registration.memory_topology, *memory_state);
+      if (memory_status != Status::ok) {
+        return impl_->fail(
+            memory_status,
+            "HAL v2 memory/topology discovery failed or was malformed");
+      }
+    } else {
+      detail::make_implicit_host_memory_state(capabilities, *memory_state);
+    }
     try {
         const auto index = static_cast<std::uint32_t>(
             impl_->device_backends.size());
-        impl_->device_backends.push_back(detail::DeviceBackendSpec{
-            std::string(registration.name),
-            registration.api,
-            capabilities,
-            detail::HalBackendKind::native_hal_v2,
-            nullptr,
-        });
+        auto *memory_instance = memory_state.get();
+        impl_->device_memory_states.push_back(std::move(memory_state));
+        try {
+          impl_->device_backends.push_back(detail::DeviceBackendSpec{
+              std::string(registration.name),
+              registration.api,
+              capabilities,
+              detail::HalBackendKind::native_hal_v2,
+              nullptr,
+              memory_instance,
+          });
+        } catch (...) {
+          impl_->device_memory_states.pop_back();
+          throw;
+        }
         out_backend = DeviceBackendHandle{impl_->graph_owner, index};
     } catch (const std::bad_alloc&) {
         return impl_->fail(Status::resource_exhausted, nullptr);
@@ -3751,6 +3858,24 @@ Status Runtime::register_device_buffer(
             Status::capacity_exceeded,
             "backend registered-buffer capacity exceeded");
     }
+    const auto *host_domain =
+        backend.memory_state ? detail::find_legacy_host_domain(
+                                   *backend.memory_state, registration.flags)
+                             : nullptr;
+    if (!host_domain) {
+      return impl_->fail(
+          Status::invalid_argument,
+          "device backend has no coherent borrowed-host memory domain");
+    }
+    if (registration.storage.size() > host_domain->maximum_bytes ||
+        registration.storage.size() % host_domain->byte_granularity != 0 ||
+        reinterpret_cast<std::uintptr_t>(registration.storage.data()) %
+                host_domain->alignment !=
+            0) {
+      return impl_->fail(
+          Status::invalid_argument,
+          "legacy host buffer violates its discovered host-domain contract");
+    }
 
     try {
         const auto index = static_cast<std::uint32_t>(
@@ -3760,15 +3885,146 @@ Status Runtime::register_device_buffer(
             static_cast<std::uint32_t>(backend_index),
             registration.storage,
             registration.flags,
+            registration.storage.size(),
+            host_domain->identity,
         });
         out_buffer = DeviceBufferHandle{impl_->graph_owner, index};
-    } catch (const std::bad_alloc&) {
-        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (const std::bad_alloc &) {
+      return impl_->fail(Status::resource_exhausted, nullptr);
     } catch (...) {
-        return impl_->fail(Status::internal_error, nullptr);
+      return impl_->fail(Status::internal_error, nullptr);
     }
     impl_->clear_error();
     return Status::ok;
+}
+
+Status Runtime::register_device_buffer(
+    const HeterogeneousDeviceBufferRegistration& registration,
+    DeviceBufferHandle &out_buffer) noexcept {
+  out_buffer = {};
+  if (!impl_) {
+    return Status::internal_error;
+  }
+  if (impl_->provider_callback_active()) {
+    return Status::invalid_state;
+  }
+  if (impl_->state != RuntimeState::configuring) {
+    return impl_->fail(Status::invalid_state,
+                       "heterogeneous memory registration is frozen");
+  }
+  if (!impl_->valid_device_backend(registration.backend) ||
+      !registration.domain.valid() ||
+      registration.domain.backend != registration.backend) {
+    return impl_->fail(
+        Status::invalid_handle,
+        "heterogeneous memory references a foreign backend or domain");
+  }
+  const auto backend_index =
+      static_cast<std::size_t>(registration.backend.index());
+  const auto &backend = impl_->device_backends[backend_index];
+  if (!backend.memory_state || !backend.memory_state->native_extension) {
+    return impl_->fail(
+        Status::invalid_argument,
+        "heterogeneous memory requires a native memory/topology extension");
+  }
+  const auto *domain = detail::find_memory_domain(*backend.memory_state,
+                                                  registration.domain.identity);
+  if (!domain) {
+    return impl_->fail(
+        Status::invalid_handle,
+        "heterogeneous memory domain is unknown to this backend");
+  }
+  std::array<char, RTFW_DEVICE_IDENTIFIER_CAPACITY> name{};
+  if (!set_identifier(name, registration.name) || registration.bytes == 0 ||
+      !detail::valid_memory_access(registration.access) ||
+      !detail::valid_memory_synchronization(registration.synchronization)) {
+    return impl_->fail(Status::invalid_argument,
+                       "heterogeneous memory descriptor is malformed");
+  }
+  const auto ownership = detail::ownership_bit(registration.ownership);
+  const auto coherency = static_cast<std::uint32_t>(registration.coherency);
+  const bool host_backed = !registration.host_storage.empty();
+  const bool opaque_backed = registration.opaque_handle.size != 0;
+  if (ownership == 0 || (domain->ownership_modes & ownership) == 0 ||
+      (registration.access & ~domain->access) != 0 ||
+      coherency != domain->coherency ||
+      registration.synchronization != domain->required_synchronization ||
+      host_backed == opaque_backed ||
+      !detail::validate_opaque_handle(registration.opaque_handle,
+                                      opaque_backed) ||
+      (host_backed &&
+       (registration.ownership != HalV2MemoryOwnership::borrowed_host ||
+        registration.bytes != registration.host_storage.size())) ||
+      (opaque_backed &&
+       registration.ownership == HalV2MemoryOwnership::borrowed_host) ||
+      registration.bytes > domain->maximum_bytes ||
+      registration.bytes > std::numeric_limits<std::size_t>::max() ||
+      registration.bytes % domain->byte_granularity != 0) {
+    return impl_->fail(Status::invalid_argument,
+                       "heterogeneous memory backing or declared capabilities "
+                       "conflict with its domain");
+  }
+  if (host_backed &&
+      reinterpret_cast<std::uintptr_t>(registration.host_storage.data()) %
+              domain->alignment !=
+          0) {
+    return impl_->fail(
+        Status::invalid_argument,
+        "heterogeneous host memory does not satisfy domain alignment");
+  }
+  if (impl_->device_buffers.size() >= impl_->config.device_buffer_capacity) {
+    return impl_->fail(Status::capacity_exceeded,
+                       "configured device buffer capacity exceeded");
+  }
+  if (registration.bytes > backend.capabilities.max_buffer_bytes) {
+    return impl_->fail(Status::capacity_exceeded,
+                       "heterogeneous memory exceeds backend byte capacity");
+  }
+  std::size_t backend_buffer_count = 0;
+  for (const auto &buffer : impl_->device_buffers) {
+    if (buffer.backend_index == backend_index) {
+      ++backend_buffer_count;
+    }
+    if (buffer.name == name) {
+      return impl_->fail(Status::invalid_argument,
+                         "device buffer names must be unique");
+    }
+    if (host_backed && !buffer.storage.empty() &&
+        byte_spans_overlap(std::as_bytes(buffer.storage),
+                           std::as_bytes(registration.host_storage))) {
+      return impl_->fail(
+          Status::invalid_argument,
+          "comparable heterogeneous host regions must not overlap");
+    }
+  }
+  if (backend_buffer_count >= backend.capabilities.max_registered_buffers) {
+    return impl_->fail(Status::capacity_exceeded,
+                       "backend registered-buffer capacity exceeded");
+  }
+
+  try {
+    const auto index = static_cast<std::uint32_t>(impl_->device_buffers.size());
+    impl_->device_buffers.push_back(detail::DeviceBufferSpec{
+        name,
+        static_cast<std::uint32_t>(backend_index),
+        registration.host_storage,
+        registration.access,
+        registration.bytes,
+        domain->identity,
+        static_cast<std::uint32_t>(registration.ownership),
+        coherency,
+        registration.synchronization,
+        true,
+        registration.opaque_handle,
+    });
+    out_buffer = DeviceBufferHandle{impl_->graph_owner, index};
+  } catch (const std::bad_alloc &) {
+    return impl_->fail(Status::resource_exhausted, nullptr);
+  } catch (...) {
+    return impl_->fail(Status::internal_error, nullptr);
+  }
+  impl_->clear_error();
+  return Status::ok;
 }
 
 Status Runtime::register_device_phase(
@@ -4663,17 +4919,19 @@ Status Runtime::finalize() noexcept {
         }
     }
     std::size_t registered_device_buffer_bytes = 0;
+    bool registered_device_buffer_bytes_exact = true;
     for (const auto& buffer : impl_->device_buffers) {
         std::size_t total = 0;
-        if (!detail::checked_add(
-                registered_device_buffer_bytes,
-                buffer.storage.size(),
-                total)) {
-            return impl_->fail(
-                Status::invalid_config,
-                "registered device buffer bytes overflow accounting");
+        if (!detail::checked_add(registered_device_buffer_bytes,
+                                 static_cast<std::size_t>(buffer.bytes),
+                                 total)) {
+          return impl_->fail(
+              Status::invalid_config,
+              "registered device buffer bytes overflow accounting");
         }
         registered_device_buffer_bytes = total;
+        registered_device_buffer_bytes_exact =
+            registered_device_buffer_bytes_exact && !buffer.storage.empty();
     }
     std::size_t checkpoint_record_bytes = 0;
     std::size_t checkpoint_required_bytes = 0;
@@ -4934,6 +5192,10 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_runtime_array(
         impl_->device_v1_adapters.capacity(),
         sizeof(std::unique_ptr<detail::DeviceV1CompatibilityAdapter>));
+    plan_valid = plan_valid &&
+                 add_runtime_array(
+                     impl_->device_memory_states.capacity(),
+                     sizeof(std::unique_ptr<detail::HeterogeneousMemoryState>));
     for (const auto& backend : impl_->device_backends) {
         const auto object_begin = reinterpret_cast<std::uintptr_t>(&backend);
         const auto object_end = object_begin + sizeof(backend);
@@ -5129,14 +5391,10 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(provider_status, policy_diagnostic);
     }
     const auto policy_status = detail::build_cpu_memory_policy_report(
-        impl_->cpu_memory_policy,
-        impl_->config,
-        memory_plan,
-        registered_device_buffer_bytes,
-        selected_memory_provider,
-        *impl_->thread_policy,
-        cpu_memory_policy_report,
-        policy_diagnostic);
+        impl_->cpu_memory_policy, impl_->config, memory_plan,
+        registered_device_buffer_bytes, registered_device_buffer_bytes_exact,
+        selected_memory_provider, *impl_->thread_policy,
+        cpu_memory_policy_report, policy_diagnostic);
     if (policy_status != Status::ok) {
         return impl_->fail(policy_status, policy_diagnostic);
     }
@@ -5240,6 +5498,10 @@ Status Runtime::finalize() noexcept {
             impl_->device_v1_adapters.data(),
             impl_->device_v1_adapters.capacity(),
             sizeof(std::unique_ptr<detail::DeviceV1CompatibilityAdapter>));
+        add_runtime_extent(
+            impl_->device_memory_states.data(),
+            impl_->device_memory_states.capacity(),
+            sizeof(std::unique_ptr<detail::HeterogeneousMemoryState>));
         for (const auto& backend : impl_->device_backends) {
             add_external_string(backend, backend.name);
         }
@@ -6669,6 +6931,235 @@ std::size_t Runtime::device_phase_count() const noexcept {
         [](const Impl::RegisteredCallback& callback) {
             return callback.kind == Impl::PhaseKind::device;
         }));
+}
+
+std::size_t Runtime::device_memory_domain_count(
+    DeviceBackendHandle backend) const noexcept {
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return 0;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  return state ? state->snapshot.memory_domain_count : 0;
+}
+
+bool Runtime::device_memory_domain_at(
+    DeviceBackendHandle backend, std::size_t index,
+    DeviceMemoryDomainHandle &handle,
+    HalV2MemoryDomain &domain) const noexcept {
+  handle = {};
+  domain = {};
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return false;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  if (!state || index >= state->snapshot.memory_domain_count) {
+    return false;
+  }
+  domain = state->snapshot.memory_domains[index];
+  handle = {backend, domain.identity};
+  return true;
+}
+
+std::size_t Runtime::device_topology_node_count(
+    DeviceBackendHandle backend) const noexcept {
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return 0;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  return state ? state->snapshot.topology_node_count : 0;
+}
+
+bool Runtime::device_topology_node_at(DeviceBackendHandle backend,
+                                      std::size_t index,
+                                      DeviceTopologyNodeHandle &handle,
+                                      HalV2TopologyNode &node) const noexcept {
+  handle = {};
+  node = {};
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return false;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  if (!state || index >= state->snapshot.topology_node_count) {
+    return false;
+  }
+  node = state->snapshot.topology_nodes[index];
+  handle = {backend, node.identity};
+  return true;
+}
+
+std::size_t Runtime::device_topology_link_count(
+    DeviceBackendHandle backend) const noexcept {
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return 0;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  return state ? state->snapshot.topology_link_count : 0;
+}
+
+bool Runtime::device_topology_link_at(DeviceBackendHandle backend,
+                                      std::size_t index,
+                                      HalV2TopologyLink &link) const noexcept {
+  DeviceTopologyLinkHandle handle;
+  return device_topology_link_at(backend, index, handle, link);
+}
+
+bool Runtime::device_topology_link_at(DeviceBackendHandle backend,
+                                      std::size_t index,
+                                      DeviceTopologyLinkHandle &handle,
+                                      HalV2TopologyLink &link) const noexcept {
+  handle = {};
+  link = {};
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return false;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  if (!state || index >= state->snapshot.topology_link_count) {
+    return false;
+  }
+  link = state->snapshot.topology_links[index];
+  handle = {backend, link.identity};
+  return true;
+}
+
+std::size_t Runtime::device_timestamp_domain_count(
+    DeviceBackendHandle backend) const noexcept {
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return 0;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  return state ? state->snapshot.timestamp_domain_count : 0;
+}
+
+bool Runtime::device_timestamp_domain_at(
+    DeviceBackendHandle backend, std::size_t index,
+    DeviceTimestampDomainHandle &handle,
+    HalV2TimestampDomain &domain) const noexcept {
+  handle = {};
+  domain = {};
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return false;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  if (!state || index >= state->snapshot.timestamp_domain_count) {
+    return false;
+  }
+  domain = state->snapshot.timestamp_domains[index];
+  handle = {backend, domain.identity};
+  return true;
+}
+
+bool Runtime::device_completion_timestamp_domain(
+    DeviceBackendHandle backend,
+    DeviceTimestampDomainHandle &domain) const noexcept {
+  domain = {};
+  if (!impl_ || impl_->provider_callback_active() ||
+      !impl_->valid_device_backend(backend)) {
+    return false;
+  }
+  const auto *state = impl_->device_backends[backend.index()].memory_state;
+  if (!state || state->snapshot.completion_timestamp_domain_identity == 0) {
+    return false;
+  }
+  domain = {
+      backend,
+      state->snapshot.completion_timestamp_domain_identity,
+  };
+  return true;
+}
+
+bool Runtime::device_memory_object_at(
+    std::size_t index, DeviceMemoryObjectInfo &object) const noexcept {
+  object = {};
+  if (!impl_ || impl_->provider_callback_active() ||
+      index >= impl_->device_buffers.size()) {
+    return false;
+  }
+  const auto &buffer = impl_->device_buffers[index];
+  const DeviceBackendHandle backend{impl_->graph_owner, buffer.backend_index};
+  object.buffer =
+      DeviceBufferHandle{impl_->graph_owner, static_cast<std::uint32_t>(index)};
+  object.backend = backend;
+  object.domain = {backend, buffer.domain_identity};
+  object.bytes = buffer.bytes;
+  object.ownership = buffer.ownership;
+  object.access = buffer.flags;
+  object.coherency = buffer.coherency;
+  object.synchronization = buffer.synchronization;
+  object.heterogeneous = buffer.heterogeneous ? 1 : 0;
+  object.host_addressable = buffer.storage.empty() ? 0 : 1;
+  object.opaque_handle_size = buffer.opaque_handle.size;
+  return true;
+}
+
+Status Runtime::query_device_timestamp_correlation(
+    DeviceBackendHandle backend, DeviceTimestampDomainHandle source,
+    DeviceTimestampDomainHandle destination,
+    HalV2TimestampCorrelation &correlation) noexcept {
+  correlation = {};
+  if (!impl_) {
+    return Status::internal_error;
+  }
+  if (impl_->provider_callback_active()) {
+    return Status::invalid_state;
+  }
+  if (impl_->state != RuntimeState::running || !impl_->devices ||
+      impl_->stop_pending || impl_->in_step.load(std::memory_order_acquire) ||
+      impl_->in_periodic_run.load(std::memory_order_acquire) ||
+      impl_->in_replay.load(std::memory_order_acquire)) {
+    return impl_->fail(
+        Status::invalid_state,
+        "timestamp correlation requires idle running host control");
+  }
+  if (!impl_->valid_device_backend(backend) || !source.valid() ||
+      !destination.valid() || source.backend != backend ||
+      destination.backend != backend) {
+    return impl_->fail(Status::invalid_handle,
+                       "timestamp correlation received a foreign domain");
+  }
+  auto *state = impl_->device_backends[backend.index()].memory_state;
+  const auto *source_descriptor =
+      state ? detail::find_timestamp_domain(*state, source.identity) : nullptr;
+  const auto *destination_descriptor =
+      state ? detail::find_timestamp_domain(*state, destination.identity)
+            : nullptr;
+  if (!state || !state->native_extension || !source_descriptor ||
+      !destination_descriptor || source_descriptor->supports_correlation == 0 ||
+      source_descriptor->correlation_destination_identity !=
+          destination.identity) {
+    return impl_->fail(
+        Status::device_error,
+        "timestamp correlation is unsupported for these domains");
+  }
+  HalV2TimestampCorrelationQuery query;
+  query.source_domain_identity = source.identity;
+  query.destination_domain_identity = destination.identity;
+  HalV2TimestampCorrelation candidate;
+  HalV2Status hal_status = HalV2Status::internal_error;
+  try {
+    hal_status = state->extension.query_timestamp_correlation(
+        state->extension.instance, &query, &candidate);
+  } catch (...) {
+    hal_status = HalV2Status::internal_error;
+  }
+  const auto status = detail::hal_v2_status_to_runtime(hal_status);
+  if (status != Status::ok) {
+    return impl_->fail(status, "timestamp correlation query failed");
+  }
+  if (!detail::validate_timestamp_correlation(query, candidate)) {
+    return impl_->fail(Status::device_error,
+                       "timestamp correlation output is malformed");
+  }
+  correlation = candidate;
+  impl_->clear_error();
+  return Status::ok;
 }
 
 std::size_t Runtime::resource_count() const noexcept {

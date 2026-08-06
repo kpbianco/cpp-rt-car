@@ -314,6 +314,8 @@ def check_runtime_contract() -> None:
     xdma_linux_header = read("rt/include/rt/xdma_linux.hpp")
     hal_v2_header = read("rt/src/hal_v2.hpp")
     hal_v2_source = read("rt/src/hal_v2.cpp")
+    heterogeneous_header = read("rt/src/heterogeneous_memory.hpp")
+    heterogeneous_source = read("rt/src/heterogeneous_memory.cpp")
     device_manager_header = read("rt/src/device_manager.hpp")
     device_manager = read("rt/src/device_manager.cpp")
     mock_device = read("rt/src/mock_device.cpp")
@@ -340,6 +342,7 @@ def check_runtime_contract() -> None:
     determinism_test = read("tests/test_determinism_replay.cpp")
     device_test = read("tests/test_device_runtime.cpp")
     hal_v2_test = read("tests/test_hal_v2.cpp")
+    heterogeneous_test = read("tests/test_heterogeneous_memory.cpp")
     cuda_test = read("tests/test_cuda_backend.cpp")
     xdma_test = read("tests/xdma_backend_tests.cpp")
     host_adapter_test = read("tests/host_adapter_tests.cpp")
@@ -374,6 +377,7 @@ def check_runtime_contract() -> None:
     portable_matrix = read("docs/portable_support_matrix.json")
     release_policy = read("docs/release_policy.md")
     hal_v2_doc = read("docs/hal_v2.md")
+    heterogeneous_doc = read("docs/heterogeneous_memory.md")
 
     for method in (
         "Status configure(",
@@ -1582,6 +1586,157 @@ def check_runtime_contract() -> None:
         if phrase not in normalized_hal_docs:
             fail(f"M17-01 component contracts are missing phrase {phrase!r}")
 
+    # M17-02 gates assert permanent additive memory/topology facts without
+    # treating this owned batch as the moving milestone frontier.
+    for token in (
+        "hal_v2_memory_topology_extension_version = 1u",
+        "hal_v2_memory_domain_capacity = 16u",
+        "hal_v2_topology_node_capacity = 32u",
+        "hal_v2_topology_link_capacity = 64u",
+        "hal_v2_timestamp_domain_capacity = 8u",
+        "hal_v2_opaque_handle_capacity = 64u",
+        "enum class HalV2MemoryDomainKind",
+        "enum class HalV2MemoryOwnership",
+        "enum class HalV2MemoryCoherency",
+        "enum class HalV2TopologyNodeKind",
+        "enum class HalV2TopologyLinkKind",
+        "enum class HalV2TimestampDomainKind",
+        "struct HalV2MemoryTopologySnapshot",
+        "struct HalV2MemoryTopologyExtension",
+        "struct HeterogeneousDeviceBufferRegistration",
+        "struct DeviceMemoryObjectInfo",
+    ):
+        if token not in device_header:
+            fail(
+                "public HAL-v2 memory/topology contract is missing "
+                f"{token!r}"
+            )
+    for domain_kind in (
+        "host = 1",
+        "pinned_host = 2",
+        "cuda_device = 3",
+        "imported = 4",
+        "dma_mapped = 5",
+        "peer = 6",
+    ):
+        if domain_kind not in device_header:
+            fail(f"memory-domain taxonomy is missing {domain_kind!r}")
+    for token in (
+        "const HeterogeneousDeviceBufferRegistration&",
+        "device_memory_domain_at(",
+        "device_topology_node_at(",
+        "device_topology_link_at(",
+        "device_timestamp_domain_at(",
+        "device_memory_object_at(",
+        "query_device_timestamp_correlation(",
+    ):
+        if token not in runtime_header:
+            fail(f"runtime memory/topology API is missing {token!r}")
+    for token in (
+        "validate_memory_topology_extension",
+        "validate_memory_topology_snapshot",
+        "validate_opaque_handle",
+        "validate_memory_token",
+        "discover_memory_topology",
+        "make_implicit_host_memory_state",
+        "validate_timestamp_correlation",
+    ):
+        if token not in heterogeneous_header and token not in heterogeneous_source:
+            fail(f"heterogeneous-memory validation is missing {token!r}")
+    for token in (
+        "HeterogeneousMemoryState",
+        "heterogeneous_token",
+        "register_memory",
+        "unregister_memory",
+        "estimate_control_storage",
+    ):
+        if token not in device_manager_header and token not in device_manager:
+            fail(f"canonical memory manager path is missing {token!r}")
+    for token in (
+        "device_memory_states",
+        "HeterogeneousDeviceBufferRegistration",
+        "device_memory_domain_at(",
+        "device_memory_object_at(",
+        "query_device_timestamp_correlation(",
+    ):
+        if token not in runtime_source:
+            fail(f"runtime memory/topology integration is missing {token!r}")
+
+    heterogeneous_tests = "\n".join(
+        (
+            heterogeneous_test,
+            hal_v2_test,
+            device_test,
+            memory_test,
+            determinism_test,
+            noalloc_test,
+        )
+    )
+    for token in ("HeterogeneousMemory", "Correlation", "Rollback", "Identity"):
+        if token not in heterogeneous_tests:
+            fail(f"M17-02 permanent test coverage is missing {token!r}")
+    for token in (
+        "rt/src/heterogeneous_memory.cpp",
+        "test_heterogeneous_memory.cpp",
+        "m17_heterogeneous_memory_topology",
+        "HeterogeneousMemory.*",
+        "TraceNoAlloc.*Heterogeneous*",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"M17-02 CMake integration is missing {token!r}")
+    for token in ("HeterogeneousMemory.*", "m17_heterogeneous_memory_topology"):
+        if token not in ci_workflow:
+            fail(f"M17-02 TSan/CI coverage is missing {token!r}")
+    for token in (
+        "HalV2MemoryTopologyExtension",
+        "HeterogeneousDeviceBufferRegistration",
+        "device_memory_domain_at",
+        "device_memory_object_at",
+    ):
+        if token not in package_cpp_consumer:
+            fail(f"preferred package consumer is missing M17-02 token {token!r}")
+    for token in (
+        "pre_m17_02_hal_backend",
+        "pre_m17_device_backend",
+        "pre_m17_device_buffer",
+    ):
+        if token not in package_compat_consumer:
+            fail(f"compatibility package consumer is missing {token!r}")
+
+    normalized_memory_docs = " ".join(
+        (
+            heterogeneous_doc
+            + " "
+            + hal_v2_doc
+            + " "
+            + device_doc
+            + " "
+            + host_doc
+            + " "
+            + executor_doc
+            + " "
+            + memory_doc
+            + " "
+            + determinism_doc
+            + " "
+            + observability_doc
+            + " "
+            + c_abi_doc
+        ).lower().split()
+    )
+    for phrase in (
+        "pinned-host",
+        "cuda-device",
+        "dma-mapped",
+        "implicit borrowed-host",
+        "direct peer dma",
+        "six-row",
+        "no c++ binary abi promise",
+        "timestamp accuracy",
+    ):
+        if phrase not in normalized_memory_docs:
+            fail(f"M17-02 component contracts are missing phrase {phrase!r}")
+
     for token in (
         "Runtime::run_periodic(",
         "clock_sleep_until(",
@@ -2441,6 +2596,7 @@ def main() -> int:
             "docs/determinism_replay.md",
             "docs/device_backend.md",
             "docs/hal_v2.md",
+            "docs/heterogeneous_memory.md",
             "docs/cuda_backend.md",
             "docs/cuda_support_matrix.json",
             "docs/xdma_backend.md",
@@ -2496,6 +2652,8 @@ def main() -> int:
             "rt/src/device_manager.cpp",
             "rt/src/hal_v2.hpp",
             "rt/src/hal_v2.cpp",
+            "rt/src/heterogeneous_memory.hpp",
+            "rt/src/heterogeneous_memory.cpp",
             "rt/src/mock_device.cpp",
             "rt/src/cuda_backend.cpp",
             "rt/src/cuda_driver.cpp",
@@ -2522,6 +2680,7 @@ def main() -> int:
             "tests/test_determinism_replay.cpp",
             "tests/test_device_runtime.cpp",
             "tests/test_hal_v2.cpp",
+            "tests/test_heterogeneous_memory.cpp",
             "tests/test_release_tools.py",
             "tests/test_cuda_backend.cpp",
             "tests/xdma_backend_tests.cpp",

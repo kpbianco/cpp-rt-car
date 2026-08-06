@@ -226,12 +226,12 @@ jobs:
             -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
-          GTEST_FILTER: UnifiedExecutor.*:CrossRateData.*:RateTimeline.*:RateDispatch.*:RateShedding.*:RateTelemetry.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:TraceNoAlloc.*Rate*:MemoryPolicy.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:HalV2.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*-ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover:ThreadPolicy.LinuxAppliesAndReadsBackAvailableNativeFields
+          GTEST_FILTER: UnifiedExecutor.*:CrossRateData.*:RateTimeline.*:RateDispatch.*:RateShedding.*:RateTelemetry.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:TraceNoAlloc.*Rate*:MemoryPolicy.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:HeterogeneousMemory.*:HalV2.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*-ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover:ThreadPolicy.LinuxAppliesAndReadsBackAvailableNativeFields
           TSAN_OPTIONS: halt_on_error=1
         run: |
           ctest --test-dir build-tsan \
             --output-on-failure \
-            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_hal_v2_compatibility|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
+            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_hal_v2_compatibility|m17_heterogeneous_memory_topology|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
 
   build-windows:
     runs-on: windows-2022

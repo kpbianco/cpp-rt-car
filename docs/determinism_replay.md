@@ -131,6 +131,22 @@ native/adapted mismatch before state mutation. Equivalent native-v2 and
 adapted-v1 execution may produce the same application state while remaining
 intentionally artifact-incompatible.
 
+M17-02 keeps that permanent distinction. An adapted-v1 or core-only native-v2
+backend using only the legacy buffer registration contributes no new memory,
+topology, timestamp, or extension marker beyond its M17-01 path. A native
+memory/topology extension conditionally hashes the semantic snapshot in stable
+domain, node, link, and timestamp order, including the completion-domain
+selection. Each explicit heterogeneous-memory declaration hashes its backend,
+domain identity, logical bytes, ownership, access, coherency,
+synchronization, and declared opaque-handle bytes. Instance pointers, callback
+addresses, host addresses, backend-private tokens, and unused opaque tail bytes
+never enter compatibility identity.
+
+These additions change no artifact field or schema. A schema-1 checkpoint or
+input log carries the resulting existing graph/replay identity and therefore
+rejects a heterogeneous semantic mismatch before mutation. Timestamp samples
+and correlations are observations and are not checkpointed or replayed.
+
 ## Checkpoint format v1
 
 Checkpoint artifacts use fixed-width little-endian fields:

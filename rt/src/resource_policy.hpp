@@ -45,6 +45,7 @@ struct ControlExtentLedger {
     const RuntimeConfig& config,
     const MemoryPlan& memory_plan,
     std::size_t registered_device_buffer_bytes,
+    bool registered_device_buffer_bytes_exact,
     const MemoryProvider* memory_provider,
     ThreadPolicyProvider& thread_policy_provider,
     CpuMemoryPolicyReport& report,

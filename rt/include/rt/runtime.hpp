@@ -1340,6 +1340,9 @@ public:
     [[nodiscard]] Status register_device_buffer(
         const DeviceBufferRegistration& registration,
         DeviceBufferHandle& out_buffer) noexcept;
+    [[nodiscard]] Status register_device_buffer(
+        const HeterogeneousDeviceBufferRegistration& registration,
+        DeviceBufferHandle &out_buffer) noexcept;
     [[nodiscard]] Status register_device_phase(
         const DevicePhaseRegistration& registration,
         PhaseHandle& out_phase) noexcept;
@@ -1405,6 +1408,45 @@ public:
     [[nodiscard]] std::size_t device_backend_count() const noexcept;
     [[nodiscard]] std::size_t device_buffer_count() const noexcept;
     [[nodiscard]] std::size_t device_phase_count() const noexcept;
+    [[nodiscard]] std::size_t
+    device_memory_domain_count(DeviceBackendHandle backend) const noexcept;
+    [[nodiscard]] bool
+    device_memory_domain_at(DeviceBackendHandle backend, std::size_t index,
+                            DeviceMemoryDomainHandle &handle,
+                            HalV2MemoryDomain &domain) const noexcept;
+    [[nodiscard]] std::size_t
+    device_topology_node_count(DeviceBackendHandle backend) const noexcept;
+    [[nodiscard]] bool
+    device_topology_node_at(DeviceBackendHandle backend, std::size_t index,
+                            DeviceTopologyNodeHandle &handle,
+                            HalV2TopologyNode &node) const noexcept;
+    [[nodiscard]] std::size_t
+    device_topology_link_count(DeviceBackendHandle backend) const noexcept;
+    [[nodiscard]] bool
+    device_topology_link_at(DeviceBackendHandle backend, std::size_t index,
+                            HalV2TopologyLink &link) const noexcept;
+    [[nodiscard]] bool
+    device_topology_link_at(DeviceBackendHandle backend, std::size_t index,
+                            DeviceTopologyLinkHandle &handle,
+                            HalV2TopologyLink &link) const noexcept;
+    [[nodiscard]] std::size_t
+    device_timestamp_domain_count(DeviceBackendHandle backend) const noexcept;
+    [[nodiscard]] bool
+    device_timestamp_domain_at(DeviceBackendHandle backend, std::size_t index,
+                               DeviceTimestampDomainHandle &handle,
+                               HalV2TimestampDomain &domain) const noexcept;
+    [[nodiscard]] bool device_completion_timestamp_domain(
+        DeviceBackendHandle backend,
+        DeviceTimestampDomainHandle &domain) const noexcept;
+    [[nodiscard]] bool
+    device_memory_object_at(std::size_t index,
+                            DeviceMemoryObjectInfo &object) const noexcept;
+    // Explicit non-RT host query. Samples are not cached or interpreted as
+    // runtime-monotonic time and are invalid across backend reset generations.
+    [[nodiscard]] Status query_device_timestamp_correlation(
+        DeviceBackendHandle backend, DeviceTimestampDomainHandle source,
+        DeviceTimestampDomainHandle destination,
+        HalV2TimestampCorrelation &correlation) noexcept;
     [[nodiscard]] std::size_t resource_count() const noexcept;
     [[nodiscard]] std::size_t dependency_count() const noexcept;
     [[nodiscard]] std::size_t resource_access_count() const noexcept;

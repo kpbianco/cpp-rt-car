@@ -10,9 +10,12 @@ opt-in mandatory admission, dispatch, transfer, and late actions. M16-04 adds
 optional CPU shedding/recovery and a separate versioned rate-action stream; it
 does not add action replay, device-rate execution, or RT1/RT2 qualification.
 M17-01 adds the additive C++ HAL v2 core contract and routes unchanged device
-ABI v1 backends through one bounded compatibility adapter; heterogeneous
-memory, command batches, timeline completions, vendor controls, physical
-hardware evidence, and later M17 capabilities remain deferred.
+ABI v1 backends through one bounded compatibility adapter. M17-02 adds the
+bounded C++ memory/topology extension, six explicit heterogeneous-memory
+domains, copied topology/timestamp contracts, and canonical heterogeneous
+registration while preserving the legacy core path. Command batches, timeline
+lanes, native vendor-v2 controls, combined execution, and physical hardware or
+RT qualification remain deferred.
 
 ## Read before nontrivial work
 
@@ -84,7 +87,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `0dd41167bac9b0fdd863d7305d9bd8500e341cb7`; harness version: `2`.
+- Control revision: `2206fb22691b3af0d9d6a39e582e0e9516a24c50`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.

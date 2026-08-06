@@ -616,6 +616,7 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/compiled_graph.cpp
     rt/src/cross_rate_data.cpp
     rt/src/hal_v2.cpp
+    rt/src/heterogeneous_memory.cpp
     rt/src/device_manager.cpp
     rt/src/executor.cpp
     rt/src/host_runtime.cpp

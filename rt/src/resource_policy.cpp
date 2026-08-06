@@ -640,6 +640,7 @@ Status build_cpu_memory_policy_report(
     const RuntimeConfig& config,
     const MemoryPlan& memory_plan,
     std::size_t registered_device_buffer_bytes,
+    bool registered_device_buffer_bytes_exact,
     const MemoryProvider* memory_provider,
     ThreadPolicyProvider& thread_policy_provider,
     CpuMemoryPolicyReport& report,
@@ -1036,8 +1037,12 @@ Status build_cpu_memory_policy_report(
         auto& row = report.memory[index];
         if (row.accounting_scope == MemoryAccountingScope::planned ||
             row.region == memory_region_registered_state ||
-            row.region == memory_region_registered_device_buffer) {
+            (row.region == memory_region_registered_device_buffer &&
+             registered_device_buffer_bytes_exact)) {
             row.accounting_exactness = ResourceAccountingExactness::exact;
+        } else if (row.region == memory_region_registered_device_buffer) {
+            row.accounting_exactness =
+                ResourceAccountingExactness::declared_only;
         } else if (row.region == memory_region_backend_control) {
             row.accounting_exactness = row.logical_region_count == 0
                 ? ResourceAccountingExactness::not_applicable

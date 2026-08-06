@@ -57,6 +57,12 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   malformed/failure, lifecycle-retry, isolation, sanitizer, and no-allocation
   tests are portable RT0 evidence only. M17-01 adds no heterogeneous memory,
   command batch, timeline completion, isolated vendor lane, or hardware claim.
+- [x] M17-02 adds bounded six-domain memory/topology/timestamp records,
+  explicit heterogeneous registration and inspection, declared correlation,
+  exact identity/accounting, fail-closed malformed input, rollback/retry,
+  isolation, compatibility, and resource-bound tests. These are portable RT0
+  contract gates only; no physical allocation, DMA, coherency, topology, clock,
+  vendor-lane, command-batch, timeline, or hardware behavior is qualified.
 - [ ] A named deployment independently verifies requested memory locking,
   NUMA/huge-page outcomes, residency under load, and worst-case behavior;
   M15 provider/declaration injection, `mlock`, `mincore`, preflight, and hosted CI do not
@@ -100,12 +106,13 @@ observation. None of this changes any unchecked deployment gate above.
 Provider-backed checked stop releases trace backing, so post-stop trace export
 must occur before that cleanup or be treated as unavailable.
 M16 declared-budget admission and fake-clock late/catch-up/shedding/recovery
-results are not measured WCET, latency, RT1, or RT2 evidence. M17-01 mock,
-fake-driver, compatibility-adapter, hosted CI, and documentation results are
-likewise not heterogeneous-memory, physical accelerator, HIL, field, latency,
-RT1, or RT2 evidence. Mandatory M17-01 CI and human API, compatibility,
-concurrency, accounting, lifecycle, and claim-boundary review remain required;
-M17 and CAP-M17 remain incomplete.
+results are not measured WCET, latency, RT1, or RT2 evidence. M17-01/M17-02
+mock, fake-driver, synthetic-memory, compatibility-adapter, hosted CI, and
+documentation results likewise do not prove physical accelerator memory,
+pinning, DMA, coherency, topology, clock accuracy, HIL, field, latency, RT1, or
+RT2 behavior. Mandatory M17-02 CI and human API, compatibility, concurrency,
+accounting, lifecycle, and claim-boundary review remain required; M17 and
+CAP-M17 remain incomplete.
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its

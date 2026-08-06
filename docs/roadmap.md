@@ -35,7 +35,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
-| M17 | In progress | M17-01 HAL v2 core/device-ABI-v1 compatibility is implemented locally; heterogeneous memory, batches/timelines, vendor controls, combined execution, and qualification remain |
+| M17 | In progress | M17-01 HAL v2 core/v1 compatibility is merged and M17-02 heterogeneous memory/topology is implemented locally; batches/timelines, vendor controls, combined execution, and qualification remain |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
@@ -612,7 +612,7 @@ count, or separate human-review object is inferred.
 
 ## M17 — HAL v2 and heterogeneous memory
 
-M17 is active and incomplete. M17-01 implements:
+M17 is active and incomplete. M17-01 permanently implements:
 
 - an additive C++ HAL API version 2 core table in the existing installed
   header, with capability, lifecycle, borrowed-buffer, one-submission, bounded
@@ -626,18 +626,34 @@ M17 is active and incomplete. M17-01 implements:
   candidate, XDMA candidate, C ABI, package, schema, release, and support
   boundaries.
 
+M17-02 implements:
+
+- an optional, separately versioned and copied HAL v2 extension with bounded
+  discovery, memory registration, cleanup, and timestamp correlation;
+- exactly six domain kinds: host, pinned host, CUDA device, imported, DMA
+  mapped, and peer, with explicit ownership, access, coherency,
+  synchronization, alignment, granularity, capacity, and opaque-handle rules;
+- bounded topology nodes/links and timestamp domains, instance-local Runtime
+  inspection, and one declared running-state correlation operation;
+- an additive heterogeneous-buffer registration overload with foreign/stale,
+  malformed, overlap, capacity, alignment, cleanup-retry, and isolation rules;
+- an implicit borrowed-host, host-coherent, no-sync domain for adapted-v1 and
+  core-only v2 backends, preserving the exact M17-01 legacy identity path;
+- conditional semantic identity and exact `device_control_bytes` accounting
+  without changing the MemoryPlan equation, provider regions, package, C ABI,
+  device ABI, schemas, release, support, or qualification boundaries.
+
 Later M17 batches own the remaining planned outcome:
 
-- explicit host, pinned, device, shared, and imported memory domains with
-  alignment, coherency, ownership, and synchronization contracts;
 - fixed-capacity per-backend submission lanes so executor workers never invoke
   potentially blocking vendor APIs;
-- capability discovery, completion/error/timestamp domains, CUDA and XDMA v2
-  adapters, and lifecycle-safe plugin/factory ownership.
+- command batches and timeline completions, CUDA and XDMA v2 adapters and
+  vendor controls, combined execution, and any lifecycle-safe plugin/factory
+  ownership later approved by a bounded batch.
 
-M17-01 adds none of those later memory, topology, batch/timeline,
-vendor-control, isolated-lane, plugin/factory, or hardware capabilities. M17
-and CAP-M17 remain incomplete.
+M17-02 adds none of those later batch/timeline, vendor-control, isolated-lane,
+plugin/factory, physical-adapter, or hardware capabilities. M17 and CAP-M17
+remain incomplete.
 
 Exit gates:
 

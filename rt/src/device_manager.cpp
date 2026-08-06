@@ -60,28 +60,23 @@ rt::HalV2Status runtime_status_to_hal(rt::Status status) noexcept {
 
 namespace rt::detail {
 
-DeviceManager::DeviceManager(
-    std::uint32_t owner,
-    std::vector<DeviceBackendSpec> backends,
-    std::vector<DeviceBufferSpec> buffers,
-    std::size_t outstanding_capacity,
-    std::size_t completion_batch)
-    : owner_(owner),
-      backends_(std::move(backends)),
-      initialized_backends_(backends_.size(), 0),
-      buffers_(std::move(buffers)),
-      native_buffer_tokens_(buffers_.size(), 0),
+DeviceManager::DeviceManager(std::uint32_t owner,
+                             std::vector<DeviceBackendSpec> backends,
+                             std::vector<DeviceBufferSpec> buffers,
+                             std::size_t outstanding_capacity,
+                             std::size_t completion_batch)
+    : owner_(owner), backends_(std::move(backends)),
+      initialized_backends_(backends_.size(), 0), buffers_(std::move(buffers)),
+      native_memory_(buffers_.size()),
       outstanding_slots_(
           outstanding_capacity == 0
               ? nullptr
-              : std::make_unique<Outstanding[]>(
-                    outstanding_capacity)),
+              : std::make_unique<Outstanding[]>(outstanding_capacity)),
       outstanding_capacity_(outstanding_capacity),
       completion_buffer_(
           completion_batch == 0
               ? nullptr
-              : std::make_unique<HalV2Completion[]>(
-                    completion_batch)),
+              : std::make_unique<HalV2Completion[]>(completion_batch)),
       completion_batch_(completion_batch) {}
 
 DeviceManager::~DeviceManager() {
@@ -119,10 +114,14 @@ void DeviceManager::append_control_extents(
                 backend.v1_adapter->completion_capacity(),
                 sizeof(rtfw_device_completion));
         }
+        if (backend.memory_state) {
+          add(backend.memory_state, 1, sizeof(*backend.memory_state));
+        }
     }
     add(initialized_backends_.data(), initialized_backends_.capacity(), sizeof(initialized_backends_[0]));
     add(buffers_.data(), buffers_.capacity(), sizeof(buffers_[0]));
-    add(native_buffer_tokens_.data(), native_buffer_tokens_.capacity(), sizeof(native_buffer_tokens_[0]));
+    add(native_memory_.data(), native_memory_.capacity(),
+        sizeof(native_memory_[0]));
     add(outstanding_slots_.get(), outstanding_capacity_, sizeof(Outstanding));
     add(completion_buffer_.get(), completion_batch_, sizeof(HalV2Completion));
 }
@@ -158,9 +157,10 @@ bool DeviceManager::estimate_control_storage(
            add(backend_name_bytes, 1) &&
            add(adapted_v1_count, sizeof(DeviceV1CompatibilityAdapter)) &&
            add(adapted_completion_count, sizeof(rtfw_device_completion)) &&
+           add(backend_count, sizeof(HeterogeneousMemoryState)) &&
            add(backend_count, sizeof(std::uint8_t)) &&
            add(buffer_count, sizeof(DeviceBufferSpec)) &&
-           add(buffer_count, sizeof(std::uint64_t)) &&
+           add(buffer_count, sizeof(NativeMemoryState)) &&
            add(outstanding_capacity, sizeof(Outstanding)) &&
            add(completion_batch, sizeof(HalV2Completion));
 }
@@ -199,32 +199,57 @@ Status DeviceManager::initialize_backends() noexcept {
 
     for (std::size_t index = 0; index < buffers_.size(); ++index) {
         const auto& buffer = buffers_[index];
-        auto& backend = backends_[buffer.backend_index];
-        HalV2BufferRegistration registration;
-        registration.flags = buffer.flags;
-        registration.data = buffer.storage.data();
-        registration.bytes = buffer.storage.size();
-        std::copy(
-            buffer.name.begin(),
-            buffer.name.end(),
-            registration.name.begin());
-
+        auto &backend = backends_[buffer.backend_index];
         HalV2Status device_status = HalV2Status::internal_error;
-        try {
-            device_status = backend.api.register_buffer(
-                backend.api.instance,
-                &registration,
-                &native_buffer_tokens_[index]);
-        } catch (...) {
+        auto &native = native_memory_[index];
+        if (buffer.heterogeneous) {
+          if (!backend.memory_state ||
+              !backend.memory_state->native_extension) {
+            (void)shutdown_backends();
+            return Status::invalid_state;
+          }
+          HalV2MemoryRegistration registration;
+          registration.domain_identity = buffer.domain_identity;
+          registration.bytes = buffer.bytes;
+          registration.ownership = buffer.ownership;
+          registration.access = buffer.flags;
+          registration.coherency = buffer.coherency;
+          registration.synchronization = buffer.synchronization;
+          registration.host_data = buffer.storage.data();
+          registration.opaque_handle = buffer.opaque_handle;
+          std::copy(buffer.name.begin(), buffer.name.end(),
+                    registration.name.begin());
+          native.heterogeneous_owned = 1;
+          try {
+            device_status = backend.memory_state->extension.register_memory(
+                backend.memory_state->extension.instance, &registration,
+                &native.heterogeneous_token);
+          } catch (...) {
             device_status = HalV2Status::internal_error;
+          }
+          if (device_status == HalV2Status::ok &&
+              !validate_memory_token(native.heterogeneous_token, true)) {
+            device_status = HalV2Status::internal_error;
+          }
+        } else {
+          HalV2BufferRegistration registration;
+          registration.flags = buffer.flags;
+          registration.data = buffer.storage.data();
+          registration.bytes = buffer.bytes;
+          std::copy(buffer.name.begin(), buffer.name.end(),
+                    registration.name.begin());
+          try {
+            device_status = backend.api.register_buffer(
+                backend.api.instance, &registration, &native.legacy_token);
+          } catch (...) {
+            device_status = HalV2Status::internal_error;
+          }
         }
         const auto status = hal_v2_status_to_runtime(device_status);
         if (status != Status::ok ||
-            native_buffer_tokens_[index] == 0) {
-            (void)shutdown_backends();
-            return status == Status::ok
-                ? Status::device_error
-                : status;
+            (!buffer.heterogeneous && native.legacy_token == 0)) {
+          (void)shutdown_backends();
+          return status == Status::ok ? Status::device_error : status;
         }
     }
     return Status::ok;
@@ -235,27 +260,23 @@ bool DeviceManager::backend_has_registered_buffers(
     for (std::size_t index = 0;
          index < buffers_.size();
          ++index) {
-        if (buffers_[index].backend_index == backend_index &&
-            native_buffer_tokens_[index] != 0) {
-            return true;
-        }
+      if (buffers_[index].backend_index == backend_index &&
+          (native_memory_[index].legacy_token != 0 ||
+           native_memory_[index].heterogeneous_owned != 0)) {
+        return true;
+      }
     }
     return false;
 }
 
 bool DeviceManager::has_backend_ownership() const noexcept {
-    return std::any_of(
-               native_buffer_tokens_.begin(),
-               native_buffer_tokens_.end(),
-               [](std::uint64_t token) {
-                   return token != 0;
-               }) ||
-           std::any_of(
-               initialized_backends_.begin(),
-               initialized_backends_.end(),
-               [](std::uint8_t initialized) {
-                   return initialized != 0;
-               });
+  return std::any_of(native_memory_.begin(), native_memory_.end(),
+                     [](const NativeMemoryState &state) {
+                       return state.legacy_token != 0 ||
+                              state.heterogeneous_owned != 0;
+                     }) ||
+         std::any_of(initialized_backends_.begin(), initialized_backends_.end(),
+                     [](std::uint8_t initialized) { return initialized != 0; });
 }
 
 bool DeviceManager::cleanup_pending() const noexcept {
@@ -266,9 +287,9 @@ Status DeviceManager::shutdown_backends() noexcept {
     Status first_failure = Status::ok;
     for (std::size_t index = buffers_.size(); index != 0; --index) {
         const auto buffer_index = index - 1;
-        const auto token = native_buffer_tokens_[buffer_index];
-        if (token == 0) {
-            continue;
+        auto &native = native_memory_[buffer_index];
+        if (native.legacy_token == 0 && native.heterogeneous_owned == 0) {
+          continue;
         }
         const auto backend_index =
             static_cast<std::size_t>(
@@ -283,16 +304,37 @@ Status DeviceManager::shutdown_backends() noexcept {
         }
         auto& backend = backends_[backend_index];
         HalV2Status device_status = HalV2Status::internal_error;
-        try {
-            device_status = backend.api.unregister_buffer(
-                backend.api.instance,
-                token);
-        } catch (...) {
+        if (buffers_[buffer_index].heterogeneous) {
+          HalV2MemoryRegistration registration;
+          const auto &buffer = buffers_[buffer_index];
+          registration.domain_identity = buffer.domain_identity;
+          registration.bytes = buffer.bytes;
+          registration.ownership = buffer.ownership;
+          registration.access = buffer.flags;
+          registration.coherency = buffer.coherency;
+          registration.synchronization = buffer.synchronization;
+          registration.host_data = buffer.storage.data();
+          registration.opaque_handle = buffer.opaque_handle;
+          std::copy(buffer.name.begin(), buffer.name.end(),
+                    registration.name.begin());
+          try {
+            device_status = backend.memory_state->extension.unregister_memory(
+                backend.memory_state->extension.instance, &registration,
+                &native.heterogeneous_token);
+          } catch (...) {
             device_status = HalV2Status::internal_error;
+          }
+        } else {
+          try {
+            device_status = backend.api.unregister_buffer(backend.api.instance,
+                                                          native.legacy_token);
+          } catch (...) {
+            device_status = HalV2Status::internal_error;
+          }
         }
         const auto status = hal_v2_status_to_runtime(device_status);
         if (status == Status::ok) {
-            native_buffer_tokens_[buffer_index] = 0;
+          native = {};
         } else if (first_failure == Status::ok) {
             first_failure = status;
         }
@@ -506,14 +548,38 @@ Status DeviceManager::submit(
         const auto buffer_index =
             static_cast<std::size_t>(logical.index());
         const auto& buffer = buffers_[buffer_index];
-        if (buffer.backend_index != backend_index ||
-            requested_reference.offset > buffer.storage.size() ||
+        const auto *domain =
+            backends_[backend_index].memory_state
+                ? find_memory_domain(*backends_[backend_index].memory_state,
+                                     buffer.domain_identity)
+                : nullptr;
+        if (buffer.backend_index != backend_index || !domain ||
+            requested_reference.offset > buffer.bytes ||
             requested_reference.bytes >
-                buffer.storage.size() - requested_reference.offset) {
-            return Status::invalid_argument;
+                buffer.bytes - requested_reference.offset ||
+            requested_reference.offset % domain->offset_granularity != 0 ||
+            requested_reference.bytes % domain->byte_granularity != 0) {
+          return Status::invalid_argument;
+        }
+        const auto required_access =
+            requested_reference.access == RTFW_DEVICE_ACCESS_READ
+                ? RTFW_DEVICE_BUFFER_DEVICE_READ
+            : requested_reference.access == RTFW_DEVICE_ACCESS_WRITE
+                ? RTFW_DEVICE_BUFFER_DEVICE_WRITE
+                : RTFW_DEVICE_BUFFER_DEVICE_READ |
+                      RTFW_DEVICE_BUFFER_DEVICE_WRITE;
+        if ((required_access & ~buffer.flags) != 0 ||
+            (buffer.heterogeneous &&
+             buffer.synchronization != hal_v2_memory_sync_none)) {
+          return Status::device_error;
         }
         reference.buffer_token =
-            native_buffer_tokens_[buffer_index];
+            buffer.heterogeneous ? native_memory_[buffer_index]
+                                       .heterogeneous_token.submission_token
+                                 : native_memory_[buffer_index].legacy_token;
+        if (reference.buffer_token == 0) {
+          return Status::invalid_state;
+        }
         reference.access = requested_reference.access;
         reference.offset = requested_reference.offset;
         reference.bytes = requested_reference.bytes;

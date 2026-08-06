@@ -25,6 +25,12 @@ inline constexpr std::size_t hal_v2_inline_payload_capacity =
     RTFW_DEVICE_INLINE_PAYLOAD_CAPACITY;
 inline constexpr std::size_t hal_v2_buffer_ref_capacity =
     RTFW_DEVICE_BUFFER_REF_CAPACITY;
+inline constexpr std::uint32_t hal_v2_memory_topology_extension_version = 1u;
+inline constexpr std::size_t hal_v2_memory_domain_capacity = 16u;
+inline constexpr std::size_t hal_v2_topology_node_capacity = 32u;
+inline constexpr std::size_t hal_v2_topology_link_capacity = 64u;
+inline constexpr std::size_t hal_v2_timestamp_domain_capacity = 8u;
+inline constexpr std::size_t hal_v2_opaque_handle_capacity = 64u;
 
 enum class HalV2Status : std::int32_t {
     ok = 0,
@@ -173,9 +179,221 @@ struct HalV2BackendApi {
     std::array<std::uint64_t, 8> reserved{};
 };
 
+enum class HalV2MemoryDomainKind : std::uint32_t {
+  host = 1,
+  pinned_host = 2,
+  cuda_device = 3,
+  imported = 4,
+  dma_mapped = 5,
+  peer = 6,
+};
+
+enum class HalV2MemoryOwnership : std::uint32_t {
+  borrowed_host = 1,
+  borrowed_opaque = 2,
+  backend = 3,
+};
+
+inline constexpr std::uint32_t hal_v2_memory_ownership_borrowed_host =
+    std::uint32_t{1} << 0u;
+inline constexpr std::uint32_t hal_v2_memory_ownership_borrowed_opaque =
+    std::uint32_t{1} << 1u;
+inline constexpr std::uint32_t hal_v2_memory_ownership_backend =
+    std::uint32_t{1} << 2u;
+
+enum class HalV2MemoryCoherency : std::uint32_t {
+  host_coherent = 1,
+  explicit_flush_invalidate = 2,
+  staged_copy = 3,
+  device_only = 4,
+};
+
+inline constexpr std::uint32_t hal_v2_memory_sync_none = 0;
+inline constexpr std::uint32_t hal_v2_memory_sync_flush = std::uint32_t{1}
+                                                          << 0u;
+inline constexpr std::uint32_t hal_v2_memory_sync_invalidate = std::uint32_t{1}
+                                                               << 1u;
+inline constexpr std::uint32_t hal_v2_memory_sync_copy_to_device =
+    std::uint32_t{1} << 2u;
+inline constexpr std::uint32_t hal_v2_memory_sync_copy_from_device =
+    std::uint32_t{1} << 3u;
+inline constexpr std::uint32_t hal_v2_memory_sync_timeline = std::uint32_t{1}
+                                                             << 4u;
+
+enum class HalV2TopologyNodeKind : std::uint32_t {
+  host = 1,
+  numa = 2,
+  device = 3,
+  dma_endpoint = 4,
+  peer_endpoint = 5,
+};
+
+enum class HalV2TopologyLinkKind : std::uint32_t {
+  local = 1,
+  host_access = 2,
+  device_access = 3,
+  dma = 4,
+  peer = 5,
+};
+
+enum class HalV2TimestampDomainKind : std::uint32_t {
+  runtime_monotonic = 1,
+  backend_device = 2,
+  external = 3,
+};
+
+struct HalV2OpaqueHandle {
+  std::uint32_t struct_size = sizeof(HalV2OpaqueHandle);
+  std::uint32_t size = 0;
+  std::array<std::byte, hal_v2_opaque_handle_capacity> bytes{};
+  std::array<std::uint64_t, 2> reserved{};
+};
+
+struct HalV2MemoryDomain {
+  std::uint32_t struct_size = sizeof(HalV2MemoryDomain);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t identity = 0;
+  std::uint32_t kind = 0;
+  std::uint32_t ownership_modes = 0;
+  std::uint64_t maximum_bytes = 0;
+  std::uint64_t byte_granularity = 0;
+  std::uint64_t alignment = 0;
+  std::uint64_t offset_granularity = 0;
+  std::uint32_t access = 0;
+  std::uint32_t coherency = 0;
+  std::uint32_t required_synchronization = 0;
+  std::uint32_t reserved0 = 0;
+  std::uint64_t topology_node_identity = 0;
+  std::uint64_t timestamp_domain_identity = 0;
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+struct HalV2TopologyNode {
+  std::uint32_t struct_size = sizeof(HalV2TopologyNode);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t identity = 0;
+  std::uint32_t kind = 0;
+  std::uint32_t reserved0 = 0;
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+struct HalV2TopologyLink {
+  std::uint32_t struct_size = sizeof(HalV2TopologyLink);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t identity = 0;
+  std::uint64_t source_node_identity = 0;
+  std::uint64_t destination_node_identity = 0;
+  std::uint32_t kind = 0;
+  std::uint32_t reserved0 = 0;
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+struct HalV2TimestampDomain {
+  std::uint32_t struct_size = sizeof(HalV2TimestampDomain);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t identity = 0;
+  std::uint32_t kind = 0;
+  std::uint32_t reserved0 = 0;
+  std::uint64_t tick_numerator_ns = 0;
+  std::uint64_t tick_denominator = 0;
+  std::uint64_t wrap_ticks = 0;
+  std::uint64_t correlation_destination_identity = 0;
+  std::uint8_t monotonic = 0;
+  std::uint8_t resets_on_backend_reset = 0;
+  std::uint8_t supports_correlation = 0;
+  std::uint8_t reserved1 = 0;
+  std::uint32_t reserved2 = 0;
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+struct HalV2MemoryTopologySnapshot {
+  std::uint32_t struct_size = sizeof(HalV2MemoryTopologySnapshot);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint32_t memory_domain_count = 0;
+  std::uint32_t topology_node_count = 0;
+  std::uint32_t topology_link_count = 0;
+  std::uint32_t timestamp_domain_count = 0;
+  std::uint64_t completion_timestamp_domain_identity = 0;
+  std::array<HalV2MemoryDomain, hal_v2_memory_domain_capacity> memory_domains{};
+  std::array<HalV2TopologyNode, hal_v2_topology_node_capacity> topology_nodes{};
+  std::array<HalV2TopologyLink, hal_v2_topology_link_capacity> topology_links{};
+  std::array<HalV2TimestampDomain, hal_v2_timestamp_domain_capacity>
+      timestamp_domains{};
+  std::array<std::uint64_t, 8> reserved{};
+};
+
+struct HalV2MemoryRegistration {
+  std::uint32_t struct_size = sizeof(HalV2MemoryRegistration);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t domain_identity = 0;
+  std::uint64_t bytes = 0;
+  std::uint32_t ownership = 0;
+  std::uint32_t access = 0;
+  std::uint32_t coherency = 0;
+  std::uint32_t synchronization = 0;
+  void *host_data = nullptr;
+  HalV2OpaqueHandle opaque_handle{};
+  std::array<char, hal_v2_identifier_capacity> name{};
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+struct HalV2MemoryToken {
+  std::uint32_t struct_size = sizeof(HalV2MemoryToken);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t submission_token = 0;
+  HalV2OpaqueHandle native_token{};
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+struct HalV2TimestampCorrelationQuery {
+  std::uint32_t struct_size = sizeof(HalV2TimestampCorrelationQuery);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t source_domain_identity = 0;
+  std::uint64_t destination_domain_identity = 0;
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+struct HalV2TimestampCorrelation {
+  std::uint32_t struct_size = sizeof(HalV2TimestampCorrelation);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  std::uint64_t source_domain_identity = 0;
+  std::uint64_t destination_domain_identity = 0;
+  std::uint64_t generation = 0;
+  std::uint64_t source_value = 0;
+  std::uint64_t destination_value = 0;
+  std::uint64_t uncertainty_ns = 0;
+  std::array<std::uint64_t, 4> reserved{};
+};
+
+using HalV2DiscoverMemoryTopologyFn =
+    HalV2Status (*)(void *, HalV2MemoryTopologySnapshot *);
+using HalV2RegisterMemoryFn = HalV2Status (*)(void *,
+                                              const HalV2MemoryRegistration *,
+                                              HalV2MemoryToken *);
+using HalV2UnregisterMemoryFn = HalV2Status (*)(void *,
+                                                const HalV2MemoryRegistration *,
+                                                const HalV2MemoryToken *);
+using HalV2QueryTimestampCorrelationFn =
+    HalV2Status (*)(void *, const HalV2TimestampCorrelationQuery *,
+                    HalV2TimestampCorrelation *);
+
+struct HalV2MemoryTopologyExtension {
+  std::uint32_t struct_size = sizeof(HalV2MemoryTopologyExtension);
+  std::uint32_t extension_version = hal_v2_memory_topology_extension_version;
+  void *instance = nullptr;
+  HalV2DiscoverMemoryTopologyFn discover = nullptr;
+  HalV2RegisterMemoryFn register_memory = nullptr;
+  HalV2UnregisterMemoryFn unregister_memory = nullptr;
+  HalV2QueryTimestampCorrelationFn query_timestamp_correlation = nullptr;
+  std::array<std::uint64_t, 8> reserved{};
+};
+
 struct HalV2BackendRegistration {
     std::string_view name;
     HalV2BackendApi api{};
+    // Optional and borrowed only for this call. Runtime copies the table and
+    // its complete validated discovery snapshot before publishing a handle.
+    const HalV2MemoryTopologyExtension *memory_topology = nullptr;
 };
 
 struct DeviceBackendHandle {
@@ -257,6 +475,80 @@ struct DeviceBufferRegistration {
         RTFW_DEVICE_BUFFER_HOST_WRITE |
         RTFW_DEVICE_BUFFER_DEVICE_READ |
         RTFW_DEVICE_BUFFER_DEVICE_WRITE;
+};
+
+struct DeviceMemoryDomainHandle {
+  DeviceBackendHandle backend{};
+  std::uint64_t identity = 0;
+
+  [[nodiscard]] constexpr bool valid() const noexcept {
+    return backend.valid() && identity != 0;
+  }
+  friend constexpr bool operator==(DeviceMemoryDomainHandle,
+                                   DeviceMemoryDomainHandle) noexcept = default;
+};
+
+struct DeviceTopologyNodeHandle {
+  DeviceBackendHandle backend{};
+  std::uint64_t identity = 0;
+
+  [[nodiscard]] constexpr bool valid() const noexcept {
+    return backend.valid() && identity != 0;
+  }
+  friend constexpr bool operator==(DeviceTopologyNodeHandle,
+                                   DeviceTopologyNodeHandle) noexcept = default;
+};
+
+struct DeviceTopologyLinkHandle {
+  DeviceBackendHandle backend{};
+  std::uint64_t identity = 0;
+
+  [[nodiscard]] constexpr bool valid() const noexcept {
+    return backend.valid() && identity != 0;
+  }
+  friend constexpr bool operator==(DeviceTopologyLinkHandle,
+                                   DeviceTopologyLinkHandle) noexcept = default;
+};
+
+struct DeviceTimestampDomainHandle {
+  DeviceBackendHandle backend{};
+  std::uint64_t identity = 0;
+
+  [[nodiscard]] constexpr bool valid() const noexcept {
+    return backend.valid() && identity != 0;
+  }
+  friend constexpr bool
+  operator==(DeviceTimestampDomainHandle,
+             DeviceTimestampDomainHandle) noexcept = default;
+};
+
+struct HeterogeneousDeviceBufferRegistration {
+  std::string_view name;
+  DeviceBackendHandle backend{};
+  DeviceMemoryDomainHandle domain{};
+  std::span<std::byte> host_storage{};
+  HalV2OpaqueHandle opaque_handle{};
+  std::uint64_t bytes = 0;
+  HalV2MemoryOwnership ownership = HalV2MemoryOwnership::borrowed_host;
+  std::uint32_t access = 0;
+  HalV2MemoryCoherency coherency = HalV2MemoryCoherency::host_coherent;
+  std::uint32_t synchronization = hal_v2_memory_sync_none;
+};
+
+struct DeviceMemoryObjectInfo {
+  DeviceBufferHandle buffer{};
+  DeviceBackendHandle backend{};
+  DeviceMemoryDomainHandle domain{};
+  std::uint64_t bytes = 0;
+  std::uint32_t ownership = 0;
+  std::uint32_t access = 0;
+  std::uint32_t coherency = 0;
+  std::uint32_t synchronization = 0;
+  std::uint8_t heterogeneous = 0;
+  std::uint8_t host_addressable = 0;
+  std::uint16_t reserved0 = 0;
+  std::uint32_t opaque_handle_size = 0;
+  std::array<std::uint64_t, 4> reserved{};
 };
 
 using DeviceSubmission = rtfw_device_submission;
