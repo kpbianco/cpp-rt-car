@@ -1257,16 +1257,20 @@ Status aggregate_runtime_stack_startup_results(
     const ThreadStartupResult* watchdog_results,
     std::size_t watchdog_count,
     const ThreadStartupResult* device_results,
-    std::size_t device_count) noexcept {
-    const std::array<const ThreadStartupResult*, 3> result_sets{
+    std::size_t device_count,
+    const ThreadStartupResult* submission_results,
+    std::size_t submission_count) noexcept {
+    const std::array<const ThreadStartupResult*, 4> result_sets{
         executor_results,
         watchdog_results,
         device_results,
+        submission_results,
     };
-    const std::array<std::size_t, 3> result_counts{
+    const std::array<std::size_t, 4> result_counts{
         executor_count,
         watchdog_count,
         device_count,
+        submission_count,
     };
     std::size_t count = 0;
     for (std::size_t set = 0; set < result_sets.size(); ++set) {
@@ -1418,6 +1422,8 @@ Status aggregate_stack_startup_results(
         report,
         results,
         count,
+        nullptr,
+        0,
         nullptr,
         0,
         nullptr,

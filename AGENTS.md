@@ -13,9 +13,11 @@ M17-01 adds the additive C++ HAL v2 core contract and routes unchanged device
 ABI v1 backends through one bounded compatibility adapter. M17-02 adds the
 bounded C++ memory/topology extension, six explicit heterogeneous-memory
 domains, copied topology/timestamp contracts, and canonical heterogeneous
-registration while preserving the legacy core path. Command batches, timeline
-lanes, native vendor-v2 controls, combined execution, and physical hardware or
-RT qualification remain deferred.
+registration while preserving the legacy core path. M17-03 adds the bounded
+command/timeline extension, same-backend timeline completion, explicit ordered
+memory synchronization, and one isolated Runtime submission lane per opted-in
+backend. Native vendor-v2 controls, combined execution, and physical hardware
+or RT qualification remain deferred.
 
 ## Read before nontrivial work
 
@@ -87,7 +89,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `2206fb22691b3af0d9d6a39e582e0e9516a24c50`; harness version: `2`.
+- Control revision: `048c26e8656a4cfce7afd176bafa1476ab11195b`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.

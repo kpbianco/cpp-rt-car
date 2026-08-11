@@ -369,3 +369,20 @@ that arbitrary host data is automatically optimized.
 - Separate research scheduler: `rt::Scheduler`; `rt/include/rt/scheduler.hpp`
 - Data-layout utilities: `include/simcore/car_soa.hpp`,
   `include/simcore/soa/`
+
+## M17-03 command and timeline lanes
+
+Configuration copies one version-1 command/timeline extension, up to 16
+timeline descriptors per opted-in backend, and batch-phase declaration
+skeletons. Finalization constructs fixed slots, timeline atomics, completion
+scratch, and exactly one submission thread for each opted-in backend.
+Core-only-v2, memory-only-v2, and adapted-v1 backends create no such thread.
+
+The ordinary executor runs the provider and performs bounded validation and
+copy only. The per-backend lane serializes potentially blocking submit calls;
+the existing service lane alone polls completions. Accepted-before-complete
+state transitions support early completion, whole-poll validation, exact-once
+graph release, timeout/cancel, and stop-request unblocking. Stop joins
+submission lanes in reverse order before service, memory, and backend cleanup.
+There is no cross-backend timeline, hidden synchronization, direct peer DMA,
+device-rate execution, or new plugin/factory ownership.

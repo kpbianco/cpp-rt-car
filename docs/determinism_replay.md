@@ -260,3 +260,16 @@ encoded vector length that does not fit the supplied input, and the demo
 enforces a 64 MiB file policy. Those changes prevent the prior out-of-bounds
 and attacker-sized allocation paths, but legacy native-layout artifacts are
 not portable checkpoint-v1 artifacts and do not inherit the M7 D1 claim.
+
+## M17-03 conditional compatibility identity
+
+An opted-in command extension contributes fixed capabilities. Timeline name,
+backend ordinal, and initial value contribute conditionally. Each batch-phase
+declaration contributes ordered command kind, operation, opcode, flags,
+logical buffer indices/ranges/access, and wait/signal timeline indices.
+
+Runtime addresses, callback pointers, mutable queue indices, generated batch
+IDs, dynamic payload/timeout/point values, timeline progress, completion
+status/timestamp, and health do not contribute. Configurations without the
+extension retain the M17-02 identity path. Checkpoint/input-log schema 1 and
+rate-action schema 1 remain unchanged; action replay remains unsupported.

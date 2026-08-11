@@ -510,6 +510,42 @@ struct DevicePhaseRegistration {
     void* user_data = nullptr;
 };
 
+struct DeviceTimelineRegistration {
+    std::string_view name{};
+    DeviceBackendHandle backend{};
+    std::uint64_t initial_value = 0;
+};
+
+struct DeviceTimelineInfo {
+    std::uint32_t struct_size = sizeof(DeviceTimelineInfo);
+    std::uint32_t extension_version =
+        hal_v2_command_timeline_extension_version;
+    DeviceTimelineHandle timeline{};
+    DeviceBackendHandle backend{};
+    std::array<char, hal_v2_identifier_capacity> name{};
+    std::uint64_t initial_value = 0;
+    std::uint64_t last_accepted_value = 0;
+    std::uint64_t completed_value = 0;
+    std::array<std::uint64_t, 4> reserved{};
+};
+
+using DeviceBatchCommandCallback = CallbackResult (*)(
+    void* user_data,
+    const DeviceCallbackContext& context,
+    DeviceCommandBatch& batch);
+
+struct DeviceBatchPhaseRegistration {
+    // The declaration is copied during configuration. Counts, ordered command
+    // kinds/operations/references, and ordered wait/signal handles define the
+    // compatibility skeleton. Runtime-generated IDs, frame/timeout values,
+    // payload bytes, and timeline values remain invocation data.
+    std::string_view name{};
+    DeviceBackendHandle backend{};
+    DeviceBatchCommandCallback callback = nullptr;
+    void* user_data = nullptr;
+    DeviceCommandBatch declaration{};
+};
+
 struct StepResult {
     std::size_t callbacks_executed = 0;
     std::uint64_t start_ns = 0;
@@ -928,6 +964,11 @@ struct MemoryPlan {
     std::size_t device_outstanding_capacity = 0;
     std::size_t device_completion_batch = 0;
     std::size_t device_control_bytes = 0;
+    // M17-03 command/timeline storage remains a subcomponent of the existing
+    // device-control row and does not alter the six-row plan equation.
+    std::size_t device_batch_backend_count = 0;
+    std::size_t device_timeline_count = 0;
+    std::size_t device_batch_queue_slots = 0;
     // Backend-reported private control storage is informational and excluded
     // from planned_bytes because the backend owns it.
     std::size_t device_backend_reported_bytes = 0;
@@ -962,7 +1003,7 @@ struct MemoryPlan {
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
 inline constexpr std::size_t thread_role_report_capacity =
-    5 + thread_policy_request_capacity;
+    6 + thread_policy_request_capacity;
 inline constexpr std::size_t memory_region_report_capacity = 12;
 inline constexpr std::size_t resource_accounting_name_capacity = 48;
 
@@ -1346,6 +1387,12 @@ public:
     [[nodiscard]] Status register_device_phase(
         const DevicePhaseRegistration& registration,
         PhaseHandle& out_phase) noexcept;
+    [[nodiscard]] Status register_device_timeline(
+        const DeviceTimelineRegistration& registration,
+        DeviceTimelineHandle& out_timeline) noexcept;
+    [[nodiscard]] Status register_device_batch_phase(
+        const DeviceBatchPhaseRegistration& registration,
+        PhaseHandle& out_phase) noexcept;
     [[nodiscard]] Status register_rate_domain(
         const RateDomainRegistration& registration,
         RateDomainHandle& out_domain) noexcept;
@@ -1408,6 +1455,12 @@ public:
     [[nodiscard]] std::size_t device_backend_count() const noexcept;
     [[nodiscard]] std::size_t device_buffer_count() const noexcept;
     [[nodiscard]] std::size_t device_phase_count() const noexcept;
+    [[nodiscard]] std::size_t
+    device_timeline_count(DeviceBackendHandle backend) const noexcept;
+    [[nodiscard]] bool device_timeline_at(
+        DeviceBackendHandle backend,
+        std::size_t index,
+        DeviceTimelineInfo& info) const noexcept;
     [[nodiscard]] std::size_t
     device_memory_domain_count(DeviceBackendHandle backend) const noexcept;
     [[nodiscard]] bool

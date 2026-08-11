@@ -67,6 +67,7 @@ int main() {
     if (pre_m17_02_hal_backend.name != "legacy.hal.v2" ||
         pre_m17_02_hal_backend.api.api_version != rt::hal_v2_api_version ||
         pre_m17_02_hal_backend.memory_topology != nullptr ||
+        pre_m17_02_hal_backend.command_timeline != nullptr ||
         pre_m17_device_backend.name != "legacy.device.v1" ||
         pre_m17_device_backend.api.abi_version != 0 ||
         pre_m17_device_buffer.name != "legacy.buffer.v1" ||

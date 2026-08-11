@@ -96,6 +96,7 @@ bool valid_thread_role(rt::ThreadRoleId role) noexcept {
            role == rt::thread_role_watchdog ||
            role == rt::thread_role_device_service ||
            role == rt::thread_role_xdma_io ||
+           role == rt::thread_role_device_submission ||
            role.value >= rt::thread_role_custom_first;
 }
 
@@ -335,7 +336,8 @@ rt::ThreadPolicy resolved_thread_policy(
     if (role == rt::thread_role_executor_worker && runtime_owned) {
         policy.wait_strategy = rt::WaitStrategy::yield;
     } else if (role == rt::thread_role_watchdog ||
-               role == rt::thread_role_device_service) {
+               role == rt::thread_role_device_service ||
+               role == rt::thread_role_device_submission) {
         policy.wait_strategy = rt::WaitStrategy::park;
     }
     return policy;
@@ -726,6 +728,12 @@ Status build_cpu_memory_policy_report(
         diagnostic = "runtime thread inventory overflows";
         return Status::invalid_config;
     }
+    if (!checked_add(runtime_stack_count,
+                     memory_plan.device_batch_backend_count,
+                     runtime_stack_count)) {
+        diagnostic = "runtime submission-thread inventory overflows";
+        return Status::invalid_config;
+    }
     std::size_t external_stack_count = 1;
     bool external_stack_cardinality_known =
         memory_plan.device_backend_count == 0;
@@ -751,6 +759,8 @@ Status build_cpu_memory_policy_report(
             count = config.watchdog_timeout_ns == 0 ? 0 : 1;
         } else if (request.role == thread_role_device_service) {
             count = memory_plan.device_backend_count == 0 ? 0 : 1;
+        } else if (request.role == thread_role_device_submission) {
+            count = memory_plan.device_batch_backend_count;
         } else {
             cardinality_known = false;
             external_stack_cardinality_known = false;
@@ -868,6 +878,18 @@ Status build_cpu_memory_policy_report(
         false);
     if (thread_resolution_status != Status::ok) {
         diagnostic = "strict external XDMA thread policy is unsupported";
+        return thread_resolution_status;
+    }
+    add_thread(
+        thread_role_device_submission,
+        "thread.device-submission",
+        ResourceOwnership::runtime,
+        PolicyApplicationMode::apply_and_verify,
+        memory_plan.device_batch_backend_count,
+        true);
+    if (thread_resolution_status != Status::ok) {
+        diagnostic =
+            "strict device-submission thread policy is unsupported or inactive";
         return thread_resolution_status;
     }
 

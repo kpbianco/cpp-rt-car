@@ -1,6 +1,7 @@
 #pragma once
 
 #include "executor.hpp"
+#include "command_batch.hpp"
 #include "hal_v2.hpp"
 #include "heterogeneous_memory.hpp"
 
@@ -26,6 +27,13 @@ struct DeviceBackendSpec {
     HalBackendKind kind = HalBackendKind::adapted_device_abi_v1;
     DeviceV1CompatibilityAdapter* v1_adapter = nullptr;
     HeterogeneousMemoryState *memory_state = nullptr;
+    CommandTimelineExtensionState *command_state = nullptr;
+};
+
+struct DeviceTimelineSpec {
+    std::array<char, hal_v2_identifier_capacity> name{};
+    std::uint32_t backend_index = 0;
+    std::uint64_t initial_value = 0;
 };
 
 struct DeviceBufferSpec {
@@ -87,6 +95,7 @@ public:
         std::uint32_t owner,
         std::vector<DeviceBackendSpec> backends,
         std::vector<DeviceBufferSpec> buffers,
+        std::vector<DeviceTimelineSpec> timelines,
         std::size_t outstanding_capacity,
         std::size_t completion_batch);
     ~DeviceManager();
@@ -98,6 +107,10 @@ public:
         Executor& executor,
         DeviceEventObserver observer,
         void* observer_data,
+        ThreadPolicyProvider& provider,
+        ThreadStartupGate& gate,
+        const ThreadRolePlan& plan) noexcept;
+    [[nodiscard]] Status start_submission_lanes(
         ThreadPolicyProvider& provider,
         ThreadStartupGate& gate,
         const ThreadRolePlan& plan) noexcept;
@@ -116,6 +129,15 @@ public:
         std::uint64_t frame_index,
         const DeviceSubmission& submission,
         std::uint64_t& out_submission_id) noexcept;
+    [[nodiscard]] Status submit_batch(
+        std::size_t backend_index,
+        std::size_t phase_index,
+        std::size_t worker_index,
+        std::uint64_t frame_index,
+        const DeviceCommandBatch& batch,
+        const DeviceCommandBatch& declaration,
+        std::uint64_t& out_batch_id) noexcept;
+    [[nodiscard]] Status request_batch_stop() noexcept;
     [[nodiscard]] Status health(
         std::size_t backend_index,
         DeviceHealth& output) noexcept;
@@ -131,6 +153,20 @@ public:
     [[nodiscard]] std::size_t buffer_count() const noexcept {
         return buffers_.size();
     }
+    [[nodiscard]] std::size_t batch_backend_count() const noexcept {
+        return batch_backend_count_;
+    }
+    [[nodiscard]] std::size_t timeline_count(
+        std::size_t backend_index) const noexcept;
+    [[nodiscard]] bool timeline_at(
+        std::size_t backend_index,
+        std::size_t ordinal,
+        DeviceTimelineInfo& info) const noexcept;
+    [[nodiscard]] const ThreadStartupResult* submission_startup_results()
+        const noexcept { return submission_startup_results_.get(); }
+    [[nodiscard]] std::size_t submission_startup_result_count() const noexcept {
+        return batch_backend_count_;
+    }
     void append_control_extents(
         std::vector<LogicalControlExtent>& extents,
         std::uint64_t& next_extent_id) const;
@@ -140,6 +176,8 @@ public:
         std::size_t backend_name_bytes,
         std::size_t adapted_v1_count,
         std::size_t buffer_count,
+        std::size_t timeline_count,
+        std::size_t batch_backend_count,
         std::size_t outstanding_capacity,
         std::size_t completion_batch,
         std::size_t& bytes) noexcept;
@@ -160,6 +198,41 @@ private:
       std::uint8_t heterogeneous_owned = 0;
     };
 
+    struct TimelineState {
+        std::array<char, hal_v2_identifier_capacity> name{};
+        std::uint32_t backend_index = 0;
+        std::uint64_t initial_value = 0;
+        std::atomic<std::uint64_t> last_accepted{0};
+        std::atomic<std::uint64_t> completed{0};
+    };
+
+    struct BatchSlot {
+        std::atomic<std::uint32_t> state{0};
+        std::atomic<bool> graph_released{false};
+        std::uint64_t sequence = 0;
+        std::uint64_t deadline_ns = 0;
+        std::uint32_t backend_index = 0;
+        std::uint32_t phase_index = 0;
+        std::uint64_t frame_index = 0;
+        DeviceCommandBatch batch{};
+        HalV2BatchCompletion early_completion{};
+        bool early_completion_valid = false;
+    };
+
+    struct BatchBackendState {
+        std::size_t slot_offset = 0;
+        std::size_t slot_count = 0;
+        std::size_t lane_index = std::numeric_limits<std::size_t>::max();
+        std::atomic_flag admission = ATOMIC_FLAG_INIT;
+        std::atomic<std::uint64_t> wake_sequence{0};
+        std::atomic<std::uint64_t> next_sequence{1};
+    };
+
+    struct SubmissionLaneContext {
+        DeviceManager* manager = nullptr;
+        std::size_t backend_index = 0;
+    };
+
     [[nodiscard]] Status initialize_backends() noexcept;
     [[nodiscard]] Status shutdown_backends() noexcept;
     [[nodiscard]] bool backend_has_registered_buffers(
@@ -177,6 +250,17 @@ private:
     void fail_backend_outstanding(
         std::size_t backend_index,
         Status status) noexcept;
+    void submission_loop(std::size_t backend_index) noexcept;
+    static void submission_entry(void* context) noexcept;
+    void poll_batch_completions(std::size_t backend_index) noexcept;
+    void process_batch_completion(
+        std::size_t backend_index,
+        const HalV2BatchCompletion& completion) noexcept;
+    void finish_batch_slot(
+        BatchSlot& slot,
+        Status status,
+        bool publish_timeline) noexcept;
+    void fail_backend_batches(std::size_t backend_index, Status status) noexcept;
     void record_failure(Status status) noexcept;
     [[nodiscard]] Outstanding* acquire_outstanding() noexcept;
     void emit(const DeviceEvent& event) noexcept;
@@ -185,7 +269,18 @@ private:
     std::vector<DeviceBackendSpec> backends_;
     std::vector<std::uint8_t> initialized_backends_;
     std::vector<DeviceBufferSpec> buffers_;
+    std::vector<DeviceTimelineSpec> timeline_specs_;
     std::vector<NativeMemoryState> native_memory_;
+    std::unique_ptr<TimelineState[]> timelines_;
+    std::size_t timeline_count_ = 0;
+    std::unique_ptr<BatchBackendState[]> batch_backends_;
+    std::unique_ptr<BatchSlot[]> batch_slots_;
+    std::size_t batch_slot_count_ = 0;
+    std::size_t batch_backend_count_ = 0;
+    std::unique_ptr<NativeThread[]> submission_threads_;
+    std::unique_ptr<ThreadStartupResult[]> submission_startup_results_;
+    std::unique_ptr<SubmissionLaneContext[]> submission_contexts_;
+    std::unique_ptr<HalV2BatchCompletion[]> batch_completion_buffer_;
     std::unique_ptr<Outstanding[]> outstanding_slots_;
     std::size_t outstanding_capacity_ = 0;
     std::unique_ptr<HalV2Completion[]> completion_buffer_;
@@ -198,9 +293,12 @@ private:
     void* observer_data_ = nullptr;
     std::atomic<bool> started_{false};
     std::atomic<bool> stopping_{false};
+    std::atomic<bool> batch_admission_open_{false};
+    std::atomic<bool> batch_stopping_{false};
     std::atomic<bool> service_ready_{false};
     std::atomic<std::size_t> slot_hint_{0};
     std::atomic<std::uint64_t> next_submission_id_{1};
+    std::atomic<std::uint64_t> next_batch_id_{1};
     std::atomic<std::uint64_t> submissions_{0};
     std::atomic<std::uint64_t> completions_{0};
     std::atomic<std::uint64_t> failures_{0};

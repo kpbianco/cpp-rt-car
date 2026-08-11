@@ -274,3 +274,13 @@ stack/control observation is not qualification. The tests do not establish
 privileged lock/NUMA/huge-page availability, device or DMA pinning, worst-case
 latency, physical hardware or HIL behavior, field results, RT1, RT2, signing,
 release, deployment, or production validation.
+
+## M17-03 submission role
+
+Stable role numeric value 6 is `thread.device-submission`. Its permanent report
+row is Runtime-owned, apply-and-verify, portable by default, and has a known
+instance count equal to opted-in command/timeline backends. A strict request is
+resolved and read back through the same pre-start barrier as other Runtime
+lanes. Core-only-v2, memory-only-v2, and adapted-v1 backends have zero
+instances. Live stacks enter the existing `memory.runtime-thread-stack` row;
+no memory-region identity is added.

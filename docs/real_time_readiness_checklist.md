@@ -122,3 +122,18 @@ schema and exporter boundaries are in the
 are in the [determinism/replay contract](determinism_replay.md); M8 backend and
 mock boundaries are in the [device backend contract](device_backend.md). The
 native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
+
+## M17-03 portable command/timeline status
+
+- [x] Fixed command, wait, signal, timeline, queue, and completion capacities
+  are validated and preallocated before start.
+- [x] Each opted-in backend has one isolated Runtime submission lane; executor
+  workers perform provider validation/copy but no backend call.
+- [x] Explicit flush/invalidate/copy ordering and whole timeline completion are
+  covered by synthetic failure-injected tests.
+- [x] Timeout, cancellation, malformed completion, blocked stop request,
+  reverse join, compatibility, isolation, and exact accounting have portable
+  functional gates.
+- [ ] Native CUDA/XDMA-v2 latency, physical memory coherence, hardware/HIL,
+  field, worst-case timing, RT1, and RT2 remain unqualified and require named
+  later evidence.

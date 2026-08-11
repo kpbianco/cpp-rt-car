@@ -237,3 +237,12 @@ host sink.
 - Export can allocate, block in the destination stream, or fail with
   `resource_exhausted`; it belongs on a non-RT host lane.
 - Observability correctness does not establish RT1/RT2 timing behavior.
+
+## M17-03 observability boundary
+
+M17-03 adds no global event, metric, producer, cursor, or schema field. Batch
+outcomes reuse existing device categories, and submission-lane policy/readback
+uses the M15 report. Timeline inspection is a control query, not a trace event.
+Batch IDs, device timestamps, and mutable progress are excluded from
+compatibility identity. Global observability schema 2 and every ID remain
+unchanged.

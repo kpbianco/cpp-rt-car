@@ -176,7 +176,7 @@ TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
     rt::CpuMemoryPolicyReport report;
     ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
     EXPECT_EQ(report.schema_version, rt::cpu_memory_policy_schema_version);
-    EXPECT_EQ(report.thread_count, 5u);
+    EXPECT_EQ(report.thread_count, 6u);
     EXPECT_EQ(report.memory_count, 12u);
 
     const auto* frame = find_thread(report, rt::thread_role_frame);
@@ -186,11 +186,14 @@ TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
     const auto* device =
         find_thread(report, rt::thread_role_device_service);
     const auto* xdma = find_thread(report, rt::thread_role_xdma_io);
+    const auto* submission =
+        find_thread(report, rt::thread_role_device_submission);
     ASSERT_NE(frame, nullptr);
     ASSERT_NE(executor, nullptr);
     ASSERT_NE(watchdog, nullptr);
     ASSERT_NE(device, nullptr);
     ASSERT_NE(xdma, nullptr);
+    ASSERT_NE(submission, nullptr);
     EXPECT_EQ(stable_name(frame->stable_name), "thread.frame");
     EXPECT_EQ(frame->ownership, rt::ResourceOwnership::caller);
     EXPECT_EQ(frame->application_mode, rt::PolicyApplicationMode::verify_only);
@@ -206,6 +209,11 @@ TEST(CpuMemoryPolicy, DefaultsInventoryEveryStableRoleAndMemoryIdentity) {
     EXPECT_EQ(xdma->ownership, rt::ResourceOwnership::backend);
     EXPECT_EQ(xdma->application_mode, rt::PolicyApplicationMode::verify_only);
     EXPECT_FALSE(xdma->cardinality_known);
+    EXPECT_EQ(submission->ownership, rt::ResourceOwnership::runtime);
+    EXPECT_EQ(submission->application_mode,
+              rt::PolicyApplicationMode::apply_and_verify);
+    EXPECT_EQ(submission->logical_instance_count, 0u);
+    EXPECT_TRUE(submission->cardinality_known);
     for (std::size_t index = 0; index < report.thread_count; ++index) {
         EXPECT_EQ(
             report.threads[index].applied,
@@ -626,7 +634,7 @@ TEST(CpuMemoryPolicy, RejectsDuplicateMalformedAndContradictoryRequests) {
 
     rt::CpuMemoryPolicy invalid_role;
     invalid_role.thread_policy_count = 1;
-    invalid_role.thread_policies[0].role = {6};
+    invalid_role.thread_policies[0].role = {7};
     expect_invalid_policy(invalid_role, "malformed or contradictory");
 
     rt::CpuMemoryPolicy invalid_region;
@@ -748,7 +756,7 @@ TEST(CpuMemoryPolicy, FailedFinalizationCanReplacePolicyAndRecover) {
     ASSERT_EQ(runtime.finalize(), rt::Status::ok);
     rt::CpuMemoryPolicyReport report;
     ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
-    EXPECT_EQ(report.thread_count, 5u);
+    EXPECT_EQ(report.thread_count, 6u);
     EXPECT_EQ(runtime.set_cpu_memory_policy(rejected), rt::Status::invalid_state);
     ASSERT_EQ(runtime.start(), rt::Status::ok);
     EXPECT_EQ(runtime.stop(), rt::Status::ok);
@@ -781,7 +789,7 @@ TEST(CpuMemoryPolicy, ExternalHostAndCustomRolesRemainVerifyOnly) {
 
     rt::CpuMemoryPolicyReport report;
     ASSERT_TRUE(runtime.cpu_memory_policy_report(report));
-    EXPECT_EQ(report.thread_count, 6u);
+    EXPECT_EQ(report.thread_count, 7u);
     const auto* executor =
         find_thread(report, rt::thread_role_executor_worker);
     const auto* custom = find_thread(

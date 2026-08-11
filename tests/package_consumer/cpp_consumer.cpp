@@ -287,9 +287,24 @@ int main() {
     const rt::CpuMemoryPolicyReport pre_m15_04_report{
         rt::cpu_memory_policy_schema_version, 0, {}, 0, {}};
     const rt::MemoryPlan pre_m16_plan{1024, 512};
+    const rt::HalV2CommandTimelineCapabilities command_capabilities{};
+    const rt::HalV2CommandTimelineExtension command_extension{};
+    const rt::DeviceCommand command{};
+    const rt::DeviceCommandBatch command_batch{};
+    const rt::HalV2BatchCompletion batch_completion{};
+    const rt::DeviceTimelineRegistration timeline_registration{};
+    const rt::DeviceBatchPhaseRegistration batch_phase_registration{};
     if (pre_m15_04_policy.accounting_declaration_count != 0 ||
         pre_m15_04_report.accounting_complete ||
-        pre_m16_plan.rate_plan_bytes != 0) {
+        pre_m16_plan.rate_plan_bytes != 0 ||
+        command_capabilities.extension_version != 1 ||
+        command_extension.extension_version != 1 ||
+        command.kind != 0 || command_batch.command_count != 0 ||
+        batch_completion.batch_id != 0 ||
+        timeline_registration.initial_value != 0 ||
+        batch_phase_registration.callback != nullptr ||
+        rt::hal_v2_command_capacity != 16 ||
+        rt::hal_v2_timeline_capacity != 16) {
         return 3;
     }
 

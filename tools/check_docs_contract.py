@@ -316,6 +316,8 @@ def check_runtime_contract() -> None:
     hal_v2_source = read("rt/src/hal_v2.cpp")
     heterogeneous_header = read("rt/src/heterogeneous_memory.hpp")
     heterogeneous_source = read("rt/src/heterogeneous_memory.cpp")
+    command_header = read("rt/src/command_batch.hpp")
+    command_source = read("rt/src/command_batch.cpp")
     device_manager_header = read("rt/src/device_manager.hpp")
     device_manager = read("rt/src/device_manager.cpp")
     mock_device = read("rt/src/mock_device.cpp")
@@ -343,6 +345,7 @@ def check_runtime_contract() -> None:
     device_test = read("tests/test_device_runtime.cpp")
     hal_v2_test = read("tests/test_hal_v2.cpp")
     heterogeneous_test = read("tests/test_heterogeneous_memory.cpp")
+    command_test = read("tests/test_command_batch.cpp")
     cuda_test = read("tests/test_cuda_backend.cpp")
     xdma_test = read("tests/xdma_backend_tests.cpp")
     host_adapter_test = read("tests/host_adapter_tests.cpp")
@@ -1736,6 +1739,100 @@ def check_runtime_contract() -> None:
     ):
         if phrase not in normalized_memory_docs:
             fail(f"M17-02 component contracts are missing phrase {phrase!r}")
+
+    # M17-03 gates assert permanent command/timeline facts without asserting
+    # that this batch remains the moving milestone frontier.
+    for token in (
+        "hal_v2_command_timeline_extension_version = 1u",
+        "hal_v2_command_capacity = 16u",
+        "hal_v2_timeline_wait_capacity = 8u",
+        "hal_v2_timeline_signal_capacity = 8u",
+        "hal_v2_timeline_capacity = 16u",
+        "enum class HalV2CommandKind",
+        "enum class HalV2MemoryOperation",
+        "struct DeviceCommand",
+        "struct DeviceCommandBatch",
+        "struct HalV2BatchCompletion",
+        "struct HalV2CommandTimelineExtension",
+    ):
+        if token not in device_header:
+            fail(f"public command/timeline contract is missing {token!r}")
+    for token in (
+        "DeviceTimelineRegistration",
+        "DeviceBatchPhaseRegistration",
+        "register_device_timeline(",
+        "register_device_batch_phase(",
+        "device_timeline_at(",
+        "thread_role_device_submission",
+    ):
+        if token not in runtime_header and token not in config_header:
+            fail(f"runtime command/timeline API is missing {token!r}")
+    for token in (
+        "validate_command_timeline_extension",
+        "discover_command_timeline_extension",
+        "validate_batch_shape",
+        "validate_batch_declaration",
+        "validate_batch_completion",
+    ):
+        if token not in command_header and token not in command_source:
+            fail(f"command/timeline validation is missing {token!r}")
+    for token in (
+        "submit_batch(",
+        "submission_loop(",
+        "poll_batch_completions(",
+        "request_batch_stop(",
+        "finish_batch_slot(",
+    ):
+        if token not in device_manager_header and token not in device_manager:
+            fail(f"command/timeline manager path is missing {token!r}")
+    for token in (
+        "CommandBatch",
+        "TimeoutCancels",
+        "ExplicitFlushAndInvalidate",
+        "InstanceIsolated",
+        "AggregatePrefix",
+    ):
+        if token not in command_test:
+            fail(f"M17-03 permanent test coverage is missing {token!r}")
+    for token in (
+        "rt/src/command_batch.cpp",
+        "test_command_batch.cpp",
+        "m17_command_batch_timeline",
+    ):
+        if token not in cmake and token not in tests_cmake:
+            fail(f"M17-03 CMake integration is missing {token!r}")
+    for token in ("CommandBatch.*", "m17_command_batch_timeline"):
+        if token not in ci_workflow:
+            fail(f"M17-03 TSan/CI coverage is missing {token!r}")
+    for token in (
+        "HalV2CommandTimelineExtension",
+        "DeviceCommandBatch",
+        "DeviceTimelineRegistration",
+        "DeviceBatchPhaseRegistration",
+    ):
+        if token not in package_cpp_consumer:
+            fail(f"preferred package consumer is missing M17-03 token {token!r}")
+    if "command_timeline" not in package_compat_consumer:
+        fail("compatibility package consumer is missing command extension prefix")
+    normalized_command_docs = " ".join(
+        (
+            hal_v2_doc + " " + heterogeneous_doc + " " + device_doc + " "
+            + host_doc + " " + executor_doc + " " + memory_doc + " "
+            + determinism_doc + " " + observability_doc + " " + c_abi_doc
+        ).lower().split()
+    )
+    for phrase in (
+        "16 commands",
+        "eight waits",
+        "eight signals",
+        "same-backend",
+        "thread.device-submission",
+        "whole-completion",
+        "no c++ binary abi promise",
+        "direct peer dma",
+    ):
+        if phrase not in normalized_command_docs:
+            fail(f"M17-03 component contracts are missing phrase {phrase!r}")
 
     for token in (
         "Runtime::run_periodic(",

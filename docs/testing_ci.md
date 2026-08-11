@@ -254,3 +254,18 @@ predeclared thresholds, and the measurement procedure.
 - Stable ABI/export and installed-package gates:
   `tools/check_c_abi.py`, `abi/rtfw_c_abi_v8.exports`,
   `tests/package_consumer`
+- M17-03 command/timeline and isolated-lane path:
+  `rt/src/command_batch.cpp`, `rt/src/device_manager.cpp`,
+  `tests/test_command_batch.cpp`, CTest `m17_command_batch_timeline`, and the
+  ThreadSanitizer filter `CommandBatch.*`. Coverage includes exact public
+  layouts/defaults, malformed extension/provider/completion output,
+  same-backend timeline monotonicity, ordered synchronization, submit
+  exception/error, timeout/cancel, blocked-stop recovery, isolation,
+  accounting, source prefixes, and installed consumers.
+
+These gates authorize only static, unit, synthetic, failure-injected,
+sanitizer, package, and RT0 functional conclusions. They are not native
+vendor-v2, hardware, HIL, field, bounded-latency, RT1/RT2, signing, release,
+deployment, or production evidence. Mandatory GitHub CI and human API,
+compatibility, concurrency, lifetime, memory-order, accounting, security, and
+claim review remain external merge gates.
