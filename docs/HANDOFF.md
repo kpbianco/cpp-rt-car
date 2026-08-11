@@ -2,78 +2,64 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. The exact M17-02 baseline is
-`bea813f08ea43c3415d3af1ff25a713affd423d4`; merged M17-01 is
-`25ea1950d993bf7fcc170ccaafa32181d734ce4e`. M14, M14.1, M15, and M16 are
-complete in target history. M17 is active and remains incomplete.
-`contracts/active-batch.yaml` is binding.
-
-Canonical control artifacts are under
-`/home/kbianco/.local/share/portfolio-control/worktrees/control/cpp-rt-car/products/cpp-rt-car`
-at revision `2206fb22691b3af0d9d6a39e582e0e9516a24c50`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-03 starts from exact target
+baseline `ee1ddd21c483687c4237f3b53ec8d15029d20ff2`; M17-01 and M17-02 are
+merged prerequisites. M17 remains active and incomplete. The binding contract
+is `contracts/active-batch.yaml`, sourced from control revision
+`048c26e8656a4cfce7afd176bafa1476ab11195b`.
 
 ## Implemented boundary
 
-M17-02 appends one optional memory/topology extension pointer to the additive
-C++ HAL v2 backend registration. The extension has its own version and copied
-function table and publishes fixed-capacity memory-domain, topology-node,
-topology-link, and timestamp-domain records. Counts are bounded at 16, 32, 64,
-and 8 respectively. The exact six domain kinds are host, pinned host, CUDA
-device, imported, DMA mapped, and peer; no seventh category is inferred.
+M17-03 appends optional command/timeline extension version 1 to the existing
+C++ HAL-v2 backend registration without changing its `{name, api,
+memory_topology}` aggregate prefix. Runtime copies its fixed capability table
+and requires submit, bounded nonblocking poll, cancel, and nonblocking stop
+request callbacks. Malformed sizes, versions, capacities, callbacks, reserved
+data, exceptions, and partial outputs fail transactionally.
 
-Native discovery is configuring-only, transactional, and fail closed. Core-only
-native v2 and adapted-v1 backends receive the same implicit borrowed-host,
-host-coherent, no-sync domain. The M17-01 HAL core table, complete v1 adapter,
-legacy buffer surface, identifiers, statuses, call counts, and cleanup behavior
-are preserved.
+The public bounds are 16 commands, eight waits, eight signals, 16 timelines,
+128 inline payload bytes, and eight references per command. Configuring-only
+timeline and batch-phase registration is instance/backend bound. Providers run
+on the ordinary CPU graph path and fill a caller-borrowed batch, but no backend
+function executes there. Runtime validates declared shape, dynamic bounds,
+prior-accepted waits, increasing signals, access/ranges, and ordered explicit
+flush/invalidate or staged copy operations.
 
-A new `register_device_buffer()` overload accepts a same-instance domain and
-one host span or opaque handle, then validates size, backing, ownership,
-access, coherency, synchronization, alignment, granularity, capacity, overlap,
-and reserved bytes against the copied domain. Inspection methods expose
-instance-owned domain/node/timestamp handles, links, completion-domain choice,
-and memory-object facts without transferring ownership. Correlation queries
-are running-state control operations and require a declared relationship.
+Each opted-in backend has one fixed Runtime-owned submission thread using role
+value 6. Bounded admission copies into preallocated slots; the submission lane
+alone calls submit and the existing service lane alone polls completions.
+Whole completion batches require known unique IDs, exact declared signal sets,
+valid statuses, and the declared M17-02 timestamp domain. Timeout, cancel,
+submit failure/exception, malformed completion, stop, and reset/loss paths are
+terminal and exact-once. A blocked submit is released through stop request and
+cancel; no lane detaches.
 
-The runtime registers native memory during start and unregisters it in reverse
-order during checked stop. Ownership is pessimistically retained across any
-failed or exceptional register/unregister call. Backend shutdown cannot pass
-unresolved memory ownership; a later checked stop retries only unresolved
-cleanup. No post-start dynamic allocation is introduced.
-
-Copied extension state, snapshot records, memory specifications, native tokens,
-and fixed translation storage are counted once in `device_control_bytes` and
-the existing M15 device-control extent. The six `MemoryPlan` rows and three
-provider regions remain unchanged. Adapted-v1/core-only legacy identity bytes
-remain exact; native extension semantics and explicit heterogeneous-memory
-declarations are hashed conditionally, excluding pointer and callback values.
-
-The existing core submission path remains bounded. It accepts a heterogeneous
-memory reference only when the object is device accessible and requires no
-explicit synchronization. M17-02 adds no command-batch vocabulary, timeline
-completion, vendor control, device-rate execution, callback from poll, or new
-submission/I/O lane.
+All new state is included once in device control and the existing logical
+extent ledger. Submission stacks are included once in runtime-stack
+accounting. The six-row memory plan, three provider regions, schemas, installed
+inventory, release, support, and license remain unchanged. Batch capabilities,
+timeline descriptors, command order, operations, references, and point handles
+are conditional compatibility identity; mutable progress and runtime values
+are excluded.
 
 ## Protected decisions
 
-- Preserve C ABI v8, 70 exports/fingerprint, SONAME 8, every device-ABI-v1
-  declaration/layout/value, and every M17-01 HAL core behavior.
-- Preserve Runtime statuses, profile schema 7/25 keys, observability schema 2
-  and IDs, checkpoint/input-log schema 1, and rate-action schema 1.
-- Preserve installed headers/targets and aliases, support matrices, release
-  1.2.1, and Apache-2.0.
-- Keep borrowed storage and opaque handles externally owned unless the explicit
-  domain ownership contract says backend-owned; never infer CUDA/XDMA peer DMA.
-- Do not add batches, timelines, vendor facilities, plugins/factories, another
-  lane, device-rate execution, or physical adapters in M17-02.
-- Do not claim hardware, HIL, field, controlled latency, RT1, RT2, Unreal,
-  signing, release, staging, deployment, or production evidence.
+- Preserve C ABI v8, 70 exports/fingerprint, SONAME 8, device ABI v1, HAL core
+  v2, memory extension v1, Runtime status values, and all existing schemas.
+- Preserve the legacy single-submit path and no invented capability for
+  adapted-v1, core-only-v2, and memory-only-v2 backends.
+- Keep command queues fixed, same-backend only, explicitly synchronized, and
+  free of executor-worker vendor calls, hidden work, spill, or detached lanes.
+- Keep CUDA/XDMA-v2 controls, CUDA Graph, XDMA MMIO/events, device-rate work,
+  cross-backend timelines, combined execution, and direct peer DMA deferred.
+- Do not claim hardware, HIL, field, bounded vendor latency, RT1/RT2, Unreal,
+  signing, release, staging, deployment, or production validation.
 
 ## Completion output
 
-Run the exact local commands in `contracts/active-batch.yaml`, ending with
-`./scripts/agent-verify.sh full`, C ABI verification, and the SONAME check.
-Retain acceptance mapping, exact commands/results, storage and identity facts,
-lifecycle and rollback behavior, residual risks, and all unperformed validation
-in `docs/evidence/M17-02-2026-08-06.md`. Mandatory CI and human review remain
-external gates. Do not commit, push, open a pull request, release, or deploy.
+Run the exact local validation contract through `./scripts/agent-verify.sh
+full`, C ABI verification, and the SONAME check. Record acceptance mapping,
+commands/results, identity/accounting facts, lifecycle and rollback behavior,
+residual risks, and unperformed validation in
+`docs/evidence/M17-03-2026-08-11.md`. Mandatory CI and human review remain
+external. Do not commit, push, open a pull request, release, or deploy.

@@ -57,16 +57,15 @@ existing device-service lane polls and publishes completion.
 The adapter does not retry, spill, allocate, wait for device completion, invoke
 a callback from poll, or create a helper thread. The submitting/early-ready
 handshake publishes acceptance before applying a synchronous completion.
-M17-02 does not add an executor or lane. Its discovery, registration, cleanup,
-inspection, and correlation operations are control-path calls. A
+M17-02 discovery, registration, cleanup, inspection, and correlation remain
+control-path calls. A
 heterogeneous memory reference reaches the existing core submission only when
 the declared object is device accessible and requires no explicit
-synchronization. Explicit flush, invalidate, copy, and timeline semantics await
-later command-batch work.
+synchronization. M17-03 batch phases provide explicit flush, invalidate, copy,
+and timeline semantics without changing that legacy core path.
 
-Potentially blocking vendor-operation isolation and fixed per-backend
-submission/I/O lanes belong to M17-03; neither M17-01 nor M17-02 creates such a
-lane or qualifies a vendor call as bounded in time.
+M17-03 isolates potentially blocking batch submit on one fixed per-backend
+submission lane. It does not qualify a vendor call as bounded in time.
 
 The positive policy cap bounds executed reference records per step. Callback
 failure, missing/duplicate publication, finite generation exhaustion, or a
@@ -222,3 +221,16 @@ best-effort destruction.
 - native HAL v2/adapted-v1 single-path and causal-order coverage:
   `tests/test_hal_v2.cpp`, `tests/test_device_runtime.cpp`;
 - sanitizer configuration: `.github/workflows/ci.yml`.
+
+## M17-03 batch-provider boundary
+
+A batch provider uses the ordinary CPU phase graph, scratch, task context, and
+exception boundary. It validates and copies only; no extension/backend callback
+executes on an executor worker. An accepted batch retains external graph work
+until the service lane publishes one terminal result. Queue contention or
+exhaustion returns `device_queue_full` without retry, spill, inline submit,
+hidden worker creation, or partially accepted timeline state.
+
+Potentially blocking submit is isolated to one precreated lane per opted-in
+backend. That lane cannot invoke application callbacks and is reported as
+`thread.device-submission`, role 6.

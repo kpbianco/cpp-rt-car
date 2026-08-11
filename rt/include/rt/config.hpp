@@ -80,6 +80,7 @@ inline constexpr ThreadRoleId thread_role_executor_worker{2};
 inline constexpr ThreadRoleId thread_role_watchdog{3};
 inline constexpr ThreadRoleId thread_role_device_service{4};
 inline constexpr ThreadRoleId thread_role_xdma_io{5};
+inline constexpr ThreadRoleId thread_role_device_submission{6};
 inline constexpr std::uint32_t thread_role_custom_first = 0x0001'0000u;
 
 [[nodiscard]] constexpr std::uint64_t thread_resource_accounting_key(

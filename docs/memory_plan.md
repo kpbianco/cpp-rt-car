@@ -304,8 +304,8 @@ retry, and complete CPU-plus-device frames allocate no ordinary heap.
 Before `start()` creates a thread, M15-03 applies and observes resident-memory
 policy for phase scratch, task scratch, and trace storage. It then creates the
 configured fixed worker team, an optional M5 watchdog lane, and one M8 device
-service lane when backends exist. M17-01 and M17-02 add no submission or I/O
-lane. After it returns, the
+service lane when backends exist. M17-03 additionally creates one submission
+lane per opted-in command backend. After it returns, the
 target CPU/device frame path uses preallocated graph, queue, scratch, trace,
 outstanding, and completion storage. It contains no file I/O, blocking mutex,
 hidden per-frame thread creation, heap fallback, or intentional heap
@@ -357,3 +357,17 @@ pointers; the runtime cannot make arbitrary host code real-time safe.
 - implementation:
   `rt/src/host_runtime.cpp`, `rt/src/executor.cpp`,
   `rt/src/device_manager.cpp`.
+
+## M17-03 fixed device storage
+
+The device row counts copied command-extension state, timeline
+descriptors/atomics, `device_outstanding_capacity` batch slots per opted-in
+backend, batch completion scratch, submission-lane controls, and validation
+state. `device_batch_backend_count`, `device_timeline_count`, and
+`device_batch_queue_slots` expose exact cardinalities. Declared backend-private
+command control bytes remain backend-reported bytes.
+
+Submission stacks are reconciled once through the M15 runtime-stack row. The
+six-row equation, twelve region identities, and three provider-backed regions
+do not change. Checked multiplication rejects an unrepresentable slot plan,
+and the logical device extent must equal its estimate before commit.

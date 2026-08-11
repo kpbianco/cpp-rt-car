@@ -155,3 +155,10 @@ deployment tuple are qualified together.
 
 The complete deprecation, package-version, and release rules are in the
 [release policy](release_policy.md).
+
+M17-03 changes only additive C++ declarations in the already installed
+`rt/device.hpp`, `rt/runtime.hpp`, and `rt/config.hpp`. It adds no C symbol,
+installed header, target, or C representation and makes no C++ binary ABI
+promise. Stable C ABI v8 remains exactly 70 exports with its frozen fingerprint
+and SONAME 8; device ABI v1, its layouts/values, and Runtime status numeric
+values remain unchanged.

@@ -164,11 +164,12 @@ token.
 Legacy coherent buffers and heterogeneous objects whose declared
 synchronization is `none` can use the M17-01 core submission. A reference that
 requires flush, invalidate, host/device copy, or timeline synchronization
-returns an explicit device error before submission. M17-02 does not execute
-those operations, a command batch, timeline wait/signal, cross-device
-migration, CUDA Graph, XDMA MMIO/event operation, direct peer DMA, or a
-potentially blocking vendor call on an executor worker. Fixed isolated vendor
-submission lanes remain M17-03 work.
+returns an explicit device error on the legacy single-submit path. M17-03 batch
+phases discharge flush, invalidate, copy-to-device, or copy-from-device only
+with an explicit correctly ordered command covering the referenced range. A
+timeline never discharges coherence. Runtime inserts no hidden operation and
+infers no cross-device migration, CUDA Graph, XDMA MMIO/event work, or direct
+peer DMA.
 
 ## Inspection, identity, and accounting
 
@@ -219,6 +220,7 @@ Those tests, fake drivers, hosted CI, preflight, and this document establish no
 physical pinning, CUDA-device memory, imported interoperability, DMA map, peer
 access, real topology, timestamp accuracy, HIL, hardware, field, latency,
 thermal, endurance, RT1, RT2, signing, release, deployment, or production
-evidence. M17 and CAP-M17 remain incomplete; batches/timelines, native vendor-v2
-adapters, vendor controls, combined execution, and qualification belong to
-later M17/M18 batches.
+evidence. M17-03 adds portable synthetic batch/timeline and explicit
+memory-order validation only. M17 and CAP-M17 remain incomplete; native
+vendor-v2 adapters, vendor controls, combined execution, and qualification
+belong to later M17/M18 batches.

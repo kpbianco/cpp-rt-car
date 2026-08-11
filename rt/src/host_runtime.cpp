@@ -2,6 +2,7 @@
 
 #include "compiled_graph.hpp"
 #include "cross_rate_data.hpp"
+#include "command_batch.hpp"
 #include "device_manager.hpp"
 #include "executor.hpp"
 #include "memory_policy.hpp"
@@ -83,6 +84,7 @@ static_assert(
     "RTFW_BUILD_ID_STRING exceeds the observability identifier capacity");
 
 std::atomic<std::uint32_t> g_next_graph_owner{1};
+thread_local const void* g_active_runtime_callback = nullptr;
 
 std::uint32_t next_graph_owner() noexcept {
     for (;;) {
@@ -756,6 +758,7 @@ struct Runtime::Impl {
     enum class PhaseKind : std::uint8_t {
         cpu,
         device,
+        device_batch,
     };
 
     struct RegisteredCallback {
@@ -763,8 +766,10 @@ struct Runtime::Impl {
         PhaseKind kind = PhaseKind::cpu;
         FrameCallback callback = nullptr;
         DeviceCommandCallback device_callback = nullptr;
+        DeviceBatchCommandCallback batch_callback = nullptr;
         void* user_data = nullptr;
         std::uint32_t device_backend_index = 0;
+        DeviceCommandBatch batch_declaration{};
     };
 
     struct RegisteredResource {
@@ -904,6 +909,12 @@ struct Runtime::Impl {
                buffer.index() < device_buffers.size();
     }
 
+    [[nodiscard]] bool valid_device_timeline(
+        DeviceTimelineHandle timeline) const noexcept {
+        return timeline.valid() && timeline.owner() == graph_owner &&
+               timeline.index() < device_timelines.size();
+    }
+
     [[nodiscard]] std::uint64_t compute_graph_id() const noexcept {
         std::uint64_t hash = kFnvOffset;
         hash_u64(hash, 1);
@@ -913,8 +924,49 @@ struct Runtime::Impl {
             hash_u64(
                 hash,
                 static_cast<std::uint64_t>(callback.kind));
-            if (callback.kind == PhaseKind::device) {
+            if (callback.kind == PhaseKind::device ||
+                callback.kind == PhaseKind::device_batch) {
                 hash_u64(hash, callback.device_backend_index);
+            }
+            if (callback.kind == PhaseKind::device_batch) {
+                hash_u64(hash, 0x4d31372d62617433ull);
+                const auto& declaration = callback.batch_declaration;
+                hash_u64(hash, declaration.command_count);
+                hash_u64(hash, declaration.wait_count);
+                hash_u64(hash, declaration.signal_count);
+                const auto hash_reference = [&](const HalV2BufferReference& ref) {
+                    hash_u64(hash, ref.buffer_token == 0
+                        ? 0
+                        : DeviceBufferHandle{ref.buffer_token}.index() + 1u);
+                    hash_u64(hash, ref.access);
+                    hash_u64(hash, ref.offset);
+                    hash_u64(hash, ref.bytes);
+                };
+                for (std::size_t index = 0;
+                     index < declaration.command_count; ++index) {
+                    const auto& command = declaration.commands[index];
+                    hash_u64(hash, command.kind);
+                    hash_u64(hash, command.operation);
+                    hash_u64(hash, command.opcode);
+                    hash_u64(hash, command.flags);
+                    hash_u64(hash, command.buffer_count);
+                    for (std::size_t ref = 0; ref < command.buffer_count; ++ref) {
+                        hash_reference(command.buffers[ref]);
+                    }
+                    hash_reference(command.source);
+                    hash_reference(command.destination);
+                    hash_reference(command.target);
+                }
+                for (std::size_t index = 0; index < declaration.wait_count;
+                     ++index) {
+                    hash_u64(hash, DeviceTimelineHandle{
+                        declaration.waits[index].timeline_handle}.index());
+                }
+                for (std::size_t index = 0; index < declaration.signal_count;
+                     ++index) {
+                    hash_u64(hash, DeviceTimelineHandle{
+                        declaration.signals[index].timeline_handle}.index());
+                }
             }
         }
         hash_u64(hash, device_backends.size());
@@ -985,6 +1037,28 @@ struct Runtime::Impl {
                 hash_u64(hash, domain.supports_correlation);
               }
               hash_u64(hash, snapshot.completion_timestamp_domain_identity);
+            }
+            if (backend.command_state) {
+              hash_u64(hash, 0x4d31372d636d6433ull);
+              const auto& command = backend.command_state->capabilities;
+              hash_u64(hash, command.max_in_flight_batches);
+              hash_u64(hash, command.max_commands_per_batch);
+              hash_u64(hash, command.max_wait_points);
+              hash_u64(hash, command.max_signal_points);
+              hash_u64(hash, command.max_timelines);
+              hash_u64(hash, command.completion_batch_capacity);
+              hash_u64(hash, command.backend_control_storage_bytes);
+            }
+        }
+        if (!device_timelines.empty()) {
+            hash_u64(hash, 0x4d31372d746c6e33ull);
+            hash_u64(hash, device_timelines.size());
+            for (const auto& timeline : device_timelines) {
+                hash_string(hash, std::string_view(
+                    timeline.name.data(),
+                    std::char_traits<char>::length(timeline.name.data())));
+                hash_u64(hash, timeline.backend_index);
+                hash_u64(hash, timeline.initial_value);
             }
         }
         hash_u64(hash, device_buffers.size());
@@ -3138,6 +3212,14 @@ struct Runtime::Impl {
         }
 
         auto& callback = self.callbacks[index];
+        struct CallbackMarker {
+            explicit CallbackMarker(const void* runtime) noexcept
+                : previous(g_active_runtime_callback) {
+                g_active_runtime_callback = runtime;
+            }
+            ~CallbackMarker() { g_active_runtime_callback = previous; }
+            const void* previous;
+        } callback_marker{&self};
         self.record(
             RuntimeTraceEventType::callback_begin,
             Status::ok,
@@ -3183,7 +3265,7 @@ struct Runtime::Impl {
             status = result == CallbackResult::ok
                 ? Status::ok
                 : Status::callback_failed;
-        } else {
+        } else if (callback.kind == PhaseKind::device) {
             DeviceCallbackContext callback_context{
                 *self.active_frame,
                 phase_scratch,
@@ -3209,6 +3291,30 @@ struct Runtime::Impl {
                     self.active_frame->frame_index,
                     submission,
                     submission_id);
+                pending = status == Status::ok;
+            }
+        } else {
+            DeviceCallbackContext callback_context{
+                *self.active_frame,
+                phase_scratch,
+                self.numerics,
+                task_context,
+                self.degradation_level.load(std::memory_order_acquire),
+            };
+            DeviceCommandBatch batch;
+            try {
+                result = callback.batch_callback(
+                    callback.user_data, callback_context, batch);
+            } catch (...) {
+                result = CallbackResult::error;
+            }
+            if (result == CallbackResult::ok && self.devices) {
+                std::uint64_t batch_id = 0;
+                status = self.devices->submit_batch(
+                    callback.device_backend_index, index,
+                    task_context.worker_index(),
+                    self.active_frame->frame_index, batch,
+                    callback.batch_declaration, batch_id);
                 pending = status == Status::ok;
             }
         }
@@ -3253,7 +3359,10 @@ struct Runtime::Impl {
         device_v1_adapters;
     std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
         device_memory_states;
+    std::vector<std::unique_ptr<detail::CommandTimelineExtensionState>>
+        device_command_states;
     std::vector<detail::DeviceBufferSpec> device_buffers;
+    std::vector<detail::DeviceTimelineSpec> device_timelines;
     std::vector<RegisteredResource> resources;
     std::vector<RegisteredState> states;
     std::vector<detail::GraphDependency> dependencies;
@@ -3546,8 +3655,10 @@ Status Runtime::register_callback(
             Impl::PhaseKind::cpu,
             registration.callback,
             nullptr,
+            nullptr,
             registration.user_data,
             0,
+            {},
         });
         out_phase = PhaseHandle{impl_->graph_owner, index};
     } catch (const std::bad_alloc&) {
@@ -3656,6 +3767,7 @@ Status Runtime::register_device_backend(
               detail::HalBackendKind::adapted_device_abi_v1,
               adapter_instance,
               memory_instance,
+              nullptr,
           });
         } catch (...) {
           impl_->device_memory_states.pop_back();
@@ -3735,6 +3847,7 @@ Status Runtime::register_device_backend(
             "HAL v2 backend reported malformed capabilities");
     }
     std::unique_ptr<detail::HeterogeneousMemoryState> memory_state;
+    std::unique_ptr<detail::CommandTimelineExtensionState> command_state;
     try {
       memory_state = std::make_unique<detail::HeterogeneousMemoryState>();
     } catch (const std::bad_alloc &) {
@@ -3753,11 +3866,51 @@ Status Runtime::register_device_backend(
     } else {
       detail::make_implicit_host_memory_state(capabilities, *memory_state);
     }
+    if (registration.command_timeline) {
+      if (!registration.memory_topology ||
+          memory_state->snapshot.completion_timestamp_domain_identity == 0) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "command/timeline extension requires a native completion "
+            "timestamp domain");
+      }
+      try {
+        command_state =
+            std::make_unique<detail::CommandTimelineExtensionState>();
+      } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+      } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+      }
+      const auto command_status = detail::discover_command_timeline_extension(
+          *registration.command_timeline, *command_state);
+      if (command_status != Status::ok) {
+        return impl_->fail(
+            command_status,
+            "HAL v2 command/timeline capability discovery failed or was "
+            "malformed");
+      }
+      if (command_state->capabilities.max_in_flight_batches <
+              impl_->config.device_outstanding_capacity ||
+          command_state->capabilities.completion_batch_capacity <
+              impl_->config.device_completion_batch) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "command/timeline backend capacities are below Runtime bounds");
+      }
+    }
     try {
         const auto index = static_cast<std::uint32_t>(
             impl_->device_backends.size());
         auto *memory_instance = memory_state.get();
+        auto *command_instance = command_state.get();
         impl_->device_memory_states.push_back(std::move(memory_state));
+        try {
+          impl_->device_command_states.push_back(std::move(command_state));
+        } catch (...) {
+          impl_->device_memory_states.pop_back();
+          throw;
+        }
         try {
           impl_->device_backends.push_back(detail::DeviceBackendSpec{
               std::string(registration.name),
@@ -3766,8 +3919,10 @@ Status Runtime::register_device_backend(
               detail::HalBackendKind::native_hal_v2,
               nullptr,
               memory_instance,
+              command_instance,
           });
         } catch (...) {
+          impl_->device_command_states.pop_back();
           impl_->device_memory_states.pop_back();
           throw;
         }
@@ -4077,9 +4232,179 @@ Status Runtime::register_device_phase(
             Impl::PhaseKind::device,
             nullptr,
             registration.callback,
+            nullptr,
             registration.user_data,
             registration.backend.index(),
+            {},
         });
+        out_phase = PhaseHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_device_timeline(
+    const DeviceTimelineRegistration& registration,
+    DeviceTimelineHandle& out_timeline) noexcept {
+    out_timeline = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state,
+                           "device timeline registration is frozen");
+    }
+    if (!impl_->valid_device_backend(registration.backend)) {
+        return impl_->fail(Status::invalid_handle,
+                           "device timeline references a foreign backend");
+    }
+    const auto backend_index =
+        static_cast<std::size_t>(registration.backend.index());
+    const auto& backend = impl_->device_backends[backend_index];
+    std::array<char, hal_v2_identifier_capacity> name{};
+    if (!backend.command_state || !set_identifier(name, registration.name)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device timeline requires an opted-in backend and stable name");
+    }
+    std::size_t backend_count = 0;
+    for (const auto& timeline : impl_->device_timelines) {
+        backend_count += timeline.backend_index == backend_index ? 1u : 0u;
+        if (timeline.name == name) {
+            return impl_->fail(Status::invalid_argument,
+                               "device timeline names must be unique");
+        }
+    }
+    if (backend_count >= hal_v2_timeline_capacity ||
+        backend_count >= backend.command_state->capabilities.max_timelines) {
+        return impl_->fail(Status::capacity_exceeded,
+                           "device timeline capacity exceeded");
+    }
+    if (impl_->device_timelines.size() >= device_handle_index_mask) {
+        return impl_->fail(Status::capacity_exceeded, nullptr);
+    }
+    try {
+        const auto index = static_cast<std::uint32_t>(
+            impl_->device_timelines.size());
+        impl_->device_timelines.push_back(detail::DeviceTimelineSpec{
+            name, static_cast<std::uint32_t>(backend_index),
+            registration.initial_value});
+        out_timeline = DeviceTimelineHandle{impl_->graph_owner, index};
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_device_batch_phase(
+    const DeviceBatchPhaseRegistration& registration,
+    PhaseHandle& out_phase) noexcept {
+    out_phase = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state,
+                           "device batch phase registration is frozen");
+    }
+    if (registration.name.empty() || !registration.callback ||
+        !impl_->valid_device_backend(registration.backend)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device batch phase requires a name, provider, and backend");
+    }
+    const auto backend_index =
+        static_cast<std::size_t>(registration.backend.index());
+    if (!impl_->device_backends[backend_index].command_state ||
+        !detail::validate_batch_declaration(registration.declaration)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device batch declaration or backend extension is invalid");
+    }
+    const auto valid_reference = [&](const HalV2BufferReference& reference) {
+        const DeviceBufferHandle handle{reference.buffer_token};
+        return impl_->valid_device_buffer(handle) &&
+               impl_->device_buffers[handle.index()].backend_index ==
+                   backend_index;
+    };
+    for (std::size_t index = 0;
+         index < registration.declaration.command_count; ++index) {
+        const auto& command = registration.declaration.commands[index];
+        const auto kind = static_cast<HalV2CommandKind>(command.kind);
+        if (kind == HalV2CommandKind::dispatch) {
+            for (std::size_t ref = 0; ref < command.buffer_count; ++ref) {
+                if (!valid_reference(command.buffers[ref])) {
+                    return impl_->fail(
+                        Status::invalid_handle,
+                        "device batch declaration references a foreign buffer");
+                }
+            }
+        } else if (kind == HalV2CommandKind::copy) {
+            if (!valid_reference(command.source) ||
+                !valid_reference(command.destination)) {
+                return impl_->fail(
+                    Status::invalid_handle,
+                    "device copy declaration references a foreign buffer");
+            }
+        } else if (!valid_reference(command.target)) {
+            return impl_->fail(
+                Status::invalid_handle,
+                "device synchronization declaration references a foreign buffer");
+        }
+    }
+    const auto valid_point = [&](const HalV2TimelinePoint& point) {
+        const DeviceTimelineHandle handle{point.timeline_handle};
+        return impl_->valid_device_timeline(handle) &&
+               impl_->device_timelines[handle.index()].backend_index ==
+                   backend_index;
+    };
+    for (std::size_t index = 0; index < registration.declaration.wait_count;
+         ++index) {
+        if (!valid_point(registration.declaration.waits[index])) {
+            return impl_->fail(
+                Status::invalid_handle,
+                "device batch wait declaration references a foreign timeline");
+        }
+    }
+    for (std::size_t index = 0; index < registration.declaration.signal_count;
+         ++index) {
+        if (!valid_point(registration.declaration.signals[index])) {
+            return impl_->fail(
+                Status::invalid_handle,
+                "device batch signal declaration references a foreign timeline");
+        }
+    }
+    if (impl_->callbacks.size() >= impl_->config.callback_capacity) {
+        return impl_->fail(Status::capacity_exceeded, nullptr);
+    }
+    const auto duplicate = std::find_if(
+        impl_->callbacks.begin(), impl_->callbacks.end(),
+        [&](const Impl::RegisteredCallback& callback) {
+            return callback.name == registration.name;
+        });
+    if (duplicate != impl_->callbacks.end()) {
+        return impl_->fail(Status::invalid_argument,
+                           "phase names must be unique");
+    }
+    try {
+        const auto index = static_cast<std::uint32_t>(impl_->callbacks.size());
+        impl_->callbacks.push_back(Impl::RegisteredCallback{
+            std::string(registration.name), Impl::PhaseKind::device_batch,
+            nullptr, nullptr, registration.callback, registration.user_data,
+            registration.backend.index(), registration.declaration});
         out_phase = PhaseHandle{impl_->graph_owner, index};
     } catch (const std::bad_alloc&) {
         return impl_->fail(Status::resource_exhausted, nullptr);
@@ -4215,6 +4540,12 @@ Status Runtime::bind_phase_to_rate_domain(
     }
     if (!impl_->valid_phase(phase) || !impl_->valid_rate_domain(domain)) {
         return impl_->fail(Status::invalid_handle, "rate binding contains an invalid or foreign handle");
+    }
+    if (impl_->callbacks[phase.index()].kind ==
+        Impl::PhaseKind::device_batch) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "device batch phases cannot use M16 device-rate execution");
     }
     if (std::any_of(
             impl_->rate_bindings.begin(),
@@ -4708,6 +5039,18 @@ Status Runtime::finalize() noexcept {
                 "backend-reported control storage overflows");
         }
         backend_reported_bytes = total;
+        if (backend.command_state) {
+            if (!detail::checked_add(
+                    backend_reported_bytes,
+                    static_cast<std::size_t>(backend.command_state
+                        ->capabilities.backend_control_storage_bytes),
+                    total)) {
+                return impl_->fail(
+                    Status::invalid_config,
+                    "command backend-reported control storage overflows");
+            }
+            backend_reported_bytes = total;
+        }
     }
 
     std::vector<PhaseHandle> compiled_order;
@@ -5005,6 +5348,17 @@ Status Runtime::finalize() noexcept {
         : impl_->config.device_completion_batch;
     memory_plan.device_backend_reported_bytes =
         backend_reported_bytes;
+    memory_plan.device_batch_backend_count =
+        static_cast<std::size_t>(std::count_if(
+            impl_->device_backends.begin(), impl_->device_backends.end(),
+            [](const detail::DeviceBackendSpec& backend) {
+                return backend.command_state != nullptr;
+            }));
+    memory_plan.device_timeline_count = impl_->device_timelines.size();
+    bool plan_valid = detail::checked_multiply(
+        memory_plan.device_batch_backend_count,
+        impl_->config.device_outstanding_capacity,
+        memory_plan.device_batch_queue_slots);
     memory_plan.scratch_alignment =
         impl_->config.scratch_alignment;
     memory_plan.overload_policy =
@@ -5037,7 +5391,6 @@ Status Runtime::finalize() noexcept {
     memory_plan.rate_telemetry_counter_bytes = rate_counters
         ? sizeof(detail::RateCounters)
         : 0;
-    bool plan_valid = true;
     for (std::size_t index = 0;
          index < impl_->cross_rate_channels.size();
          ++index) {
@@ -5125,6 +5478,8 @@ Status Runtime::finalize() noexcept {
                 backend_name_bytes,
                 adapted_v1_count,
                 impl_->device_buffers.size(),
+                impl_->device_timelines.size(),
+                memory_plan.device_batch_backend_count,
                 impl_->config.device_outstanding_capacity,
                 impl_->config.device_completion_batch,
                 memory_plan.device_control_bytes);
@@ -5196,6 +5551,12 @@ Status Runtime::finalize() noexcept {
                  add_runtime_array(
                      impl_->device_memory_states.capacity(),
                      sizeof(std::unique_ptr<detail::HeterogeneousMemoryState>));
+    plan_valid = plan_valid &&
+                 add_runtime_array(
+                     impl_->device_command_states.capacity(),
+                     sizeof(std::unique_ptr<detail::CommandTimelineExtensionState>));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->device_timelines.capacity(), sizeof(detail::DeviceTimelineSpec));
     for (const auto& backend : impl_->device_backends) {
         const auto object_begin = reinterpret_cast<std::uintptr_t>(&backend);
         const auto object_end = object_begin + sizeof(backend);
@@ -5439,6 +5800,7 @@ Status Runtime::finalize() noexcept {
                 impl_->graph_owner,
                 impl_->device_backends,
                 impl_->device_buffers,
+                impl_->device_timelines,
                 impl_->config.device_outstanding_capacity,
                 impl_->config.device_completion_batch);
         }
@@ -5502,6 +5864,14 @@ Status Runtime::finalize() noexcept {
             impl_->device_memory_states.data(),
             impl_->device_memory_states.capacity(),
             sizeof(std::unique_ptr<detail::HeterogeneousMemoryState>));
+        add_runtime_extent(
+            impl_->device_command_states.data(),
+            impl_->device_command_states.capacity(),
+            sizeof(std::unique_ptr<detail::CommandTimelineExtensionState>));
+        add_runtime_extent(
+            impl_->device_timelines.data(),
+            impl_->device_timelines.capacity(),
+            sizeof(detail::DeviceTimelineSpec));
         for (const auto& backend : impl_->device_backends) {
             add_external_string(backend, backend.name);
         }
@@ -5934,7 +6304,10 @@ Status Runtime::start() noexcept {
     auto* executor_report = find_thread_report(thread_role_executor_worker);
     auto* watchdog_report = find_thread_report(thread_role_watchdog);
     auto* device_report = find_thread_report(thread_role_device_service);
-    if (!executor_report || !watchdog_report || !device_report) {
+    auto* submission_report =
+        find_thread_report(thread_role_device_submission);
+    if (!executor_report || !watchdog_report || !device_report ||
+        !submission_report) {
         (void)rollback_memory();
         return impl_->fail(
             Status::internal_error,
@@ -5962,6 +6335,9 @@ Status Runtime::start() noexcept {
         detail::make_thread_role_plan(*watchdog_report, *runtime_stack_report);
     const auto device_plan =
         detail::make_thread_role_plan(*device_report, *runtime_stack_report);
+    const auto submission_plan =
+        detail::make_thread_role_plan(*submission_report,
+                                      *runtime_stack_report);
 
     impl_->thread_startup_gate.reset();
     if (!impl_->rate_execution_policy_set ||
@@ -6018,7 +6394,13 @@ Status Runtime::start() noexcept {
                     impl_->devices
                         ? &impl_->devices->startup_result()
                         : nullptr,
-                    impl_->devices ? 1 : 0);
+                    impl_->devices ? 1 : 0,
+                    impl_->devices
+                        ? impl_->devices->submission_startup_results()
+                        : nullptr,
+                    impl_->devices
+                        ? impl_->devices->submission_startup_result_count()
+                        : 0);
                 detail::refresh_accounting_totals(
                     impl_->cpu_memory_policy_report);
             }
@@ -6105,6 +6487,25 @@ Status Runtime::start() noexcept {
                 Status::internal_error,
                 "strict device-service thread policy failed apply or readback");
         }
+        const auto submission_status =
+            impl_->devices->start_submission_lanes(
+                *impl_->thread_policy, impl_->thread_startup_gate,
+                submission_plan);
+        detail::aggregate_thread_startup_results(
+            *submission_report,
+            impl_->devices->submission_startup_results(),
+            impl_->devices->submission_startup_result_count());
+        if (submission_status != Status::ok) {
+            return rollback_startup(
+                submission_status,
+                "failed to create device submission lanes");
+        }
+        if (strict_failed(*submission_report)) {
+            return rollback_startup(
+                Status::internal_error,
+                "strict device-submission thread policy failed apply or "
+                "readback");
+        }
     }
 
     const auto stack_status = detail::aggregate_runtime_stack_startup_results(
@@ -6122,7 +6523,13 @@ Status Runtime::start() noexcept {
         impl_->devices
             ? &impl_->devices->startup_result()
             : nullptr,
-        impl_->devices ? 1 : 0);
+        impl_->devices ? 1 : 0,
+        impl_->devices
+            ? impl_->devices->submission_startup_results()
+            : nullptr,
+        impl_->devices
+            ? impl_->devices->submission_startup_result_count()
+            : 0);
     impl_->runtime_stack_results_available = true;
     detail::refresh_accounting_totals(
         impl_->cpu_memory_policy_report);
@@ -6696,6 +7103,14 @@ Status Runtime::stop() noexcept {
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
         impl_->in_replay.load(std::memory_order_acquire)) {
+        if (g_active_runtime_callback != impl_.get() && impl_->devices &&
+            impl_->devices->batch_backend_count() != 0) {
+            (void)impl_->devices->request_batch_stop();
+            return impl_->fail(
+                Status::invalid_state,
+                "batch stop requested; retry checked stop after active "
+                "execution quiesces");
+        }
         return impl_->fail(
             Status::invalid_state,
             "stop cannot run from a callback or periodic loop");
@@ -6759,7 +7174,13 @@ Status Runtime::stop() noexcept {
                   impl_->devices
                       ? &impl_->devices->startup_result()
                       : nullptr,
-                  impl_->devices ? 1 : 0)
+                  impl_->devices ? 1 : 0,
+                  impl_->devices
+                      ? impl_->devices->submission_startup_results()
+                      : nullptr,
+                  impl_->devices
+                      ? impl_->devices->submission_startup_result_count()
+                      : 0)
             : Status::internal_error;
         detail::refresh_accounting_totals(
             impl_->cpu_memory_policy_report);
@@ -6931,6 +7352,58 @@ std::size_t Runtime::device_phase_count() const noexcept {
         [](const Impl::RegisteredCallback& callback) {
             return callback.kind == Impl::PhaseKind::device;
         }));
+}
+
+std::size_t Runtime::device_timeline_count(
+    DeviceBackendHandle backend) const noexcept {
+    if (!impl_ || impl_->provider_callback_active() ||
+        !impl_->valid_device_backend(backend)) {
+        return 0;
+    }
+    if (impl_->devices) {
+        return impl_->devices->timeline_count(backend.index());
+    }
+    return static_cast<std::size_t>(std::count_if(
+        impl_->device_timelines.begin(), impl_->device_timelines.end(),
+        [&](const detail::DeviceTimelineSpec& timeline) {
+            return timeline.backend_index == backend.index();
+        }));
+}
+
+bool Runtime::device_timeline_at(
+    DeviceBackendHandle backend,
+    std::size_t index,
+    DeviceTimelineInfo& info) const noexcept {
+    info = {};
+    if (!impl_ || impl_->provider_callback_active() ||
+        !impl_->valid_device_backend(backend)) {
+        return false;
+    }
+    if (impl_->devices) {
+        return impl_->devices->timeline_at(backend.index(), index, info);
+    }
+    std::size_t ordinal = 0;
+    for (std::size_t timeline_index = 0;
+         timeline_index < impl_->device_timelines.size(); ++timeline_index) {
+        const auto& timeline = impl_->device_timelines[timeline_index];
+        if (timeline.backend_index != backend.index()) {
+            continue;
+        }
+        if (ordinal++ != index) {
+            continue;
+        }
+        DeviceTimelineInfo candidate;
+        candidate.timeline = DeviceTimelineHandle{
+            impl_->graph_owner, static_cast<std::uint32_t>(timeline_index)};
+        candidate.backend = backend;
+        candidate.name = timeline.name;
+        candidate.initial_value = timeline.initial_value;
+        candidate.last_accepted_value = timeline.initial_value;
+        candidate.completed_value = timeline.initial_value;
+        info = candidate;
+        return true;
+    }
+    return false;
 }
 
 std::size_t Runtime::device_memory_domain_count(

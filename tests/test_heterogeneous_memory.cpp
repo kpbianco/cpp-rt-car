@@ -634,7 +634,7 @@ TEST(HeterogeneousMemory,
   EXPECT_EQ(sizeof(rt::HalV2TimestampCorrelationQuery), 56u);
   EXPECT_EQ(sizeof(rt::HalV2TimestampCorrelation), 88u);
   EXPECT_EQ(sizeof(rt::HalV2MemoryTopologyExtension), 112u);
-  EXPECT_EQ(sizeof(rt::HalV2BackendRegistration), 184u);
+  EXPECT_EQ(sizeof(rt::HalV2BackendRegistration), 192u);
   EXPECT_EQ(sizeof(rt::DeviceMemoryDomainHandle), 16u);
   EXPECT_EQ(sizeof(rt::DeviceTopologyNodeHandle), 16u);
   EXPECT_EQ(sizeof(rt::DeviceTopologyLinkHandle), 16u);
@@ -725,6 +725,7 @@ TEST(HeterogeneousMemory,
   const rt::HalV2BackendRegistration old_prefix{"old", {}};
   const rt::DeviceBufferRegistration legacy_prefix{"old.buffer", {}, {}};
   EXPECT_EQ(old_prefix.memory_topology, nullptr);
+  EXPECT_EQ(old_prefix.command_timeline, nullptr);
   EXPECT_EQ(legacy_prefix.flags, RTFW_DEVICE_BUFFER_HOST_READ |
                                      RTFW_DEVICE_BUFFER_HOST_WRITE |
                                      RTFW_DEVICE_BUFFER_DEVICE_READ |

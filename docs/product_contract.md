@@ -63,9 +63,11 @@ a Runtime registration and inspection surface. It defines exactly six bounded
 memory-domain kinds, explicit ownership/access/coherency/synchronization
 semantics, topology and timestamp domains, and running-state timestamp
 correlation. Core-only v2 and adapted-v1 backends keep one implicit borrowed
-host domain and the exact M17-01 path. M17-02 does not add command batches,
-timeline completions, vendor controls, another submission lane, physical
-adapters, or hardware qualification; M17 and CAP-M17 remain incomplete.
+host domain and the exact M17-01 path. M17-03 appends optional fixed-capacity
+command batches, same-backend timeline completion, explicit synchronization,
+and one isolated Runtime submission lane per opted-in backend. It does not add
+native vendor controls, physical adapters, combined execution, or hardware
+qualification; M17 and CAP-M17 remain incomplete.
 
 ## Claim policy
 
@@ -339,7 +341,7 @@ callback expressions.
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
 | CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Multi-rate simulation | M16 complete in merged history | Bounded reference domains, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
-| HAL v2 memory/topology and device ABI v1 compatibility | M17-02 implemented locally; external gates pending | Preserved HAL v2 core and complete v1 adapter; additive bounded six-domain memory/topology extension, explicit heterogeneous registration and inspection, timestamp-domain correlation, exact accounting/identity, and retryable cleanup; later M17 capabilities remain incomplete |
+| HAL v2 command/timeline, memory/topology, and device ABI v1 compatibility | M17-03 implemented locally; external gates pending | Preserved HAL core v2, memory extension v1, complete v1 adapter, and single-submit path; additive bounded batches/timelines, explicit ordered synchronization, isolated submission lanes, exact accounting/identity, and retryable cleanup; later M17 capabilities remain incomplete |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

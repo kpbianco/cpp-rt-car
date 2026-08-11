@@ -218,7 +218,9 @@ void aggregate_thread_startup_results(
     const ThreadStartupResult* watchdog_results,
     std::size_t watchdog_count,
     const ThreadStartupResult* device_results,
-    std::size_t device_count) noexcept;
+    std::size_t device_count,
+    const ThreadStartupResult* submission_results,
+    std::size_t submission_count) noexcept;
 
 struct RuntimeThreadPolicyTestAccess {
     static void set_provider(

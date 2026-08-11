@@ -35,7 +35,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
-| M17 | In progress | M17-01 HAL v2 core/v1 compatibility is merged and M17-02 heterogeneous memory/topology is implemented locally; batches/timelines, vendor controls, combined execution, and qualification remain |
+| M17 | In progress | M17-01 and M17-02 are merged; M17-03 command/timeline lanes are implemented locally; native vendor controls, combined execution, and qualification remain |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
@@ -643,17 +643,16 @@ M17-02 implements:
   without changing the MemoryPlan equation, provider regions, package, C ABI,
   device ABI, schemas, release, support, or qualification boundaries.
 
-Later M17 batches own the remaining planned outcome:
+M17-03 implements fixed command batches, same-backend timeline waits/signals,
+explicit ordered synchronization, one precreated Runtime submission lane per
+opted-in backend using role value 6, whole-completion validation, deterministic
+timeout/cancel/stop, and exact device-control/runtime-stack accounting.
 
-- fixed-capacity per-backend submission lanes so executor workers never invoke
-  potentially blocking vendor APIs;
-- command batches and timeline completions, CUDA and XDMA v2 adapters and
-  vendor controls, combined execution, and any lifecycle-safe plugin/factory
-  ownership later approved by a bounded batch.
-
-M17-02 adds none of those later batch/timeline, vendor-control, isolated-lane,
-plugin/factory, physical-adapter, or hardware capabilities. M17 and CAP-M17
-remain incomplete.
+Later M17 batches own CUDA and XDMA v2 adapters and vendor controls, combined
+execution, and any lifecycle-safe plugin/factory ownership later approved by a
+bounded batch. M17-03 adds no native vendor-control, plugin/factory,
+physical-adapter, cross-backend timeline, direct-peer, combined, or hardware
+capability. M17 and CAP-M17 remain incomplete.
 
 Exit gates:
 

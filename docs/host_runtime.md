@@ -19,8 +19,9 @@ as available. They also report versioned observability and deterministic replay
 as available; the latter means the implemented D0/D1 surface, not D2 or D3.
 They report `host_executor_adapter` for the borrowed engine job-system policy
 and `bounded_device_backend` for the poll-only canonical HAL v2 runtime path.
-That capability includes unchanged v1 backends through the adapter and the
-M17-02 C++ memory/topology surface, but no command-batch or timeline surface.
+That capability includes unchanged v1 backends through the adapter, the
+M17-02 C++ memory/topology surface, and optional M17-03 C++ command/timeline
+registration. The stable capability schema itself remains unchanged.
 Those capabilities do not imply engine, CUDA, Vulkan, or XDMA qualification. The
 optional M9 CUDA and M10 XDMA candidates are separately linked backends with
 independent support matrices and evidence gates.
@@ -465,3 +466,18 @@ bounded loss-aware inspection without changing global observability schema 2.
 - C sample: `samples/embed_c/mini_app.c`
 - C++ sample: `samples/embed_cpp/mini_app.cpp`
 - Device sample: `samples/device_mock.cpp`
+
+## M17-03 host surface and lifecycle
+
+`register_device_timeline()` and `register_device_batch_phase()` are
+configuring-only. Handles are runtime/backend bound, and copied declarations
+fix command order, operations, logical references, and wait/signal handles.
+Providers run as ordinary graph CPU phases and fill one borrowed fixed batch;
+they invoke no backend function.
+
+Admission requires a finite timeout, one to 16 commands, zero to eight
+prior-accepted waits, and one to eight increasing signals. Runtime performs one
+bounded copy attempt. Concurrent host stop during a blocked submit issues the
+nonblocking stop request and returns `invalid_state`; the host retries checked
+stop after the active step quiesces. Callback-reentrant stop remains
+side-effect-free. No new status or schema is introduced.

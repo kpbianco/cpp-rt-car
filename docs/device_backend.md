@@ -280,9 +280,14 @@ qualified hardware tuple. Neither backend inherits a portable completion-time
 claim from M8.
 
 M17-02 establishes bounded heterogeneous-memory, topology, coherency,
-synchronization-declaration, and timestamp-correlation contracts with synthetic
-functional tests. It does not establish physical CUDA/XDMA memory, peer DMA,
-device-clock accuracy, command batching, timeline completion, an isolated
-vendor lane, CUDA Graph, XDMA controls, physical accelerator behavior, HIL,
-field performance, worst-case latency, RT1, RT2, signing, release, deployment,
-or production readiness. M17 and CAP-M17 remain incomplete.
+synchronization-declaration, and timestamp-correlation contracts. M17-03 adds
+fixed command batches, same-backend timeline completion, ordered explicit
+synchronization, one isolated Runtime submission lane per opted-in backend,
+and whole-completion validation. The legacy single-submit and adapted-v1,
+core-only-v2, memory-only-v2, mock, CUDA-v1, and XDMA-v1 behavior remains.
+
+Synthetic tests do not establish physical CUDA/XDMA memory, peer DMA,
+device-clock accuracy, native vendor-v2 behavior, CUDA Graph, XDMA controls,
+physical accelerator behavior, HIL, field performance, worst-case latency,
+RT1, RT2, signing, release, deployment, or production readiness. M17 and
+CAP-M17 remain incomplete.

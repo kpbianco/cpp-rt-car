@@ -230,10 +230,10 @@ After successful start, submission, early and polled completion, health,
 reset, checked cleanup, and complete CPU-plus-device frames use fixed storage.
 They add no ordinary heap allocation, hidden thread, blocking mutex, unbounded
 wait or retry, spill path, poll callback, or file/network I/O. M17-01 and
-M17-02 create no new submission lane; potentially blocking vendor-operation
-isolation belongs to M17-03. A heterogeneous object reaches the existing core
-submission only if it is device accessible and requires no explicit
-synchronization.
+M17-02 create no new submission lane. M17-03 creates one fixed isolated lane
+per opted-in backend; the core single-submit path remains unchanged. A
+heterogeneous object reaches that core path only if it is device accessible
+and requires no explicit synchronization.
 
 ## Evidence and claim boundary
 
@@ -254,3 +254,24 @@ worst-case latency, RT1, RT2, signing, release, deployment, or production
 readiness. Mocks, fixtures, hosted CI, preflight, and documentation remain
 non-physical evidence. M17 and CAP-M17 stay incomplete; later M17 batches and
 named M18 qualification evidence own those claims.
+
+## M17-03 optional command/timeline extension
+
+M17-03 appends `command_timeline` after the exact M17-02
+`{name, api, memory_topology}` aggregate prefix. Extension version 1 declares
+submit, bounded nonblocking poll, cancel, and nonblocking stop request callbacks
+plus fixed capabilities. Runtime copies and validates the borrowed table before
+publication; malformed or partial input and exceptions fail transactionally.
+M17-01 itself adds no submission or I/O lane; the new lane is conditional on
+the separate M17-03 extension.
+
+The fixed records define 16 commands, eight waits, eight signals, 16 timelines,
+128 payload bytes, and eight references. Commands are dispatch,
+copy-to/from-device, flush, or invalidate. Only the isolated submission lane
+calls batch submit; the existing service lane validates known unique IDs, exact
+signals, status, and the M17-02 timestamp domain as a whole result. HAL core v2
+and memory extension v1 remain unchanged, with no C++ binary ABI promise.
+
+Portable tests do not establish native CUDA/XDMA-v2 behavior, vendor latency,
+physical coherency, hardware, HIL, field, RT1/RT2, signing, release, deployment,
+or production readiness.
