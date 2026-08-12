@@ -386,3 +386,19 @@ graph release, timeout/cancel, and stop-request unblocking. Stop joins
 submission lanes in reverse order before service, memory, and backend cleanup.
 There is no cross-backend timeline, hidden synchronization, direct peer DMA,
 device-rate execution, or new plugin/factory ownership.
+
+## M17-04 native vendor command adapters
+
+The existing CUDA and XDMA candidate objects can expose borrowed native HAL-v2
+registrations without changing their device-ABI-v1 tables. Each object owns one
+fixed core, memory/topology, and command/timeline table set and rejects a second
+registration path or invalid lifetime. Runtime continues to own the single
+M17-03 submission lane; vendor callbacks do not move to executor workers.
+
+CUDA stores at most 16 caller-owned, pre-instantiated Graph handles with stable
+16-bit identifiers and copied bindings. One native batch preserves declared
+copy/kernel/Graph order on one configured stream and records one completion
+event. XDMA uses the existing fixed I/O team for H2C/C2H, bounded 32-bit user-
+BAR operations, and stop-aware event waits. Both adapters retain uncertain
+ownership through drain or checked shutdown; neither adds a cross-backend
+timeline, combined execution, or hardware qualification.

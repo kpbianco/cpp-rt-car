@@ -262,10 +262,18 @@ predeclared thresholds, and the measurement procedure.
   same-backend timeline monotonicity, ordered synchronization, submit
   exception/error, timeout/cancel, blocked-stop recovery, isolation,
   accounting, source prefixes, and installed consumers.
+- M17-04 native vendor paths: `tests/test_vendor_hal_v2.cpp`,
+  `tests/test_cuda_backend.cpp`, and `tests/xdma_backend_tests.cpp`, with
+  permanent CTest gates `m17_cuda_graph` and `m17_xdma_control`. Coverage
+  includes exact table versions and stable opcodes, malformed driver tables and
+  commands, copied Graph bindings, control apertures, event waits, timeout and
+  stop recovery, lifecycle isolation, resource bounds, and preservation of the
+  device-ABI-v1 candidates and installed consumers.
 
 These gates authorize only static, unit, synthetic, failure-injected,
-sanitizer, package, and RT0 functional conclusions. They are not native
-vendor-v2, hardware, HIL, field, bounded-latency, RT1/RT2, signing, release,
-deployment, or production evidence. Mandatory GitHub CI and human API,
+fake-driver native-v2 protocol, sanitizer, package, and RT0 functional
+conclusions. They are not physical Graph, MMIO, interrupt, hardware, HIL,
+field, bounded-latency, RT1/RT2, signing, release, deployment, or production
+evidence. Mandatory GitHub CI and human API,
 compatibility, concurrency, lifetime, memory-order, accounting, security, and
 claim review remain external merge gates.

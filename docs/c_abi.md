@@ -162,3 +162,10 @@ installed header, target, or C representation and makes no C++ binary ABI
 promise. Stable C ABI v8 remains exactly 70 exports with its frozen fingerprint
 and SONAME 8; device ABI v1, its layouts/values, and Runtime status numeric
 values remain unchanged.
+
+M17-04 likewise changes only source-level C++ vendor records and methods in
+the already installed CUDA and XDMA headers. The additive version-2 driver
+tails and native HAL-v2 registration tables require recompilation and carry no
+C++ binary ABI promise. Stable C ABI v8 remains exactly 70 exports with its
+frozen fingerprint and SONAME 8; every device-ABI-v1 declaration, layout, and
+value remains unchanged.

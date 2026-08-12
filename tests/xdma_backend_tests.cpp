@@ -43,6 +43,14 @@ struct FakeDriver {
     std::atomic<std::uint64_t> transfers{0};
     std::atomic<std::uint64_t> resets{0};
     std::atomic<std::uint64_t> shutdowns{0};
+    std::array<std::uint32_t, 64> control{};
+    std::atomic<std::uint64_t> control_reads{0};
+    std::atomic<std::uint64_t> control_writes{0};
+    std::atomic<std::uint64_t> event_waits{0};
+    std::atomic<std::uint64_t> stop_requests{0};
+    std::atomic<bool> event_ready{false};
+    std::atomic<bool> event_waiting{false};
+    std::atomic<std::uint32_t> event_value{0};
     std::atomic<bool> fail_initialize_after_acquire_once{false};
     std::atomic<bool> fail_shutdown_once{false};
 
@@ -152,6 +160,71 @@ struct FakeDriver {
         return fake ? fake->now_ns.load(std::memory_order_acquire) : 0;
     }
 
+    static rt::XdmaControlReadResult control_read32(
+        void* user_data,
+        std::uint32_t offset) noexcept {
+        auto* fake = self(user_data);
+        rt::XdmaControlReadResult output{};
+        if (!fake || (offset & 3u) != 0 || offset / 4u >= fake->control.size()) {
+            output.result = rt::XdmaDriverResult::invalid_value;
+            return output;
+        }
+        fake->control_reads.fetch_add(1, std::memory_order_relaxed);
+        output.value = fake->control[offset / 4u];
+        output.result = rt::XdmaDriverResult::success;
+        return output;
+    }
+
+    static rt::XdmaDriverResult control_write32(
+        void* user_data,
+        std::uint32_t offset,
+        std::uint32_t value) noexcept {
+        auto* fake = self(user_data);
+        if (!fake || (offset & 3u) != 0 || offset / 4u >= fake->control.size()) {
+            return rt::XdmaDriverResult::invalid_value;
+        }
+        fake->control[offset / 4u] = value;
+        fake->control_writes.fetch_add(1, std::memory_order_relaxed);
+        return rt::XdmaDriverResult::success;
+    }
+
+    static rt::XdmaUserEventResult wait_user_event(
+        void* user_data,
+        std::uint32_t index,
+        std::uint64_t timeout_ns) noexcept {
+        auto* fake = self(user_data);
+        rt::XdmaUserEventResult output{};
+        if (!fake || index >= rt::xdma_user_event_capacity || timeout_ns == 0) {
+            output.result = rt::XdmaDriverResult::invalid_value;
+            return output;
+        }
+        fake->event_waits.fetch_add(1, std::memory_order_relaxed);
+        fake->event_waiting.store(true, std::memory_order_release);
+        while (!fake->event_ready.load(std::memory_order_acquire) &&
+               fake->blocked.load(std::memory_order_acquire)) {
+            fake->blocked.wait(true, std::memory_order_relaxed);
+        }
+        fake->event_waiting.store(false, std::memory_order_release);
+        if (!fake->event_ready.exchange(false, std::memory_order_acq_rel)) {
+            output.result = rt::XdmaDriverResult::timeout;
+            return output;
+        }
+        output.result = rt::XdmaDriverResult::success;
+        output.value = fake->event_value.load(std::memory_order_acquire);
+        return output;
+    }
+
+    static rt::XdmaDriverResult request_stop(void* user_data) noexcept {
+        auto* fake = self(user_data);
+        if (!fake) {
+            return rt::XdmaDriverResult::invalid_value;
+        }
+        fake->stop_requests.fetch_add(1, std::memory_order_relaxed);
+        fake->blocked.store(false, std::memory_order_release);
+        fake->blocked.notify_all();
+        return rt::XdmaDriverResult::success;
+    }
+
     rt::XdmaDriverApi api() noexcept {
         rt::XdmaDriverApi output{};
         output.user_data = this;
@@ -160,6 +233,17 @@ struct FakeDriver {
         output.reset = &reset;
         output.shutdown = &shutdown;
         output.monotonic_time_ns = &monotonic;
+        return output;
+    }
+
+    rt::XdmaDriverApi api_v2() noexcept {
+        auto output = api();
+        output.struct_size = sizeof(output);
+        output.api_version = rt::xdma_driver_api_version_2;
+        output.control_read32 = &control_read32;
+        output.control_write32 = &control_write32;
+        output.wait_user_event = &wait_user_event;
+        output.request_stop = &request_stop;
         return output;
     }
 };
@@ -236,6 +320,73 @@ rtfw_device_completion wait_for(
             RTFW_DEVICE_STATUS_OK);
         if (count != 0) {
             assert(completion.submission_id == id);
+            return completion;
+        }
+        std::this_thread::yield();
+    }
+}
+
+struct NativeFixture {
+    rt::HalV2BackendRegistration registration{};
+    rt::HalV2BackendApi core{};
+    rt::HalV2CommandTimelineExtension command{};
+    rt::HalV2MemoryTopologyExtension memory{};
+};
+
+NativeFixture initialize_native(rt::XdmaDeviceBackend& backend) {
+    NativeFixture fixture{};
+    fixture.registration = backend.hal_v2_registration("test.xdma.native");
+    fixture.core = fixture.registration.api;
+    fixture.command = *fixture.registration.command_timeline;
+    fixture.memory = *fixture.registration.memory_topology;
+    rt::HalV2InitializeConfig config{};
+    config.requested_in_flight = 4;
+    config.requested_registered_buffers = 2;
+    assert(fixture.core.initialize(fixture.core.instance, &config) ==
+           rt::HalV2Status::ok);
+    return fixture;
+}
+
+std::uint64_t register_native_buffer(
+    NativeFixture& fixture,
+    std::span<std::byte> storage) {
+    rt::HalV2BufferRegistration registration{};
+    registration.flags =
+        RTFW_DEVICE_BUFFER_HOST_READ |
+        RTFW_DEVICE_BUFFER_HOST_WRITE |
+        RTFW_DEVICE_BUFFER_DEVICE_READ |
+        RTFW_DEVICE_BUFFER_DEVICE_WRITE;
+    registration.data = storage.data();
+    registration.bytes = storage.size();
+    std::memcpy(registration.name.data(), "native.buffer", 14);
+    std::uint64_t token = 0;
+    assert(fixture.core.register_buffer(
+               fixture.core.instance, &registration, &token) ==
+           rt::HalV2Status::ok);
+    return token;
+}
+
+rt::DeviceCommandBatch native_batch(std::uint64_t id) {
+    rt::DeviceCommandBatch batch{};
+    batch.batch_id = id;
+    batch.timeout_ns = 1'000'000;
+    batch.signal_count = 1;
+    batch.signals[0].timeline_handle = 1;
+    batch.signals[0].value = id;
+    return batch;
+}
+
+rt::HalV2BatchCompletion wait_for_batch(
+    NativeFixture& fixture,
+    std::uint64_t id) {
+    for (;;) {
+        rt::HalV2BatchCompletion completion{};
+        std::uint64_t count = 0;
+        assert(fixture.command.poll(
+                   fixture.command.instance, &completion, 1, &count) ==
+               rt::HalV2Status::ok);
+        if (count != 0) {
+            assert(completion.batch_id == id);
             return completion;
         }
         std::this_thread::yield();
@@ -563,6 +714,300 @@ void concurrent_submit_poll() {
     assert(api.shutdown(api.instance) == RTFW_DEVICE_STATUS_OK);
 }
 
+void driver_versions_and_native_snapshot() {
+    FakeDriver fake;
+    const auto v1 = fake.api();
+    assert(v1.struct_size == rt::xdma_driver_api_v1_size);
+    assert(v1.api_version == rt::xdma_driver_api_version_1);
+    assert(v1.control_read32 == nullptr);
+
+    rt::XdmaBackendConfig config{};
+    config.queue_capacity = 4;
+    config.buffer_capacity = 2;
+    config.worker_count = 1;
+    config.max_transfer_bytes = 4096;
+    config.control_aperture_bytes = 256;
+    config.user_event_count = 2;
+    rt::XdmaDeviceBackend backend(fake.api_v2(), config);
+    auto registration = backend.hal_v2_registration("test.xdma.native");
+    assert(registration.api.api_version == rt::hal_v2_api_version);
+    assert(registration.memory_topology != nullptr);
+    assert(registration.command_timeline != nullptr);
+
+    rt::HalV2Capabilities capabilities{};
+    assert(registration.api.get_capabilities(
+               registration.api.instance, &capabilities) ==
+           rt::HalV2Status::ok);
+    assert(std::string_view(capabilities.backend_id.data()) ==
+           "rtfw.xdma.xilinx_linux_aximm.v2");
+    rt::HalV2MemoryTopologySnapshot snapshot{};
+    assert(registration.memory_topology->discover(
+               registration.memory_topology->instance, &snapshot) ==
+           rt::HalV2Status::ok);
+    assert(snapshot.memory_domain_count == 1);
+    assert(snapshot.topology_nodes[0].kind == static_cast<std::uint32_t>(
+               rt::HalV2TopologyNodeKind::dma_endpoint));
+    assert(snapshot.completion_timestamp_domain_identity == 1);
+
+    auto old_api = backend.api();
+    auto native = initialize_native(backend);
+    rtfw_device_init_config old_initialize{};
+    old_initialize.struct_size = sizeof(old_initialize);
+    old_initialize.abi_version = RTFW_DEVICE_ABI_VERSION;
+    old_initialize.requested_in_flight = 1;
+    old_initialize.requested_registered_buffers = 1;
+    assert(old_api.initialize(old_api.instance, &old_initialize) ==
+           RTFW_DEVICE_STATUS_INVALID_STATE);
+    assert(native.core.shutdown(native.core.instance) == rt::HalV2Status::ok);
+
+    bool threw = false;
+    try {
+        auto invalid_driver = fake.api_v2();
+        invalid_driver.reserved_v2[0] = 1;
+        rt::XdmaDeviceBackend invalid(invalid_driver, config);
+        (void)invalid;
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    assert(threw);
+    threw = false;
+    try {
+        auto invalid_config = config;
+        invalid_config.control_aperture_bytes = 258;
+        rt::XdmaDeviceBackend invalid(fake.api_v2(), invalid_config);
+        (void)invalid;
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    assert(threw);
+}
+
+void native_control_event_and_malformed_validation() {
+    FakeDriver fake;
+    fake.control[3] = 0x1122'3344u;
+    fake.event_ready.store(true, std::memory_order_release);
+    fake.event_value.store(0xaabb'ccddu, std::memory_order_release);
+    rt::XdmaBackendConfig config{};
+    config.queue_capacity = 4;
+    config.buffer_capacity = 2;
+    config.worker_count = 1;
+    config.max_transfer_bytes = 4096;
+    config.control_aperture_bytes = 256;
+    config.user_event_count = 2;
+    rt::XdmaDeviceBackend backend(fake.api_v2(), config);
+    auto fixture = initialize_native(backend);
+    std::array<std::byte, 16> output{};
+    const auto token = register_native_buffer(fixture, output);
+    rt::HalV2BufferReference reference{};
+    reference.buffer_token = token;
+    reference.access = RTFW_DEVICE_ACCESS_WRITE;
+    reference.bytes = 4;
+
+    auto batch = native_batch(101);
+    batch.command_count = 3;
+    assert(rt::set_xdma_control_write(
+        batch.commands[0], 8, 0x5566'7788u));
+    assert(rt::set_xdma_control_read(batch.commands[1], 12, reference));
+    reference.offset = 4;
+    assert(rt::set_xdma_user_event_wait(batch.commands[2], 1, reference));
+    assert(fixture.command.submit(fixture.command.instance, &batch) ==
+           rt::HalV2Status::ok);
+    const auto completion = wait_for_batch(fixture, 101);
+    assert(completion.status == static_cast<std::int32_t>(rt::HalV2Status::ok));
+    assert(fake.control[2] == 0x5566'7788u);
+    assert(fake.control_reads.load(std::memory_order_acquire) == 1);
+    assert(fake.control_writes.load(std::memory_order_acquire) == 1);
+    assert(fake.event_waits.load(std::memory_order_acquire) == 1);
+    std::uint32_t read_value = 0;
+    std::uint32_t event_value = 0;
+    std::memcpy(&read_value, output.data(), sizeof(read_value));
+    std::memcpy(&event_value, output.data() + 4, sizeof(event_value));
+    assert(read_value == 0x1122'3344u);
+    assert(event_value == 0xaabb'ccddu);
+
+    const auto calls = fake.control_reads.load(std::memory_order_acquire);
+    auto malformed = native_batch(102);
+    malformed.command_count = 1;
+    reference.offset = 0;
+    assert(rt::set_xdma_control_read(malformed.commands[0], 12, reference));
+    malformed.commands[0].buffers[0].access = RTFW_DEVICE_ACCESS_READ;
+    assert(fixture.command.submit(fixture.command.instance, &malformed) ==
+           rt::HalV2Status::invalid_argument);
+    malformed = native_batch(103);
+    malformed.command_count = 1;
+    assert(rt::set_xdma_control_read(malformed.commands[0], 12, reference));
+    malformed.commands[0].payload[127] = 1;
+    assert(fixture.command.submit(fixture.command.instance, &malformed) ==
+           rt::HalV2Status::invalid_argument);
+    malformed = native_batch(104);
+    malformed.command_count = 1;
+    malformed.commands[0].kind = static_cast<std::uint32_t>(
+        rt::HalV2CommandKind::dispatch);
+    malformed.commands[0].opcode = 0x584b'0000u;
+    assert(fixture.command.submit(fixture.command.instance, &malformed) ==
+           rt::HalV2Status::invalid_argument);
+    malformed = native_batch(105);
+    malformed.command_count = 1;
+    assert(rt::set_xdma_control_read(malformed.commands[0], 252, reference));
+    assert(fixture.command.submit(fixture.command.instance, &malformed) ==
+           rt::HalV2Status::ok);
+    assert(wait_for_batch(fixture, 105).status ==
+           static_cast<std::int32_t>(rt::HalV2Status::ok));
+    malformed = native_batch(106);
+    malformed.command_count = 1;
+    malformed.commands[0].kind = static_cast<std::uint32_t>(
+        rt::HalV2CommandKind::dispatch);
+    malformed.commands[0].opcode =
+        rt::xdma_device_opcode_control_read_base | 64u;
+    malformed.commands[0].buffer_count = 1;
+    malformed.commands[0].buffers[0] = reference;
+    assert(fixture.command.submit(fixture.command.instance, &malformed) ==
+           rt::HalV2Status::invalid_argument);
+    assert(fake.control_reads.load(std::memory_order_acquire) == calls + 1);
+
+    assert(fixture.core.unregister_buffer(fixture.core.instance, token) ==
+           rt::HalV2Status::ok);
+    assert(fixture.core.shutdown(fixture.core.instance) == rt::HalV2Status::ok);
+}
+
+void native_timeout_stop_and_isolation() {
+    FakeDriver first;
+    FakeDriver second;
+    rt::XdmaBackendConfig config{};
+    config.queue_capacity = 4;
+    config.buffer_capacity = 2;
+    config.worker_count = 1;
+    config.max_transfer_bytes = 4096;
+    config.user_event_count = 1;
+    rt::XdmaDeviceBackend first_backend(first.api_v2(), config);
+    rt::XdmaDeviceBackend second_backend(second.api_v2(), config);
+    auto first_fixture = initialize_native(first_backend);
+    auto second_fixture = initialize_native(second_backend);
+    std::array<std::byte, 4> first_output{};
+    std::array<std::byte, 4> second_output{};
+    const auto first_token = register_native_buffer(first_fixture, first_output);
+    const auto second_token = register_native_buffer(second_fixture, second_output);
+
+    rt::HalV2BufferReference reference{};
+    reference.buffer_token = first_token;
+    reference.access = RTFW_DEVICE_ACCESS_WRITE;
+    reference.bytes = 4;
+    auto timeout = native_batch(201);
+    timeout.command_count = 1;
+    assert(rt::set_xdma_user_event_wait(timeout.commands[0], 0, reference));
+    assert(first_fixture.command.submit(
+               first_fixture.command.instance, &timeout) ==
+           rt::HalV2Status::ok);
+    assert(wait_for_batch(first_fixture, 201).status ==
+           static_cast<std::int32_t>(rt::HalV2Status::timeout));
+    assert(second.event_waits.load(std::memory_order_acquire) == 0);
+
+    first.blocked.store(true, std::memory_order_release);
+    auto blocked = native_batch(202);
+    blocked.command_count = 1;
+    assert(rt::set_xdma_user_event_wait(blocked.commands[0], 0, reference));
+    assert(first_fixture.command.submit(
+               first_fixture.command.instance, &blocked) ==
+           rt::HalV2Status::ok);
+    while (!first.event_waiting.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    assert(first_fixture.command.request_stop(
+               first_fixture.command.instance) == rt::HalV2Status::ok);
+    assert(first_fixture.command.request_stop(
+               first_fixture.command.instance) == rt::HalV2Status::ok);
+    assert(wait_for_batch(first_fixture, 202).status ==
+           static_cast<std::int32_t>(rt::HalV2Status::canceled));
+    assert(first.stop_requests.load(std::memory_order_acquire) >= 1);
+    assert(second.stop_requests.load(std::memory_order_acquire) == 0);
+
+    assert(first_fixture.core.unregister_buffer(
+               first_fixture.core.instance, first_token) ==
+           rt::HalV2Status::ok);
+    assert(second_fixture.core.unregister_buffer(
+               second_fixture.core.instance, second_token) ==
+           rt::HalV2Status::ok);
+    assert(first_fixture.core.shutdown(first_fixture.core.instance) ==
+           rt::HalV2Status::ok);
+    assert(second_fixture.core.shutdown(second_fixture.core.instance) ==
+           rt::HalV2Status::ok);
+}
+
+void native_queued_cancel_does_not_interrupt_running_event() {
+    FakeDriver fake;
+    fake.blocked.store(true, std::memory_order_release);
+    rt::XdmaBackendConfig config{};
+    config.queue_capacity = 4;
+    config.buffer_capacity = 2;
+    config.worker_count = 1;
+    config.max_transfer_bytes = 4096;
+    config.control_aperture_bytes = 256;
+    config.user_event_count = 1;
+    rt::XdmaDeviceBackend backend(fake.api_v2(), config);
+    auto fixture = initialize_native(backend);
+    std::array<std::byte, 4> output{};
+    const auto token = register_native_buffer(fixture, output);
+
+    rt::HalV2BufferReference reference{};
+    reference.buffer_token = token;
+    reference.access = RTFW_DEVICE_ACCESS_WRITE;
+    reference.bytes = sizeof(std::uint32_t);
+    auto running = native_batch(301);
+    running.command_count = 1;
+    assert(rt::set_xdma_user_event_wait(
+        running.commands[0], 0, reference));
+    assert(fixture.command.submit(fixture.command.instance, &running) ==
+           rt::HalV2Status::ok);
+    while (!fake.event_waiting.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    auto queued = native_batch(302);
+    queued.command_count = 1;
+    assert(rt::set_xdma_control_write(
+        queued.commands[0], 0, 0x1234'5678u));
+    assert(fixture.command.submit(fixture.command.instance, &queued) ==
+           rt::HalV2Status::ok);
+    assert(fixture.command.cancel(fixture.command.instance, 302) ==
+           rt::HalV2Status::ok);
+    assert(fake.stop_requests.load(std::memory_order_acquire) == 0);
+    assert(fake.event_waiting.load(std::memory_order_acquire));
+    assert(fake.control_writes.load(std::memory_order_acquire) == 0);
+
+    rt::HalV2BatchCompletion canceled{};
+    std::uint64_t count = 0;
+    assert(fixture.command.poll(
+               fixture.command.instance, &canceled, 1, &count) ==
+           rt::HalV2Status::ok);
+    assert(count == 1);
+    assert(canceled.batch_id == 302);
+    assert(canceled.status ==
+           static_cast<std::int32_t>(rt::HalV2Status::canceled));
+
+    fake.event_value.store(0xaabb'ccddu, std::memory_order_release);
+    fake.event_ready.store(true, std::memory_order_release);
+    fake.blocked.store(false, std::memory_order_release);
+    fake.blocked.notify_all();
+    const auto completed = wait_for_batch(fixture, 301);
+    assert(completed.status ==
+           static_cast<std::int32_t>(rt::HalV2Status::ok));
+
+    rt::HalV2Health health{};
+    assert(fixture.core.get_health(fixture.core.instance, &health) ==
+           rt::HalV2Status::ok);
+    assert(health.submissions == 2);
+    assert(health.completions == 2);
+    assert(health.cancellations == 1);
+    assert(health.outstanding == 0);
+    assert(health.state ==
+           static_cast<std::uint32_t>(rt::HalV2HealthState::healthy));
+
+    assert(fixture.core.unregister_buffer(fixture.core.instance, token) ==
+           rt::HalV2Status::ok);
+    assert(fixture.core.shutdown(fixture.core.instance) ==
+           rt::HalV2Status::ok);
+}
+
 #if defined(RTFW_XDMA_LINUX_AVAILABLE)
 void linux_adapter_smoke() {
     char path[] = "/tmp/rtfw-xdma-XXXXXX";
@@ -602,7 +1047,105 @@ void linux_adapter_smoke() {
         assert(value == std::byte{0x5a});
     }
     assert(api.shutdown(api.user_data) == rt::XdmaDriverResult::success);
+
+    char user_path[] = "/tmp/rtfw-xdma-user-XXXXXX";
+    const int user_descriptor = ::mkstemp(user_path);
+    assert(user_descriptor >= 0);
+    assert(::ftruncate(user_descriptor, 256) == 0);
+    assert(::close(user_descriptor) == 0);
+    char event_path[] = "/tmp/rtfw-xdma-event-XXXXXX";
+    const int event_descriptor = ::mkstemp(event_path);
+    assert(event_descriptor >= 0);
+    const std::array<std::uint8_t, 8> event_bytes{
+        0x78, 0x56, 0x34, 0x12,
+        0x78, 0x56, 0x34, 0x12};
+    assert(::write(
+               event_descriptor, event_bytes.data(), event_bytes.size()) ==
+           static_cast<ssize_t>(event_bytes.size()));
+    assert(::lseek(event_descriptor, 0, SEEK_SET) == 0);
+    assert(::close(event_descriptor) == 0);
+    const std::array<std::string_view, 1> events{event_path};
+    rt::LinuxXdmaConfig control_only_config{};
+    control_only_config.h2c_paths = h2c;
+    control_only_config.c2h_paths = c2h;
+    control_only_config.user_path = user_path;
+    rt::LinuxXdmaDriver control_only_driver(control_only_config);
+    const auto control_only_api = control_only_driver.api();
+    assert(control_only_api.api_version == rt::xdma_driver_api_version_2);
+    assert(control_only_api.control_read32 != nullptr);
+    assert(control_only_api.control_write32 != nullptr);
+    assert(control_only_api.wait_user_event == nullptr);
+    assert(control_only_api.request_stop == nullptr);
+
+    rt::LinuxXdmaConfig event_only_config{};
+    event_only_config.h2c_paths = h2c;
+    event_only_config.c2h_paths = c2h;
+    event_only_config.event_paths = events;
+    rt::LinuxXdmaDriver event_only_driver(event_only_config);
+    const auto event_only_api = event_only_driver.api();
+    assert(event_only_api.api_version == rt::xdma_driver_api_version_2);
+    assert(event_only_api.control_read32 == nullptr);
+    assert(event_only_api.control_write32 == nullptr);
+    assert(event_only_api.wait_user_event != nullptr);
+    assert(event_only_api.request_stop != nullptr);
+
+    bool rejected_mismatched_capability = false;
+    try {
+        rt::XdmaBackendConfig mismatched{};
+        mismatched.user_event_count = 1;
+        rt::XdmaDeviceBackend invalid(control_only_api, mismatched);
+        (void)invalid;
+    } catch (const std::invalid_argument&) {
+        rejected_mismatched_capability = true;
+    }
+    assert(rejected_mismatched_capability);
+    rejected_mismatched_capability = false;
+    try {
+        rt::XdmaBackendConfig mismatched{};
+        mismatched.control_aperture_bytes = 256;
+        rt::XdmaDeviceBackend invalid(event_only_api, mismatched);
+        (void)invalid;
+    } catch (const std::invalid_argument&) {
+        rejected_mismatched_capability = true;
+    }
+    assert(rejected_mismatched_capability);
+
+    rt::LinuxXdmaConfig control_config{};
+    control_config.h2c_paths = h2c;
+    control_config.c2h_paths = c2h;
+    control_config.user_path = user_path;
+    control_config.event_paths = events;
+    rt::LinuxXdmaDriver control_driver(control_config);
+    auto control_api = control_driver.api();
+    assert(control_api.api_version == rt::xdma_driver_api_version_2);
+    assert(control_api.initialize(control_api.user_data) ==
+           rt::XdmaDriverResult::success);
+    assert(control_api.control_write32(
+               control_api.user_data, 12, 0xaabb'ccddu) ==
+           rt::XdmaDriverResult::success);
+    const auto read = control_api.control_read32(control_api.user_data, 12);
+    assert(read.result == rt::XdmaDriverResult::success);
+    assert(read.value == 0xaabb'ccddu);
+    const auto event = control_api.wait_user_event(
+        control_api.user_data, 0, 1'000'000);
+    assert(event.result == rt::XdmaDriverResult::success);
+    assert(event.value == 0x1234'5678u);
+    assert(control_api.request_stop(control_api.user_data) ==
+           rt::XdmaDriverResult::success);
+    assert(control_api.request_stop(control_api.user_data) ==
+           rt::XdmaDriverResult::success);
+    const auto stopped_event = control_api.wait_user_event(
+        control_api.user_data, 0, 1'000'000);
+    assert(stopped_event.result == rt::XdmaDriverResult::error);
+    const auto rearmed_event = control_api.wait_user_event(
+        control_api.user_data, 0, 1'000'000);
+    assert(rearmed_event.result == rt::XdmaDriverResult::success);
+    assert(rearmed_event.value == 0x1234'5678u);
+    assert(control_api.shutdown(control_api.user_data) ==
+           rt::XdmaDriverResult::success);
     assert(::unlink(path) == 0);
+    assert(::unlink(user_path) == 0);
+    assert(::unlink(event_path) == 0);
 }
 #endif
 
@@ -633,6 +1176,10 @@ int main() {
     recovery_and_no_allocation();
     partial_initialize_cleanup_retries();
     concurrent_submit_poll();
+    driver_versions_and_native_snapshot();
+    native_control_event_and_malformed_validation();
+    native_timeout_stop_and_isolation();
+    native_queued_cancel_does_not_interrupt_running_event();
 #if defined(RTFW_XDMA_LINUX_AVAILABLE)
     linux_adapter_smoke();
 #endif

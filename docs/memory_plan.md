@@ -371,3 +371,13 @@ Submission stacks are reconciled once through the M15 runtime-stack row. The
 six-row equation, twelve region identities, and three provider-backed regions
 do not change. Checked multiplication rejects an unrepresentable slot plan,
 and the logical device extent must equal its estimate before commit.
+
+## M17-04 vendor-private storage
+
+The bounded CUDA Graph registry, copied binding metadata, stream events, and
+native batch slots, and the XDMA control/event queue, worker state, descriptors,
+and stop-wakeup resources remain backend-private. Their fixed capacities are
+reported through vendor capabilities where applicable and are not added to
+Runtime-owned `device_control_bytes`. The six-row equation, twelve region
+identities, three provider-backed regions, and runtime-stack accounting remain
+unchanged.

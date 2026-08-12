@@ -11,10 +11,12 @@ memory/topology extension pointer to `HalV2BackendRegistration`. The extension
 adds bounded memory-domain, topology, timestamp-domain, native-memory, and
 correlation contracts; it does not change HAL API version 2 or any M17-01 core
 record/table behavior. Both batches establish portable RT0 functional behavior
-only. M17 and CAP-M17 remain incomplete. Command batches, timeline
-completions, isolated vendor submission lanes, CUDA Graph, XDMA
-control/MMIO/event facilities, physical peer DMA, plugin or factory loading,
-device-rate execution, and combined CPU/GPU/FPGA execution remain deferred.
+only. M17-03 appends the optional command/timeline extension version 1 and its
+isolated Runtime submission lanes. M17-04 supplies native-v2 registrations for
+the existing CUDA and XDMA candidates through those unchanged tables. M17 and
+CAP-M17 remain incomplete; physical peer DMA, plugin or factory loading,
+device-rate execution, combined CPU/GPU/FPGA execution, and every hardware or
+RT qualification remain deferred.
 
 ## Public core shape
 
@@ -272,6 +274,38 @@ calls batch submit; the existing service lane validates known unique IDs, exact
 signals, status, and the M17-02 timestamp domain as a whole result. HAL core v2
 and memory extension v1 remain unchanged, with no C++ binary ABI promise.
 
-Portable tests do not establish native CUDA/XDMA-v2 behavior, vendor latency,
-physical coherency, hardware, HIL, field, RT1/RT2, signing, release, deployment,
-or production readiness.
+Portable tests do not establish vendor latency, physical coherency, hardware,
+HIL, field, RT1/RT2, signing, release, deployment, or production readiness.
+
+## M17-04 native vendor registrations
+
+`CudaDeviceBackend` and `XdmaDeviceBackend` preserve their device-ABI-v1
+`api()` accessors and add source-only
+`hal_v2_registration(std::string_view name) noexcept`. The returned
+registration contains the unchanged core-v2, memory-v1, and command-v1 tables.
+Each backend object permits one selected registration path until checked
+shutdown proves that no Runtime or vendor owner remains; the accessors never
+wrap or advertise both paths simultaneously.
+
+The vendor callback aggregates retain their complete version-1 positional
+prefixes, explicit version-1 and version-2 constants, and version-1 defaults.
+Version 1 accepts only its frozen prefix plus an all-zero appended tail.
+Version 2 requires the full exact table, zero reserved data, and the complete
+callback group required by a published capability. CUDA v2 adds only Graph
+launch. XDMA v2 adds only 32-bit control read/write, finite user-event wait,
+and nonblocking stop request.
+
+The native CUDA snapshot truthfully describes borrowed host staging, the
+explicit staged-copy domain, device topology endpoint, and host-monotonic
+completion timestamps implemented by the candidate. The native XDMA snapshot
+describes borrowed host staging, its configured AXI-MM endpoint, and the same
+host timestamp semantics. Neither injected discovery nor an API success is
+physical memory, coherency, topology, clock, DMA, interrupt, or latency
+evidence.
+
+Graph, control, and event commands use stable declaration-visible opcodes, so
+the existing M17-03 identity rules include their semantic choice without
+hashing native handles, pointers, file descriptors, addresses, mutable state,
+or observed timestamps. Backend-private registries, events, queues,
+descriptors, and workers remain outside Runtime-owned device control and are
+reported through existing capability bytes.

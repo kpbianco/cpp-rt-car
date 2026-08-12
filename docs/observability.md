@@ -246,3 +246,13 @@ uses the M15 report. Timeline inspection is a control query, not a trace event.
 Batch IDs, device timestamps, and mutable progress are excluded from
 compatibility identity. Global observability schema 2 and every ID remain
 unchanged.
+
+## M17-04 observability boundary
+
+CUDA Graph launch and XDMA transfer/control/event outcomes reuse the existing
+device completion and health surfaces. M17-04 adds no event, metric, producer,
+cursor, schema field, or ID. Graph identifiers, control offsets, and event
+indexes participate in compatibility through command declarations, while
+native handles, observed values, timestamps, counters, and health do not.
+Portable fake-driver results do not establish physical Graph, MMIO, interrupt,
+latency, HIL, RT1, or RT2 behavior.

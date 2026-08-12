@@ -131,6 +131,8 @@ HASHED_CONTRACT_PATHS = {
     "rt/include/rt/xdma_linux.hpp",
     "rt/src/command_batch.cpp",
     "rt/src/command_batch.hpp",
+    "rt/src/cuda_backend.cpp",
+    "rt/src/cuda_driver.cpp",
     "rt/src/device_manager.cpp",
     "rt/src/device_manager.hpp",
     "rt/src/compiled_graph.cpp",
@@ -162,6 +164,8 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/thread_policy.hpp",
     "rt/src/watchdog_monitor.cpp",
     "rt/src/watchdog_monitor.hpp",
+    "rt/src/xdma_backend.cpp",
+    "rt/src/xdma_linux.cpp",
     "samples/CMakeLists.txt",
     "samples/embed_cpp/mini_app.cpp",
     "src/runtime_profile_demo.cpp",
@@ -187,6 +191,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_compiled_graph.cpp",
     "tests/test_command_batch.cpp",
     "tests/test_cross_rate_data.cpp",
+    "tests/test_cuda_backend.cpp",
     "tests/test_host_runtime.cpp",
     "tests/test_hal_v2.cpp",
     "tests/test_heterogeneous_memory.cpp",
@@ -201,7 +206,9 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_rt_pipeline.cpp",
     "tests/test_thread_policy.cpp",
     "tests/test_trace_noalloc.cpp",
+    "tests/test_vendor_hal_v2.cpp",
     "tests/runtime_profile_tests.cpp",
+    "tests/xdma_backend_tests.cpp",
     "tools/autotune/config.schema.json",
     "tools/autotune/install_profile.py",
     "tools/autotune/make_config.py",
@@ -970,6 +977,69 @@ def validate_repository(root: pathlib.Path) -> list[str]:
             errors.append(
                 f"M17-02 aggregate compatibility consumer: missing {token!r}"
             )
+
+    # M17-03 and M17-04 are additive C++ source contracts. Keep their owned
+    # facts permanent without coupling the release checker to a moving active
+    # milestone or requiring a later batch to remain pending.
+    for token in (
+        "hal_v2_command_timeline_extension_version = 1u",
+        "struct HalV2CommandTimelineExtension",
+        "struct DeviceCommandBatch",
+        "struct DeviceTimelineRegistration",
+    ):
+        if token not in device_header and token not in runtime_header:
+            errors.append(f"M17-03 source contract: missing {token!r}")
+    command_test = load_text(root, "tests/test_command_batch.cpp", errors)
+    for token in (
+        "CommandBatch",
+        "TimeoutCancels",
+        "ExplicitFlushAndInvalidate",
+        "InstanceIsolated",
+        "AggregatePrefix",
+    ):
+        if token not in command_test:
+            errors.append(f"M17-03 release tests: missing {token!r}")
+    for token in ("m17_command_batch_timeline", "CommandBatch.*"):
+        if token not in tests_cmake and token not in ci:
+            errors.append(f"M17-03 CI integration: missing {token!r}")
+
+    cuda_header = load_text(root, "rt/include/rt/cuda_backend.hpp", errors)
+    xdma_header = load_text(root, "rt/include/rt/xdma_backend.hpp", errors)
+    for token in (
+        "cuda_driver_api_version_1 = 1",
+        "cuda_driver_api_version_2 = 2",
+        "cuda_device_opcode_graph_base = 0x4347'0000u",
+        "cuda_graph_capacity = 16",
+        "cuda_graph_buffer_binding_capacity = 8",
+        "register_graph(",
+        "hal_v2_registration(",
+    ):
+        if token not in cuda_header:
+            errors.append(f"M17-04 CUDA source contract: missing {token!r}")
+    for token in (
+        "xdma_driver_api_version_1 = 1",
+        "xdma_driver_api_version_2 = 2",
+        "xdma_control_aperture_max_bytes = 262144",
+        "xdma_user_event_capacity = 16",
+        "xdma_device_opcode_control_read_base",
+        "xdma_device_opcode_control_write_base",
+        "xdma_device_opcode_user_event_base",
+        "hal_v2_registration(",
+    ):
+        if token not in xdma_header:
+            errors.append(f"M17-04 XDMA source contract: missing {token!r}")
+    vendor_test = load_text(root, "tests/test_vendor_hal_v2.cpp", errors)
+    for token in (
+        "ExistingDeviceAbiV1SurfaceRemainsExact",
+        "VersionOnePositionalAggregatePrefixesRemainUsable",
+        "CudaNativeRegistrationSuppliesAllFrozenHalTables",
+        "XdmaNativeRegistrationSuppliesAllFrozenHalTables",
+    ):
+        if token not in vendor_test:
+            errors.append(f"M17-04 release tests: missing {token!r}")
+    for token in ("m17_cuda_graph", "m17_xdma_control", "VendorHalV2.*"):
+        if token not in tests_cmake and token not in ci:
+            errors.append(f"M17-04 CI integration: missing {token!r}")
 
     workflow_paths = sorted(
         set((root / ".github/workflows").glob("*.yml"))

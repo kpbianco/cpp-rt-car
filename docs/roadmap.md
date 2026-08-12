@@ -35,7 +35,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
-| M17 | In progress | M17-01 and M17-02 are merged; M17-03 command/timeline lanes are implemented locally; native vendor controls, combined execution, and qualification remain |
+| M17 | In progress | M17-01 through M17-03 are merged; M17-04 native CUDA Graph and XDMA control/event facilities are implemented locally; combined execution and qualification remain |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
@@ -648,10 +648,16 @@ explicit ordered synchronization, one precreated Runtime submission lane per
 opted-in backend using role value 6, whole-completion validation, deterministic
 timeout/cancel/stop, and exact device-control/runtime-stack accounting.
 
-Later M17 batches own CUDA and XDMA v2 adapters and vendor controls, combined
-execution, and any lifecycle-safe plugin/factory ownership later approved by a
-bounded batch. M17-03 adds no native vendor-control, plugin/factory,
-physical-adapter, cross-backend timeline, direct-peer, combined, or hardware
+M17-04 implements additive native-v2 registrations on the existing CUDA and
+XDMA candidates, caller-owned pre-instantiated CUDA Graph dispatch through
+stable identifiers and copied bindings, and bounded XDMA 32-bit control and
+user-event operations. It preserves both device-ABI-v1 paths and routes work
+only through the existing isolated submission/service and backend-worker
+model.
+
+Later M17 batches own combined execution and any lifecycle-safe plugin/factory
+ownership later approved by a bounded batch. M17-04 adds no plugin/factory,
+cross-backend timeline, direct-peer, combined, hardware, or qualification
 capability. M17 and CAP-M17 remain incomplete.
 
 Exit gates:

@@ -224,3 +224,25 @@ evidence. M17-03 adds portable synthetic batch/timeline and explicit
 memory-order validation only. M17 and CAP-M17 remain incomplete; native
 vendor-v2 adapters, vendor controls, combined execution, and qualification
 belong to later M17/M18 batches.
+
+## M17-04 vendor staged domains
+
+M17-04 preserves both CUDA and XDMA device-ABI-v1 paths while adding explicit
+native-v2 registrations. The CUDA registration publishes a borrowed-host
+staging domain and one staged CUDA domain. A heterogeneous registration copies
+its stable name and metadata and maps to either an existing pre-bound device
+address or the candidate's existing host-registration/device-mirror setup. Its
+coherency is `staged_copy`, and its exact obligations are
+`copy_to_device | copy_from_device`; Runtime inserts neither operation.
+
+The XDMA native registration publishes borrowed host staging associated with
+the configured AXI-MM endpoint. H2C/C2H remain explicit command operations and
+do not make host pages pinned or DMA mapped. The control aperture itself is not
+a generic FPGA memory domain, and user events create no memory-coherency or
+interrupt-latency fact.
+
+For both vendors, copied domains/topology/timestamp records and heterogeneous
+declarations enter the existing conditional identity. Host pointers, CUDA
+addresses, graph handles, Linux descriptors, and runtime-private tokens do not.
+Portable fake callbacks establish record and ordering behavior only, not
+physical pinning, allocation, DMA, coherency, topology, or timestamp accuracy.

@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M17-03
-  title: Add batched commands and timeline completion lanes
-  goal: Add one bounded optional C++ HAL-v2 command/timeline extension, fixed-capacity Runtime batch phases, same-backend timeline waits and signals, explicit heterogeneous-memory synchronization commands, and one isolated preallocated submission lane per opted-in backend, while preserving all M17-01/M17-02 core, compatibility, memory, lifecycle, and claim boundaries.
+  id: M17-04
+  title: Add CUDA Graph and XDMA control facilities
+  goal: Add additive native HAL-v2 registration paths to the existing CUDA and XDMA candidates, execute pre-registered CUDA Graph objects through the bounded command/timeline lane, and add bounded XDMA AXI-MM control-register and user-event commands, while preserving both device-ABI-v1 candidate paths and deferring combined execution and every hardware or support claim.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -19,8 +19,6 @@ sources:
     - docs/device_backend.md
     - docs/cuda_backend.md
     - docs/xdma_backend.md
-    - docs/host_runtime.md
-    - docs/executor.md
     - docs/cpu_memory_policy.md
     - docs/memory_plan.md
     - docs/determinism_replay.md
@@ -41,22 +39,76 @@ sources:
     - docs/evidence/M16-04-2026-08-05.md
     - docs/evidence/M17-01-2026-08-05.md
     - docs/evidence/M17-02-2026-08-06.md
-  baseline_commit: ee1ddd21c483687c4237f3b53ec8d15029d20ff2
+    - docs/evidence/M17-03-2026-08-11.md
+  baseline_commit: 122f9919674b5f09e321deb8ba6701f78b2993ce
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M17-03.yaml
-  control_plane_revision: 048c26e8656a4cfce7afd176bafa1476ab11195b  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M17-04.yaml
+  control_plane_revision: 8f94ced14abf34d7818c44edc73ae3cd204d5b6b  # pragma: allowlist secret
 dependencies:
   - M17-01
   - M17-02
+  - M17-03
 scope:
   allowed_paths:
     - .portfolio-harness.json
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
-    - rt/include/rt/config.hpp
+    - rt/include/rt/cuda_backend.hpp
+    - rt/include/rt/cuda_driver.hpp
+    - rt/include/rt/xdma_backend.hpp
+    - rt/include/rt/xdma_linux.hpp
+    - rt/src/cuda_backend.cpp
+    - rt/src/cuda_driver.cpp
+    - rt/src/xdma_backend.cpp
+    - rt/src/xdma_linux.cpp
+    - tests/test_cuda_backend.cpp
+    - tests/xdma_backend_tests.cpp
+    - tests/test_vendor_hal_v2.cpp
+    - tests/package_consumer/cuda_consumer.cpp
+    - tests/package_consumer/cuda_driver_consumer.cpp
+    - tests/package_consumer/xdma_consumer.cpp
+    - tests/package_consumer/xdma_linux_consumer.cpp
+    - tests/package_consumer/package_contract.cmake
+    - tests/package_consumer/CMakeLists.txt
+    - tests/CMakeLists.txt
+    - CMakeLists.txt
+    - cmake/rtfwConfig.cmake.in
+    - .github/workflows/ci.yml
+    - .github/workflows/cuda-qualification.yml
+    - .github/workflows/xdma-qualification.yml
+    - docs/CURRENT_STATE.md
+    - docs/HANDOFF.md
+    - docs/product_contract.md
+    - docs/architecture.md
+    - docs/roadmap.md
+    - docs/hal_v2.md
+    - docs/heterogeneous_memory.md
+    - docs/device_backend.md
+    - docs/cuda_backend.md
+    - docs/xdma_backend.md
+    - docs/cpu_memory_policy.md
+    - docs/memory_plan.md
+    - docs/determinism_replay.md
+    - docs/observability.md
+    - docs/testing_ci.md
+    - docs/c_abi.md
+    - docs/real_time_readiness_checklist.md
+    - docs/evidence/M17-04-*.md
+    - README.md
+    - release/rtfw-release-contract.json
+    - tools/check_docs_contract.py
+    - tools/check_release_contract.py
+  forbidden_paths:
+    - abi/rtfw_c_abi_v8.exports
+    - abi/rtfw_c_abi_v8.sha256
+    - rt/include/rt/c_api.h
+    - rt/include/rt/device_abi.h
     - rt/include/rt/device.hpp
     - rt/include/rt/runtime.hpp
+    - rt/include/rt/config.hpp
+    - rt/include/rt/status.hpp
+    - src/c_abi.cpp
     - rt/src/hal_v2.cpp
     - rt/src/hal_v2.hpp
     - rt/src/command_batch.cpp
@@ -70,67 +122,6 @@ scope:
     - rt/src/resource_policy.hpp
     - rt/src/thread_policy.cpp
     - rt/src/thread_policy.hpp
-    - tests/test_command_batch.cpp
-    - tests/test_hal_v2.cpp
-    - tests/test_heterogeneous_memory.cpp
-    - tests/test_device_runtime.cpp
-    - tests/test_cpu_memory_policy.cpp
-    - tests/test_thread_policy.cpp
-    - tests/test_memory_plan.cpp
-    - tests/test_determinism_replay.cpp
-    - tests/test_trace_noalloc.cpp
-    - tests/package_consumer/cpp_consumer.cpp
-    - tests/package_consumer/compat_consumer.cpp
-    - tests/package_consumer/cuda_consumer.cpp
-    - tests/package_consumer/xdma_consumer.cpp
-    - tests/package_consumer/package_contract.cmake
-    - tests/CMakeLists.txt
-    - CMakeLists.txt
-    - .github/workflows/ci.yml
-    - docs/CURRENT_STATE.md
-    - docs/HANDOFF.md
-    - docs/product_contract.md
-    - docs/architecture.md
-    - docs/roadmap.md
-    - docs/hal_v2.md
-    - docs/heterogeneous_memory.md
-    - docs/device_backend.md
-    - docs/host_runtime.md
-    - docs/executor.md
-    - docs/cpu_memory_policy.md
-    - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/observability.md
-    - docs/testing_ci.md
-    - docs/c_abi.md
-    - docs/real_time_readiness_checklist.md
-    - docs/evidence/M17-03-*.md
-    - README.md
-    - release/rtfw-release-contract.json
-    - tools/check_docs_contract.py
-    - tools/check_release_contract.py
-  forbidden_paths:
-    - abi/rtfw_c_abi_v8.exports
-    - abi/rtfw_c_abi_v8.sha256
-    - rt/include/rt/c_api.h
-    - rt/include/rt/device_abi.h
-    - rt/include/rt/status.hpp
-    - src/c_abi.cpp
-    - core/include/core/config.hpp
-    - core/include/core/config_hot_reload.hpp
-    - configs/*.json
-    - rt/include/rt/profile.hpp
-    - rt/src/runtime_profile.cpp
-    - rt/include/rt/mock_device.hpp
-    - rt/src/mock_device.cpp
-    - rt/include/rt/cuda_backend.hpp
-    - rt/include/rt/cuda_driver.hpp
-    - rt/src/cuda_backend.cpp
-    - rt/src/cuda_driver.cpp
-    - rt/include/rt/xdma_backend.hpp
-    - rt/include/rt/xdma_linux.hpp
-    - rt/src/xdma_backend.cpp
-    - rt/src/xdma_linux.cpp
     - rt/src/executor.cpp
     - rt/src/executor.hpp
     - rt/src/telemetry.cpp
@@ -146,6 +137,8 @@ scope:
     - rt/src/rate_timeline.hpp
     - rt/src/cross_rate_data.cpp
     - rt/src/cross_rate_data.hpp
+    - core/include/core/
+    - configs/
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
@@ -159,118 +152,131 @@ scope:
     - docs/evidence/M16-04-2026-08-05.md
     - docs/evidence/M17-01-2026-08-05.md
     - docs/evidence/M17-02-2026-08-06.md
-    - .github/workflows/cuda-qualification.yml
-    - .github/workflows/xdma-qualification.yml
-    - .github/workflows/release.yml
+    - docs/evidence/M17-03-2026-08-11.md
     - tools/rt_harden.sh
     - tools/rt_harden.ps1
     - LICENSE
     - VERSION.txt
-    - include/simcore/**
-    - hal/**
-    - gpu/**
+    - include/simcore/
+    - hal/
+    - gpu/
     - rt/include/rt/scheduler.hpp
     - rt/include/rt/fiber_pool.hpp
     - rt/include/rt/plugin_api.h
     - rt/src/scheduler.cpp
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
+    - examples/
+    - samples/
 acceptance:
-  - The existing installed `rt/device.hpp` adds a separately size/versioned optional command/timeline extension version 1 beside unchanged HAL core API version 2 and memory/topology extension version 1. It adds no installed header or target. Public fixed-width records and zeroed reserved tails define exactly 16 commands per batch, eight wait points, eight signal points, 16 timelines per backend, the existing 128-byte inline payload and eight buffer references per command, and explicit dispatch, copy, and memory-synchronization command kinds.
-  - The existing `HalV2BackendRegistration` retains the M17-02 positional prefix and may append one borrowed command/timeline-extension pointer that Runtime copies before publication. The extension declares fixed capacities and required submit, bounded nonblocking completion-poll, cancel, and nonblocking stop-request operations. Runtime rejects small/unknown sizes or versions, null required callbacks, impossible/zero capacities, nonzero reserved data, incompatible capability combinations, callback exceptions, partial outputs, and values above Runtime or backend bounds transactionally.
-  - A configuring-only Runtime API registers at most 16 stable named timeline handles per opted-in backend with an initial value, and a distinct batch-device phase whose provider fills one caller-borrowed fixed `DeviceCommandBatch` per invocation. Handles are Runtime-instance and backend bound; foreign, stale, duplicate, empty, over-capacity, or post-finalization registrations fail without publishing partial state. Existing `register_device_phase` and single `DeviceSubmission` behavior remain exact.
-  - Every batch has a nonzero finite timeout, one to 16 commands, zero to eight waits, and one to eight signals. Wait and signal points reference only timelines owned by the same Runtime and backend; waits may target only values already accepted for signal, and each new signal value is strictly greater than the last accepted value for that timeline. Zero values, duplicate points, wait/signal contradictions, unchecked arithmetic, cycles created within one batch, and cross-backend or peer inference are rejected before backend entry.
-  - Dispatch commands preserve the existing opcode, flags, payload, logical-buffer, range, access, and translation rules. Copy and memory-synchronization commands use explicit source/destination or target logical buffers and discharge only the M17-02 `copy_to_device`, `copy_from_device`, `flush`, or `invalidate` requirement they name. Runtime validates a deterministic per-batch memory-state walk so every device read is preceded by its required flush/copy and every host-visible completion follows its required invalidate/copy; it never inserts hidden work or treats registration, `mlock`, pin declarations, or a timeline point as coherence proof.
-  - The batch provider executes as the ordinary graph CPU phase, but it calls no backend function. A successfully validated batch is copied into fixed Runtime-owned storage and enqueued with a bounded attempt budget to exactly one precreated submission lane for its opted-in backend. Full or contended storage returns `device_queue_full` without acceptance, retry, spill, inline vendor execution, allocation, hidden worker creation, or a partially reserved timeline value.
-  - Each opted-in backend has exactly one Runtime-owned submission thread using the additive stable `thread_role_device_submission` role with numeric value 6. Its instance count equals the number of opted-in backends; default policy is portable, a configured strict policy applies and reads back through the M15 startup barrier, and report/accounting rows distinguish it from the existing device-service poll lane. Core-only HAL-v2, memory-only HAL-v2, and adapted-v1 backends create no submission lane and retain their exact M17-02 thread inventory and behavior.
-  - Only the matching submission lane calls the potentially blocking extension submit callback. The existing device-service lane alone calls the extension completion poll and publishes graph completion; neither lane invokes application callbacks. Submit exceptions/errors become one terminal batch result, stop requests are nonblocking and idempotent, accepted queue entries and in-call ownership remain explicit, and a blocked injected backend is released by stop-request/cancel without detaching a thread or falsely claiming cleanup.
-  - A batch is accepted before a synchronous or early completion can be applied. Completion records carry the batch ID, exact declared signal points, status, and the already declared M17-02 timestamp-domain value. Runtime validates whole completion batches, rejects unknown/duplicate IDs, undeclared/regressive/oversized timeline data, wrong backend, malformed status/timestamp fields, and completion before acceptance, and publishes no partial timeline advancement. A valid terminal completion advances each timeline monotonically by maximum completed value and releases the graph token exactly once.
-  - Timeout, cancel, queue failure, backend loss/reset, malformed completion, and stop quiescence terminate or retain every batch deterministically. Reset is rejected while queued, submitting, or outstanding batch ownership exists. Stop first closes admission, requests backend stop, wakes submission lanes, cancels/fails accepted work, quiesces and joins submission lanes in reverse backend order, then stops the completion lane and performs existing reverse memory/backend cleanup. First-error retention and unresolved-only retry remain exact; borrowed backend/extension/memory instances remain live until checked cleanup succeeds.
-  - All extension tables, timeline descriptors/state, copied batches, queue slots, completion scratch, lane controls, and validation state are Runtime-owned, fixed after finalization, instance isolated, and counted once in `device_control_bytes` and the existing M15 logical device extent. Submission-thread stacks are reported once through M15 runtime-stack accounting. The six-row MemoryPlan equation and three provider regions do not change; backend-private queue/event/vendor storage remains excluded or truthfully declared, never invented.
-  - Command/timeline extension capabilities, registered timeline semantics, batch-phase declarations, command order, memory operations, and timeline waits/signals participate conditionally in graph/replay compatibility identity. Runtime addresses, callback pointers, mutable queue indices, batch IDs, observed completions, timestamps, and health do not. Configurations without the extension or batch phases retain exact M17-02 identity and artifact bytes; checkpoint/input-log schema 1, rate-action schema 1, and global observability schema 2 remain unchanged.
-  - After successful start, provider validation, batch copy/enqueue, submission-lane dequeue/call, completion polling/validation, timeline inspection, health/reset rejection, and checked cleanup add no ordinary heap allocation, file/network I/O, blocking mutex, unbounded retry, or spill. The submission callback may block only on its isolated non-executor lane and remains subject to the declared finite timeout and stop-request contract; no portable test result is a vendor latency or bounded-driver guarantee.
-  - Adapted device-ABI-v1, core-only native-v2, and memory-only native-v2 registrations expose no invented batch/timeline capability and retain every M17-01/M17-02 capability, call, status, completion, identity, accounting, and cleanup result. The unchanged mock, CUDA candidate, and XDMA candidate remain device-ABI-v1 backends; native CUDA/XDMA-v2 adapters, CUDA Graph, XDMA control/MMIO/events, device-rate execution, plugin/factory loading, cross-backend timelines, combined execution, and direct peer DMA remain outside M17-03.
-  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, every device-ABI-v1 declaration/layout/value, HAL-v2 core version/table semantics, memory/topology extension version 1, Runtime status values, runtime-profile schema 7 and 25 keys, existing observability/rate/artifact schemas and IDs, installed target/header inventory and aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. The additions are C++ source contracts requiring recompilation and do not promise a stable C++ binary ABI.
-  - Target governance, active batch, current state, handoff, roadmap, HAL/device/memory/host/executor/policy/accounting/determinism/observability/testing contracts, release digest ledger, and retained M17-03 evidence describe actual behavior and keep M17/CAP-M17 incomplete. Focused tests, clean installed-package consumers, complete deterministic local verification, mandatory GitHub CI, and human API, compatibility, lifecycle, concurrency, memory-ordering, accounting, security, and claim-boundary review pass before merge.
+  - The exact baseline contains merged M17-03 target PR 219 at `0d1c95a4e859c9136b28b912735610cd58016e95`; baseline `122f9919674b5f09e321deb8ba6701f78b2993ce` changes only portfolio-harness metadata after that merge. Target governance is refreshed to M17-04 without rewriting retained M17-03 evidence or inventing an absent final CI run, check count, or separate human-review object.
+  - The existing installed CUDA and XDMA headers add source-compatible `hal_v2_registration(std::string_view name) noexcept` accessors over their existing candidate objects. Each accessor returns one `HalV2BackendRegistration` supplying unchanged HAL core API version 2, memory/topology extension version 1, and command/timeline extension version 1 tables and remains borrowed through checked cleanup. Existing `api()` methods continue to return the exact device-ABI-v1 candidate tables and behavior; a host chooses one registration path for an object and Runtime rejects duplicate use or invalid lifetimes rather than wrapping or advertising both simultaneously.
+  - Vendor driver callback tables evolve additively with their complete version-1 positional prefixes preserved, explicit version-1 and version-2 constants, and the existing default remaining version 1. A version-1 table is validated through the frozen prefix and ignores an all-zero appended tail; a version-2 table requires the full exact size and zero reserved fields. Version-1 CUDA/XDMA injected drivers and installed consumers retain every current transfer, kernel, event, worker, timeout, health, reset, and cleanup behavior and expose no invented Graph/MMIO/event capability. Version 2 adds `graph_launch` for CUDA and `control_read32`, `control_write32`, `wait_user_event`, and `request_stop` for XDMA; a capability is published only when every callback and configured bound it requires is present.
+  - The CUDA native-v2 snapshot exposes only truthful host/staged CUDA memory, topology, and host-monotonic completion timestamp semantics implemented by the candidate. A legacy coherent borrowed-host domain remains available only for the preserved core path. The explicit staged domain uses copied registration metadata, fixed name/token storage, the existing host-registration/device-mirror or pre-bound device-address rules, and `copy_to_device`/`copy_from_device` synchronization obligations. Injected discovery or CUDA API success is not physical pinning, device-memory, topology, clock, or coherency evidence.
+  - CUDA Graph support is limited to at most 16 caller-created and caller-instantiated `CUgraphExec`-compatible objects registered before backend initialization under a caller-selected unique identifier in `[1, 65535]` and up to eight copied stable buffer-name/access bindings. Runtime/backend never captures, instantiates, clones, updates, uploads, destroys, or owns a graph. Graph objects, functions, modules, contexts, streams, external allocations, and borrowed host spans remain caller-owned until checked shutdown succeeds.
+  - Each CUDA graph identifier is encoded as `cuda_device_opcode_graph_base | graph_id`, where the public base is exactly `0x4347'0000u`, so the M17-03 batch declaration and compatibility identity distinguish graph selection without hashing a pointer or mutable payload. A graph dispatch has zero inline payload and exactly its registered buffer bindings in declared order. The backend rejects unknown/duplicate IDs, bits outside the 16-bit identifier field, binding/name/access/token mismatch, registry or binding overflow, post-initialize registration, malformed commands, and use of legacy or foreign buffers before any CUDA call.
+  - "One native CUDA batch executes in declared command order on exactly one configured command stream: explicit staged copies use the generic M17-03 copy commands, registered kernel/graph operations use vendor dispatch commands, and one precreated completion event is recorded only after every accepted operation is enqueued. Same-backend batches and timeline signals preserve Runtime submission order on that stream. Partial enqueue failure, event-record/query failure, timeout, context loss, reset, stop, and shutdown quarantine every possibly referenced graph, stream, buffer, event, and batch until physical readiness, successful drain, or explicit final host context reclamation; Runtime never fabricates a timeline completion."
+  - The XDMA native-v2 snapshot truthfully describes borrowed host staging, the configured AXI-MM endpoint topology, and host-monotonic completion timestamps only. It does not declare pinned or DMA-mapped host pages, generic FPGA memory, peer access, interrupt latency, or driver cancellation. Existing H2C/C2H transfer commands remain supported through their stable opcodes on the fixed backend I/O team.
+  - XDMA adds exact vendor dispatch operations for 32-bit little-endian control read, 32-bit little-endian control write, and one user-event wait. Read is `0x5848'0000u | (offset / 4)`, write is `0x5849'0000u | (offset / 4)`, and event wait is `0x584A'0000u | event_index`. The configured control aperture is four-byte aligned, nonzero when enabled, and at most 262144 bytes, making offsets `0..262140` exactly representable; the configured event count is at most 16 and event indexes are `0..15`. Read and wait results use one exactly sized writable borrowed-host reference; write uses one fixed four-byte payload. Unknown opcodes, high/foreign bits, out-of-range offsets/indexes, access/range/payload mismatch, overflow, nonzero reserved data, or unavailable callbacks fail before driver entry.
+  - The Linux XDMA adapter copies optional user-BAR and event-device paths, opens only configured endpoints during initialization with close-on-exec and the required nonblocking/event-wakeup behavior, and performs MMIO/event operations only on the existing fixed backend I/O team. Event wait uses the batch's checked finite remaining timeout and is interruptible by an idempotent nonblocking stop request. Data-transfer calls that the kernel driver cannot cancel retain their existing quarantine and checked-shutdown ownership; no thread is detached and no buffer, file descriptor, or event owner is cleared while a call may still reference it.
+  - CUDA and XDMA batch submission, polling, and stop integrate only through the existing M17-03 Runtime submission/service lanes and tables. No vendor callback executes in the ordinary batch provider or executor worker. Backends add no Runtime-owned lane, cross-backend timeline, implicit command, spill queue, unbounded retry, per-command thread, host callback, or file/network I/O on executor workers. Backend-private Graph, registry, control, event, queue, and worker storage is fixed at construction/initialization, reported through existing capability byte fields, and remains excluded or truthfully declared rather than added to Runtime-owned `device_control_bytes`.
+  - Native-v2 capability, domain/topology/timestamp, stable graph opcode/bindings, XDMA control offset/event opcode, command order, logical references, waits, and signals participate through the existing M17-02/M17-03 conditional identity rules. Driver pointers, native handles/file descriptors, graph executables, host addresses, mutable queue/event state, observed timestamps/counters, and health do not. Configurations using the device-ABI-v1 path retain exact M17-03 identity, thread inventory, accounting, and artifact bytes.
+  - Construction, registration, initialization, submit, poll, timeout, reset, stop, and destruction preserve exception containment, checked arithmetic, fixed capacities, Runtime-instance isolation, accepted-before-complete causality, whole-completion publication, exact-once graph release, first-error retention, reverse cleanup, and unresolved-only retry. Complete CUDA Graph and XDMA control/event frames plus cleanup add no ordinary heap allocation after successful start.
+  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, every device-ABI-v1 declaration/layout/value, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime status values, runtime-profile schema 7 and 25 keys, observability/rate/checkpoint/input-log schemas and IDs, installed header/target inventory and aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged. Vendor additions are C++ source contracts requiring recompilation and make no C++ binary ABI promise.
+  - Target governance, current state, handoff, architecture, HAL/vendor/memory/policy/accounting/determinism/observability/testing/safety contracts, release digest ledger, and retained M17-04 evidence describe actual portable and injected behavior. M17 and CAP-M17 remain incomplete; the CPU-GPU-FPGA-CPU sample, device-rate execution, cross-backend timelines, direct peer DMA, support promotion, and physical qualification remain outside this batch.
+  - Focused malformed/success/failure/lifecycle tests, clean default and opt-in installed-package consumers, complete deterministic local verification, mandatory GitHub CI, and human API, compatibility, CUDA/XDMA ownership, concurrency, MMIO safety, lifecycle, accounting, security, and claim-boundary review pass before merge.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='CommandBatch.*:HalV2.*Batch*:DeviceRuntime.*Batch*:HeterogeneousMemory.*Batch*:ThreadPolicy.*DeviceSubmission*:CpuMemoryPolicy.*DeviceSubmission*:MemoryPlan.*Batch*:DeterminismReplay.*Batch*:TraceNoAlloc.*Batch*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|xdma_backend'
-    - cmake -S . -B build/m17-03-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
-    - cmake --build build/m17-03-package --parallel 2
-    - cmake --install build/m17-03-package --prefix "$PWD/build/m17-03-install"
-    - cmake -S tests/package_consumer -B build/m17-03-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m17-03-install"
-    - cmake --build build/m17-03-package-consumer --parallel 2
-    - ctest --test-dir build/m17-03-package-consumer --output-on-failure
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='VendorHalV2.*:CudaBackend.*Graph*:CudaBackend.*HalV2*:HeterogeneousMemory.*Cuda*:CommandBatch.*Vendor*:MemoryPlan.*Vendor*:DeterminismReplay.*Vendor*:TraceNoAlloc.*Vendor*'
+    - ./build/agent-full/tests/rtfw_xdma_backend_tests
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|xdma_backend'
+    - cmake -S . -B build/m17-04-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
+    - cmake --build build/m17-04-package --parallel 2
+    - cmake --install build/m17-04-package --prefix "$PWD/build/m17-04-install"
+    - cmake -S tests/package_consumer -B build/m17-04-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m17-04-install"
+    - cmake --build build/m17-04-package-consumer --parallel 2
+    - ctest --test-dir build/m17-04-package-consumer --output-on-failure
+    - cmake -S . -B build/m17-04-xdma-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DRTFW_ENABLE_XDMA=ON -DSIM_WERROR=ON
+    - cmake --build build/m17-04-xdma-package --parallel 2
+    - cmake --install build/m17-04-xdma-package --prefix "$PWD/build/m17-04-xdma-install"
+    - cmake -S tests/package_consumer -B build/m17-04-xdma-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m17-04-xdma-install" -DRTFW_TEST_XDMA_LINUX=ON
+    - cmake --build build/m17-04-xdma-consumer --parallel 2
+    - ctest --test-dir build/m17-04-xdma-consumer --output-on-failure
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
   focused_tests_to_add:
-    - exact version, enum, constant, default, reserved-tail, and LP64/LLP64 layout diagnostics for extension capabilities/table, commands, batches, timeline points/handles/info, and completions, plus M17-02 positional aggregate-prefix consumers
-    - transactional extension registration rejection for malformed sizes/versions/capacities/callbacks/reserved data, callback exceptions, partial writes, duplicate extensions, and excess configured timelines or batch phases
-    - timeline registration, freeze, inspection, foreign/stale/cross-backend rejection, strictly increasing accepted signals, prior-accepted waits, duplicate/zero/overflow/cycle rejection, completion monotonicity, and two-runtime isolation
-    - exhaustive batch bounds and ordered dispatch/copy/flush/invalidate validation, including logical-buffer access/range/alignment, heterogeneous synchronization discharge, missing or wrong-order synchronization, opaque-device memory, and proof that no hidden command is inserted
-    - bounded queue acceptance and saturation with an accepted prefix only, deterministic queue-full behavior, no retry/spill/inline callback, exact batch copy lifetime, producer return before backend entry, and one submission lane per opted-in backend
-    - injected blocked, throwing, erroring, early-completing, malformed-completing, out-of-order, duplicate, timed-out, canceled, reset-required, and lost backend behavior with exact terminal graph result and no application callback on submission/completion lanes
-    - startup policy apply/readback for every conditional submission-lane instance, strict failure before callbacks, reverse partial-start rollback, stop-request unblocking, reverse join, first-error retention, cleanup retry, destructor fail-safe, and no detached or leaked lane
-    - exact completion acceptance handshake, whole-poll-batch validation, signal-set equality, max-completed timeline publication, exact-once graph release, timestamp-domain preservation, and rejection without partial timeline state
-    - exact command/timeline/lane storage and stack reconciliation in device control, the M15 logical ledger, and the unchanged six-row plan, with backend-private bytes excluded and no provider-region expansion
-    - conditional identity sensitivity to extension/timeline/batch/memory-order semantics and byte-exact M17-02 identity/artifact preservation when unused, with unchanged checkpoint/input-log/rate-action/observability schemas
-    - complete frames and stop under allocation instrumentation plus concurrent enqueue/poll, blocked-backend, cleanup, and two-runtime ThreadSanitizer coverage with bounded callback counts and no executor-worker backend call
-    - installed preferred and compatibility C++ consumers for batch/timeline additions and old aggregate prefixes, plus unchanged C, device-v1 CUDA/XDMA, header-inventory, warning-isolation, and pure-C consumers
+    - exact vendor table versions, preserved version-1 aggregate prefixes, new defaults/reserved tails, stable opcode encodings, capacity boundaries, LP64/LLP64 layout diagnostics, and installed old-source consumers
+    - native-v2 registration table ownership, copied Runtime discovery, duplicate-object/path rejection, device-ABI-v1 versus native-v2 selection, freeze, correction after transactional failure, and two-Runtime isolation
+    - CUDA staged-domain discovery and registration, host/device mirror and pre-bound address handling, explicit copy ordering, name/token/access/range mismatch, uncertain host-registration or device-allocation cleanup, and no physical pinning/coherency inference
+    - CUDA graph registry capacity, unique stable identifiers, up to eight copied bindings, caller-owned lifetime, configuration freeze, unknown graph/buffer rejection, and proof that Runtime never creates, updates, or destroys a graph
+    - ordered CUDA copy-graph-copy and kernel/graph batches on one command stream, same-backend signal order, one event per accepted batch, early completion, saturation, timeout quarantine, launch/event failure, context loss, reset refusal, drain, reverse shutdown retry, and exact-once completion
+    - XDMA control opcode construction and rejection for unaligned/overflowed/out-of-aperture offsets, malformed four-byte reads/writes, unknown operations, wrong access or host result spans, and proof that no control driver call occurs before full validation
+    - XDMA user-event index/capacity, finite remaining-time conversion, not-ready/timeout/success/error/loss results, event/read races, stop wakeup, close/reopen failure, queued versus running cancellation, and no invented interrupt-latency or cancel guarantee
+    - Linux XDMA path copying and bounded open/close ownership for H2C, C2H, optional user BAR, up to 16 event nodes, and stop-wakeup resources, with short I/O, EINTR, poll wake, partial initialization, first-error retention, and retryable cleanup
+    - complete native CUDA/XDMA frames, queue saturation, concurrent submit/poll/stop, two-runtime isolation, fixed call counts, backend-call thread identity, and allocation instrumentation after successful start
+    - exact Runtime-owned versus backend-private control/queue/event/graph/worker byte accounting, unchanged six-row MemoryPlan and runtime-stack inventory, and truthful existing external XDMA worker declarations
+    - conditional identity separation for native vendor capabilities and stable graph/control/event opcodes plus byte-exact M17-03 adapted-v1 behavior and identity when native registration is unused
+    - preferred/compatibility default consumers plus opt-in CUDA Driver API and Linux XDMA consumers, exact SDK inventory, C/C++ shared/static consumers, frozen C/device ABI, warning isolation, and pure C
   required_ci:
-    - Documentation contract workflow covering exact command/timeline/lane semantics and claim limits, quick-start, release contract, frozen C ABI/device ABI, SDK inventory, and permanent M15/M16/M17-01/M17-02 gates
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of malformed batches, memory ordering, timeline completion, saturation, blocked/error lifecycle, identity, accounting, and recovery
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering identical constants/defaults/validation, intentional size/alignment diagnostics, native thread startup/stop portability, source compatibility, and installed consumers
-    - Unified executor GCC ThreadSanitizer job executing the complete CommandBatch, HeterogeneousMemory, HAL-v2/v1-adapter, submission/completion-lane, blocked-stop, mixed cleanup, two-runtime, CUDA fake-driver, portable XDMA, and permanent M15/M16 processes without weaker exclusions or timeouts
-    - Determinism GCC and Clang FMA-on and FMA-off jobs plus artifact exchange proving byte-exact M17-02 identity when unused and explicit batch/timeline identity separation when configured
-    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, unchanged v1 CUDA/XDMA consumers, exact 70-export C ABI consumers, dependency review, SBOM, and existing autotune/scaling smoke jobs
-    - Existing no-allocation, bounded-memory/control-ledger, thread-policy/stack cleanup, M14.1 device recovery, M15 rollback, M16 timeline/data/dispatch/shedding/telemetry, M17-01 compatibility, M17-02 memory/topology, sanitizer, fuzz-smoke, observability-schema, documentation, release-contract, package, CUDA fake-driver, and XDMA portable gates; no hosted vendor, timing, or hardware claim is authorized
+    - Documentation contract workflow covering exact native-v2 CUDA/XDMA capability and ownership boundaries, stable vendor opcodes, Graph/MMIO/event safety, quick start, release contract, frozen C/device ABI, SDK inventory, and all permanent M15/M16/M17 gates
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of both native vendor registrations, malformed tables/commands, graph bindings, staged copies, MMIO/events, saturation, stop/reset/loss, identity, accounting, and cleanup retry
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix covering portable fake CUDA/XDMA native-v2 tables, exact opcode/layout/default diagnostics, source compatibility, no Linux-path leakage, and default installed consumers
+    - Unified executor GCC ThreadSanitizer job executing complete VendorHalV2, CUDA Graph/fake-driver, XDMA transfer/control/event, CommandBatch, HeterogeneousMemory, HAL-v2/v1-adapter, submission/completion-lane, blocked-stop, two-runtime, and permanent M15/M16 processes without weaker exclusions or timeouts
+    - Determinism GCC and Clang FMA-on/FMA-off jobs plus artifact exchange proving byte-exact M17-03 device-ABI-v1 identity when native vendor paths are unused and deterministic separation for declared graph/control/event commands
+    - C and C++ embedding, add_subdirectory, default installed package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, dependency review, SBOM, and autotune/scaling smoke gates
+    - Node-free Linux `RTFW_ENABLE_XDMA=ON` compile/install/consumer validation for the user-BAR/event adapter and a CUDA-toolkit compile/install/consumer gate for the production `cuGraphLaunch` adapter; these are build/package checks and must not access a device or be reported as hardware evidence
+    - Existing CUDA and XDMA qualification workflows remain manually dispatched evidence-only workflows. Any workflow edits must preserve explicit inputs, self-hosted labels, raw-evidence validation, source binding, no support-matrix mutation, and no claim that a schema/build/package pass qualifies hardware
+    - Existing no-allocation, bounded-memory/control-ledger, M14.1 recovery, M15 rollback, M16 timeline/data/dispatch/shedding/telemetry, M17 core/memory/command compatibility, sanitizer, fuzz-smoke, observability-schema, release-contract, package, CUDA fake-driver, and XDMA portable gates
   manual:
-    - Human public-API and compatibility review must approve the additive extension/table/record/handle shape, exact capacities and command vocabulary, M17-02 positional source compatibility, conditional identity boundary, and preservation of C ABI v8, device ABI v1, HAL core v2, memory extension v1, Runtime status, package, schema, release, support, and license boundaries.
-    - Human concurrency, lifetime, memory-ordering, and safety review must confirm bounded enqueue, accepted-before-complete publication, one backend caller lane, queue and timeline atomic ordering, explicit synchronization discharge, no executor-worker backend calls, nonblocking stop request, reverse join/cleanup, uncertain ownership retention, exact accounting, and absence of post-start allocation or detached work.
-    - Promotion review is deferred. Native CUDA/XDMA v2 and vendor controls remain M17-04, combined staged execution remains M17-05, and every vendor latency, physical memory/topology/timestamp, hardware, HIL, RT1, or RT2 claim requires later named retained evidence and separate human approval.
+    - Human public-API and compatibility review must approve the additive vendor table/version strategy, exact aggregate prefixes/opcodes/records/capacities, installed-package shape, conditional identity, and preservation of C ABI v8, device ABI v1, all three HAL extension versions, Runtime statuses, schemas, release, support, and license boundaries.
+    - Human CUDA/XDMA concurrency, lifetime, and safety review must confirm graph/stream/event/buffer ownership, staged-copy order, accepted-before-complete publication, MMIO aperture and access validation, event-stop wakeup, no executor-worker vendor calls, fixed storage, quarantine, reverse retryable cleanup, and no detached work or false release.
+    - A maintainer must review every physical XDMA control write or event-node test plan before it is run because the user BAR may contain destructive design-specific registers. Such a run is not required for this software batch and cannot promote a support tuple.
+    - Promotion review is deferred. M17-05 owns the combined staged sample; M18 owns named CUDA/XDMA/combined hardware and RT qualification. Cross-backend timelines, direct peer DMA, device-rate execution, support-matrix changes, release, and deployment require separate approval.
 risk:
   class: high
   hazards:
-    - accepting a timeline signal before queue ownership commits can leave an unreachable wait value or allow a synchronous completion to release the wrong graph token
-    - malformed, duplicate, regressive, or cross-backend completion points can corrupt monotonic timeline state or publish only part of a multi-signal completion
-    - a missing or misordered flush, invalidate, or staged-copy command can expose stale or incoherent memory even though registration and range validation pass
-    - a full multi-producer queue, ABA-prone slot generation, or weak publication ordering can overwrite an accepted batch, execute it twice, or race completion and cancellation
-    - a backend callback that blocks, ignores timeout/stop, throws, or completes during submission can deadlock shutdown, strand ownership, or run vendor work on an executor lane
-    - adding a conditional runtime-owned thread role can undercount stacks, aggregate policy success incorrectly, start callbacks before verification, or break reverse cleanup
-    - new fixed batch/timeline storage can overflow arithmetic, be omitted or double-counted, allocate after start, or leak across Runtime instances
-    - appending C++ aggregates can break positional source consumers or warning-clean MSVC builds while stable C ABI checks remain green
-    - hashing mutable batch IDs, timeline progress, callbacks, or addresses can make compatible configurations nondeterministic; failing to hash semantic declarations can accept incompatible artifacts
-    - portable injected lanes and fake completions can be overstated as bounded vendor latency, real CUDA/XDMA synchronization, physical hardware, HIL, or RT qualification
+    - a caller-owned graph executable, context, stream, module, device allocation, or bound host span can be destroyed while an accepted batch or quarantined CUDA operation still references it
+    - a graph identifier or buffer binding can be omitted from compatibility identity, allowing a different graph or allocation contract to consume an otherwise compatible artifact
+    - multi-stream or out-of-order submission can satisfy a Runtime timeline before the CUDA event that physically protects its graph and staged memory has completed
+    - a CUDA call or XDMA character-device call can block beyond its declared timeout, making stop wait while ownership must remain retained
+    - an error after partial CUDA command enqueue can publish a false batch completion, reuse an event, or release a staged buffer before the stream is drained
+    - an unchecked XDMA user-BAR write can corrupt device state, trigger destructive hardware behavior, or target the wrong PCI function/bitstream
+    - event-index, timeout conversion, poll wakeup, short-read, EINTR, close, or re-open races can lose an event, hang shutdown, leak a descriptor, or fabricate cancellation
+    - extending vendor callback/config records can break positional source consumers or route version-1 drivers into unavailable Graph/control callbacks
+    - backend-private graph/queue/event/worker bytes can be counted as Runtime-owned, omitted from declarations, allocated after start, or shared across Runtime instances
+    - fake CUDA Graph and XDMA MMIO/event drivers, compile-only toolkit checks, hosted CI, or documentation can be overstated as physical control, interrupt, latency, HIL, or RT evidence
   stop_conditions:
-    - the exact baseline commit is unavailable, dirty, or lacks merged M17-02 commit ee1ddd21c483687c4237f3b53ec8d15029d20ff2 and all retained M15/M16/M17-01/M17-02 evidence
-    - target contracts or actual M17-02 code contradict the additive extension, same-backend timeline, explicit synchronization, conditional-lane, identity, or ownership model and require a new product/architecture decision
-    - implementation requires changing stable C ABI v8, SONAME 8, any device-ABI-v1 declaration/layout/value, HAL-v2 core version/table semantics, memory/topology extension version/semantics, Runtime status values, runtime-profile schema 7/25 keys, observability/rate/artifact schemas or IDs, installed header/target inventory, support matrices, release version, or license
-    - correct behavior requires more than the fixed public capacities, silent truncation, hidden synchronization, a cross-backend timeline, direct peer DMA, or treating an unverified memory/topology/timestamp fact as established
-    - an opted-in backend cannot keep every potentially blocking submit callback off executor workers or cannot provide a nonblocking idempotent stop request and finite-time callback-return contract without detaching a thread or clearing uncertain ownership
-    - accepted-before-complete, exact-once graph release, monotonic multi-signal publication, queue cancellation, reset exclusion, or reverse retryable cleanup cannot be made race-free with bounded preallocated storage
-    - adapted-v1, core-only-v2, or M17-02 memory-only behavior and identity cannot remain exact when the batch extension is absent, or the conditional submission role cannot be represented and accounted without changing a protected schema
-    - native CUDA/XDMA v2 adapter code, CUDA Graph, XDMA control/MMIO/event code, device-rate dispatch, plugin/factory loading, combined-device execution, direct peer DMA, or support-matrix promotion becomes necessary to satisfy acceptance
-    - deterministic functional tests require timing sleeps/tolerances, a fixed CPU/NUMA/PCI topology, root privilege, physical CUDA or FPGA/XDMA hardware, controlled timing hosts, secrets, signing, release, deployment, or production access
+    - the exact baseline commit is unavailable, dirty, or lacks merged M17-03 commit `0d1c95a4e859c9136b28b912735610cd58016e95` and every retained M15/M16/M17-01/M17-02/M17-03 evidence record
+    - target contracts or actual M17-03 code contradict the vendor-only native-v2 adapter, pre-instantiated CUDA Graph, stable opcode, bounded XDMA control/event, ownership, or isolated-lane model and require a new product/architecture decision
+    - implementation requires changing stable C ABI v8, SONAME 8, any device-ABI-v1 declaration/layout/value, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime status values, runtime-profile schema 7/25 keys, observability/rate/artifact schemas or IDs, installed header/target inventory, support matrices, release version, or license
+    - correct implementation requires modifying the generic HAL, Runtime, device manager, command validator, heterogeneous-memory, executor, policy, accounting, or telemetry implementation instead of fitting the accepted M17-01 through M17-03 extension contracts
+    - CUDA Graph capture, instantiate, update, clone, upload, destruction, dynamic allocation, an unbounded registry, pointer-derived identity, or Runtime ownership is required rather than configuration-time registration of a caller-owned executable
+    - graph selection, XDMA control offset/access, or event index cannot be represented by stable declaration-visible opcodes without changing the protected generic command/timeline contract or hashing mutable native values
+    - a vendor callback can execute on an executor worker, or a blocked submission/event wait cannot retain ownership and respond to checked stop without detaching work, inventing completion, clearing a live handle, or weakening the finite timeout/stop contract
+    - XDMA MMIO cannot be bounded to an explicit configured aperture and exact access/width, or physical execution is required to make portable malformed/failure-injected tests pass
+    - existing device-ABI-v1 CUDA/XDMA behavior, identity, package consumers, worker topology, timeout quarantine, or cleanup retry cannot remain exact when the native-v2 accessors are unused
+    - the combined CPU-GPU-FPGA-CPU sample, cross-backend timeline, device-rate dispatch, direct peer DMA, plugin/factory loading, support-matrix promotion, hardware qualification, signing, release, deployment, or production access becomes necessary to satisfy acceptance
+    - deterministic validation requires fixed physical CUDA/FPGA hardware, device nodes, root privilege, a particular PCI/IRQ/IOMMU topology, destructive MMIO, secrets, timing tolerances, controlled hardware, or post-selected thresholds
     - a required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the optional command/timeline extension and Runtime phase/timeline API, fixed batch queues and validation, conditional per-backend submission lanes and thread-role/accounting integration, manager completion/timeline state, identity/accounting changes, tests/CI, documentation/governance, release digests, and retained M17-03 evidence as one batch. Before discarding a running integration, close batch admission, issue the nonblocking backend stop request, resolve or retain every queued/submitting/outstanding batch, join submission lanes in reverse backend order, quiesce the completion lane, and complete existing reverse memory/backend/thread/region cleanup; never detach a blocked lane, invent a completion, regress a timeline, or clear uncertain backend/memory ownership. Exact ee1ddd M17-02 single-submit and heterogeneous-memory behavior is the fallback, with no data migration, persistent host setting, support promotion, release, or deployment rollback.
+  strategy: Revert the additive vendor-v2 accessors and callback-table tails, CUDA staged-domain/graph registry and command path, XDMA control/event configuration and Linux driver operations, tests/CI/package consumers, documentation/governance, release digests, and retained M17-04 evidence as one batch. Before removing a live integration, close Runtime batch admission, issue vendor stop requests, retain every queued/submitting/outstanding or driver-owned batch, drain or quarantine CUDA streams/events/graphs and XDMA transfers/MMIO/event waits, join Runtime submission and backend I/O lanes in reverse ownership order, close descriptors only after calls return, and complete existing reverse memory/backend/thread/provider cleanup. Never destroy a graph/context/stream, unbind/free a buffer, close a live descriptor, detach a lane, fabricate a timeline signal, or clear uncertain ownership. The fallback is exact baseline M17-03 with the unchanged device-ABI-v1 CUDA/XDMA candidate APIs; no data migration, persistent host mutation, support promotion, release, or deployment rollback is authorized.
   data_migration: none
-  release_action: Do not publish a release, promote CUDA/XDMA/peer/combined/RT support, alter qualification records, or mark M17/CAP-M17 complete from this batch.
+  release_action: Do not publish a release, promote CUDA/XDMA/combined/peer/RT support, alter qualification records, execute unreviewed physical MMIO, or mark M17/CAP-M17 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M17-03-<date>.md
-    - exact baseline, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public extension, command, batch, timeline, completion, Runtime phase, and thread-role definitions with exact versions, sizes, defaults, enum values, capacities, ownership, source compatibility, exception behavior, and rejected-input rules
-    - batch validation tables for dispatch/copy/flush/invalidate order, logical-memory translation, required synchronization discharge, timeline wait/signal acceptance, queue ownership, early completion, cancellation, timeout, loss/reset, and whole-completion publication
-    - per-backend submission-lane creation, startup barrier, policy apply/readback, backend-call thread identity, bounded enqueue/dequeue counts, blocked-stop release, reverse join, failure rollback, retryable cleanup, and two-runtime isolation evidence
-    - exact command/timeline/queue/lane storage and runtime-stack reconciliation inside device control, the M15 logical ledger, and the unchanged six-row MemoryPlan, including backend-private exclusions and post-start no-allocation/ThreadSanitizer results
-    - proof that adapted-v1, core-only-v2, and memory-only-v2 backends retain exact M17-02 behavior, identity, thread inventory, and no invented capability, plus unchanged mock/CUDA/XDMA-v1 regression results
-    - semantic identity comparisons, unchanged checkpoint/input-log/rate-action/observability schemas, installed package consumers, and C++ source/C ABI/device ABI/HAL-core/memory-extension compatibility status
-    - changed and preserved invariants, rollback path, residual risks, and all unperformed native CUDA/XDMA-v2, CUDA Graph, XDMA control/MMIO/event, cross-backend timeline, direct-peer, combined-device, controlled-performance, privileged-native, physical-memory/topology/timestamp, hardware, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static, unit, malformed/failure-injected, synthetic command/timeline/memory-ordering, mock/fake-driver, sanitizer, package, bounded-memory/no-allocation, lifecycle-recovery, concurrency, and portable RT0 functional contract behavior only. A fixed queue, injected blocked backend, fake completion, hosted CI run, fixture, preflight, benchmark, or document does not establish bounded vendor latency, physical synchronization/coherency, native CUDA/XDMA-v2 behavior, CUDA Graph, XDMA control/events, hardware, HIL, field performance, worst-case timing, RT1, RT2, signing, release, deployment, or production readiness; those claims require later implementation and named retained qualification evidence.
+    - docs/evidence/M17-04-<date>.md
+    - exact baseline and M17-03 ancestry, changed files, commands, exit codes, focused/default/opt-in package test counts, required CI run/check identifiers, and human review result
+    - vendor public table/config/registration/graph/control/event definitions with exact versions, sizes, aggregate prefixes, defaults, reserved tails, enum/opcode values, capacities, ownership, exception behavior, and rejected-input rules
+    - CUDA native-v2 capability/snapshot and staged-registration matrix, stable graph identifiers/bindings, ordered copy/kernel/graph/event call traces, timeline publication, timeout/loss/reset/stop quarantine, and caller-lifetime evidence
+    - XDMA native-v2 capability/snapshot and H2C/C2H/control/event command matrix, exact offset/index/access/width/timeout validation, backend-call thread identity, stop wakeup, partial-open/close/reopen recovery, and no-driver-entry negative results
+    - accepted-before-complete, whole-completion, queue saturation, early completion, cancel/timeout, blocked-stop, reverse cleanup, first-error, unresolved-only retry, destructor fail-safe, and two-runtime isolation evidence for both vendors
+    - exact Runtime-owned and backend-private control/registry/queue/event/worker byte reconciliation, unchanged six-row MemoryPlan/provider boundary, post-start no-allocation results, ThreadSanitizer results, and truthful external XDMA worker accounting
+    - proof that device-ABI-v1 CUDA/XDMA registrations retain exact M17-03 behavior, identity, call counts, package surface, thread inventory, quarantine, and cleanup when native-v2 is unused
+    - conditional semantic identity comparisons, unchanged checkpoint/input-log/rate-action/observability schemas, installed default and opt-in consumers, and C++ source/C ABI/device ABI/HAL-version compatibility status
+    - changed and preserved invariants, rollback path, residual risks, and all unperformed physical graph execution, physical pinning/device memory/coherency/topology/timestamps, XDMA MMIO/interrupts, combined execution, cross-backend timeline, direct peer, controlled-performance, privileged-native, hardware, HIL, field, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish static, unit, malformed/failure-injected, fake CUDA Graph, fixture XDMA control/event, portable native-v2 protocol, sanitizer, package, bounded-memory/no-allocation, lifecycle-recovery, concurrency, and portable RT0 functional contract behavior only. A registered opaque graph, fake driver, injected MMIO aperture/event, compile-only CUDA toolkit or Linux XDMA adapter, hosted CI run, preflight, benchmark, schema, or document does not establish physical graph execution, pinning, device memory, DMA, coherency, topology, timestamp/interrupt accuracy, safe design-specific register effects, bounded vendor latency, hardware, HIL, field performance, worst-case timing, RT1, RT2, signing, release, deployment, or production readiness. Those claims require later named retained qualification evidence and human promotion; M17 and CAP-M17 remain incomplete.

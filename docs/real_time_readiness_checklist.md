@@ -137,3 +137,18 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - [ ] Native CUDA/XDMA-v2 latency, physical memory coherence, hardware/HIL,
   field, worst-case timing, RT1, and RT2 remain unqualified and require named
   later evidence.
+
+## M17-04 portable vendor-control status
+
+- [x] Native CUDA and XDMA registrations use the existing bounded M17-03
+  submission/service and backend-worker paths without executor-worker calls.
+- [x] CUDA Graph identifiers, copied bindings, one-stream ordering, one-event
+  completion, malformed input, timeout, stop, and checked cleanup have
+  fake-driver functional gates.
+- [x] XDMA control aperture/width/access and event index/timeout/stop validation
+  have portable fixture gates before any driver entry.
+- [x] Device-ABI-v1 behavior, stable C ABI v8, schemas, package inventory,
+  MemoryPlan equation, release, and support matrices remain unchanged.
+- [ ] Physical Graph execution, pinning/device memory/coherency, design-safe
+  MMIO, interrupts, hardware/HIL, field, bounded latency, RT1, and RT2 remain
+  unqualified and require named later evidence.

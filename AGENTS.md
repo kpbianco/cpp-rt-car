@@ -16,8 +16,10 @@ domains, copied topology/timestamp contracts, and canonical heterogeneous
 registration while preserving the legacy core path. M17-03 adds the bounded
 command/timeline extension, same-backend timeline completion, explicit ordered
 memory synchronization, and one isolated Runtime submission lane per opted-in
-backend. Native vendor-v2 controls, combined execution, and physical hardware
-or RT qualification remain deferred.
+backend. M17-04 adds native HAL-v2 registration paths to the preserved CUDA and
+XDMA candidates, bounded caller-owned CUDA Graph launch, and bounded XDMA
+control/event operations. Combined execution and physical hardware or RT
+qualification remain deferred.
 
 ## Read before nontrivial work
 
@@ -89,7 +91,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `9878923e6d34d138181deaea9ed81fd424c8ab28`; harness version: `2`.
+- Control revision: `8f94ced14abf34d7818c44edc73ae3cd204d5b6b`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.
