@@ -13,14 +13,22 @@
 
 namespace rt {
 
-inline constexpr std::uint32_t cuda_driver_api_version = 1;
+inline constexpr std::uint32_t cuda_driver_api_version_1 = 1;
+inline constexpr std::uint32_t cuda_driver_api_version_2 = 2;
+inline constexpr std::uint32_t cuda_driver_api_version =
+    cuda_driver_api_version_1;
+// Frozen LP64/LLP64 byte size of the complete version-1 positional prefix.
+inline constexpr std::size_t cuda_driver_api_v1_struct_size = 224;
 inline constexpr std::size_t cuda_kernel_argument_capacity = 8;
 inline constexpr std::size_t cuda_kernel_scalar_capacity = 48;
+inline constexpr std::size_t cuda_graph_capacity = 16;
+inline constexpr std::size_t cuda_graph_buffer_binding_capacity = 8;
 
 using CudaContext = std::uintptr_t;
 using CudaStream = std::uintptr_t;
 using CudaEvent = std::uintptr_t;
 using CudaFunction = std::uintptr_t;
+using CudaGraphExec = std::uintptr_t;
 using CudaDeviceAddress = std::uint64_t;
 
 enum class CudaDriverResult : std::int32_t {
@@ -40,7 +48,7 @@ enum class CudaDriverResult : std::int32_t {
  * the production adapter.
  */
 struct CudaDriverApi {
-    std::uint32_t struct_size = sizeof(CudaDriverApi);
+    std::uint32_t struct_size = cuda_driver_api_v1_struct_size;
     std::uint32_t api_version = cuda_driver_api_version;
     void* user_data = nullptr;
 
@@ -122,8 +130,20 @@ struct CudaDriverApi {
     std::uint64_t (*monotonic_time_ns)(
         void* user_data) noexcept = nullptr;
 
+    // Frozen version-1 positional prefix ends after this reserved array.
     std::uint64_t reserved[8]{};
+
+    CudaDriverResult (*graph_launch)(
+        void* user_data,
+        CudaGraphExec graph,
+        CudaStream stream) noexcept = nullptr;
+    std::uint64_t reserved_v2[8]{};
 };
+
+static_assert(offsetof(CudaDriverApi, graph_launch) ==
+              cuda_driver_api_v1_struct_size);
+inline constexpr std::size_t cuda_driver_api_v2_struct_size =
+    sizeof(CudaDriverApi);
 
 struct CudaBackendConfig {
     std::size_t queue_capacity = 64;
@@ -141,6 +161,18 @@ inline constexpr std::uint32_t cuda_device_opcode_copy_device_to_host = 2;
 inline constexpr std::uint32_t cuda_device_opcode_copy_device_to_device = 3;
 inline constexpr std::uint32_t cuda_device_opcode_memset_d8 = 4;
 inline constexpr std::uint32_t cuda_device_opcode_launch_kernel = 5;
+inline constexpr std::uint32_t cuda_device_opcode_graph_base = 0x4347'0000u;
+
+[[nodiscard]] constexpr std::uint32_t cuda_device_opcode_graph(
+    std::uint16_t graph_id) noexcept {
+    return cuda_device_opcode_graph_base |
+           static_cast<std::uint32_t>(graph_id);
+}
+
+struct CudaGraphBufferBinding {
+    std::string_view name{};
+    std::uint32_t access = 0;
+};
 
 enum class CudaKernelArgumentKind : std::uint8_t {
     none = 0,
@@ -262,6 +294,15 @@ public:
     [[nodiscard]] rtfw_device_backend_api api() noexcept;
 
     /*
+     * Additive native HAL-v2 registration over this same candidate object.
+     * The returned tables remain borrowed until checked Runtime shutdown.
+     * A candidate object may be initialized through either api() or this
+     * registration, never both at once.
+     */
+    [[nodiscard]] HalV2BackendRegistration hal_v2_registration(
+        std::string_view name) noexcept;
+
+    /*
      * Bind a runtime buffer name to caller-owned device storage before
      * initialize(). Otherwise register_buffer() allocates an owned mirror when
      * allocate_device_mirrors is enabled.
@@ -278,6 +319,16 @@ public:
     [[nodiscard]] rtfw_device_status register_kernel(
         CudaFunction function,
         std::uint64_t& out_kernel_token) noexcept;
+
+    /*
+     * Register one caller-created and caller-instantiated graph executable.
+     * The graph and every named buffer remain caller-owned through checked
+     * shutdown. IDs are stable declaration values, never derived from handles.
+     */
+    [[nodiscard]] rtfw_device_status register_graph(
+        std::uint16_t graph_id,
+        CudaGraphExec graph,
+        std::span<const CudaGraphBufferBinding> bindings) noexcept;
 
 private:
     struct Impl;

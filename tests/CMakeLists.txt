@@ -84,6 +84,7 @@ if (SIM_GTEST_AVAILABLE)
         test_determinism_replay.cpp
         test_device_runtime.cpp
         test_cuda_backend.cpp
+        test_vendor_hal_v2.cpp
         test_rt_pipeline.cpp
         test_platform_gate.cpp
         integration/test_determinism.cpp
@@ -101,6 +102,7 @@ if (SIM_GTEST_AVAILABLE)
             test_determinism_replay.cpp
             test_device_runtime.cpp
             test_cuda_backend.cpp
+            test_vendor_hal_v2.cpp
         )
     endif()
 
@@ -137,6 +139,7 @@ if (SIM_GTEST_AVAILABLE)
         PRIVATE
             rtfw_runtime
             rtfw_cuda_backend
+            rtfw_xdma_backend
             ${SIM_GTEST_LIBRARIES})
     if (RTFW_BUILD_EXPERIMENTAL)
         target_link_libraries(
@@ -205,6 +208,16 @@ if (SIM_GTEST_AVAILABLE)
             --gtest_filter=HeterogeneousMemory.*:HalV2.*Memory*:DeviceRuntime.*Memory*:MemoryPlan.*Heterogeneous*:DeterminismReplay.*Heterogeneous*:TraceNoAlloc.*Heterogeneous*)
     set_tests_properties(
         m17_heterogeneous_memory_topology PROPERTIES TIMEOUT 60)
+    add_test(
+        NAME m17_cuda_graph
+        COMMAND simcore_tests
+            --gtest_filter=VendorHalV2.*:CudaBackend.*Graph*:CudaBackend.*HalV2*:HeterogeneousMemory.*Cuda*:MemoryPlan.*Vendor*:DeterminismReplay.*Vendor*:TraceNoAlloc.*Vendor*)
+    set_tests_properties(m17_cuda_graph PROPERTIES TIMEOUT 60)
+    add_test(
+        NAME m17_xdma_control
+        COMMAND simcore_tests
+            --gtest_filter=VendorHalV2.*:MemoryPlan.*Vendor*:DeterminismReplay.*Vendor*:TraceNoAlloc.*Vendor*)
+    set_tests_properties(m17_xdma_control PROPERTIES TIMEOUT 60)
     add_test(
         NAME m16_rate_timeline
         COMMAND simcore_tests
@@ -362,5 +375,9 @@ endif()
 add_executable(rtfw_xdma_backend_tests xdma_backend_tests.cpp)
 target_link_libraries(
     rtfw_xdma_backend_tests PRIVATE rtfw_xdma_backend)
+if (TARGET rtfw_xdma_linux)
+    target_link_libraries(
+        rtfw_xdma_backend_tests PRIVATE rtfw_xdma_linux)
+endif()
 add_test(NAME xdma_backend COMMAND rtfw_xdma_backend_tests)
 set_tests_properties(xdma_backend PROPERTIES TIMEOUT 60)

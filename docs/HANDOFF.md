@@ -2,64 +2,60 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-03 starts from exact target
-baseline `ee1ddd21c483687c4237f3b53ec8d15029d20ff2`; M17-01 and M17-02 are
-merged prerequisites. M17 remains active and incomplete. The binding contract
-is `contracts/active-batch.yaml`, sourced from control revision
-`048c26e8656a4cfce7afd176bafa1476ab11195b`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-04 starts from exact target
+baseline `122f9919674b5f09e321deb8ba6701f78b2993ce`; M17-03 is merged in PR
+219 at `0d1c95a4e859c9136b28b912735610cd58016e95`, and the baseline changes only
+portfolio-harness metadata after that merge. M17 remains active and incomplete.
+The binding contract is `contracts/active-batch.yaml`, sourced from control
+revision `8f94ced14abf34d7818c44edc73ae3cd204d5b6b`.
 
 ## Implemented boundary
 
-M17-03 appends optional command/timeline extension version 1 to the existing
-C++ HAL-v2 backend registration without changing its `{name, api,
-memory_topology}` aggregate prefix. Runtime copies its fixed capability table
-and requires submit, bounded nonblocking poll, cancel, and nonblocking stop
-request callbacks. Malformed sizes, versions, capacities, callbacks, reserved
-data, exceptions, and partial outputs fail transactionally.
+M17-04 keeps the CUDA and XDMA `api()` device-ABI-v1 candidate paths exact and
+adds `hal_v2_registration(std::string_view) noexcept` accessors backed by the
+existing HAL core v2, memory/topology v1, and command/timeline v1 contracts.
+Each candidate object is borrowed through one selected path until checked
+shutdown succeeds. Driver tables preserve their version-1 aggregate prefixes
+and defaults; exact version 2 adds CUDA Graph launch or XDMA control/event/stop
+callbacks only when the complete required configuration is present.
 
-The public bounds are 16 commands, eight waits, eight signals, 16 timelines,
-128 inline payload bytes, and eight references per command. Configuring-only
-timeline and batch-phase registration is instance/backend bound. Providers run
-on the ordinary CPU graph path and fill a caller-borrowed batch, but no backend
-function executes there. Runtime validates declared shape, dynamic bounds,
-prior-accepted waits, increasing signals, access/ranges, and ordered explicit
-flush/invalidate or staged copy operations.
+CUDA native-v2 uses an explicit staged domain, one configured command stream,
+and fixed completion events. It accepts at most 16 caller-owned pre-instantiated
+graph handles, unique 16-bit nonzero IDs, and eight copied bindings per graph.
+`0x43470000 | graph_id` is the stable dispatch identity. Batch copies, kernels,
+and graphs execute in order; partial enqueue, timeout, event failure, loss,
+reset, and stop retain every possibly referenced owner until safe drain.
 
-Each opted-in backend has one fixed Runtime-owned submission thread using role
-value 6. Bounded admission copies into preallocated slots; the submission lane
-alone calls submit and the existing service lane alone polls completions.
-Whole completion batches require known unique IDs, exact declared signal sets,
-valid statuses, and the declared M17-02 timestamp domain. Timeout, cancel,
-submit failure/exception, malformed completion, stop, and reset/loss paths are
-terminal and exact-once. A blocked submit is released through stop request and
-cancel; no lane detaches.
+XDMA native-v2 retains H2C/C2H and adds bounded 32-bit little-endian control
+read/write plus one finite user-event wait. Stable opcodes encode the checked
+word offset or event index. A configured aperture is at most 262144 bytes and
+there are at most 16 events. The Linux adapter copies the optional paths,
+opens them close-on-exec, wakes event waits through an idempotent stop request,
+and never closes a descriptor while a fixed I/O worker may reference it.
 
-All new state is included once in device control and the existing logical
-extent ledger. Submission stacks are included once in runtime-stack
-accounting. The six-row memory plan, three provider regions, schemas, installed
-inventory, release, support, and license remain unchanged. Batch capabilities,
-timeline descriptors, command order, operations, references, and point handles
-are conditional compatibility identity; mutable progress and runtime values
-are excluded.
+Backend-private storage remains fixed and reported through existing capability
+bytes. Runtime-owned command storage, submission/service lanes, six MemoryPlan
+rows, three provider regions, schemas, installed inventory, release, support,
+and license remain unchanged.
 
 ## Protected decisions
 
 - Preserve C ABI v8, 70 exports/fingerprint, SONAME 8, device ABI v1, HAL core
-  v2, memory extension v1, Runtime status values, and all existing schemas.
-- Preserve the legacy single-submit path and no invented capability for
-  adapted-v1, core-only-v2, and memory-only-v2 backends.
-- Keep command queues fixed, same-backend only, explicitly synchronized, and
-  free of executor-worker vendor calls, hidden work, spill, or detached lanes.
-- Keep CUDA/XDMA-v2 controls, CUDA Graph, XDMA MMIO/events, device-rate work,
-  cross-backend timelines, combined execution, and direct peer DMA deferred.
-- Do not claim hardware, HIL, field, bounded vendor latency, RT1/RT2, Unreal,
-  signing, release, staging, deployment, or production validation.
+  v2, memory extension v1, command extension v1, Runtime statuses, and schemas.
+- Preserve exact device-ABI-v1 CUDA/XDMA behavior and conditional identity when
+  native registration is unused.
+- Keep vendor work off executor workers and within the existing Runtime
+  submission/service lanes or fixed XDMA I/O team.
+- Never infer graph ownership, CUDA pinning/device memory/coherency, a safe FPGA
+  register map, interrupt latency, driver cancellation, or direct peer DMA.
+- Keep the combined sample, cross-backend timelines, device-rate execution,
+  physical qualification, support promotion, release, and deployment deferred.
 
 ## Completion output
 
 Run the exact local validation contract through `./scripts/agent-verify.sh
-full`, C ABI verification, and the SONAME check. Record acceptance mapping,
-commands/results, identity/accounting facts, lifecycle and rollback behavior,
-residual risks, and unperformed validation in
-`docs/evidence/M17-03-2026-08-11.md`. Mandatory CI and human review remain
+full`, package consumers, C ABI verification, and the SONAME check. Record
+acceptance mapping, exact commands/results, identity/accounting facts,
+lifecycle and rollback behavior, residual risks, and unperformed validation in
+`docs/evidence/M17-04-2026-08-12.md`. Mandatory CI and human review remain
 external. Do not commit, push, open a pull request, release, or deploy.

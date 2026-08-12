@@ -250,3 +250,49 @@ has:
 - an explicit pass/fail review committed to the versioned support matrix.
 
 No tuple has completed those gates in the repository at 1.2.1.
+
+## M17-04 native HAL-v2 and CUDA Graph control
+
+`CudaDeviceBackend::api()` remains the exact device-ABI-v1 candidate path.
+`hal_v2_registration(name)` is additive and returns the unchanged HAL core-v2,
+memory/topology-v1, and command/timeline-v1 tables over the same borrowed
+object. One object can use only one path until checked shutdown succeeds.
+
+`CudaDriverApi` retains its complete version-1 positional prefix and
+version-1 default. Exact version 2 adds `graph_launch`; a version-1 table
+ignores only an all-zero appended tail and exposes no Graph capability. The
+production adapter maps that callback to `cuGraphLaunch`. No capture,
+instantiation, clone, update, upload, or destruction API exists in RTFW.
+
+The native snapshot exposes only borrowed host staging, the explicit staged
+CUDA domain, one host/device topology relationship, and host-monotonic
+completion timestamps. Registration uses copied names and metadata plus the
+existing device mirror or caller pre-binding rules. Staged memory requires
+explicit `copy_to_device` and `copy_from_device` commands. A successful fake or
+Driver API call is not physical pinning, allocation, coherency, topology, or
+clock evidence.
+
+At most 16 caller-created and caller-instantiated graph-exec-compatible handles
+may be registered before initialization. Each has a unique caller-selected ID
+in `[1, 65535]` and up to eight copied stable buffer-name/access bindings. The
+stable dispatch opcode is `0x43470000 | graph_id`.
+
+A graph command has zero payload and exactly its registered bindings in order.
+Unknown or duplicate IDs, high foreign bits, binding/name/access/token/range
+mismatch, legacy/foreign buffers, overflow, and post-initialize mutation fail
+before any CUDA call. Native batches use exactly one configured command stream:
+generic staged copies and registered kernel/Graph dispatches enqueue in declared
+order, followed by one precreated completion event for the whole batch.
+
+Partial enqueue or event failure quarantines the complete possibly referenced
+batch. Timeout retains the slot until the event is physically ready. Context
+loss, reset, stop, shutdown, and retry preserve graph, stream, event, buffer,
+module, function, context, and external-allocation ownership until successful
+drain or explicit final host context reclamation. A graph executable remains
+caller-owned throughout; Runtime never fabricates a timeline completion.
+
+All native registries, events, and queue state are fixed backend-private
+storage reported through existing capability bytes. Portable fake Graph tests,
+sanitizers, or a compile-only CUDA toolkit package establish protocol behavior
+only. They do not qualify a GPU, graph execution, bounded vendor latency,
+hardware, HIL, field, RT1, or RT2 behavior.

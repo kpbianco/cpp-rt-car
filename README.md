@@ -27,14 +27,14 @@ versioned observability/replay, and asynchronous device integration.
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
 | Multi-rate simulation | M16 complete in merged history | Bounded domains/reference order, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
-| HAL v2 command/timeline, memory/topology, and device ABI v1 compatibility | M17-03 implemented locally; external gates pending | Preserved HAL core v2, memory extension v1, complete v1 adapter, and legacy single submit; added bounded same-backend batches/timelines, explicit synchronization, isolated submission lanes, exact accounting/identity, and retryable cleanup |
+| HAL v2 command/timeline, memory/topology, and device ABI v1 compatibility | M17-04 implemented locally; external gates pending | Preserved HAL core v2, memory extension v1, complete v1 adapter, and legacy single submit; bounded same-backend batches/timelines now include native CUDA Graph and XDMA control/event registrations without changing the generic Runtime path |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
 | Target-path observability | Implemented RT0 surface | Schema-v2 fixed records and 32 metrics, bounded nonblocking emission, runtime-bound trace/metric cursors, explicit loss, provenance metadata, and non-RT JSON export |
 | Target-path checkpoint/replay | Implemented D0/D1 surface | Canonical state registration, stable little-endian checkpoints/input logs, transactional restore, worker-count-independent D1 identity, and synchronous input replay |
 | Target-path device ABI/mock | Implemented RT0 surface | Size/versioned poll-only backend ABI, registered buffers, nonblocking device phases, a runtime-owned completion lane, and deterministic fault-injectable CPU mock |
-| CUDA Driver API backend | Candidate; not hardware-qualified | Optional caller-owned context/stream adapter with fixed event/buffer/kernel registries, pinned-host registration, async copies/kernel launch, timeout quarantine, fake-driver tests, and a raw-evidence tool |
+| CUDA Driver API backend | Candidate; not hardware-qualified | Optional caller-owned context/stream adapter with fixed event/buffer/kernel/Graph registries, native HAL-v2 registration, staged copies, ordered kernel/Graph launch, timeout quarantine, fake-driver tests, and a raw-evidence tool |
 | Legacy phase/range execution | Experimental | `SimCore` retains its separate phase, range, reduction, and pacing path for compatibility |
 | Legacy `SimCore` graph | Experimental | Topological levels exist, but this path does not inherit the target runtime's cycle/resource validation |
 | Legacy memory utilities | Experimental | Per-thread frame arenas and NUMA helpers remain outside the target plan; the Release arena overflow path can fall back to heap allocation |
@@ -48,7 +48,7 @@ versioned observability/replay, and asynchronous device integration.
 | Runtime configuration | Implemented schema 7 | Twenty-five strict typed keys include bounded execution/device capacities, time/platform, provenance, determinism, artifacts, and the host-adapter policy; unknown keys fail |
 | Runtime profiles/autotune | Implemented RT0 host tooling | Allocation-free transactional profile parser, exact version/schema compatibility, complete resolved configs, profile-driven target-runtime demo, generated-profile round trip, and direct frame metrics |
 | Legacy GPU stub | Experimental compatibility path | Detached CPU-thread stub outside `rt::Runtime`; superseded for new CUDA work by the separate M9 candidate |
-| Xilinx XDMA AXI-MM backend | Candidate; not hardware-qualified | Portable fixed-capacity state machine plus an opt-in Linux character-device adapter, timeout quarantine, fake-driver stress tests, and raw-evidence tooling for one named stack |
+| Xilinx XDMA AXI-MM backend | Candidate; not hardware-qualified | Portable fixed-capacity state machine with native HAL-v2 transfer/control/event commands plus an opt-in Linux character-device adapter, stop-aware timeout quarantine, fake-driver tests, and raw-evidence tooling for one named stack |
 
 `rt::Runtime` does not use the legacy `WorkerPool`, `rt::Scheduler`, or
 `FiberPool`. Those compatibility experiments retain different lifetime and
@@ -248,8 +248,9 @@ declared running-state timestamp correlation. Core-only v2 and adapted-v1
 backends keep one implicit borrowed-host domain and the exact M17-01 path. See
 the [heterogeneous-memory contract](docs/heterogeneous_memory.md). M17-03 adds
 fixed command batches, same-backend timelines, explicit synchronization, and
-isolated per-backend submission lanes. M17 remains incomplete; native vendor
-controls, combined execution, and physical qualification belong to later
+isolated per-backend submission lanes. M17-04 adds native registrations for
+caller-owned CUDA Graphs and bounded XDMA control/event commands. M17 remains
+incomplete; combined execution and physical qualification belong to later
 batches.
 
 `step()` remains synchronous to the host, but dependency-ready phases may run
@@ -317,9 +318,9 @@ cross-rate selection/storage. M16-03 adds opt-in admission, CPU dispatch,
 transfer, and late-frame policy. M16-04 adds optional shedding/recovery and
 versioned telemetry; M16 is complete in merged target history. M17-01 adds the
 HAL v2 core and complete device-ABI-v1 compatibility path without promoting
-later M17 or M18 capabilities. M17-03 adds the bounded command/timeline and
-isolated-lane C++ contract without promoting physical memory, DMA, coherency,
-clock, native vendor-control, or qualification claims. The
+later M17 or M18 capabilities. M17-04 adds bounded native vendor commands to
+the M17-03 isolated-lane C++ contract without promoting physical memory, DMA,
+coherency, clock, hardware, or qualification claims. The
 [architecture guide](docs/architecture.md) distinguishes supported and
 experimental paths.
 

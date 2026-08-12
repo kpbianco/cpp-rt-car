@@ -65,9 +65,13 @@ semantics, topology and timestamp domains, and running-state timestamp
 correlation. Core-only v2 and adapted-v1 backends keep one implicit borrowed
 host domain and the exact M17-01 path. M17-03 appends optional fixed-capacity
 command batches, same-backend timeline completion, explicit synchronization,
-and one isolated Runtime submission lane per opted-in backend. It does not add
-native vendor controls, physical adapters, combined execution, or hardware
-qualification; M17 and CAP-M17 remain incomplete.
+and one isolated Runtime submission lane per opted-in backend. M17-04 adds
+source-compatible native HAL-v2 registrations to the existing CUDA and XDMA
+candidates: stable-ID dispatch of caller-instantiated CUDA Graphs with copied
+bindings, and bounded XDMA 32-bit control reads/writes and user-event waits.
+The legacy device-ABI-v1 paths, generic Runtime, schemas, support matrices, and
+release surface remain unchanged. Combined execution and physical
+qualification remain deferred; M17 and CAP-M17 remain incomplete.
 
 ## Claim policy
 
@@ -341,7 +345,7 @@ callback expressions.
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
 | CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Multi-rate simulation | M16 complete in merged history | Bounded reference domains, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
-| HAL v2 command/timeline, memory/topology, and device ABI v1 compatibility | M17-03 implemented locally; external gates pending | Preserved HAL core v2, memory extension v1, complete v1 adapter, and single-submit path; additive bounded batches/timelines, explicit ordered synchronization, isolated submission lanes, exact accounting/identity, and retryable cleanup; later M17 capabilities remain incomplete |
+| HAL v2 vendor commands, command/timeline, memory/topology, and device ABI v1 compatibility | M17-04 implemented locally; external gates pending | Native CUDA Graph and XDMA control/event registrations use the existing bounded lanes and stable declarations while the v1 adapter, C ABI, schemas, support, and qualification boundaries remain unchanged; combined execution remains deferred |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

@@ -273,3 +273,13 @@ IDs, dynamic payload/timeout/point values, timeline progress, completion
 status/timestamp, and health do not contribute. Configurations without the
 extension retain the M17-02 identity path. Checkpoint/input-log schema 1 and
 rate-action schema 1 remain unchanged; action replay remains unsupported.
+
+## M17-04 vendor command identity
+
+Native vendor capability and copied memory/topology declarations enter through
+the existing conditional M17-02 identity path. The M17-03 batch declaration
+then records the stable CUDA Graph opcode and ordered logical bindings, or the
+stable XDMA control offset/event opcode and logical result reference. Native
+handles, driver pointers, file descriptors, host addresses, timestamps,
+health, and mutable queue state remain excluded. Selecting the unchanged
+device-ABI-v1 paths therefore retains the byte-exact M17-03 identity path.

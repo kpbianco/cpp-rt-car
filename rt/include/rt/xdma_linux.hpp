@@ -13,6 +13,8 @@ namespace rt {
 struct LinuxXdmaConfig {
     std::span<const std::string_view> h2c_paths{};
     std::span<const std::string_view> c2h_paths{};
+    std::string_view user_path{};
+    std::span<const std::string_view> event_paths{};
 };
 
 /*

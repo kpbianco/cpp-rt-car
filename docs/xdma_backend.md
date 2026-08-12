@@ -200,3 +200,57 @@ M10 can move from Candidate to Complete only after a declared tuple records:
 - raw latency decomposition and an explicit reviewed pass/fail record.
 
 No tuple has completed those gates in the 1.2.1 support matrix.
+
+## M17-04 native HAL-v2 control and event operations
+
+`XdmaDeviceBackend::api()` remains the exact device-ABI-v1 transfer path.
+`hal_v2_registration(name)` adds the unchanged core-v2, memory/topology-v1,
+and command/timeline-v1 tables over the same borrowed object. One backend
+object can use only one path until checked shutdown succeeds.
+
+`XdmaDriverApi` retains its complete version-1 aggregate prefix and version-1
+default. Exact version 2 adds `control_read32`, `control_write32`,
+`wait_user_event`, and idempotent nonblocking `request_stop`. Version 1 exposes
+only H2C/C2H behavior. A native capability is published only when its complete
+callback set and configured bounds are present. The Linux adapter supplies the
+control callbacks only when a user-BAR path exists and supplies the event/stop
+callbacks only when at least one event path exists, so mismatched backend and
+endpoint configurations fail before initialization.
+
+The native snapshot describes borrowed host staging, the configured AXI-MM
+endpoint, and host-monotonic completion timestamps. It declares no pinned or
+DMA-mapped pages, generic FPGA memory, peer path, interrupt latency, safe
+register map, or driver cancellation. Existing H2C/C2H opcodes remain stable.
+
+The vendor dispatch encodings are exact: read is
+`0x58480000 | (offset / 4)`, write is `0x58490000 | (offset / 4)`, and event
+wait is `0x584A0000 | event_index`.
+
+When control is enabled, the aperture is nonzero, four-byte aligned, and at
+most 262144 bytes, so offsets through 262140 are representable. At most 16
+events are configured. A read or event wait uses one exactly sized writable
+borrowed-host reference; a write uses one fixed four-byte little-endian
+payload. Foreign/high bits, bad alignment/range/index/access/size/payload,
+overflow, reserved data, and unavailable callbacks fail before driver entry.
+
+Linux configuration copies an optional user-BAR path and up to 16 event-device
+paths. Initialization opens only configured endpoints with close-on-exec and
+the nonblocking behavior required for event wakeup. MMIO and event operations
+execute only on the existing fixed backend I/O team. Event wait consumes the
+checked finite batch timeout and is interruptible by the stop wakeup.
+Canceling a queued batch produces its bounded canceled completion without a
+driver stop request and therefore cannot interrupt an unrelated running event.
+A running event cancellation alone issues the driver stop wakeup; consuming
+that wakeup rearms later event waits. Noncancelable H2C/C2H calls retain their
+existing quarantine.
+
+Shutdown never detaches a worker or closes a descriptor that an in-flight call
+may reference. Partial open, short I/O, `EINTR`, poll wake, close/reopen failure,
+and stop retain first-error and unresolved-only retry semantics. The fixed
+control/event paths, descriptors, queue slots, wakeup owners, and workers are
+backend-private storage reported through existing capability bytes.
+
+Portable injected MMIO/event tests and node-free Linux compile/package checks
+do not execute a physical register or establish safe design-specific effects,
+DMA, interrupt latency, bounded driver calls, hardware, HIL, field, RT1, or RT2
+evidence. Any physical control-write plan requires separate maintainer review.

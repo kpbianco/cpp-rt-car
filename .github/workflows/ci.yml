@@ -226,12 +226,12 @@ jobs:
             -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
-          GTEST_FILTER: UnifiedExecutor.*:CommandBatch.*:CrossRateData.*:RateTimeline.*:RateDispatch.*:RateShedding.*:RateTelemetry.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:TraceNoAlloc.*Rate*:MemoryPolicy.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:HeterogeneousMemory.*:HalV2.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*-ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover:ThreadPolicy.LinuxAppliesAndReadsBackAvailableNativeFields
+          GTEST_FILTER: UnifiedExecutor.*:CommandBatch.*:CrossRateData.*:RateTimeline.*:RateDispatch.*:RateShedding.*:RateTelemetry.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:TraceNoAlloc.*Rate*:MemoryPolicy.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:HeterogeneousMemory.*:HalV2.*:VendorHalV2.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*Graph*:CudaBackend.*HalV2*:XdmaBackend.*Control*:XdmaBackend.*Event*-ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover:ThreadPolicy.LinuxAppliesAndReadsBackAvailableNativeFields
           TSAN_OPTIONS: halt_on_error=1
         run: |
           ctest --test-dir build-tsan \
             --output-on-failure \
-            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_command_batch_timeline|m17_hal_v2_compatibility|m17_heterogeneous_memory_topology|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
+            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_command_batch_timeline|m17_hal_v2_compatibility|m17_heterogeneous_memory_topology|m17_cuda_graph|m17_xdma_control|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
 
   build-windows:
     runs-on: windows-2022
@@ -466,3 +466,40 @@ jobs:
             --test-dir build-custom-layout-consumer \
             -C Release \
             --output-on-failure
+
+  vendor-adapter-packages:
+    name: CUDA toolkit and node-free XDMA package consumers
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install compile-only CUDA toolkit
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes nvidia-cuda-toolkit
+      - name: Configure opt-in vendor adapters
+        env:
+          CC: gcc-11
+          CXX: g++-11
+        run: |
+          cmake -S . -B build-vendor-package \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TESTS=OFF \
+            -DRTFW_BUILD_EXPERIMENTAL=OFF \
+            -DRTFW_BUILD_EXAMPLES=OFF \
+            -DRTFW_BUILD_RUNTIME_DEMO=OFF \
+            -DRTFW_ENABLE_CUDA=ON \
+            -DRTFW_ENABLE_XDMA=ON \
+            -DSIM_WERROR=ON
+      - name: Build and install opt-in vendor adapters
+        run: |
+          cmake --build build-vendor-package --parallel 2
+          cmake --install build-vendor-package --prefix "$RUNNER_TEMP/rtfw-vendor"
+      - name: Build compile-only consumers without device access
+        run: |
+          cmake -S tests/package_consumer -B build-vendor-consumer \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/rtfw-vendor" \
+            -DRTFW_TEST_CUDA_DRIVER=ON \
+            -DRTFW_TEST_XDMA_LINUX=ON
+          cmake --build build-vendor-consumer --parallel 2
+          ctest --test-dir build-vendor-consumer --output-on-failure

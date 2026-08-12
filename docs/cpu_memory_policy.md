@@ -284,3 +284,13 @@ resolved and read back through the same pre-start barrier as other Runtime
 lanes. Core-only-v2, memory-only-v2, and adapted-v1 backends have zero
 instances. Live stacks enter the existing `memory.runtime-thread-stack` row;
 no memory-region identity is added.
+
+## M17-04 vendor worker boundary
+
+Native CUDA Graph commands use the existing Runtime submission lane and CUDA
+stream/event ownership; native XDMA transfer, control, and event calls use the
+candidate's already declared external fixed I/O team. M17-04 adds no Runtime
+thread role, implicit worker, executor-worker callback, stack category, or
+ordinary heap allocation after successful start. Backend-private registries,
+queues, events, descriptors, and stop controls remain backend declarations,
+not Runtime-owned control or stack bytes.

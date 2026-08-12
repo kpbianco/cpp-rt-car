@@ -348,6 +348,7 @@ def check_runtime_contract() -> None:
     command_test = read("tests/test_command_batch.cpp")
     cuda_test = read("tests/test_cuda_backend.cpp")
     xdma_test = read("tests/xdma_backend_tests.cpp")
+    vendor_hal_v2_test = read("tests/test_vendor_hal_v2.cpp")
     host_adapter_test = read("tests/host_adapter_tests.cpp")
     add_subdirectory_consumer = read(
         "tests/add_subdirectory_consumer/CMakeLists.txt"
@@ -1833,6 +1834,84 @@ def check_runtime_contract() -> None:
     ):
         if phrase not in normalized_command_docs:
             fail(f"M17-03 component contracts are missing phrase {phrase!r}")
+
+    # M17-04 gates retain the owned vendor source contracts without asserting
+    # that this batch remains active or the latest M17 frontier.
+    for token in (
+        "cuda_driver_api_version_1 = 1",
+        "cuda_driver_api_version_2 = 2",
+        "cuda_device_opcode_graph_base = 0x4347'0000u",
+        "cuda_graph_capacity = 16",
+        "cuda_graph_buffer_binding_capacity = 8",
+        "hal_v2_registration(",
+    ):
+        if token not in cuda_header:
+            fail(f"M17-04 CUDA public contract is missing {token!r}")
+    for token in (
+        "graph_launch",
+        "register_graph(",
+        "submit_batch",
+        "poll_batch",
+        "request_stop",
+    ):
+        if token not in cuda_header and token not in cuda_backend:
+            fail(f"M17-04 CUDA implementation is missing {token!r}")
+    for token in (
+        "xdma_driver_api_version_1 = 1",
+        "xdma_driver_api_version_2 = 2",
+        "xdma_control_aperture_max_bytes = 262144",
+        "xdma_user_event_capacity = 16",
+        "xdma_device_opcode_control_read_base",
+        "xdma_device_opcode_control_write_base",
+        "xdma_device_opcode_user_event_base",
+        "hal_v2_registration(",
+    ):
+        if token not in xdma_header:
+            fail(f"M17-04 XDMA public contract is missing {token!r}")
+    for token in (
+        "control_read32",
+        "control_write32",
+        "wait_user_event",
+        "request_stop",
+        "submit_batch",
+        "poll_batch",
+    ):
+        if token not in xdma_header and token not in xdma_backend:
+            fail(f"M17-04 XDMA implementation is missing {token!r}")
+    for token in (
+        "ExistingDeviceAbiV1SurfaceRemainsExact",
+        "VersionOnePositionalAggregatePrefixesRemainUsable",
+        "CudaNativeRegistrationSuppliesAllFrozenHalTables",
+        "XdmaNativeRegistrationSuppliesAllFrozenHalTables",
+    ):
+        if token not in vendor_hal_v2_test:
+            fail(f"M17-04 compatibility tests are missing {token!r}")
+    for token in (
+        "test_vendor_hal_v2.cpp",
+        "m17_cuda_graph",
+        "m17_xdma_control",
+    ):
+        if token not in tests_cmake:
+            fail(f"M17-04 CMake integration is missing {token!r}")
+    normalized_vendor_docs = " ".join(
+        (
+            hal_v2_doc + " " + heterogeneous_doc + " " + device_doc + " "
+            + cuda_doc + " " + xdma_doc + " " + memory_doc + " "
+            + cpu_memory_policy_doc + " " + determinism_doc + " "
+            + observability_doc + " " + c_abi_doc
+        ).lower().split()
+    )
+    for phrase in (
+        "caller-owned",
+        "0x43470000",
+        "262144 bytes",
+        "one configured command stream",
+        "device-abi-v1",
+        "no c++ binary abi promise",
+        "rt qualification",
+    ):
+        if phrase not in normalized_vendor_docs:
+            fail(f"M17-04 component contracts are missing phrase {phrase!r}")
 
     for token in (
         "Runtime::run_periodic(",

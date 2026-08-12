@@ -20,6 +20,7 @@ class FakeCudaDriver {
 public:
     static constexpr rt::CudaContext context = 0xc001u;
     static constexpr rt::CudaFunction add_one_function = 0xf001u;
+    static constexpr rt::CudaGraphExec graph = 0x9001u;
     static constexpr std::size_t event_capacity = 32;
     static constexpr std::size_t allocation_capacity = 8;
     static constexpr std::size_t allocation_bytes = 4096;
@@ -48,6 +49,14 @@ public:
         result.memset_d8_async = &memset_d8_async;
         result.launch_kernel = &launch_kernel;
         result.monotonic_time_ns = &monotonic_time_ns;
+        return result;
+    }
+
+    rt::CudaDriverApi api_v2() noexcept {
+        auto result = api();
+        result.struct_size = rt::cuda_driver_api_v2_struct_size;
+        result.api_version = rt::cuda_driver_api_version_2;
+        result.graph_launch = &graph_launch;
         return result;
     }
 
@@ -92,6 +101,10 @@ public:
     std::atomic<std::uint64_t> host_registrations{0};
     std::atomic<std::uint64_t> host_unregistrations{0};
     std::atomic<std::uint64_t> launches{0};
+    std::atomic<std::uint64_t> graph_launches{0};
+    std::atomic<bool> fail_next_graph_launch{false};
+    std::array<char, 32> call_order{};
+    std::atomic<std::size_t> call_order_count{0};
 
 private:
     struct EventState {
@@ -117,6 +130,14 @@ private:
 
     static FakeCudaDriver* self(void* user_data) noexcept {
         return static_cast<FakeCudaDriver*>(user_data);
+    }
+
+    static void record(FakeCudaDriver& driver, char value) noexcept {
+        const auto index = driver.call_order_count.fetch_add(
+            1, std::memory_order_relaxed);
+        if (index < driver.call_order.size()) {
+            driver.call_order[index] = value;
+        }
     }
 
     static EventState* event_for(
@@ -228,6 +249,7 @@ private:
         if (!state) {
             return rt::CudaDriverResult::invalid_value;
         }
+        record(*driver, 'E');
         if (driver->fail_next_event_record.exchange(
                 false,
                 std::memory_order_acq_rel)) {
@@ -383,13 +405,16 @@ private:
     }
 
     static rt::CudaDriverResult memcpy_host_to_device_async(
-        void*,
+        void* user_data,
         rt::CudaDeviceAddress destination,
         const void* source,
         std::uint64_t bytes,
         rt::CudaStream) noexcept {
         if (destination == 0 || !source || bytes == 0) {
             return rt::CudaDriverResult::invalid_value;
+        }
+        if (auto* driver = self(user_data)) {
+            record(*driver, 'H');
         }
         std::memcpy(
             reinterpret_cast<void*>(
@@ -400,13 +425,16 @@ private:
     }
 
     static rt::CudaDriverResult memcpy_device_to_host_async(
-        void*,
+        void* user_data,
         void* destination,
         rt::CudaDeviceAddress source,
         std::uint64_t bytes,
         rt::CudaStream) noexcept {
         if (!destination || source == 0 || bytes == 0) {
             return rt::CudaDriverResult::invalid_value;
+        }
+        if (auto* driver = self(user_data)) {
+            record(*driver, 'D');
         }
         std::memcpy(
             destination,
@@ -479,6 +507,22 @@ private:
         }
         driver->launches.fetch_add(1, std::memory_order_relaxed);
         return rt::CudaDriverResult::success;
+    }
+
+    static rt::CudaDriverResult graph_launch(
+        void* user_data,
+        rt::CudaGraphExec requested,
+        rt::CudaStream) noexcept {
+        auto* driver = self(user_data);
+        if (!driver || requested != graph) {
+            return rt::CudaDriverResult::invalid_value;
+        }
+        record(*driver, 'G');
+        driver->graph_launches.fetch_add(1, std::memory_order_relaxed);
+        return driver->fail_next_graph_launch.exchange(
+                   false, std::memory_order_acq_rel)
+            ? rt::CudaDriverResult::launch_failure
+            : rt::CudaDriverResult::success;
     }
 
     static std::uint64_t monotonic_time_ns(
@@ -1385,3 +1429,372 @@ TEST(CudaBackend, RuntimeGraphAcceptsCandidateBackendAtD0) {
 }
 
 } // namespace
+
+TEST(CudaBackend, DriverVersionsPreserveV1PrefixAndRequireCompleteV2) {
+    EXPECT_EQ(rt::cuda_driver_api_version, 1u);
+    EXPECT_EQ(rt::cuda_driver_api_v1_struct_size, 224u);
+    EXPECT_EQ(rt::cuda_driver_api_v2_struct_size, sizeof(rt::CudaDriverApi));
+    const rt::CudaDriverApi defaults{};
+    EXPECT_EQ(defaults.struct_size, rt::cuda_driver_api_v1_struct_size);
+    EXPECT_EQ(defaults.api_version, rt::cuda_driver_api_version_1);
+    EXPECT_EQ(defaults.graph_launch, nullptr);
+
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend v1_backend(driver.api(), config(streams));
+    EXPECT_EQ(v1_backend.hal_v2_registration("cuda.v1").api.instance, nullptr);
+    auto malformed = driver.api();
+    malformed.graph_launch = +[](void*, rt::CudaGraphExec,
+                                 rt::CudaStream) noexcept {
+        return rt::CudaDriverResult::success;
+    };
+    EXPECT_THROW((void)rt::CudaDeviceBackend(malformed, config(streams)),
+                 std::invalid_argument);
+    malformed = driver.api_v2();
+    malformed.struct_size = rt::cuda_driver_api_v1_struct_size;
+    EXPECT_THROW((void)rt::CudaDeviceBackend(malformed, config(streams)),
+                 std::invalid_argument);
+    malformed = driver.api_v2();
+    malformed.reserved_v2[0] = 1;
+    EXPECT_THROW((void)rt::CudaDeviceBackend(malformed, config(streams)),
+                 std::invalid_argument);
+}
+
+TEST(CudaBackend, GraphRegistryIsBoundedUniqueCopiedAndFrozen) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(driver.api_v2(), config(streams));
+    const std::array bindings{
+        rt::CudaGraphBufferBinding{"buffer.a", RTFW_DEVICE_ACCESS_READ_WRITE}};
+    EXPECT_EQ(backend.register_graph(0, FakeCudaDriver::graph, bindings),
+              RTFW_DEVICE_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(backend.register_graph(7, FakeCudaDriver::graph, bindings),
+              RTFW_DEVICE_STATUS_OK);
+    EXPECT_EQ(backend.register_graph(7, FakeCudaDriver::graph + 1, bindings),
+              RTFW_DEVICE_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(backend.register_graph(8, FakeCudaDriver::graph, bindings),
+              RTFW_DEVICE_STATUS_INVALID_ARGUMENT);
+    for (std::uint16_t id = 8; id <= 22; ++id) {
+        EXPECT_EQ(backend.register_graph(
+                      id, FakeCudaDriver::graph + id, bindings),
+                  RTFW_DEVICE_STATUS_OK);
+    }
+    EXPECT_EQ(backend.register_graph(23, FakeCudaDriver::graph + 23, bindings),
+              RTFW_DEVICE_STATUS_RESOURCE_EXHAUSTED);
+    auto registration = backend.hal_v2_registration("cuda.native");
+    rt::HalV2InitializeConfig initialize{};
+    initialize.requested_in_flight = 4;
+    initialize.requested_registered_buffers = 4;
+    ASSERT_EQ(registration.api.initialize(registration.api.instance, &initialize),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(backend.register_graph(23, FakeCudaDriver::graph + 23, bindings),
+              RTFW_DEVICE_STATUS_INVALID_STATE);
+    EXPECT_EQ(registration.api.shutdown(registration.api.instance),
+              rt::HalV2Status::ok);
+}
+
+TEST(CudaBackend, NativeRegistrationDiscoversTruthfulStagedMemory) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(driver.api_v2(), config(streams));
+    const auto registration = backend.hal_v2_registration("cuda.native");
+    ASSERT_NE(registration.memory_topology, nullptr);
+    ASSERT_NE(registration.command_timeline, nullptr);
+    rt::HalV2Capabilities capabilities{};
+    EXPECT_EQ(registration.api.get_capabilities(registration.api.instance,
+                                                &capabilities),
+              rt::HalV2Status::ok);
+    EXPECT_STREQ(capabilities.backend_id.data(), "rtfw.cuda.native.v2");
+    rt::HalV2MemoryTopologySnapshot snapshot{};
+    EXPECT_EQ(registration.memory_topology->discover(
+                  registration.memory_topology->instance, &snapshot),
+              rt::HalV2Status::ok);
+    ASSERT_EQ(snapshot.memory_domain_count, 2u);
+    EXPECT_EQ(snapshot.memory_domains[1].kind,
+              static_cast<std::uint32_t>(
+                  rt::HalV2MemoryDomainKind::pinned_host));
+    EXPECT_EQ(snapshot.memory_domains[1].coherency,
+              static_cast<std::uint32_t>(
+                  rt::HalV2MemoryCoherency::staged_copy));
+    EXPECT_EQ(snapshot.completion_timestamp_domain_identity, 1u);
+    rt::HalV2CommandTimelineCapabilities command{};
+    EXPECT_EQ(registration.command_timeline->get_capabilities(
+                  registration.command_timeline->instance, &command),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(command.max_commands_per_batch,
+              rt::hal_v2_command_capacity);
+}
+
+TEST(CudaBackend, NativeStagedDomainDoesNotInventPinningWhenDisabled) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    auto requested = config(streams);
+    requested.register_host_memory = false;
+    rt::CudaDeviceBackend backend(driver.api_v2(), requested);
+    const auto registration = backend.hal_v2_registration("cuda.native");
+    rt::HalV2MemoryTopologySnapshot snapshot{};
+    ASSERT_EQ(registration.memory_topology->discover(
+                  registration.memory_topology->instance, &snapshot),
+              rt::HalV2Status::ok);
+    ASSERT_EQ(snapshot.memory_domain_count, 2u);
+    EXPECT_EQ(snapshot.memory_domains[1].kind,
+              static_cast<std::uint32_t>(rt::HalV2MemoryDomainKind::host));
+    EXPECT_EQ(snapshot.memory_domains[1].coherency,
+              static_cast<std::uint32_t>(
+                  rt::HalV2MemoryCoherency::staged_copy));
+}
+
+TEST(CudaBackend, NativeGraphBatchExecutesCopyGraphCopyThenOneEvent) {
+    FakeCudaDriver driver;
+    driver.complete_on_record.store(true, std::memory_order_release);
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(driver.api_v2(), config(streams, 4, 1));
+    const std::array bindings{
+        rt::CudaGraphBufferBinding{"buffer.a", RTFW_DEVICE_ACCESS_READ_WRITE}};
+    ASSERT_EQ(backend.register_graph(7, FakeCudaDriver::graph, bindings),
+              RTFW_DEVICE_STATUS_OK);
+    const auto registration = backend.hal_v2_registration("cuda.native");
+    rt::HalV2InitializeConfig initialize{};
+    initialize.requested_in_flight = 4;
+    initialize.requested_registered_buffers = 1;
+    ASSERT_EQ(registration.api.initialize(registration.api.instance, &initialize),
+              rt::HalV2Status::ok);
+    std::array<std::byte, 16> storage{};
+    rt::HalV2MemoryRegistration memory{};
+    memory.domain_identity = 2;
+    memory.bytes = storage.size();
+    memory.ownership = static_cast<std::uint32_t>(
+        rt::HalV2MemoryOwnership::borrowed_host);
+    memory.access = RTFW_DEVICE_BUFFER_HOST_READ |
+                    RTFW_DEVICE_BUFFER_HOST_WRITE |
+                    RTFW_DEVICE_BUFFER_DEVICE_READ |
+                    RTFW_DEVICE_BUFFER_DEVICE_WRITE;
+    memory.coherency = static_cast<std::uint32_t>(
+        rt::HalV2MemoryCoherency::staged_copy);
+    memory.synchronization = rt::hal_v2_memory_sync_copy_to_device |
+                             rt::hal_v2_memory_sync_copy_from_device;
+    memory.host_data = storage.data();
+    std::copy_n("buffer.a", sizeof("buffer.a"), memory.name.begin());
+    rt::HalV2MemoryToken token{};
+    ASSERT_EQ(registration.memory_topology->register_memory(
+                  registration.memory_topology->instance, &memory, &token),
+              rt::HalV2Status::ok);
+
+    rt::DeviceCommandBatch batch{};
+    batch.batch_id = 1;
+    batch.frame_index = 3;
+    batch.timeout_ns = 1000;
+    batch.command_count = 3;
+    batch.signal_count = 1;
+    batch.signals[0].timeline_handle = 11;
+    batch.signals[0].value = 1;
+    auto reference = rt::HalV2BufferReference{
+        token.submission_token, RTFW_DEVICE_ACCESS_READ, 0, 0,
+        storage.size()};
+    auto& upload = batch.commands[0];
+    upload.kind = static_cast<std::uint32_t>(rt::HalV2CommandKind::copy);
+    upload.operation = static_cast<std::uint32_t>(
+        rt::HalV2MemoryOperation::copy_to_device);
+    upload.source = reference;
+    upload.source.access = RTFW_DEVICE_ACCESS_READ;
+    upload.destination = reference;
+    upload.destination.access = RTFW_DEVICE_ACCESS_WRITE;
+    auto& graph = batch.commands[1];
+    graph.kind = static_cast<std::uint32_t>(rt::HalV2CommandKind::dispatch);
+    graph.opcode = rt::cuda_device_opcode_graph(7);
+    graph.buffer_count = 1;
+    graph.buffers[0] = reference;
+    graph.buffers[0].access = RTFW_DEVICE_ACCESS_READ_WRITE;
+    auto& download = batch.commands[2];
+    download = upload;
+    download.operation = static_cast<std::uint32_t>(
+        rt::HalV2MemoryOperation::copy_from_device);
+    ASSERT_EQ(registration.command_timeline->submit(
+                  registration.command_timeline->instance, &batch),
+              rt::HalV2Status::ok);
+    rt::HalV2BatchCompletion completion{};
+    std::uint64_t count = 0;
+    EXPECT_EQ(registration.command_timeline->poll(
+                  registration.command_timeline->instance, &completion, 1,
+                  &count),
+              rt::HalV2Status::ok);
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(completion.batch_id, 1u);
+    EXPECT_EQ(completion.signal_count, 1u);
+    EXPECT_EQ(driver.graph_launches.load(), 1u);
+    ASSERT_GE(driver.call_order_count.load(), 4u);
+    EXPECT_EQ(driver.call_order[0], 'H');
+    EXPECT_EQ(driver.call_order[1], 'G');
+    EXPECT_EQ(driver.call_order[2], 'D');
+    EXPECT_EQ(driver.call_order[3], 'E');
+    EXPECT_EQ(registration.memory_topology->unregister_memory(
+                  registration.memory_topology->instance, &memory, &token),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(registration.api.shutdown(registration.api.instance),
+              rt::HalV2Status::ok);
+}
+
+TEST(CudaBackend, NativeGraphRejectsUnknownBindingAndLegacyBufferBeforeLaunch) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(driver.api_v2(), config(streams, 2, 2));
+    const std::array bindings{
+        rt::CudaGraphBufferBinding{"staged", RTFW_DEVICE_ACCESS_READ}};
+    ASSERT_EQ(backend.register_graph(9, FakeCudaDriver::graph, bindings),
+              RTFW_DEVICE_STATUS_OK);
+    const auto registration = backend.hal_v2_registration("cuda.native");
+    rt::HalV2InitializeConfig initialize{};
+    initialize.requested_in_flight = 2;
+    initialize.requested_registered_buffers = 2;
+    ASSERT_EQ(registration.api.initialize(registration.api.instance, &initialize),
+              rt::HalV2Status::ok);
+    std::array<std::byte, 8> bytes{};
+    rt::HalV2BufferRegistration legacy{};
+    legacy.flags = RTFW_DEVICE_BUFFER_HOST_READ |
+                   RTFW_DEVICE_BUFFER_DEVICE_READ;
+    legacy.data = bytes.data();
+    legacy.bytes = bytes.size();
+    std::copy_n("staged", sizeof("staged"), legacy.name.begin());
+    std::uint64_t token = 0;
+    ASSERT_EQ(registration.api.register_buffer(registration.api.instance,
+                                               &legacy, &token),
+              rt::HalV2Status::ok);
+    rt::DeviceCommandBatch batch{};
+    batch.batch_id = 2;
+    batch.timeout_ns = 100;
+    batch.command_count = 1;
+    batch.signal_count = 1;
+    batch.signals[0].timeline_handle = 4;
+    batch.signals[0].value = 1;
+    auto& command = batch.commands[0];
+    command.kind = static_cast<std::uint32_t>(rt::HalV2CommandKind::dispatch);
+    command.opcode = rt::cuda_device_opcode_graph(9);
+    command.buffer_count = 1;
+    command.buffers[0] = {token, RTFW_DEVICE_ACCESS_READ, 0, 0,
+                          bytes.size()};
+    EXPECT_EQ(registration.command_timeline->submit(
+                  registration.command_timeline->instance, &batch),
+              rt::HalV2Status::invalid_argument);
+    EXPECT_EQ(driver.graph_launches.load(), 0u);
+    command.opcode = rt::cuda_device_opcode_graph(10);
+    EXPECT_EQ(registration.command_timeline->submit(
+                  registration.command_timeline->instance, &batch),
+              rt::HalV2Status::invalid_argument);
+    EXPECT_EQ(driver.graph_launches.load(), 0u);
+    EXPECT_EQ(registration.api.unregister_buffer(registration.api.instance,
+                                                 token),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(registration.api.shutdown(registration.api.instance),
+              rt::HalV2Status::ok);
+}
+
+TEST(CudaBackend, NativePathRejectsDuplicateDeviceV1Use) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(driver.api_v2(), config(streams));
+    const auto native = backend.hal_v2_registration("cuda.native");
+    rt::HalV2Capabilities capabilities{};
+    ASSERT_EQ(native.api.get_capabilities(native.api.instance, &capabilities),
+              rt::HalV2Status::ok);
+    auto v1 = backend.api();
+    rtfw_device_capabilities v1_capabilities{};
+    v1_capabilities.struct_size = sizeof(v1_capabilities);
+    EXPECT_EQ(v1.get_capabilities(v1.instance, &v1_capabilities),
+              RTFW_DEVICE_STATUS_INVALID_STATE);
+}
+
+TEST(CudaBackend, NativeGraphFailureQuarantinesUntilReset) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(driver.api_v2(), config(streams, 1, 1));
+    const std::array<rt::CudaGraphBufferBinding, 0> bindings{};
+    ASSERT_EQ(backend.register_graph(3, FakeCudaDriver::graph, bindings),
+              RTFW_DEVICE_STATUS_OK);
+    const auto registration = backend.hal_v2_registration("cuda.native");
+    rt::HalV2InitializeConfig initialize{};
+    initialize.requested_in_flight = 1;
+    initialize.requested_registered_buffers = 1;
+    ASSERT_EQ(registration.api.initialize(registration.api.instance, &initialize),
+              rt::HalV2Status::ok);
+    rt::DeviceCommandBatch batch{};
+    batch.batch_id = 1;
+    batch.timeout_ns = 100;
+    batch.command_count = 1;
+    batch.signal_count = 1;
+    batch.signals[0].timeline_handle = 1;
+    batch.signals[0].value = 1;
+    batch.commands[0].kind = static_cast<std::uint32_t>(
+        rt::HalV2CommandKind::dispatch);
+    batch.commands[0].opcode = rt::cuda_device_opcode_graph(3);
+    driver.fail_next_graph_launch.store(true, std::memory_order_release);
+    EXPECT_EQ(registration.command_timeline->submit(
+                  registration.command_timeline->instance, &batch),
+              rt::HalV2Status::reset_required);
+    rt::HalV2Health health{};
+    ASSERT_EQ(registration.api.get_health(registration.api.instance, &health),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(health.state, static_cast<std::uint32_t>(
+                                rt::HalV2HealthState::reset_required));
+    EXPECT_EQ(registration.api.reset(registration.api.instance),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(driver.stream_syncs.load(), 1u);
+    batch.batch_id = 2;
+    batch.signals[0].value = 2;
+    EXPECT_EQ(registration.command_timeline->submit(
+                  registration.command_timeline->instance, &batch),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(registration.api.shutdown(registration.api.instance),
+              rt::HalV2Status::ok);
+}
+
+TEST(CudaBackend, NativeGraphTimeoutRetainsUntilEventReadyAndStopIsIdempotent) {
+    FakeCudaDriver driver;
+    const std::array<rt::CudaStream, 1> streams{0x51u};
+    rt::CudaDeviceBackend backend(driver.api_v2(), config(streams, 1, 1));
+    const std::array<rt::CudaGraphBufferBinding, 0> bindings{};
+    ASSERT_EQ(backend.register_graph(4, FakeCudaDriver::graph, bindings),
+              RTFW_DEVICE_STATUS_OK);
+    const auto registration = backend.hal_v2_registration("cuda.native");
+    rt::HalV2InitializeConfig initialize{};
+    initialize.requested_in_flight = 1;
+    initialize.requested_registered_buffers = 1;
+    ASSERT_EQ(registration.api.initialize(registration.api.instance, &initialize),
+              rt::HalV2Status::ok);
+    rt::DeviceCommandBatch batch{};
+    batch.batch_id = 1;
+    batch.timeout_ns = 10;
+    batch.command_count = 1;
+    batch.signal_count = 1;
+    batch.signals[0].timeline_handle = 1;
+    batch.signals[0].value = 1;
+    batch.commands[0].kind = static_cast<std::uint32_t>(
+        rt::HalV2CommandKind::dispatch);
+    batch.commands[0].opcode = rt::cuda_device_opcode_graph(4);
+    ASSERT_EQ(registration.command_timeline->submit(
+                  registration.command_timeline->instance, &batch),
+              rt::HalV2Status::ok);
+    driver.advance(11);
+    rt::HalV2BatchCompletion completion{};
+    std::uint64_t count = 0;
+    EXPECT_EQ(registration.command_timeline->poll(
+                  registration.command_timeline->instance, &completion, 1,
+                  &count),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(registration.command_timeline->request_stop(
+                  registration.command_timeline->instance),
+              rt::HalV2Status::ok);
+    EXPECT_EQ(registration.command_timeline->request_stop(
+                  registration.command_timeline->instance),
+              rt::HalV2Status::ok);
+    driver.make_events_ready();
+    EXPECT_EQ(registration.command_timeline->poll(
+                  registration.command_timeline->instance, &completion, 1,
+                  &count),
+              rt::HalV2Status::ok);
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(completion.status,
+              static_cast<std::int32_t>(rt::HalV2Status::timeout));
+    EXPECT_EQ(registration.api.shutdown(registration.api.instance),
+              rt::HalV2Status::ok);
+}

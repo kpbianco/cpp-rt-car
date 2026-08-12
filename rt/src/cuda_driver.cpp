@@ -231,6 +231,15 @@ rt::CudaDriverResult launch_kernel(
         nullptr));
 }
 
+rt::CudaDriverResult graph_launch(
+    void*,
+    rt::CudaGraphExec graph,
+    rt::CudaStream stream) noexcept {
+    return normalize(cuGraphLaunch(
+        pointer_handle<CUgraphExec>(graph),
+        pointer_handle<CUstream>(stream)));
+}
+
 std::uint64_t monotonic_time_ns(void*) noexcept {
     const auto now =
         std::chrono::steady_clock::now().time_since_epoch();
@@ -246,6 +255,8 @@ namespace rt {
 
 CudaDriverApi cuda_driver_api() noexcept {
     CudaDriverApi driver{};
+    driver.struct_size = cuda_driver_api_v2_struct_size;
+    driver.api_version = cuda_driver_api_version_2;
     driver.push_context = &push_context;
     driver.pop_context = &pop_context;
     driver.event_create = &event_create;
@@ -267,6 +278,7 @@ CudaDriverApi cuda_driver_api() noexcept {
     driver.memset_d8_async = &memset_d8_async;
     driver.launch_kernel = &launch_kernel;
     driver.monotonic_time_ns = &monotonic_time_ns;
+    driver.graph_launch = &graph_launch;
     return driver;
 }
 

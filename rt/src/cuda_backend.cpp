@@ -85,8 +85,8 @@ bool valid_device_range(
 }
 
 bool driver_api_valid(const rt::CudaDriverApi& driver) noexcept {
-    return driver.struct_size >= sizeof(driver) &&
-           driver.api_version == rt::cuda_driver_api_version &&
+    const bool common =
+           driver.struct_size >= rt::cuda_driver_api_v1_struct_size &&
            driver.push_context &&
            driver.pop_context &&
            driver.event_create &&
@@ -106,6 +106,20 @@ bool driver_api_valid(const rt::CudaDriverApi& driver) noexcept {
            driver.launch_kernel &&
            driver.monotonic_time_ns &&
            bytes_zero(driver.reserved, std::size(driver.reserved));
+    if (!common) {
+        return false;
+    }
+    if (driver.api_version == rt::cuda_driver_api_version_1) {
+        return driver.struct_size == rt::cuda_driver_api_v1_struct_size &&
+               driver.graph_launch == nullptr &&
+               bytes_zero(driver.reserved_v2,
+                          std::size(driver.reserved_v2));
+    }
+    return driver.api_version == rt::cuda_driver_api_version_2 &&
+           driver.struct_size == rt::cuda_driver_api_v2_struct_size &&
+           driver.graph_launch != nullptr &&
+           bytes_zero(driver.reserved_v2,
+                      std::size(driver.reserved_v2));
 }
 
 rt::CudaBackendConfig validated_config(
@@ -170,6 +184,12 @@ rt::CudaDriverResult combine_with_pop(
 namespace rt {
 
 struct CudaDeviceBackend::Impl {
+    enum class RegistrationPath : std::uint8_t {
+        unselected = 0,
+        device_v1 = 1,
+        native_v2 = 2,
+    };
+
     struct Slot {
         std::atomic<std::uint32_t> state{kSlotFree};
         CudaEvent event = 0;
@@ -180,7 +200,13 @@ struct CudaDeviceBackend::Impl {
         std::uint32_t buffer_count = 0;
         std::array<
             std::uint64_t,
-            RTFW_DEVICE_BUFFER_REF_CAPACITY> buffer_tokens{};
+            hal_v2_command_capacity * hal_v2_buffer_ref_capacity>
+            buffer_tokens{};
+        std::uint64_t batch_id = 0;
+        std::uint32_t signal_count = 0;
+        std::array<HalV2TimelinePoint,
+                   hal_v2_timeline_signal_capacity> signals{};
+        bool batch = false;
         bool timed_out = false;
     };
 
@@ -193,6 +219,7 @@ struct CudaDeviceBackend::Impl {
         bool registered = false;
         bool owns_device_address = false;
         bool owns_host_registration = false;
+        bool heterogeneous = false;
         std::array<char, RTFW_DEVICE_IDENTIFIER_CAPACITY> name{};
     };
 
@@ -207,6 +234,20 @@ struct CudaDeviceBackend::Impl {
         CudaFunction function = 0;
         std::uint64_t token = 0;
         bool registered = false;
+    };
+
+    struct GraphBinding {
+        std::array<char, RTFW_DEVICE_IDENTIFIER_CAPACITY> name{};
+        std::uint32_t access = 0;
+    };
+
+    struct Graph {
+        CudaGraphExec executable = 0;
+        std::uint16_t identifier = 0;
+        std::uint8_t binding_count = 0;
+        bool registered = false;
+        std::array<GraphBinding,
+                   cuda_graph_buffer_binding_capacity> bindings{};
     };
 
     Impl(
@@ -242,6 +283,7 @@ struct CudaDeviceBackend::Impl {
             slots[index].stream = streams[index % stream_count];
         }
         config.streams = {};
+        initialize_hal_tables();
     }
 
     [[nodiscard]] static Impl* self(void* instance) noexcept {
@@ -281,6 +323,55 @@ struct CudaDeviceBackend::Impl {
         std::uint64_t token) const noexcept {
         return const_cast<Impl*>(this)->kernel_for(token);
     }
+
+    [[nodiscard]] Graph* graph_for(std::uint16_t identifier) noexcept {
+        for (auto& graph : graphs) {
+            if (graph.registered && graph.identifier == identifier) {
+                return &graph;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] const Graph* graph_for(
+        std::uint16_t identifier) const noexcept {
+        return const_cast<Impl*>(this)->graph_for(identifier);
+    }
+
+    [[nodiscard]] bool select_path(RegistrationPath requested) noexcept {
+        auto expected = RegistrationPath::unselected;
+        if (registration_path.compare_exchange_strong(
+                expected, requested, std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            return true;
+        }
+        return expected == requested;
+    }
+
+    static HalV2Status hal_status(rtfw_device_status status) noexcept {
+        switch (status) {
+        case RTFW_DEVICE_STATUS_OK: return HalV2Status::ok;
+        case RTFW_DEVICE_STATUS_INVALID_ARGUMENT:
+            return HalV2Status::invalid_argument;
+        case RTFW_DEVICE_STATUS_INVALID_STATE:
+            return HalV2Status::invalid_state;
+        case RTFW_DEVICE_STATUS_QUEUE_FULL: return HalV2Status::queue_full;
+        case RTFW_DEVICE_STATUS_TIMEOUT: return HalV2Status::timeout;
+        case RTFW_DEVICE_STATUS_LOST: return HalV2Status::lost;
+        case RTFW_DEVICE_STATUS_CANCELED: return HalV2Status::canceled;
+        case RTFW_DEVICE_STATUS_UNSUPPORTED: return HalV2Status::unsupported;
+        case RTFW_DEVICE_STATUS_RESOURCE_EXHAUSTED:
+            return HalV2Status::resource_exhausted;
+        case RTFW_DEVICE_STATUS_INTERNAL_ERROR:
+            return HalV2Status::internal_error;
+        case RTFW_DEVICE_STATUS_RESET_REQUIRED:
+            return HalV2Status::reset_required;
+        case RTFW_DEVICE_STATUS_ERROR:
+        default: return HalV2Status::error;
+        }
+    }
+
+    void initialize_hal_tables() noexcept;
 
     [[nodiscard]] CudaDriverResult push_context() noexcept {
         return driver.push_context(
@@ -447,6 +538,137 @@ struct CudaDeviceBackend::Impl {
              index < launch.scalar_data.size();
              ++index) {
             if (launch.scalar_data[index] != std::byte{0}) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool hal_reference_valid(
+        const HalV2BufferReference& reference) const noexcept {
+        const auto* buffer = buffer_for(reference.buffer_token);
+        return buffer && reference.reserved0 == 0 &&
+               valid_access(reference.access) && reference.bytes != 0 &&
+               reference.offset <= buffer->bytes &&
+               reference.bytes <= buffer->bytes - reference.offset;
+    }
+
+    [[nodiscard]] bool graph_dispatch_valid(
+        const DeviceCommand& command,
+        const Graph& graph) const noexcept {
+        if (command.payload_size != 0 || command.buffer_count !=
+                graph.binding_count) {
+            return false;
+        }
+        for (std::size_t index = 0; index < graph.binding_count; ++index) {
+            const auto& reference = command.buffers[index];
+            const auto* buffer = buffer_for(reference.buffer_token);
+            if (!buffer || !hal_reference_valid(reference) ||
+                !buffer->heterogeneous ||
+                reference.access != graph.bindings[index].access ||
+                reference.offset != 0 || reference.bytes != buffer->bytes ||
+                std::strncmp(buffer->name.data(),
+                             graph.bindings[index].name.data(),
+                             RTFW_DEVICE_IDENTIFIER_CAPACITY) != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool command_valid(const DeviceCommand& command) const noexcept {
+        if (command.struct_size != sizeof(command) ||
+            command.extension_version !=
+                hal_v2_command_timeline_extension_version ||
+            command.flags != 0 ||
+            !bytes_zero(command.reserved.data(), command.reserved.size())) {
+            return false;
+        }
+        const auto kind = static_cast<HalV2CommandKind>(command.kind);
+        if (kind == HalV2CommandKind::dispatch) {
+            if (command.operation != static_cast<std::uint32_t>(
+                    HalV2MemoryOperation::invalid) ||
+                command.buffer_count > hal_v2_buffer_ref_capacity ||
+                command.payload_size > hal_v2_inline_payload_capacity) {
+                return false;
+            }
+            for (std::size_t index = 0; index < command.buffer_count; ++index) {
+                if (!hal_reference_valid(command.buffers[index])) {
+                    return false;
+                }
+            }
+            if ((command.opcode & 0xffff'0000u) ==
+                cuda_device_opcode_graph_base) {
+                const auto id = static_cast<std::uint16_t>(command.opcode);
+                const auto* graph = id == 0 ? nullptr : graph_for(id);
+                return graph && graph_dispatch_valid(command, *graph);
+            }
+            rtfw_device_submission translated{};
+            translated.struct_size = sizeof(translated);
+            translated.abi_version = RTFW_DEVICE_ABI_VERSION;
+            translated.submission_id = 1;
+            translated.timeout_ns = 1;
+            translated.opcode = command.opcode;
+            translated.payload_size = command.payload_size;
+            translated.buffer_count = command.buffer_count;
+            std::copy(command.payload.begin(), command.payload.end(),
+                      translated.payload);
+            for (std::size_t index = 0; index < command.buffer_count; ++index) {
+                translated.buffers[index].buffer_token =
+                    command.buffers[index].buffer_token;
+                translated.buffers[index].access = command.buffers[index].access;
+                translated.buffers[index].offset = command.buffers[index].offset;
+                translated.buffers[index].bytes = command.buffers[index].bytes;
+            }
+            return submission_valid(translated);
+        }
+        if (kind == HalV2CommandKind::copy) {
+            const auto operation =
+                static_cast<HalV2MemoryOperation>(command.operation);
+            return command.opcode == 0 && command.payload_size == 0 &&
+                   command.buffer_count == 0 &&
+                   (operation == HalV2MemoryOperation::copy_to_device ||
+                    operation == HalV2MemoryOperation::copy_from_device) &&
+                   hal_reference_valid(command.source) &&
+                   hal_reference_valid(command.destination) &&
+                   command.source.buffer_token ==
+                       command.destination.buffer_token &&
+                   command.source.offset == command.destination.offset &&
+                   command.source.bytes == command.destination.bytes &&
+                   command.source.access == RTFW_DEVICE_ACCESS_READ &&
+                   command.destination.access == RTFW_DEVICE_ACCESS_WRITE;
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool batch_valid(
+        const DeviceCommandBatch& batch) const noexcept {
+        if (batch.struct_size != sizeof(batch) ||
+            batch.extension_version !=
+                hal_v2_command_timeline_extension_version ||
+            batch.batch_id == 0 || batch.timeout_ns == 0 ||
+            batch.command_count == 0 ||
+            batch.command_count > hal_v2_command_capacity ||
+            batch.wait_count > hal_v2_timeline_wait_capacity ||
+            batch.signal_count == 0 ||
+            batch.signal_count > hal_v2_timeline_signal_capacity ||
+            batch.reserved0 != 0 ||
+            !bytes_zero(batch.reserved.data(), batch.reserved.size())) {
+            return false;
+        }
+        for (std::size_t index = 0; index < batch.command_count; ++index) {
+            if (!command_valid(batch.commands[index])) {
+                return false;
+            }
+        }
+        for (std::size_t index = 0; index < batch.signal_count; ++index) {
+            const auto& signal = batch.signals[index];
+            if (signal.struct_size != sizeof(signal) ||
+                signal.extension_version !=
+                    hal_v2_command_timeline_extension_version ||
+                signal.timeline_handle == invalid_device_handle ||
+                signal.value == 0 ||
+                !bytes_zero(signal.reserved.data(), signal.reserved.size())) {
                 return false;
             }
         }
@@ -662,6 +884,59 @@ struct CudaDeviceBackend::Impl {
                 : arguments.data());
     }
 
+    [[nodiscard]] CudaDriverResult execute_command(
+        const DeviceCommand& command,
+        CudaStream stream) noexcept {
+        if (static_cast<HalV2CommandKind>(command.kind) ==
+            HalV2CommandKind::copy) {
+            const auto operation =
+                static_cast<HalV2MemoryOperation>(command.operation);
+            const auto& reference = operation ==
+                    HalV2MemoryOperation::copy_to_device
+                ? command.destination
+                : command.source;
+            const auto* buffer = buffer_for(reference.buffer_token);
+            if (operation == HalV2MemoryOperation::copy_to_device) {
+                return driver.memcpy_host_to_device_async(
+                    driver.user_data,
+                    buffer->device_address + reference.offset,
+                    static_cast<const std::byte*>(buffer->host_data) +
+                        reference.offset,
+                    reference.bytes, stream);
+            }
+            return driver.memcpy_device_to_host_async(
+                driver.user_data,
+                static_cast<std::byte*>(buffer->host_data) + reference.offset,
+                buffer->device_address + reference.offset,
+                reference.bytes, stream);
+        }
+        if ((command.opcode & 0xffff'0000u) ==
+            cuda_device_opcode_graph_base) {
+            const auto* graph = graph_for(
+                static_cast<std::uint16_t>(command.opcode));
+            return driver.graph_launch(driver.user_data, graph->executable,
+                                       stream);
+        }
+        rtfw_device_submission translated{};
+        translated.struct_size = sizeof(translated);
+        translated.abi_version = RTFW_DEVICE_ABI_VERSION;
+        translated.submission_id = 1;
+        translated.timeout_ns = 1;
+        translated.opcode = command.opcode;
+        translated.payload_size = command.payload_size;
+        translated.buffer_count = command.buffer_count;
+        std::copy(command.payload.begin(), command.payload.end(),
+                  translated.payload);
+        for (std::size_t index = 0; index < command.buffer_count; ++index) {
+            translated.buffers[index].buffer_token =
+                command.buffers[index].buffer_token;
+            translated.buffers[index].access = command.buffers[index].access;
+            translated.buffers[index].offset = command.buffers[index].offset;
+            translated.buffers[index].bytes = command.buffers[index].bytes;
+        }
+        return execute(translated, stream);
+    }
+
     [[nodiscard]] Slot* acquire_slot() noexcept {
         const auto first =
             slot_hint.fetch_add(
@@ -693,6 +968,9 @@ struct CudaDeviceBackend::Impl {
             capabilities->struct_size < sizeof(*capabilities)) {
             return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
         }
+        if (!backend->select_path(RegistrationPath::device_v1)) {
+            return RTFW_DEVICE_STATUS_INVALID_STATE;
+        }
         *capabilities = {};
         capabilities->struct_size = sizeof(*capabilities);
         capabilities->abi_version = RTFW_DEVICE_ABI_VERSION;
@@ -723,9 +1001,10 @@ struct CudaDeviceBackend::Impl {
         return RTFW_DEVICE_STATUS_OK;
     }
 
-    static rtfw_device_status initialize(
+    static rtfw_device_status initialize_for(
         void* instance,
-        const rtfw_device_init_config* requested) noexcept {
+        const rtfw_device_init_config* requested,
+        RegistrationPath path) noexcept {
         auto* backend = self(instance);
         if (!backend || !requested ||
             requested->struct_size < sizeof(*requested) ||
@@ -738,6 +1017,9 @@ struct CudaDeviceBackend::Impl {
             requested->requested_registered_buffers >
                 backend->config.buffer_capacity) {
             return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+        }
+        if (!backend->select_path(path)) {
+            return RTFW_DEVICE_STATUS_INVALID_STATE;
         }
         if (backend->shutdown_incomplete.load(
                 std::memory_order_acquire)) {
@@ -852,6 +1134,13 @@ struct CudaDeviceBackend::Impl {
             RTFW_DEVICE_HEALTH_HEALTHY,
             std::memory_order_release);
         return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static rtfw_device_status initialize(
+        void* instance,
+        const rtfw_device_init_config* requested) noexcept {
+        return initialize_for(instance, requested,
+                              RegistrationPath::device_v1);
     }
 
     static rtfw_device_status register_buffer(
@@ -1169,6 +1458,7 @@ struct CudaDeviceBackend::Impl {
             backend->driver.user_data);
         slot->timeout_ns = submission->timeout_ns;
         slot->buffer_count = submission->buffer_count;
+        slot->batch = false;
         slot->timed_out = false;
         std::fill(
             slot->buffer_tokens.begin(),
@@ -1263,6 +1553,12 @@ struct CudaDeviceBackend::Impl {
                     kSlotOwned,
                     std::memory_order_acq_rel,
                     std::memory_order_relaxed)) {
+                continue;
+            }
+            if (slot.batch) {
+                slot.state.store(
+                    kSlotPending,
+                    std::memory_order_release);
                 continue;
             }
             result = backend->driver.event_query(
@@ -1607,7 +1903,554 @@ struct CudaDeviceBackend::Impl {
         backend->shutdown_active.store(
             false,
             std::memory_order_release);
+        backend->stop_requested.store(false, std::memory_order_release);
+        backend->registration_path.store(
+            RegistrationPath::unselected, std::memory_order_release);
         return RTFW_DEVICE_STATUS_OK;
+    }
+
+    static HalV2Status hal_get_capabilities(
+        void* instance, HalV2Capabilities* output) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !output || output->struct_size < sizeof(*output)) {
+            return HalV2Status::invalid_argument;
+        }
+        if (!backend->select_path(RegistrationPath::native_v2)) {
+            return HalV2Status::invalid_state;
+        }
+        *output = {};
+        output->max_in_flight = backend->config.queue_capacity;
+        output->max_registered_buffers = backend->config.buffer_capacity;
+        output->max_buffer_bytes = static_cast<std::uint64_t>(
+            std::numeric_limits<std::size_t>::max());
+        output->supports_reset = 1;
+        std::memcpy(output->backend_id.data(), "rtfw.cuda.native.v2",
+                    sizeof("rtfw.cuda.native.v2"));
+        output->control_storage_bytes =
+            sizeof(Impl) +
+            backend->config.queue_capacity * sizeof(Slot) +
+            backend->config.buffer_capacity *
+                (sizeof(Buffer) + sizeof(Binding)) +
+            backend->config.kernel_capacity * sizeof(Kernel) +
+            backend->stream_count * sizeof(CudaStream) +
+            sizeof(backend->graphs);
+        return HalV2Status::ok;
+    }
+
+    static HalV2Status hal_initialize(
+        void* instance, const HalV2InitializeConfig* requested) noexcept {
+        if (!requested || requested->struct_size < sizeof(*requested) ||
+            requested->api_version != hal_v2_api_version ||
+            !bytes_zero(requested->reserved.data(),
+                        requested->reserved.size())) {
+            return HalV2Status::invalid_argument;
+        }
+        rtfw_device_init_config translated{};
+        translated.struct_size = sizeof(translated);
+        translated.abi_version = RTFW_DEVICE_ABI_VERSION;
+        translated.requested_in_flight = requested->requested_in_flight;
+        translated.requested_registered_buffers =
+            requested->requested_registered_buffers;
+        const auto status = initialize_for(
+            instance, &translated, RegistrationPath::native_v2);
+        if (status == RTFW_DEVICE_STATUS_OK) {
+            self(instance)->stop_requested.store(false,
+                                                  std::memory_order_release);
+        }
+        return hal_status(status);
+    }
+
+    static HalV2Status hal_register_buffer(
+        void* instance, const HalV2BufferRegistration* registration,
+        std::uint64_t* out_token) noexcept {
+        if (!registration || registration->struct_size < sizeof(*registration)) {
+            return HalV2Status::invalid_argument;
+        }
+        rtfw_device_buffer_registration translated{};
+        translated.struct_size = sizeof(translated);
+        translated.flags = registration->flags;
+        translated.data = registration->data;
+        translated.bytes = registration->bytes;
+        std::copy(registration->name.begin(), registration->name.end(),
+                  translated.name);
+        std::copy(registration->reserved.begin(), registration->reserved.end(),
+                  translated.reserved);
+        return hal_status(register_buffer(instance, &translated, out_token));
+    }
+
+    static HalV2Status hal_unregister_buffer(
+        void* instance, std::uint64_t token) noexcept {
+        return hal_status(unregister_buffer(instance, token));
+    }
+
+    static HalV2Status hal_submit(
+        void* instance, const HalV2Submission* submission) noexcept {
+        if (!submission || submission->struct_size < sizeof(*submission) ||
+            submission->api_version != hal_v2_api_version) {
+            return HalV2Status::invalid_argument;
+        }
+        rtfw_device_submission translated{};
+        translated.struct_size = sizeof(translated);
+        translated.abi_version = RTFW_DEVICE_ABI_VERSION;
+        translated.submission_id = submission->submission_id;
+        translated.frame_index = submission->frame_index;
+        translated.timeout_ns = submission->timeout_ns;
+        translated.opcode = submission->opcode;
+        translated.flags = submission->flags;
+        translated.payload_size = submission->payload_size;
+        translated.buffer_count = submission->buffer_count;
+        std::copy(submission->payload.begin(), submission->payload.end(),
+                  translated.payload);
+        for (std::size_t index = 0; index < submission->buffers.size(); ++index) {
+            translated.buffers[index].buffer_token =
+                submission->buffers[index].buffer_token;
+            translated.buffers[index].access = submission->buffers[index].access;
+            translated.buffers[index].reserved0 =
+                submission->buffers[index].reserved0;
+            translated.buffers[index].offset = submission->buffers[index].offset;
+            translated.buffers[index].bytes = submission->buffers[index].bytes;
+        }
+        std::copy(submission->reserved.begin(), submission->reserved.end(),
+                  translated.reserved);
+        return hal_status(submit(instance, &translated));
+    }
+
+    static HalV2Status hal_poll(
+        void* instance, HalV2Completion* output, std::uint64_t capacity,
+        std::uint64_t* out_count) noexcept {
+        if (!out_count || (capacity != 0 && !output)) {
+            return HalV2Status::invalid_argument;
+        }
+        *out_count = 0;
+        while (*out_count < capacity) {
+            rtfw_device_completion candidate{};
+            std::uint64_t count = 0;
+            const auto status = poll(instance, &candidate, 1, &count);
+            if (status != RTFW_DEVICE_STATUS_OK) {
+                *out_count = 0;
+                return hal_status(status);
+            }
+            if (count == 0) {
+                break;
+            }
+            auto& completion = output[*out_count];
+            completion = {};
+            completion.status = candidate.status;
+            completion.submission_id = candidate.submission_id;
+            completion.device_timestamp_ns = candidate.device_timestamp_ns;
+            completion.value = candidate.value;
+            ++*out_count;
+        }
+        return HalV2Status::ok;
+    }
+
+    static HalV2Status hal_cancel(void* instance,
+                                  std::uint64_t submission_id) noexcept {
+        return hal_status(cancel(instance, submission_id));
+    }
+
+    static HalV2Status hal_get_health(
+        void* instance, HalV2Health* output) noexcept {
+        if (!output || output->struct_size < sizeof(*output)) {
+            return HalV2Status::invalid_argument;
+        }
+        rtfw_device_health candidate{};
+        candidate.struct_size = sizeof(candidate);
+        const auto status = get_health(instance, &candidate);
+        if (status != RTFW_DEVICE_STATUS_OK) {
+            return hal_status(status);
+        }
+        *output = {};
+        output->state = candidate.state;
+        output->last_status = candidate.last_status;
+        output->generation = candidate.generation;
+        output->submissions = candidate.submissions;
+        output->completions = candidate.completions;
+        output->queue_rejections = candidate.queue_rejections;
+        output->timeouts = candidate.timeouts;
+        output->errors = candidate.errors;
+        output->losses = candidate.losses;
+        output->cancellations = candidate.cancellations;
+        output->resets = candidate.resets;
+        output->outstanding = candidate.outstanding;
+        return HalV2Status::ok;
+    }
+
+    static HalV2Status hal_reset(void* instance) noexcept {
+        return hal_status(reset(instance));
+    }
+
+    static HalV2Status hal_shutdown(void* instance) noexcept {
+        return hal_status(shutdown(instance));
+    }
+
+    static HalV2Status discover_memory(
+        void* instance, HalV2MemoryTopologySnapshot* output) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !output || output->struct_size < sizeof(*output)) {
+            return HalV2Status::invalid_argument;
+        }
+        *output = {};
+        output->memory_domain_count = 2;
+        output->topology_node_count = 2;
+        output->topology_link_count = 2;
+        output->timestamp_domain_count = 1;
+        output->completion_timestamp_domain_identity = 1;
+
+        auto& host = output->memory_domains[0];
+        host.identity = 1;
+        host.kind = static_cast<std::uint32_t>(HalV2MemoryDomainKind::host);
+        host.ownership_modes = hal_v2_memory_ownership_borrowed_host;
+        host.maximum_bytes = static_cast<std::uint64_t>(
+            std::numeric_limits<std::size_t>::max());
+        host.byte_granularity = 1;
+        host.alignment = 1;
+        host.offset_granularity = 1;
+        host.access = RTFW_DEVICE_BUFFER_HOST_READ |
+                      RTFW_DEVICE_BUFFER_HOST_WRITE |
+                      RTFW_DEVICE_BUFFER_DEVICE_READ |
+                      RTFW_DEVICE_BUFFER_DEVICE_WRITE;
+        host.coherency = static_cast<std::uint32_t>(
+            HalV2MemoryCoherency::host_coherent);
+        host.topology_node_identity = 1;
+        host.timestamp_domain_identity = 1;
+
+        auto& staged = output->memory_domains[1];
+        staged.identity = 2;
+        staged.kind = static_cast<std::uint32_t>(
+            backend->config.register_host_memory
+                ? HalV2MemoryDomainKind::pinned_host
+                : HalV2MemoryDomainKind::host);
+        staged.ownership_modes = hal_v2_memory_ownership_borrowed_host;
+        staged.maximum_bytes = host.maximum_bytes;
+        staged.byte_granularity = 1;
+        staged.alignment = 1;
+        staged.offset_granularity = 1;
+        staged.access = host.access;
+        staged.coherency = static_cast<std::uint32_t>(
+            HalV2MemoryCoherency::staged_copy);
+        staged.required_synchronization =
+            hal_v2_memory_sync_copy_to_device |
+            hal_v2_memory_sync_copy_from_device;
+        staged.topology_node_identity = 2;
+        staged.timestamp_domain_identity = 1;
+
+        output->topology_nodes[0].identity = 1;
+        output->topology_nodes[0].kind = static_cast<std::uint32_t>(
+            HalV2TopologyNodeKind::host);
+        output->topology_nodes[1].identity = 2;
+        output->topology_nodes[1].kind = static_cast<std::uint32_t>(
+            HalV2TopologyNodeKind::device);
+        output->topology_links[0].identity = 1;
+        output->topology_links[0].source_node_identity = 1;
+        output->topology_links[0].destination_node_identity = 2;
+        output->topology_links[0].kind = static_cast<std::uint32_t>(
+            HalV2TopologyLinkKind::host_access);
+        output->topology_links[1].identity = 2;
+        output->topology_links[1].source_node_identity = 2;
+        output->topology_links[1].destination_node_identity = 1;
+        output->topology_links[1].kind = static_cast<std::uint32_t>(
+            HalV2TopologyLinkKind::device_access);
+        auto& timestamp = output->timestamp_domains[0];
+        timestamp.identity = 1;
+        timestamp.kind = static_cast<std::uint32_t>(
+            HalV2TimestampDomainKind::runtime_monotonic);
+        timestamp.tick_numerator_ns = 1;
+        timestamp.tick_denominator = 1;
+        timestamp.monotonic = 1;
+        return HalV2Status::ok;
+    }
+
+    static bool opaque_empty(const HalV2OpaqueHandle& handle) noexcept {
+        return handle.struct_size >= sizeof(handle) && handle.size == 0 &&
+               std::all_of(handle.bytes.begin(), handle.bytes.end(),
+                           [](std::byte value) {
+                               return value == std::byte{0};
+                           }) &&
+               bytes_zero(handle.reserved.data(), handle.reserved.size());
+    }
+
+    static HalV2Status register_memory(
+        void* instance, const HalV2MemoryRegistration* registration,
+        HalV2MemoryToken* out_token) noexcept {
+        if (!registration || !out_token ||
+            registration->struct_size < sizeof(*registration) ||
+            registration->extension_version !=
+                hal_v2_memory_topology_extension_version ||
+            registration->domain_identity != 2 ||
+            registration->ownership != static_cast<std::uint32_t>(
+                HalV2MemoryOwnership::borrowed_host) ||
+            registration->coherency != static_cast<std::uint32_t>(
+                HalV2MemoryCoherency::staged_copy) ||
+            registration->synchronization !=
+                (hal_v2_memory_sync_copy_to_device |
+                 hal_v2_memory_sync_copy_from_device) ||
+            !registration->host_data || registration->bytes == 0 ||
+            !opaque_empty(registration->opaque_handle) ||
+            !bytes_zero(registration->reserved.data(),
+                        registration->reserved.size())) {
+            return HalV2Status::invalid_argument;
+        }
+        HalV2BufferRegistration core{};
+        core.flags = registration->access;
+        core.data = registration->host_data;
+        core.bytes = registration->bytes;
+        core.name = registration->name;
+        std::uint64_t token = 0;
+        const auto status = hal_register_buffer(instance, &core, &token);
+        if (status != HalV2Status::ok) {
+            return status;
+        }
+        *out_token = {};
+        out_token->submission_token = token;
+        self(instance)->buffer_for(token)->heterogeneous = true;
+        return HalV2Status::ok;
+    }
+
+    static HalV2Status unregister_memory(
+        void* instance, const HalV2MemoryRegistration* registration,
+        const HalV2MemoryToken* token) noexcept {
+        if (!registration || !token ||
+            token->struct_size < sizeof(*token) ||
+            token->extension_version !=
+                hal_v2_memory_topology_extension_version ||
+            token->submission_token == 0 ||
+            !opaque_empty(token->native_token) ||
+            !bytes_zero(token->reserved.data(), token->reserved.size())) {
+            return HalV2Status::invalid_argument;
+        }
+        auto* backend = self(instance);
+        auto* buffer = backend ? backend->buffer_for(token->submission_token)
+                               : nullptr;
+        if (!buffer || registration->domain_identity != 2 ||
+            registration->host_data != buffer->host_data ||
+            registration->bytes != buffer->bytes ||
+            registration->access != buffer->flags ||
+            std::strncmp(registration->name.data(), buffer->name.data(),
+                         RTFW_DEVICE_IDENTIFIER_CAPACITY) != 0) {
+            return HalV2Status::invalid_argument;
+        }
+        return hal_unregister_buffer(instance, token->submission_token);
+    }
+
+    static HalV2Status query_correlation(
+        void*, const HalV2TimestampCorrelationQuery*,
+        HalV2TimestampCorrelation*) noexcept {
+        return HalV2Status::unsupported;
+    }
+
+    static HalV2Status command_capabilities(
+        void* instance, HalV2CommandTimelineCapabilities* output) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !output || output->struct_size < sizeof(*output)) {
+            return HalV2Status::invalid_argument;
+        }
+        if (backend->driver.api_version != cuda_driver_api_version_2 ||
+            !backend->driver.graph_launch) {
+            return HalV2Status::unsupported;
+        }
+        *output = {};
+        output->max_in_flight_batches = static_cast<std::uint32_t>(
+            std::min<std::size_t>(backend->config.queue_capacity,
+                                  std::numeric_limits<std::uint32_t>::max()));
+        output->max_commands_per_batch = hal_v2_command_capacity;
+        output->max_wait_points = hal_v2_timeline_wait_capacity;
+        output->max_signal_points = hal_v2_timeline_signal_capacity;
+        output->max_timelines = hal_v2_timeline_capacity;
+        output->completion_batch_capacity =
+            output->max_in_flight_batches;
+        output->backend_control_storage_bytes =
+            backend->config.queue_capacity * sizeof(Slot) +
+            sizeof(backend->graphs);
+        return HalV2Status::ok;
+    }
+
+    static HalV2Status submit_batch(
+        void* instance, const DeviceCommandBatch* batch) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !batch ||
+            !backend->initialized.load(std::memory_order_acquire) ||
+            backend->registration_path.load(std::memory_order_acquire) !=
+                RegistrationPath::native_v2 ||
+            backend->stop_requested.load(std::memory_order_acquire)) {
+            return HalV2Status::invalid_state;
+        }
+        if (!backend->batch_valid(*batch)) {
+            return HalV2Status::invalid_argument;
+        }
+        auto* slot = backend->acquire_slot();
+        if (!slot) {
+            backend->queue_rejections.fetch_add(1, std::memory_order_relaxed);
+            return HalV2Status::queue_full;
+        }
+        slot->batch = true;
+        slot->batch_id = batch->batch_id;
+        slot->started_ns = backend->driver.monotonic_time_ns(
+            backend->driver.user_data);
+        slot->timeout_ns = batch->timeout_ns;
+        slot->timed_out = false;
+        slot->signal_count = batch->signal_count;
+        std::copy_n(batch->signals.begin(), batch->signal_count,
+                    slot->signals.begin());
+        std::fill(slot->buffer_tokens.begin(), slot->buffer_tokens.end(), 0);
+        slot->buffer_count = 0;
+        for (std::size_t command_index = 0;
+             command_index < batch->command_count; ++command_index) {
+            const auto& command = batch->commands[command_index];
+            if (static_cast<HalV2CommandKind>(command.kind) ==
+                HalV2CommandKind::dispatch) {
+                for (std::size_t index = 0; index < command.buffer_count;
+                     ++index) {
+                    slot->buffer_tokens[slot->buffer_count++] =
+                        command.buffers[index].buffer_token;
+                }
+            } else {
+                slot->buffer_tokens[slot->buffer_count++] =
+                    command.source.buffer_token;
+                slot->buffer_tokens[slot->buffer_count++] =
+                    command.destination.buffer_token;
+            }
+        }
+        auto result = backend->push_context();
+        bool operation_attempted = false;
+        if (result == CudaDriverResult::success) {
+            for (std::size_t index = 0; index < batch->command_count; ++index) {
+                operation_attempted = true;
+                result = backend->execute_command(
+                    batch->commands[index], backend->streams[0]);
+                if (result != CudaDriverResult::success) {
+                    break;
+                }
+            }
+            if (result == CudaDriverResult::success) {
+                result = backend->driver.event_record(
+                    backend->driver.user_data, slot->event,
+                    backend->streams[0]);
+            }
+            result = combine_with_pop(result, backend->pop_context());
+        }
+        if (result != CudaDriverResult::success) {
+            auto status = device_status(result);
+            if (operation_attempted && status != RTFW_DEVICE_STATUS_LOST) {
+                backend->set_health_after(RTFW_DEVICE_STATUS_RESET_REQUIRED);
+                status = RTFW_DEVICE_STATUS_RESET_REQUIRED;
+            } else {
+                backend->set_health_after(status);
+            }
+            if (operation_attempted) {
+                backend->outstanding.fetch_add(1, std::memory_order_relaxed);
+                slot->state.store(kSlotQuarantined,
+                                  std::memory_order_release);
+            } else {
+                slot->state.store(kSlotFree, std::memory_order_release);
+            }
+            return hal_status(status);
+        }
+        backend->submissions.fetch_add(1, std::memory_order_relaxed);
+        backend->outstanding.fetch_add(1, std::memory_order_relaxed);
+        slot->state.store(kSlotPending, std::memory_order_release);
+        return HalV2Status::ok;
+    }
+
+    static HalV2Status poll_batches(
+        void* instance, HalV2BatchCompletion* output,
+        std::uint64_t capacity, std::uint64_t* out_count) noexcept {
+        auto* backend = self(instance);
+        if (!backend || !out_count ||
+            !backend->initialized.load(std::memory_order_acquire) ||
+            (capacity != 0 && !output)) {
+            return HalV2Status::invalid_argument;
+        }
+        *out_count = 0;
+        auto result = backend->push_context();
+        if (result != CudaDriverResult::success) {
+            return hal_status(device_status(result));
+        }
+        const auto now = backend->driver.monotonic_time_ns(
+            backend->driver.user_data);
+        auto poll_result = CudaDriverResult::success;
+        for (std::size_t index = 0;
+             index < backend->config.queue_capacity && *out_count < capacity;
+             ++index) {
+            auto& slot = backend->slots[index];
+            auto expected = kSlotPending;
+            if (!slot.state.compare_exchange_strong(
+                    expected, kSlotOwned, std::memory_order_acq_rel,
+                    std::memory_order_relaxed)) {
+                continue;
+            }
+            if (!slot.batch) {
+                slot.state.store(kSlotPending, std::memory_order_release);
+                continue;
+            }
+            result = backend->driver.event_query(
+                backend->driver.user_data, slot.event);
+            if (result == CudaDriverResult::not_ready) {
+                if (now >= slot.started_ns &&
+                    now - slot.started_ns >= slot.timeout_ns) {
+                    slot.timed_out = true;
+                }
+                slot.state.store(kSlotPending, std::memory_order_release);
+                continue;
+            }
+            if (result != CudaDriverResult::success &&
+                result != CudaDriverResult::context_lost) {
+                slot.state.store(kSlotQuarantined,
+                                 std::memory_order_release);
+                backend->set_health_after(RTFW_DEVICE_STATUS_RESET_REQUIRED);
+                poll_result = result;
+                break;
+            }
+            auto status = device_status(result);
+            if (result == CudaDriverResult::success && slot.timed_out) {
+                status = RTFW_DEVICE_STATUS_TIMEOUT;
+            }
+            auto& completion = output[*out_count];
+            completion = {};
+            completion.status = static_cast<std::int32_t>(hal_status(status));
+            completion.batch_id = slot.batch_id;
+            completion.device_timestamp = now;
+            completion.timestamp_domain_identity = 1;
+            completion.signal_count = slot.signal_count;
+            std::copy_n(slot.signals.begin(), slot.signal_count,
+                        completion.signals.begin());
+            ++*out_count;
+            backend->set_health_after(status);
+            backend->completions.fetch_add(1, std::memory_order_relaxed);
+            if (status == RTFW_DEVICE_STATUS_LOST) {
+                slot.state.store(kSlotQuarantined,
+                                 std::memory_order_release);
+            } else {
+                backend->outstanding.fetch_sub(1, std::memory_order_relaxed);
+                slot.batch = false;
+                slot.state.store(kSlotFree, std::memory_order_release);
+            }
+        }
+        result = combine_with_pop(poll_result, backend->pop_context());
+        if (result != CudaDriverResult::success) {
+            *out_count = 0;
+            auto status = device_status(result);
+            if (status != RTFW_DEVICE_STATUS_LOST) {
+                status = RTFW_DEVICE_STATUS_RESET_REQUIRED;
+            }
+            backend->set_health_after(status);
+            return hal_status(status);
+        }
+        return HalV2Status::ok;
+    }
+
+    static HalV2Status cancel_batch(void*, std::uint64_t batch_id) noexcept {
+        return batch_id == 0 ? HalV2Status::invalid_argument
+                             : HalV2Status::unsupported;
+    }
+
+    static HalV2Status request_stop(void* instance) noexcept {
+        auto* backend = self(instance);
+        if (!backend) {
+            return HalV2Status::invalid_argument;
+        }
+        backend->stop_requested.store(true, std::memory_order_release);
+        return HalV2Status::ok;
     }
 
     CudaDriverApi driver;
@@ -1618,6 +2461,13 @@ struct CudaDeviceBackend::Impl {
     std::unique_ptr<Buffer[]> buffers;
     std::unique_ptr<Binding[]> bindings;
     std::unique_ptr<Kernel[]> kernels;
+    std::array<Graph, cuda_graph_capacity> graphs{};
+    HalV2BackendApi hal_api{};
+    HalV2MemoryTopologyExtension memory_extension{};
+    HalV2CommandTimelineExtension command_extension{};
+    std::atomic<RegistrationPath> registration_path{
+        RegistrationPath::unselected};
+    std::atomic<bool> stop_requested{false};
     std::atomic<bool> initialized{false};
     std::atomic<bool> shutdown_incomplete{false};
     std::atomic<bool> shutdown_active{false};
@@ -1637,6 +2487,36 @@ struct CudaDeviceBackend::Impl {
     std::atomic<std::uint64_t> resets{0};
     std::atomic<std::uint64_t> outstanding{0};
 };
+
+void CudaDeviceBackend::Impl::initialize_hal_tables() noexcept {
+    hal_api = {};
+    hal_api.instance = this;
+    hal_api.get_capabilities = &hal_get_capabilities;
+    hal_api.initialize = &hal_initialize;
+    hal_api.register_buffer = &hal_register_buffer;
+    hal_api.unregister_buffer = &hal_unregister_buffer;
+    hal_api.submit = &hal_submit;
+    hal_api.poll = &hal_poll;
+    hal_api.cancel = &hal_cancel;
+    hal_api.get_health = &hal_get_health;
+    hal_api.reset = &hal_reset;
+    hal_api.shutdown = &hal_shutdown;
+
+    memory_extension = {};
+    memory_extension.instance = this;
+    memory_extension.discover = &discover_memory;
+    memory_extension.register_memory = &register_memory;
+    memory_extension.unregister_memory = &unregister_memory;
+    memory_extension.query_timestamp_correlation = &query_correlation;
+
+    command_extension = {};
+    command_extension.instance = this;
+    command_extension.get_capabilities = &command_capabilities;
+    command_extension.submit = &submit_batch;
+    command_extension.poll = &poll_batches;
+    command_extension.cancel = &cancel_batch;
+    command_extension.request_stop = &request_stop;
+}
 
 CudaDeviceBackend::CudaDeviceBackend(
     const CudaDriverApi& driver,
@@ -1665,6 +2545,16 @@ rtfw_device_backend_api CudaDeviceBackend::api() noexcept {
     table.reset = &Impl::reset;
     table.shutdown = &Impl::shutdown;
     return table;
+}
+
+HalV2BackendRegistration CudaDeviceBackend::hal_v2_registration(
+    std::string_view name) noexcept {
+    if (!impl_ ||
+        impl_->driver.api_version != cuda_driver_api_version_2) {
+        return {name, {}, nullptr, nullptr};
+    }
+    return {name, impl_->hal_api, &impl_->memory_extension,
+            &impl_->command_extension};
 }
 
 rtfw_device_status CudaDeviceBackend::bind_device_buffer(
@@ -1733,6 +2623,60 @@ rtfw_device_status CudaDeviceBackend::register_kernel(
         }
     }
     return RTFW_DEVICE_STATUS_RESOURCE_EXHAUSTED;
+}
+
+rtfw_device_status CudaDeviceBackend::register_graph(
+    std::uint16_t graph_id,
+    CudaGraphExec graph,
+    std::span<const CudaGraphBufferBinding> bindings) noexcept {
+    if (!impl_ || impl_->initialized.load(std::memory_order_acquire)) {
+        return RTFW_DEVICE_STATUS_INVALID_STATE;
+    }
+    if (impl_->driver.api_version != cuda_driver_api_version_2 ||
+        graph_id == 0 || graph == 0 ||
+        bindings.size() > cuda_graph_buffer_binding_capacity) {
+        return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+    }
+    Impl::Graph* free_graph = nullptr;
+    for (auto& candidate : impl_->graphs) {
+        if (candidate.registered) {
+            if (candidate.identifier == graph_id ||
+                candidate.executable == graph) {
+                return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+            }
+        } else if (!free_graph) {
+            free_graph = &candidate;
+        }
+    }
+    if (!free_graph) {
+        return RTFW_DEVICE_STATUS_RESOURCE_EXHAUSTED;
+    }
+    for (std::size_t index = 0; index < bindings.size(); ++index) {
+        const auto& binding = bindings[index];
+        if (!valid_identifier(binding.name,
+                              RTFW_DEVICE_IDENTIFIER_CAPACITY) ||
+            !valid_access(binding.access)) {
+            return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+        }
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            if (bindings[prior].name == binding.name) {
+                return RTFW_DEVICE_STATUS_INVALID_ARGUMENT;
+            }
+        }
+    }
+    Impl::Graph candidate{};
+    candidate.executable = graph;
+    candidate.identifier = graph_id;
+    candidate.binding_count = static_cast<std::uint8_t>(bindings.size());
+    for (std::size_t index = 0; index < bindings.size(); ++index) {
+        candidate.bindings[index].access = bindings[index].access;
+        std::copy(bindings[index].name.begin(), bindings[index].name.end(),
+                  candidate.bindings[index].name.begin());
+        candidate.bindings[index].name[bindings[index].name.size()] = '\0';
+    }
+    candidate.registered = true;
+    *free_graph = candidate;
+    return RTFW_DEVICE_STATUS_OK;
 }
 
 } // namespace rt

@@ -291,3 +291,26 @@ device-clock accuracy, native vendor-v2 behavior, CUDA Graph, XDMA controls,
 physical accelerator behavior, HIL, field performance, worst-case latency,
 RT1, RT2, signing, release, deployment, or production readiness. M17 and
 CAP-M17 remain incomplete.
+
+## M17-04 native CUDA and XDMA command backends
+
+The CUDA and XDMA candidates offer native HAL-v2 registrations beside their
+unchanged device-ABI-v1 APIs. The registration points at the same backend
+object, which enforces exclusive path ownership through checked shutdown.
+Runtime copies the three generic tables and continues to own all
+submission/service lanes; the candidates add no Runtime thread or callback.
+
+CUDA translates generic copy commands and vendor dispatch commands into one
+declared-order stream. A pre-registered graph is selected by
+`0x43470000 | graph_id`, and one completion event is recorded after the
+complete accepted batch enqueue. XDMA translates its existing transfer opcodes
+plus stable bounded control-read, control-write, and event-wait opcodes onto
+its fixed backend I/O team. Every command is wholly validated before vendor
+entry.
+
+Partial enqueue, timeout, loss, reset, stop, and shutdown retain every buffer,
+graph, stream, event, descriptor, batch, or driver owner that could still be
+referenced. A backend completion alone authorizes the existing whole-timeline
+publication; neither Runtime nor a backend fabricates completion. New storage
+is fixed backend-private control reported through capability bytes and does
+not change Runtime device-control accounting or the MemoryPlan equation.
