@@ -69,7 +69,10 @@ thread_local std::uint32_t malformed_mode = 0;
 thread_local rtfw_extension_handle_v1 retired_provisional{};
 
 void set_name(char* output, const char* value) {
-    std::strncpy(output, value, RTFW_EXTENSION_IDENTIFIER_CAPACITY - 1);
+    const auto size = std::min<std::size_t>(
+        std::strlen(value), RTFW_EXTENSION_IDENTIFIER_CAPACITY - 1);
+    std::memset(output, 0, RTFW_EXTENSION_IDENTIFIER_CAPACITY);
+    std::memcpy(output, value, size);
 }
 
 rtfw_callback_result phase_callback(
@@ -331,7 +334,7 @@ extern "C" rtfw_status RTFW_EXTENSION_CALL full_entry(
     return RTFW_STATUS_OK;
 }
 
-extern "C" rtfw_status RTFW_EXTENSION_CALL throwing_entry(
+rtfw_status RTFW_EXTENSION_CALL throwing_entry(
     const rtfw_extension_host_api_v1*, rtfw_extension_descriptor_v1*) {
     throw std::runtime_error("extension exception");
 }

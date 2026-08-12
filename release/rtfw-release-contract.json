@@ -270,7 +270,7 @@
     "tests/test_cross_rate_data.cpp": "924a48e4130b9ec85ec7e7594b26c729af9687dbeadf9c755a5c6399dedaaf66",
     "tests/test_cuda_backend.cpp": "3f0d0b723c982853e1dee0de6daf15344ddf34e28a6fb76efe57fd4d018d624c",
     "tests/test_determinism_replay.cpp": "e6152b9ac4540f5582f9a452f5fcaa08d7c7bfafd40e4f787f509ac3f049db27",
-    "tests/test_extension_registration.cpp": "4fc653f249bc428b14f050b6e28bb28a647cdb3d7974465c5a5d78b97141c052",
+    "tests/test_extension_registration.cpp": "d57af049b91427519afe7869a9d8455626e25ca4d505ad4254e00e367c3561d7",
     "tests/test_hal_v2.cpp": "7cbde6842bdb787f869d4fb50e93b0a78fd0a2b2a1059d83e16e9c3bcb98ce59",
     "tests/test_heterogeneous_memory.cpp": "914ffeebda41e393552542a78167f0d77e248094fc670b7495d634ad23edc564",
     "tests/test_host_runtime.cpp": "4111c760c29c065fa3fdb620c0e7e5abbd01650f0e014a138fc49e40766d7d3a",
