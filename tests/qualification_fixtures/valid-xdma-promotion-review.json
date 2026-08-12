@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "document_type": "promotion_review",
+  "evidence_class": "synthetic_fixture",
+  "scope": "xdma",
+  "tuple_id": "fixture-xdma-tuple",
+  "plan_sha256": "484ec4c1204dff592e42afae027dfc7d994044f6aef19c7648749ee0d7dfddba",
+  "record_sha256": "b1b0eea50127eedc3d071fe01b7de00fb2df5a7930b8125c7bf79107f7da1dca",
+  "evidence_manifest_sha256": "1dbed12b0734b1a0ad58f0c3d38b512bde5647be9857b77b606b3923da7efdd5",
+  "reviewer": "synthetic-reviewer",
+  "reviewed_at": "2026-08-12T00:00:02Z",
+  "decision": "pass",
+  "rationale": "synthetic fixture review only",
+  "exceptions": [],
+  "pre_run_provenance_verified": true,
+  "reviewer_authentication": "attribution_only"
+}

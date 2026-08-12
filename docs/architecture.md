@@ -409,3 +409,23 @@ discovery clears the output header before invocation, while both candidate
 callbacks require the incoming `struct_size`. Registration therefore fails
 before a submission lane or graph is configured. Direct candidate tests cover
 backend-local protocol behavior only and do not establish this integration.
+
+## M18-01 offline qualification plane
+
+Qualification files are outside every runtime lane and package surface. A
+separately retained plan supplies the immutable tuple, policy, workload, trial,
+and threshold intent. A record binds its exact bytes, repeats observed identity,
+retains a complete artifact manifest and raw-population references, and records
+recomputed trial/threshold results. A separate review binds the exact plan,
+record, and manifest digests. Only that complete set can produce a canonical
+`proposal_only` handoff.
+
+The validator uses bounded strict JSON parsing and streaming artifact hashing.
+It follows no symlink, accepts no unlisted artifact, starts no thread or device
+work, and writes only one explicit new output through atomic non-overwriting
+publication. It has no support-matrix, Git, remote, signing, or production
+mutation path. See [the qualification contract](qualification.md).
+
+This plane is not a scheduler or HAL capability. The combined synthetic fixture
+does not bypass the M17-05 blocker; non-synthetic combined promotion fails
+closed until the native registration path exists.

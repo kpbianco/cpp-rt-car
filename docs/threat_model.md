@@ -27,6 +27,7 @@ boundary. Portable RT0 support is not a sandboxing claim.
 | Device hang/loss | M8 defines timeout/loss statuses, poll-only completion, health/reset/shutdown, and deterministic mock evidence; M9 quarantines timed-out or uncertain CUDA work until physical drain and treats context loss as host-recreation-required, but a malicious backend still shares process authority and no hardware-driver recovery tuple is qualified |
 | Telemetry leakage/corruption | M6 target records are size/schema tagged with cursor loss accounting, but non-RT exporters can disclose runtime data and no sink access policy exists; legacy telemetry remains experimental |
 | Supply-chain substitution | Submodule/SBOM helpers, CI dependency review, a checked release contract, and complete artifact SHA-256 manifests exist; manifests are unsigned and signed provenance is not established |
+| Malformed qualification evidence | M18-01 applies byte, depth, count, numeric, duplicate-key, strict-UTF-8, closed-object, canonical-path, symlink, regular-file, inventory, size, and digest checks before proposal output. Hashes do not authenticate the reviewer, prove that the plan predates measurement, or make untrusted native artifacts safe to execute. |
 | Host-policy mutation | Hardening scripts can make privileged system-wide changes and require operator review; M5 strict preflight is read-only |
 
 ## Required controls

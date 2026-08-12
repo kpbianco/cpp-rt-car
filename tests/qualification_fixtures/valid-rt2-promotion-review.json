@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "document_type": "promotion_review",
+  "evidence_class": "synthetic_fixture",
+  "scope": "rt2",
+  "tuple_id": "fixture-rt2-tuple",
+  "plan_sha256": "d1592d2b898e9639a407bd5846bf6cf5dddb257a9f2d9f4aaa7ec8719c414a5f",
+  "record_sha256": "c846e76deeaf1a2283f6a3ee3251069844880f12ed34f0ac26479dc6c346c978",
+  "evidence_manifest_sha256": "1dbed12b0734b1a0ad58f0c3d38b512bde5647be9857b77b606b3923da7efdd5",
+  "reviewer": "synthetic-reviewer",
+  "reviewed_at": "2026-08-12T00:00:02Z",
+  "decision": "pass",
+  "rationale": "synthetic fixture review only",
+  "exceptions": [],
+  "pre_run_provenance_verified": true,
+  "reviewer_authentication": "attribution_only"
+}

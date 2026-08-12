@@ -44,6 +44,11 @@ may disclose paths. It must not be described as a production crash handler.
   movable major-version tag.
 - `tools/store_repro_build.py` records content-addressed build artifacts and
   metadata for comparison.
+- `tools/qualification.py` bounds strict JSON and artifact-tree input, rejects
+  duplicate keys, non-finite numbers, unsafe paths, symlinks, unlisted files,
+  and digest drift, and publishes a canonical proposal only to a nonexisting
+  explicit output. Its SHA-256 chains are integrity metadata, not signatures,
+  reviewer authentication, or proof of plan chronology.
 
 The archive manifest detects accidental corruption or substitution after it is
 created, but it is not authentication. Signing, provenance attestation,
@@ -60,4 +65,6 @@ defined in the repository [security policy](../SECURITY.md).
   `tools/check_release_contract.py`, `tools/release_manifest.py`,
   `tools/stage_release_artifacts.py`, `tools/extract_release_archive.py`,
   `tools/store_repro_build.py`
+- Qualification input and proposal safety: `tools/qualification.py`,
+  `qualification/schemas/`, and [qualification contract](qualification.md)
 - Threat boundaries: [threat model](threat_model.md)

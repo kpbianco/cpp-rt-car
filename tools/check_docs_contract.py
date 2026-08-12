@@ -2752,6 +2752,90 @@ def check_runtime_contract() -> None:
             )
 
 
+def check_qualification_contract() -> None:
+    schema_types = {
+        "campaign-plan": "campaign_plan",
+        "qualification-record": "qualification_record",
+        "promotion-review": "promotion_review",
+        "promotion-proposal": "promotion_proposal",
+    }
+    expected_scopes = {"nvidia", "xdma", "combined", "rt1", "rt2"}
+    for name, document_type in schema_types.items():
+        relative = f"qualification/schemas/{name}.schema.json"
+        try:
+            schema = json.loads(read(relative))
+        except json.JSONDecodeError as exc:
+            fail(f"{relative}: invalid JSON: {exc}")
+            continue
+        properties = schema.get("properties") if isinstance(schema, dict) else None
+        scope_name = "claim_scope" if name == "promotion-proposal" else "scope"
+        scope = properties.get(scope_name) if isinstance(properties, dict) else None
+        if (
+            schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema"
+            or schema.get("$id") != f"https://rtfw.dev/qualification/{name}.schema.json"
+            or schema.get("additionalProperties") is not False
+            or not isinstance(properties, dict)
+            or properties.get("schema_version") != {"const": 1}
+            or properties.get("document_type") != {"const": document_type}
+        ):
+            fail(f"{relative}: draft/version/type/closure contract mismatch")
+        if not isinstance(scope, dict) or set(scope.get("enum", [])) != expected_scopes:
+            fail(f"{relative}: scope set mismatch")
+
+    campaign = read("qualification/schemas/campaign-plan.schema.json")
+    record = read("qualification/schemas/qualification-record.schema.json")
+    review = read("qualification/schemas/promotion-review.schema.json")
+    proposal = read("qualification/schemas/promotion-proposal.schema.json")
+    for token in (
+        '"additionalProperties": false',
+        '"pattern": "^[0-9a-f]{64}$"',
+        '"pattern": "^[0-9a-f]{40}$"',
+    ):
+        for relative, contents in (
+            ("campaign-plan", campaign),
+            ("qualification-record", record),
+        ):
+            if token not in contents:
+                fail(f"{relative} schema: missing security token {token!r}")
+    for token in ('"attribution_only"', '"pre_run_provenance_verified"'):
+        if token not in review:
+            fail(f"promotion-review schema: missing {token!r}")
+    for token in ('"proposal_only"', '"human_matrix_change_required"'):
+        if token not in proposal:
+            fail(f"promotion-proposal schema: missing {token!r}")
+
+    tool = read("tools/qualification.py")
+    documentation = read("docs/qualification.md")
+    tests = read("tests/test_release_tools.py")
+    for token in (
+        "DuplicateKeyError",
+        "parse_constant=_reject_constant",
+        "MAX_ARTIFACT_TOTAL_BYTES",
+        "MAX_ARTIFACT_TREE_ENTRIES",
+        "rtfw-qualification-artifact-manifest-v1",
+        "combined qualification is blocked until the M17-05",
+        "os.link(temporary_name, path)",
+    ):
+        if token not in tool:
+            fail(f"tools/qualification.py: missing permanent M18-01 gate {token!r}")
+    for phrase in (
+        "never support-matrix eligible",
+        "tool proves neither chronology nor identity",
+        "no matrix path or mutation command",
+        "M17-05 remains blocked",
+    ):
+        if phrase.lower() not in documentation.lower():
+            fail(f"docs/qualification.md: missing claim boundary {phrase!r}")
+    for token in (
+        "class QualificationToolTests",
+        "test_all_scope_fixtures_validate_and_proposals_are_deterministic",
+        "test_real_combined_and_raw_m12_document_are_not_promotable",
+        "test_proposal_nonoverwrite_atomic_cleanup_and_nonmutation",
+    ):
+        if token not in tests:
+            fail(f"tests/test_release_tools.py: missing permanent M18-01 gate {token!r}")
+
+
 def main() -> int:
     require_files(
         (
@@ -2761,6 +2845,7 @@ def main() -> int:
             "SECURITY.md",
             "include/rtfw/version.h",
             "docs/product_contract.md",
+            "docs/qualification.md",
             "docs/host_runtime.md",
             "docs/compiled_graph.md",
             "docs/executor.md",
@@ -2880,6 +2965,11 @@ def main() -> int:
             "tools/autotune/mapping_smoke.py",
             "tools/autotune/spec.yaml",
             "tools/check_release_contract.py",
+            "tools/qualification.py",
+            "qualification/schemas/campaign-plan.schema.json",
+            "qualification/schemas/qualification-record.schema.json",
+            "qualification/schemas/promotion-review.schema.json",
+            "qualification/schemas/promotion-proposal.schema.json",
             "tools/check_hardware_evidence.py",
             "tools/release_manifest.py",
             "tools/extract_release_archive.py",
@@ -2895,6 +2985,7 @@ def main() -> int:
     check_verified_commands()
     check_claims()
     check_runtime_contract()
+    check_qualification_contract()
 
     if FAILURES:
         print("Documentation contract failed:", file=sys.stderr)

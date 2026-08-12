@@ -36,7 +36,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
 | M17 | In progress | M17-01 through M17-04 are merged; M17-05 combined sample is blocked by the native command-capability discovery contract mismatch; qualification remains |
-| M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
+| M18 | Planned | M18-01 offline schemas/tools implemented; named NVIDIA, XDMA, combined, RT1, and optional RT2 campaigns remain |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
 
@@ -673,7 +673,19 @@ Exit gates:
 
 ## M18 — Hardware and real-time qualification
 
-Planned outcome:
+M18-01 implements the offline foundation:
+
+- independent version-1 plan, record, review, and generated proposal schemas;
+- bounded strict parsing, exact-byte provenance, artifact-tree integrity,
+  predeclared threshold evaluation, mandatory trial coverage, and deterministic
+  atomic proposal-only output;
+- synthetic NVIDIA, XDMA, combined, RT1, and RT2 fixtures that are never
+  support-matrix eligible;
+- a hard boundary that leaves non-synthetic combined promotion blocked on
+  M17-05 and leaves human chronology, identity, review, and matrix changes
+  outside the tool.
+
+Remaining outcome:
 
 - retained evidence for named CPU/kernel/BIOS/compiler/runtime/workload tuples;
 - CUDA driver/GPU and XDMA driver/firmware/bitstream/BDF tuples with functional,

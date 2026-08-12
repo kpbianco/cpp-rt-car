@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "document_type": "campaign_plan",
+  "evidence_class": "synthetic_fixture",
+  "campaign_id": "fixture-rt2-campaign",
+  "tuple_id": "fixture-rt2-tuple",
+  "scope": "rt2",
+  "source": {"commit": "0123456789abcdef0123456789abcdef01234567", "build_id": "fixture-build", "product_version": "1.2.1"},
+  "host": {"cpu": "synthetic cpu", "motherboard": "synthetic motherboard", "bios_firmware": "synthetic bios", "memory": "synthetic memory", "operating_system": "synthetic linux", "kernel": {"version": "synthetic preempt_rt kernel", "configuration_sha256": "1111111111111111111111111111111111111111111111111111111111111111", "boot_parameters": "isolcpus synthetic"}, "compiler": "synthetic compiler"},
+  "topology": {"numa": "synthetic numa", "iommu": "synthetic iommu", "irq": "synthetic irq", "power": "synthetic power"},
+  "policy": {"runtime": "resolved synthetic runtime", "threads": "resolved synthetic threads", "memory": "resolved synthetic memory", "time": "resolved synthetic time", "measured_host_policy": "named measured synthetic rt2 policy", "rt2": {"applicable": true, "preempt_rt": true, "isolation": "synthetic isolated cpus", "irq_placement": "synthetic irq placement", "scheduling": "synthetic fifo policy", "locking": "synthetic verified locking"}},
+  "workload": {"id": "fixture-workload", "input_id": "fixture-input", "input_sha256": "2222222222222222222222222222222222222222222222222222222222222222"},
+  "measurement": {"warmup_samples": 0, "duration_seconds": 1, "sample_count": 1},
+  "accelerator": {},
+  "trials": [
+    {"id": "functional", "kind": "functional", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "endurance", "kind": "endurance", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "thermal", "kind": "thermal", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "saturation", "kind": "saturation", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "device-loss", "kind": "device_loss", "required": false, "applicability": "not_applicable", "rationale": "no device in synthetic rt2 scope"},
+    {"id": "reset-rebind", "kind": "reset_rebind", "required": false, "applicability": "not_applicable", "rationale": "no device in synthetic rt2 scope"},
+    {"id": "shutdown", "kind": "shutdown", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"}
+  ],
+  "thresholds": [
+    {"id": "latency-limit", "metric": "wake_ns", "unit": "ns", "population": "latency", "statistic": "maximum", "comparison": "le", "bound": 10, "miss_allowance": 0, "error_allowance": 0},
+    {"id": "deadline-limit", "metric": "deadline_miss", "unit": "count", "population": "deadline", "statistic": "total", "comparison": "eq", "bound": 0, "miss_allowance": 0, "error_allowance": 0}
+  ]
+}

@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-12
-Batch baseline: `bdc97d0122effbad07dbf6d4981e1bf0de729437`
+Batch baseline: `e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`
 
 ## Product state
 
@@ -14,7 +14,9 @@ Batch baseline: `bdc97d0122effbad07dbf6d4981e1bf0de729437`
 - The installed header and target inventory, 1.x aliases, support matrices,
   and Apache-2.0 license are unchanged.
 - M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 are merged in
-  target history. M17 is active and incomplete; M17-05 is the approved batch.
+  target history. M17 remains active and incomplete because M17-05 is blocked.
+  M18-01 offline qualification schemas and tools are implemented from the
+  completed M17-04 foundation; M18 and CAP-M18 remain incomplete.
 
 ## M17-04 implementation
 
@@ -77,3 +79,23 @@ test are not implemented, and M17/CAP-M17 remain incomplete.
 See `docs/evidence/M17-05-2026-08-12.md`. Physical CUDA/XDMA memory, MMIO,
 interrupts, timing, HIL, field, RT1/RT2, support promotion, signing, release,
 deployment, and production qualification remain deferred.
+
+## M18-01 offline qualification plane
+
+Four independent JSON Schema draft 2020-12 version-1 documents define a
+separately retained campaign plan, immutable qualification record, human
+promotion review, and generated promotion proposal. The Python 3.11
+standard-library tool validates complete scope-specific tuple, policy,
+workload, trial, threshold, resource, thermal, health, recovery, artifact, and
+digest chains with bounded strict JSON and filesystem handling.
+
+Synthetic fixtures cover NVIDIA, XDMA, combined, RT1, and RT2. They are labeled
+`synthetic_fixture`, generate only `proposal_only` output, and are never
+support-matrix eligible. A non-synthetic combined proposal is explicitly
+blocked until M17-05 is repaired. Reviewer names and timestamps are not
+authenticated, and external pre-run plan provenance remains a human gate.
+
+See `docs/qualification.md`. M18-01 changes no runtime, ABI, installed package,
+version, support matrix, hardware workflow/sample, or prior evidence. It
+performs no physical hardware, controlled timing, HIL, field, RT1/RT2, signing,
+release, deployment, production, or support-promotion validation.

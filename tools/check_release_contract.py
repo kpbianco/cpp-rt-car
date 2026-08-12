@@ -96,6 +96,7 @@ HASHED_CONTRACT_PATHS = {
     "docs/rate_telemetry.md",
     "docs/portable_support_matrix.json",
     "docs/product_contract.md",
+    "docs/qualification.md",
     "docs/real_time_hardening.md",
     "docs/real_time_readiness_checklist.md",
     "docs/release_policy.md",
@@ -112,6 +113,10 @@ HASHED_CONTRACT_PATHS = {
     "include/simcore/SimCore.hpp",
     "profiles/README.md",
     "profiles/example-linux.json",
+    "qualification/schemas/campaign-plan.schema.json",
+    "qualification/schemas/promotion-proposal.schema.json",
+    "qualification/schemas/promotion-review.schema.json",
+    "qualification/schemas/qualification-record.schema.json",
     "rt/include/rt/c_api.h",
     "rt/include/rt/canonical_bytes.hpp",
     "rt/include/rt/config.hpp",
@@ -224,6 +229,7 @@ HASHED_CONTRACT_PATHS = {
     "tools/check_docs_contract.py",
     "tools/check_hardware_evidence.py",
     "tools/check_release_contract.py",
+    "tools/qualification.py",
     "tools/extract_release_archive.py",
     "tools/release_manifest.py",
     "tools/stage_release_artifacts.py",
@@ -632,6 +638,65 @@ def validate_release_contract(
             errors.append(f"release contract: digest mismatch for {relative}")
 
 
+def validate_qualification_contract(
+    root: pathlib.Path,
+    errors: list[str],
+) -> None:
+    schemas = {
+        "campaign-plan": "campaign_plan",
+        "qualification-record": "qualification_record",
+        "promotion-review": "promotion_review",
+        "promotion-proposal": "promotion_proposal",
+    }
+    exact_scopes = {"nvidia", "xdma", "combined", "rt1", "rt2"}
+    for name, document_type in schemas.items():
+        relative = f"qualification/schemas/{name}.schema.json"
+        schema = load_json(root, relative, errors)
+        properties = schema.get("properties") if isinstance(schema, dict) else None
+        scope_name = "claim_scope" if name == "promotion-proposal" else "scope"
+        scope = properties.get(scope_name) if isinstance(properties, dict) else None
+        if (
+            schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema"
+            or schema.get("$id") != f"https://rtfw.dev/qualification/{name}.schema.json"
+            or schema.get("type") != "object"
+            or schema.get("additionalProperties") is not False
+            or not isinstance(properties, dict)
+            or properties.get("schema_version") != {"const": 1}
+            or properties.get("document_type") != {"const": document_type}
+        ):
+            errors.append(f"{relative}: qualification schema identity/closure mismatch")
+        if not isinstance(scope, dict) or set(scope.get("enum", [])) != exact_scopes:
+            errors.append(f"{relative}: qualification scope set mismatch")
+
+    tool = load_text(root, "tools/qualification.py", errors)
+    for token in (
+        "MAX_JSON_BYTES = 1024 * 1024",
+        "MAX_ARTIFACTS = 256",
+        "MAX_ARTIFACT_TOTAL_BYTES = 512 * 1024 * 1024",
+        "MAX_ARTIFACT_TREE_ENTRIES",
+        "DuplicateKeyError",
+        "parse_constant=_reject_constant",
+        "rtfw-qualification-artifact-manifest-v1",
+        "combined qualification is blocked until the M17-05",
+        "proposal_only",
+        "human_matrix_change_required",
+        "os.link(temporary_name, path)",
+    ):
+        if token not in tool:
+            errors.append(f"tools/qualification.py: missing permanent contract token {token!r}")
+
+    documentation = load_text(root, "docs/qualification.md", errors)
+    for phrase in (
+        "never support-matrix eligible",
+        "reviewer_authentication` remains `attribution_only`",
+        "tool proves neither chronology nor identity",
+        "non-synthetic combined proposal",
+        "no matrix path or mutation command",
+    ):
+        if phrase.lower() not in documentation.lower():
+            errors.append(f"docs/qualification.md: missing claim boundary {phrase!r}")
+
+
 def validate_repository(root: pathlib.Path) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
@@ -661,6 +726,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     xdma = load_json(root, "docs/xdma_support_matrix.json", errors)
 
     validate_release_contract(root, contract, version, errors)
+    validate_qualification_contract(root, errors)
     validate_support_matrix(matrix, version, errors)
     validate_hardware_matrix(
         "docs/cuda_support_matrix.json",

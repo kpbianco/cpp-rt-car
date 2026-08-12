@@ -160,6 +160,13 @@ latency qualification and does not prove the complete product contract.
   a rejected partial destination. The same suite
   validates CUDA/XDMA `evidence_only` schemas and rejects promoted, duplicate,
   or unhealthy raw records.
+- M18-01 release-tool tests validate all four independent draft-2020-12
+  qualification schemas and synthetic NVIDIA, XDMA, combined, RT1, and RT2
+  plan/record/review/proposal chains. Negative coverage includes duplicate and
+  non-finite JSON, depth/size bounds, scope/identity/digest substitution,
+  threshold/trial drift, unstable resources, device health/recovery, unsafe or
+  unlisted artifacts, symlinks, noncanonical proposals, output collision and
+  cancellation cleanup, recovery, isolation, and matrix/input nonmutation.
 
 ## What CI does not currently establish
 
@@ -200,6 +207,9 @@ latency qualification and does not prove the complete product contract.
 - Best-effort host-hardening steps on shared runners are not RT evidence.
 - SHA-256 artifact manifests are integrity metadata, not signatures,
   provenance attestations, or proof that two builds are reproducible.
+- M18-01 synthetic fixtures, parser success, reviewer strings, timestamps, and
+  generated proposals do not prove pre-run chronology, authenticated approval,
+  physical behavior, latency, RT1/RT2, or support promotion.
 
 ## Adding evidence
 
@@ -221,6 +231,9 @@ predeclared thresholds, and the measurement procedure.
   `tools/stage_release_artifacts.py`, `tools/release_manifest.py`,
   `tools/extract_release_archive.py`, `tools/check_hardware_evidence.py`,
   `tests/test_release_tools.py`
+- Qualification schemas and tool: `qualification/schemas/`,
+  `tools/qualification.py`, `docs/qualification.md`, and the permanent
+  `QualificationToolTests` cases in `tests/test_release_tools.py`
 - Differential test: `tests/test_differential_output.cpp`
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`

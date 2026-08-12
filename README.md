@@ -28,6 +28,7 @@ versioned observability/replay, and asynchronous device integration.
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
 | Multi-rate simulation | M16 complete in merged history | Bounded domains/reference order, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
 | HAL v2 command/timeline, memory/topology, and device ABI v1 compatibility | M17-04 implemented locally; external gates pending | Preserved HAL core v2, memory extension v1, complete v1 adapter, and legacy single submit; bounded same-backend batches/timelines now include native CUDA Graph and XDMA control/event registrations without changing the generic Runtime path |
+| Qualification schemas and proposals | M18-01 offline tooling; no tuple qualified | Version-1 plan, record, review, and proposal schemas with bounded artifact/digest/threshold/trial validation and deterministic proposal-only output; synthetic fixtures cannot promote support |
 | Self-paced time | Implemented RT0 surface | A finite caller-thread loop uses absolute epoch-based releases and reports release/wake/start/finish/slack without drifting after late frames |
 | Frame watchdog/degradation | Implemented RT0 surface | One arm produces at most one event; the service lane never invokes host code and the frame thread commits capped degradation for following frames |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report before runtime threads start |
@@ -334,6 +335,11 @@ RTFW separates portable functionality from deployment qualification:
   passes strict preflight and published deadline tests.
 
 No RT2 record exists yet.
+
+The offline [qualification contract](docs/qualification.md) defines exact
+schema versions, bounds, digest rules, review limits, and proposal commands.
+Passing those synthetic/tooling gates is not hardware or RT qualification and
+does not edit a support matrix.
 
 Determinism is tiered from D0 (unspecified) through D3 (portable approved
 fixed-point/specified math). Release 1.2 supports D0 and an explicit D1
