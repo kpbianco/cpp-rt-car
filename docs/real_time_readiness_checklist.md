@@ -161,3 +161,15 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - [ ] Physical Graph execution, pinning/device memory/coherency, design-safe
   MMIO, interrupts, hardware/HIL, field, bounded latency, RT1, and RT2 remain
   unqualified and require named later evidence.
+# M19-01 extension checklist
+
+- Entry and registration execute only before finalization on the host control
+  path; complete failure publishes nothing.
+- Phase execution uses existing bounded executor and scratch contracts.
+- Service callbacks are bounded, nonblocking host-control operations and add
+  no implicit lane.
+- Checked stop closes admission and retains unresolved owners; checked detach
+  clears callable pointers only after quiescence.
+- Runtime start/status/stop/retry/detach add no ordinary heap allocation.
+- Portable tests do not qualify extension code, Unreal, hardware, HIL, field,
+  latency, RT1, RT2, signing, release, deployment, or production use.

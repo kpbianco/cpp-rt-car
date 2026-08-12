@@ -77,6 +77,14 @@ qualification-record, promotion-review, and promotion-proposal schemas plus a
 bounded standard-library validator. Synthetic fixtures and generated
 `proposal_only` output establish parser, artifact-integrity, threshold, and
 nonmutation behavior only. They do not change the runtime or promote a tuple.
+M19-01 adds an independently size-versioned C extension registration ABI v1
+and additive C++ Runtime entry-pointer operation. Complete fixed-capacity
+registration is transactional; CPU callbacks reuse C ABI v8 semantics,
+backends reuse only device ABI v1 through the canonical adapter, and services
+remain on the serialized host control path. Checked stop and detach preserve
+borrowed code/instance lifetime. Runtime performs no discovery or unload, and
+the experimental plugin manager is not a compatibility path. M19 and CAP-M19
+remain incomplete.
 
 ## Claim policy
 

@@ -87,6 +87,7 @@ HASHED_CONTRACT_PATHS = {
     "docs/devex_governance.md",
     "docs/device_backend.md",
     "docs/executor.md",
+    "docs/extension_registration.md",
     "docs/hal_v2.md",
     "docs/heterogeneous_memory.md",
     "docs/host_runtime.md",
@@ -124,6 +125,7 @@ HASHED_CONTRACT_PATHS = {
     "rt/include/rt/cuda_driver.hpp",
     "rt/include/rt/device.hpp",
     "rt/include/rt/device_abi.h",
+    "rt/include/rt/extension_abi.h",
     "rt/include/rt/graph.hpp",
     "rt/include/rt/mock_device.hpp",
     "rt/include/rt/observability_export.hpp",
@@ -146,6 +148,8 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/cross_rate_data.hpp",
     "rt/src/executor.cpp",
     "rt/src/executor.hpp",
+    "rt/src/extension_registration.cpp",
+    "rt/src/extension_registration.hpp",
     "rt/src/hal_v2.cpp",
     "rt/src/hal_v2.hpp",
     "rt/src/heterogeneous_memory.cpp",
@@ -175,9 +179,13 @@ HASHED_CONTRACT_PATHS = {
     "samples/embed_cpp/mini_app.cpp",
     "src/runtime_profile_demo.cpp",
     "tests/CMakeLists.txt",
+    "tests/extension_fixture.c",
+    "tests/extension_fixture_bad.c",
     "tests/add_subdirectory_consumer/CMakeLists.txt",
     "tests/add_subdirectory_consumer/main.cpp",
     "tests/package_consumer/CMakeLists.txt",
+    "tests/package_consumer/extension_consumer.c",
+    "tests/package_consumer/extension_cpp_consumer.cpp",
     "tests/package_consumer/c_consumer.c",
     "tests/package_consumer/compat_consumer.cpp",
     "tests/package_consumer/cpp_consumer.cpp",
@@ -207,6 +215,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_rate_timeline.cpp",
     "tests/test_release_tools.py",
     "tests/test_determinism_replay.cpp",
+    "tests/test_extension_registration.cpp",
     "tests/test_memory_policy.cpp",
     "tests/test_rt_pipeline.cpp",
     "tests/test_thread_policy.cpp",
@@ -540,6 +549,7 @@ def validate_release_contract(
         "rt/cuda_backend.hpp",
         "rt/device.hpp",
         "rt/device_abi.h",
+        "rt/extension_abi.h",
         "rt/graph.hpp",
         "rt/mock_device.hpp",
         "rt/observability_export.hpp",
@@ -618,6 +628,15 @@ def validate_release_contract(
         "XDMA": "candidate",
     }:
         errors.append("release contract: qualification boundary mismatch")
+
+    if contract.get("extension_abi") != {
+        "current": 1,
+        "minimum_compatible": 1,
+        "header": "rt/include/rt/extension_abi.h",
+        "entry_symbol": "rtfw_extension_entry_v1",
+        "runtime_loader": False,
+    }:
+        errors.append("release contract: extension ABI v1 boundary mismatch")
 
     hashes = contract.get("contract_sha256")
     if not isinstance(hashes, dict):
@@ -1362,6 +1381,59 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     device_test = load_text(root, "tests/test_device_runtime.cpp", errors)
     if "CrossInstanceDeviceStateIsIsolated" not in device_test:
         errors.append("device tests: missing cross-instance isolation gate")
+
+    extension_header = load_text(
+        root, "rt/include/rt/extension_abi.h", errors
+    )
+    extension_source = load_text(
+        root, "rt/src/extension_registration.cpp", errors
+    )
+    extension_test = load_text(
+        root, "tests/test_extension_registration.cpp", errors
+    )
+    extension_doc = load_text(
+        root, "docs/extension_registration.md", errors
+    )
+    ci = load_text(root, ".github/workflows/ci.yml", errors)
+    for token in (
+        "RTFW_EXTENSION_ABI_VERSION 1u",
+        'RTFW_EXTENSION_ENTRY_SYMBOL_V1 "rtfw_extension_entry_v1"',
+        "rtfw_extension_host_api_v1",
+        "rtfw_extension_descriptor_v1",
+        "RTFW_RUNTIME_EXTENSION_CAPACITY 16u",
+    ):
+        if token not in extension_header:
+            errors.append(f"M19-01 extension header: missing {token!r}")
+    for token in (
+        "invoke_extension_entry",
+        "valid_extension_identifier",
+        "ExtensionRegistrationRecord::clear_borrowed",
+    ):
+        if token not in extension_source:
+            errors.append(f"M19-01 implementation: missing {token!r}")
+    for token in (
+        "VersionOneLayoutsAndConstantsAreFixed",
+        "MalformedLateOutputAndExceptionAreAtomic",
+        "FailedProvisionalGenerationCannotBeReused",
+        "ServicesBackendsRetryDetachAndStaleHandles",
+        "OwnersAndGenerationsAreRuntimeLocal",
+    ):
+        if token not in extension_test:
+            errors.append(f"M19-01 tests: missing {token!r}")
+    for phrase in (
+        "already-resolved",
+        "trusted native code",
+        "performs no unload",
+        "M19-03",
+    ):
+        if phrase.lower() not in extension_doc.lower():
+            errors.append(f"M19-01 documentation: missing {phrase!r}")
+    for token in (
+        "m19_extension_registration",
+        "ExtensionAbi.*:ExtensionRegistration.*:ExtensionLifecycle.*",
+    ):
+        if token not in ci:
+            errors.append(f"M19-01 CI: missing {token!r}")
 
     return errors
 

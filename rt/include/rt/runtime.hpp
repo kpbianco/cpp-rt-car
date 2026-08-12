@@ -15,6 +15,7 @@
 #include "core/units.hpp"
 #include "rt/config.hpp"
 #include "rt/device.hpp"
+#include "rt/extension_abi.h"
 #include "rt/graph.hpp"
 #include "rt/status.hpp"
 #include "rt/version.hpp"
@@ -65,6 +66,47 @@ enum class RuntimeState : std::uint8_t {
     finalized,
     running,
     stopped,
+};
+
+enum class ExtensionLifecycleState : std::uint32_t {
+    configuring = 0,
+    registered = 1,
+    running = 2,
+    stop_requested = 3,
+    quiescent = 4,
+    cleanup_pending = 5,
+    detached = 6,
+    failed = 7,
+};
+
+struct ExtensionHandle {
+    std::uint32_t owner = 0;
+    std::uint32_t kind = 0;
+    std::uint32_t slot = 0;
+    std::uint32_t generation = 0;
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return owner != 0 && kind == RTFW_EXTENSION_HANDLE_EXTENSION &&
+               generation != 0;
+    }
+
+    friend constexpr bool operator==(
+        ExtensionHandle,
+        ExtensionHandle) noexcept = default;
+};
+
+struct ExtensionInfo {
+    std::array<char, RTFW_EXTENSION_IDENTIFIER_CAPACITY> name{};
+    std::array<char, RTFW_EXTENSION_IDENTIFIER_CAPACITY> version{};
+    std::uint32_t negotiated_abi_version = 0;
+    ExtensionLifecycleState state = ExtensionLifecycleState::configuring;
+    std::uint32_t generation = 0;
+    std::uint32_t phase_count = 0;
+    std::uint32_t backend_count = 0;
+    std::uint32_t service_count = 0;
+    std::uint32_t resource_count = 0;
+    std::uint32_t relationship_count = 0;
+    bool unload_ready = false;
 };
 
 /*
@@ -1372,6 +1414,12 @@ public:
     [[nodiscard]] Status register_callback(
         const CallbackRegistration& registration,
         PhaseHandle& out_phase) noexcept;
+    // Invokes an already-resolved ABI-v1 entry function only while
+    // configuring. The complete extension is staged and published as one
+    // transaction; Runtime never resolves, loads, or unloads a module.
+    [[nodiscard]] Status register_extension(
+        rtfw_extension_entry_fn_v1 entry,
+        ExtensionHandle& out_extension) noexcept;
     [[nodiscard]] Status register_device_backend(
         const DeviceBackendRegistration& registration,
         DeviceBackendHandle& out_backend) noexcept;
@@ -1448,10 +1496,30 @@ public:
         DeviceHealth& health) noexcept;
     [[nodiscard]] Status reset_device(
         DeviceBackendHandle backend) noexcept;
+    // Checked detach never performs an operating-system unload. It succeeds
+    // only after checked stop released every borrowed extension owner, clears
+    // all copied callable pointers, retires the generation, and then reports
+    // unload readiness.
+    [[nodiscard]] Status detach_extension(
+        ExtensionHandle extension,
+        bool& unload_ready) noexcept;
+    // Optional service status runs synchronously on the caller's host-control
+    // path and preserves output on rejection or callback failure.
+    [[nodiscard]] Status extension_service_status(
+        ExtensionHandle extension,
+        std::size_t service_index,
+        rtfw_extension_service_status_v1& status) noexcept;
 
     [[nodiscard]] RuntimeState state() const noexcept;
     [[nodiscard]] const RuntimeConfig& config() const noexcept;
     [[nodiscard]] std::size_t callback_count() const noexcept;
+    [[nodiscard]] std::size_t extension_count() const noexcept;
+    [[nodiscard]] bool extension_at(
+        std::size_t index,
+        ExtensionInfo& info) const noexcept;
+    [[nodiscard]] Status extension_info(
+        ExtensionHandle extension,
+        ExtensionInfo& info) const noexcept;
     [[nodiscard]] std::size_t device_backend_count() const noexcept;
     [[nodiscard]] std::size_t device_buffer_count() const noexcept;
     [[nodiscard]] std::size_t device_phase_count() const noexcept;

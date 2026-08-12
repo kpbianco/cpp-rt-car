@@ -237,3 +237,10 @@ The normative compatibility and release rules are in
 - Safe archive extraction: `tools/extract_release_archive.py`
 - Artifact manifest: `tools/release_manifest.py`
 - Archive workflow: `.github/workflows/release.yml`
+# M19-01 package delta
+
+The supported default package installs exactly one additional header,
+`rt/extension_abi.h`. It adds no CMake component or target and no transitive
+loader dependency. Both C11 and C++20 installed consumers compile the header;
+the C++ consumer registers a direct/static entry function. Experimental plugin
+headers and targets remain excluded from the default install.

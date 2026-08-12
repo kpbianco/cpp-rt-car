@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-12
-Batch baseline: `e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`
+Batch baseline: `5eb8f101f692b2aff85f82f4a1660630db750706`
 
 ## Product state
 
@@ -11,12 +11,36 @@ Batch baseline: `e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`
   command/timeline extension v1 are unchanged.
 - Runtime-profile schema 7 and its 25 keys, global observability schema 2,
   checkpoint/input-log schema 1, and rate-action schema 1 are unchanged.
-- The installed header and target inventory, 1.x aliases, support matrices,
-  and Apache-2.0 license are unchanged.
+- The installed target inventory, 1.x aliases, support matrices, and
+  Apache-2.0 license are unchanged. The default header inventory adds exactly
+  `rt/extension_abi.h`.
 - M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 are merged in
   target history. M17 remains active and incomplete because M17-05 is blocked.
   M18-01 offline qualification schemas and tools are implemented from the
-  completed M17-04 foundation; M18 and CAP-M18 remain incomplete.
+  completed M17-04 foundation; M18 and CAP-M18 remain incomplete. M19-01 adds
+  extension ABI v1; M19 and CAP-M19 remain incomplete.
+
+## M19-01 extension registration
+
+The installed C11 `rt/extension_abi.h` and additive C++ Runtime surface accept
+an already-resolved entry function while configuring. One bounded transaction
+copies names, descriptor/table prefixes, and local relationships and may
+publish CPU phases, device-ABI-v1 backends through the canonical adapter, and
+host-control services. Failed attempts publish nothing and retire provisional
+generations.
+
+Services initialize before Runtime lanes and backends. Checked stop closes
+admission, retains the first error while continuing independent cleanup,
+retries unresolved owners, and shuts services down in reverse order only after
+related backend ownership is released. Checked detach clears borrowed callable
+pointers, retires the handle generation, and reports host unload readiness; it
+never unloads a module. See `docs/extension_registration.md`.
+
+The change adds no C ABI export, loader dependency, target, Runtime lane,
+MemoryPlan row, schema, native HAL-v2 extension capability, or M17-05 bypass.
+Extensions remain trusted in-process code, and no physical, HIL, field,
+Unreal, RT1/RT2, signing, release, deployment, or production validation is
+claimed.
 
 ## M17-04 implementation
 

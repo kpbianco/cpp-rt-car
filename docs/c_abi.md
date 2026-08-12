@@ -169,3 +169,12 @@ tails and native HAL-v2 registration tables require recompilation and carry no
 C++ binary ABI promise. Stable C ABI v8 remains exactly 70 exports with its
 frozen fingerprint and SONAME 8; every device-ABI-v1 declaration, layout, and
 value remains unchanged.
+# Extension ABI boundary
+
+`rt/extension_abi.h` version 1 is a separate registration ABI, not a revision
+of this stable C ABI. It reuses the frozen v8 callback result and context types
+but adds no `librtfw` export. Its documented entry symbol is resolved and owned
+by the embedding host and passed directly to the additive C++ Runtime API.
+Stable C ABI v8 remains exactly 70 exports, fingerprint
+`0xd0e7a5a14bf35f97`, and SONAME 8. See
+[extension registration](extension_registration.md).

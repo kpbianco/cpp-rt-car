@@ -48,6 +48,15 @@ target_link_libraries(
     PRIVATE
         rtfw::runtime)
 
+add_executable(rtfw_consumer_extension_c extension_consumer.c)
+target_link_libraries(
+    rtfw_consumer_extension_c PRIVATE rtfw::runtime)
+
+add_executable(
+    rtfw_consumer_extension_cpp extension_cpp_consumer.cpp)
+target_link_libraries(
+    rtfw_consumer_extension_cpp PRIVATE rtfw::runtime)
+
 add_executable(rtfw_consumer_cpp_compat compat_consumer.cpp)
 target_link_libraries(
     rtfw_consumer_cpp_compat
@@ -116,6 +125,8 @@ add_test(NAME installed_c_static COMMAND rtfw_consumer_static)
 add_test(NAME installed_c_shared_compat COMMAND rtfw_consumer_shared_compat)
 add_test(NAME installed_c_static_compat COMMAND rtfw_consumer_static_compat)
 add_test(NAME installed_cpp_runtime COMMAND rtfw_consumer_cpp)
+add_test(NAME installed_extension_c COMMAND rtfw_consumer_extension_c)
+add_test(NAME installed_extension_cpp COMMAND rtfw_consumer_extension_cpp)
 add_test(NAME installed_cpp_compat COMMAND rtfw_consumer_cpp_compat)
 add_test(NAME installed_cpp_profile COMMAND rtfw_consumer_profile)
 add_test(NAME installed_cuda_backend COMMAND rtfw_consumer_cuda)

@@ -1,35 +1,48 @@
 schema_version: 1
 batch:
-  id: M18-01
-  title: Add qualification schemas and promotion tools
-  goal: Add versioned machine-readable campaign-plan, qualification-record, review, and promotion-proposal schemas plus bounded offline validation and proposal tooling that binds exact tuple provenance, predeclared thresholds, retained raw artifacts, required trials, and an explicit human decision without running hardware, changing a support matrix, or claiming that portable validation qualifies any tuple.
+  id: M19-01
+  title: Add size-versioned extension registration ABI
+  goal: Add a supported, bounded, size-versioned C extension ABI and additive C++ Runtime registration surface that transactionally registers CPU phases, device-ABI-v1 backends, and control-lane services with explicit ownership, version negotiation, quiescent checked stop, detach readiness, and stale-handle rejection, without using the experimental plugin loader, changing stable C ABI v8, or loading a dynamic library inside the runtime.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
-    - products/cpp-rt-car/PRD.md#cap-m18--real-hardware-and-rt-qualification
-    - products/cpp-rt-car/acceptance.yaml#CAP-M18
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-18
-    - products/cpp-rt-car/risk-register.yaml#R-006
-  milestone: products/cpp-rt-car/roadmap.yaml#M18
+    - products/cpp-rt-car/PRD.md#cap-m19--engine-and-extension-integration
+    - products/cpp-rt-car/acceptance.yaml#CAP-M19
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-19
+    - products/cpp-rt-car/risk-register.yaml#R-001
+    - products/cpp-rt-car/risk-register.yaml#R-007
+  milestone: products/cpp-rt-car/roadmap.yaml#M19
   target_contracts:
+    - AGENTS.md
+    - contracts/repo-profile.yaml
+    - contracts/profile-requirements.yaml
+    - contracts/verification.yaml
+    - docs/CURRENT_STATE.md
+    - docs/HANDOFF.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/release_policy.md
-    - docs/real_time_readiness_checklist.md
+    - docs/devex_governance.md
+    - docs/build_tooling.md
     - docs/testing_ci.md
+    - docs/c_abi.md
+    - docs/device_backend.md
+    - docs/hal_v2.md
+    - docs/release_policy.md
     - docs/security_supply_chain.md
     - docs/threat_model.md
-    - docs/cuda_backend.md
-    - docs/xdma_backend.md
-    - docs/cuda_support_matrix.json
-    - docs/xdma_support_matrix.json
-    - docs/portable_support_matrix.json
-    - tools/check_hardware_evidence.py
-    - tools/release_manifest.py
-    - tests/test_release_tools.py
-    - .github/workflows/cuda-qualification.yml
-    - .github/workflows/xdma-qualification.yml
+    - docs/real_time_readiness_checklist.md
+    - rt/include/rt/c_api.h
+    - rt/include/rt/device_abi.h
+    - rt/include/rt/runtime.hpp
+    - rt/include/rt/plugin_api.h
+    - rt/include/rt/plugin_manager.hpp
+    - rt/src/plugin_manager.cpp
+    - tests/test_plugin_manager.cpp
+    - CMakeLists.txt
+    - tests/CMakeLists.txt
+    - .github/workflows/ci.yml
+    - release/rtfw-release-contract.json
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -43,10 +56,11 @@ sources:
     - docs/evidence/M17-03-2026-08-11.md
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-05-2026-08-12.md
-  baseline_commit: e5f10cc572fa9ba3d4dd488781c310dafb34dfd2
+    - docs/evidence/M18-01-2026-08-12.md
+  baseline_commit: 5eb8f101f692b2aff85f82f4a1660630db750706
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M18-01.yaml
-  control_plane_revision: a729f1460f56f24f904b45faf4f37157494f847b  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M19-01.yaml
+  control_plane_revision: e2ce44f28d3d3f92d7a8bf4d4f1c4ba7b563a185  # pragma: allowlist secret
 dependencies:
   - M17-04
 scope:
@@ -55,26 +69,48 @@ scope:
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
-    - qualification/schemas/campaign-plan.schema.json
-    - qualification/schemas/qualification-record.schema.json
-    - qualification/schemas/promotion-review.schema.json
-    - qualification/schemas/promotion-proposal.schema.json
-    - tools/qualification.py
-    - tests/test_release_tools.py
-    - tests/qualification_fixtures/*.json
-    - tests/qualification_fixtures/artifacts/*
+    - rt/include/rt/extension_abi.h
+    - rt/include/rt/runtime.hpp
+    - rt/src/extension_registration.cpp
+    - rt/src/extension_registration.hpp
+    - rt/src/host_runtime.cpp
+    - rt/src/resource_policy.cpp
+    - rt/src/resource_policy.hpp
+    - tests/test_extension_registration.cpp
+    - tests/test_host_runtime.cpp
+    - tests/test_device_runtime.cpp
+    - tests/test_memory_plan.cpp
+    - tests/test_determinism_replay.cpp
+    - tests/test_trace_noalloc.cpp
+    - tests/extension_fixture.c
+    - tests/extension_fixture_bad.c
+    - tests/package_consumer/extension_consumer.c
+    - tests/package_consumer/extension_cpp_consumer.cpp
+    - tests/package_consumer/CMakeLists.txt
+    - tests/package_consumer/package_contract.cmake
+    - tests/CMakeLists.txt
+    - CMakeLists.txt
+    - .github/workflows/ci.yml
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
-    - docs/qualification.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/release_policy.md
-    - docs/real_time_readiness_checklist.md
+    - docs/extension_registration.md
+    - docs/host_runtime.md
+    - docs/executor.md
+    - docs/device_backend.md
+    - docs/memory_plan.md
+    - docs/determinism_replay.md
+    - docs/c_abi.md
+    - docs/devex_governance.md
+    - docs/build_tooling.md
     - docs/testing_ci.md
+    - docs/release_policy.md
     - docs/security_supply_chain.md
     - docs/threat_model.md
-    - docs/evidence/M18-01-*.md
+    - docs/real_time_readiness_checklist.md
+    - docs/evidence/M19-01-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -82,25 +118,46 @@ scope:
   forbidden_paths:
     - abi/rtfw_c_abi_v8.exports
     - abi/rtfw_c_abi_v8.sha256
-    - rt/include/rt/
-    - rt/src/
-    - src/
+    - rt/include/rt/c_api.h
+    - src/c_abi.cpp
+    - rt/include/rt/device_abi.h
+    - rt/include/rt/device.hpp
+    - rt/src/hal_v2.cpp
+    - rt/src/hal_v2.hpp
+    - rt/src/heterogeneous_memory.cpp
+    - rt/src/heterogeneous_memory.hpp
+    - rt/src/command_batch.cpp
+    - rt/src/command_batch.hpp
+    - rt/src/device_manager.cpp
+    - rt/src/device_manager.hpp
+    - rt/src/cuda_backend.cpp
+    - rt/src/cuda_driver.cpp
+    - rt/src/xdma_backend.cpp
+    - rt/src/xdma_linux.cpp
+    - rt/include/rt/cuda_backend.hpp
+    - rt/include/rt/cuda_driver.hpp
+    - rt/include/rt/xdma_backend.hpp
+    - rt/include/rt/xdma_linux.hpp
+    - rt/include/rt/plugin_api.h
+    - rt/include/rt/plugin_manager.hpp
+    - rt/src/plugin_manager.cpp
+    - tests/test_plugin_manager.cpp
+    - tests/sample_plugin.c
+    - tests/sample_plugin_bad.c
+    - include/simcore/
     - core/
-    - include/
-    - samples/
-    - examples/
-    - tests/CMakeLists.txt
-    - CMakeLists.txt
-    - cmake/
+    - hal/
+    - gpu/
     - configs/
+    - qualification/
+    - tools/qualification.py
+    - tests/qualification_fixtures/
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
-    - tools/check_hardware_evidence.py
-    - tools/release_manifest.py
-    - tools/rt_harden.sh
-    - tools/rt_harden.ps1
-    - .github/workflows/
+    - .github/workflows/cuda-qualification.yml
+    - .github/workflows/xdma-qualification.yml
+    - .github/workflows/release.yml
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -114,89 +171,106 @@ scope:
     - docs/evidence/M17-03-2026-08-11.md
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-05-2026-08-12.md
+    - docs/evidence/M18-01-2026-08-12.md
     - release/rtfw-release-contract.schema.json
     - LICENSE
     - VERSION.txt
 acceptance:
-  - The implementation starts from the exact clean default-branch baseline `e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`. That baseline records M17-05 as blocked by the native command-capability discovery mismatch and contains no combined sample; M18-01 neither repairs that defect nor marks M17/CAP-M17 complete. Offline schema/tool work may proceed from the completed M17-04 foundation, but no combined qualification or promotion may rely on the absent M17-05 behavior.
-  - Four draft-2020-12 JSON schemas with independent schema version 1 define a campaign plan, qualification record, promotion review, and generated promotion proposal. Each top-level and security-sensitive nested object is closed to unknown properties, uses bounded strings and arrays, rejects duplicate identities, requires canonical lowercase SHA-256 and complete 40-character source commits, and distinguishes `nvidia`, `xdma`, `combined`, `rt1`, and `rt2` scopes without changing any runtime, ABI, package, observability, checkpoint, input-log, rate-action, or release schema.
-  - A campaign plan is a separately retained pre-run object. It names one immutable campaign and tuple, runtime source/build identity, product version, CPU, motherboard, BIOS/firmware, memory, operating system, kernel/configuration/boot parameters, compiler, resolved runtime/thread/memory/time policy, workload and input identity, warm-up and duration/sample bounds, topology/NUMA/IOMMU/IRQ/power policy, applicable accelerator/driver/firmware/bitstream facts, required functional/endurance/thermal/saturation/loss/reset-rebind/shutdown trials, and every pass/fail threshold with exact metric, unit, population, statistic, comparison, bound, and miss/error allowance.
-  - "Scope-specific validation fails closed when required tuple or trial facts are absent: NVIDIA requires exact GPU/PCIe/CUDA driver/toolkit/power-clock identity; XDMA requires exact FPGA part/BDF/link/driver/module/firmware-or-bitstream/IP/memory-map identity; combined requires both identities and the declared host-staging path without implying peer DMA; RT1 requires a named measured host policy and latency/deadline populations; RT2 additionally requires PREEMPT_RT kernel/config/boot/isolation/IRQ/scheduling/locking evidence. RT2 remains optional and cannot be inferred from RT1 or preflight success."
-  - A qualification record is immutable run output bound by byte-exact SHA-256 to the campaign plan, exact target source commit and runtime build, resolved observed tuple/policy, start/end times, workload, raw artifact manifest, resource and thermal trends, and every planned trial and threshold evaluation. It preserves raw release, wake, compute, submit, poll, completion, slack, miss, temperature, clock, power, memory, queue, error, and recovery artifact references where applicable; missing, duplicate, unsafe, unlisted, symlinked, oversized, digest-mismatched, non-finite, out-of-range, or plan-divergent data rejects the record rather than being defaulted or summarized away.
-  - The existing M12 `evidence_only` CUDA/XDMA JSON and source-bound artifact manifests remain valid raw inputs but never become a qualification record or passing threshold evaluation by themselves. The new validator accepts them only as retained artifacts referenced by a complete M18 record and never changes their schema, workflow, sample, meaning, or claim label.
-  - A promotion review is a separate byte-digest-bound decision naming the exact plan, record, raw-evidence manifest, qualification scope and tuple ID, reviewer identifier, review time, decision, rationale, and exceptions. A passing review requires a passing record, no unresolved exception, every applicable mandatory trial and predeclared threshold to pass, and exact digest agreement. The reviewer field is attribution metadata, not authentication or a signature; signing and identity assurance remain M20/manual governance.
-  - The `tools/qualification.py` implementation uses only the Python 3.11 standard library and bounded file/collection limits. Its validation command checks schema version/shape and all cross-document semantics, verifies every retained artifact as a regular in-tree file by exact relative path, byte count, and SHA-256, rejects JSON duplicate keys and `NaN`/infinity, reports all deterministic validation errors without exposing artifact contents, and returns nonzero without a partial output on any failure.
-  - The proposal command consumes only a fully validated plan, record, artifact directory, and explicit passing review and writes a new deterministic canonical proposal to an explicit nonexisting output path. The proposal contains exact tuple/claim scope plus plan, record, review, source, build, workload, evidence-manifest, and artifact digests and is labeled `proposal_only` and `human_matrix_change_required`; repeated inputs produce byte-identical output. It never edits a support matrix, release contract, qualification record, source artifact, Git state, remote service, or production setting and does not authenticate the reviewer.
-  - Validation proves threshold integrity only by binding the run and review to a separately retained plan digest. Untrusted timestamps or a validator pass cannot prove that the plan existed before measurement; promotion remains blocked unless a human reviewer verifies the plan's externally retained pre-run provenance. The tool rejects plan/record threshold drift and post-run threshold additions but never claims cryptographic chronology.
-  - Synthetic fixtures cover one minimal valid plan/record/review/proposal for every scope plus negative mutations for every required field group, scope mismatch, plan/record/review digest mismatch, changed thresholds, missing trials, failed resource trend, unstable resource growth, unhealthy/lost device, malformed recovery, unsafe paths, symlinks, unlisted artifacts, duplicate JSON keys, non-finite numbers, size/count limits, failed review, unresolved exceptions, existing output, and attempted in-place matrix mutation. Fixture output is explicitly `synthetic_fixture` and cannot be copied into a support matrix.
-  - Documentation and deterministic contract checks define schema evolution, artifact layout, canonical digest rules, review and rollback procedure, the M17-05 prerequisite boundary for later combined work, and the exact distinction among fixture, portable CI, raw hardware evidence, reviewed qualification, and support promotion. No document claims that M18-01 qualifies NVIDIA, XDMA, combined, RT1, or RT2 behavior.
-  - Stable C ABI v8 with exactly 70 exports and frozen fingerprint, SONAME 8, device ABI v1, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime statuses, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log schemas and IDs, installed targets/headers and aliases, release 1.2.1, all three existing support matrices and claims, qualification workflows/samples, and Apache-2.0 remain unchanged.
-  - Focused qualification-tool tests, complete deterministic local verification, mandatory GitHub CI, and human schema, security, promotion, compatibility, and claim-boundary review pass before merge. M18/CAP-M18 remain incomplete and no tuple is promoted by this batch.
+  - The implementation starts from the exact clean default-branch baseline `5eb8f101f692b2aff85f82f4a1660630db750706`, target pull request 223. Every retained M15 through M18-01 evidence record is present. M17-05 remains blocked by the native command-capability discovery mismatch, and M19-01 neither repairs or bypasses that mismatch nor marks M17, M18, CAP-M17, or CAP-M18 complete.
+  - A new installed C11-compatible `rt/extension_abi.h` defines extension ABI version 1 independently of stable C ABI v8 and device ABI v1. Every boundary record and callback table uses fixed-width C types, an exact known version-1 required prefix, `struct_size`, ABI/current-minimum compatibility fields where negotiation applies, explicit counts/capacities, and zero known reserved fields; it contains no C++ type, STL layout, compiler-native exception, ownership-ambiguous string, or persisted process pointer.
+  - Version negotiation is deterministic and fail-closed. The host supplies only the size and version range it implements; an extension declares its current and minimum compatible versions. A common version-1 prefix is selected only when both ranges overlap and every required prefix is present. Short required prefixes, unsupported versions, inconsistent minimum/current values, overflowed sizes/counts, malformed enum/boolean/name data, null required callbacks or instances, nonzero known reserved data, and partial output reject before any Runtime registration becomes visible. Known version-1 prefixes of larger forward records may be copied while unknown suffix bytes are ignored and never interpreted as capabilities.
+  - The host receives an already-resolved extension entry-function pointer and invokes it only while the Runtime is configuring. Runtime never calls `dlopen`, `dlsym`, `LoadLibrary`, `GetProcAddress`, `dlclose`, or `FreeLibrary`, never searches a path, and never owns a module handle. Symbol discovery, trust/provenance checks, and physical library unload remain host responsibilities; the documented version-1 entry symbol and direct/static entry path are covered by C and C++ fixtures without linking `rtfw_runtime` to the experimental plugin target or a platform loader library.
+  - One additive C++ configuring-time Runtime operation stages one complete extension registration transaction and returns an instance-local generation-bearing extension handle only after success. The extension entry call may stage bounded CPU phases, device-ABI-v1 backends, control-lane services, and their local relationships through copied version-1 records and provisional handles. The Runtime validates the complete staged set, existing capacities/names/ownership, and checked storage arithmetic before publishing any phase, backend, service, relationship, extension handle, identity, or inspector row; any entry error, callback exception, malformed late record, duplicate, capacity failure, or existing-runtime conflict leaves the Runtime configuring and correctable with no partial extension state.
+  - Version-1 CPU-phase registration reuses the exact stable C-ABI-v8 callback result and callback-context semantics without adding a C ABI export. Names and descriptors are copied; callback code and user data are borrowed until checked detach. Successful phases enter the ordinary compiled graph, preserve fixed scratch and nested-task semantics, execute only under existing Runtime dispatch and overload rules, and can participate in copied extension-local dependency/resource declarations. No extension registration callback executes from a frame, executor, device-submission, completion, watchdog, or other post-start lane.
+  - Version-1 backend registration carries only the existing complete `rtfw_device_backend_api` version-1 table and is translated through the existing Runtime device-ABI-v1 compatibility path. It preserves backend capacity, borrowed instance/table lifetime, initialization, buffer/submission/completion, health/reset, reverse retryable shutdown, and no-executor-vendor-call rules. It exposes no HAL-v2 memory/topology or command/timeline table, CUDA Graph, XDMA control/event, cross-backend timeline, peer-memory, or combined-path capability and therefore cannot work around the M17-05 blocker.
+  - "Version-1 service registration defines a bounded named interface/version plus nonthrowing initialize, request-stop, quiesce, shutdown, and optional status hooks. Service callbacks execute only on the single host control path: initialize runs in registration order before extension backend/lane startup and before phase callbacks are admitted; request-stop is bounded, nonblocking, and idempotent; quiesce and shutdown run in reverse registration order only after frame callbacks, nested jobs, submissions/completions, and extension backend cleanup can no longer enter extension code. A service is never scheduled as an executor phase, never creates an implicit Runtime lane, never reenters Runtime control operations, and never performs registration after finalization."
+  - Ownership and state are explicit and inspectable. Runtime copies all names, table prefixes, semantic descriptors, and relationships, borrows extension code/instances/user data until checked detach succeeds, tracks registration generation and active phase/service/backend ownership, and reports configuring, registered, running, stop-requested, quiescent, cleanup-pending, detached, or failed state without exposing addresses. Handles encode Runtime ownership, kind, slot, and generation; zero, foreign-Runtime, wrong-kind, never-issued, detached, and prior-generation handles fail deterministically without invoking extension code or mutating output.
+  - Checked stop closes extension admission first, requests service and backend stop without waiting on an executor worker, quiesces Runtime phase/job/device work, completes the existing reverse extension-backend cleanup, and only then quiesces and shuts down services in reverse registration order before retiring extension registrations. The first error is retained while independent cleanup continues; unresolved backend ownership keeps every enclosing service it may reference alive. A failure preserves the exact unresolved owner and callback/table lifetime, keeps detach/unload readiness false, and retries only unresolved work. Destruction is a best-effort fallback and cannot relabel uncertain ownership as released.
+  - Checked detach is permitted only after Runtime stop has succeeded, every extension callback/job/backend/service reference is quiescent, and all registered ownership is released. It invalidates the generation and clears copied callable pointers before reporting unload readiness. M19-01 performs no operating-system unload and no hot reload; M19-03 remains responsible for Unreal world/module lifecycle, concurrent world-instance teardown, actual host unload orchestration, and long-run reload coverage.
+  - Extension descriptors, provisional/committed handle maps, copied phase/backend/service records, lifecycle state, and cleanup bookkeeping are fixed-capacity, Runtime-instance-owned, and represented exactly once in runtime/device control bytes and the existing M15 logical ledger without adding a MemoryPlan row or provider region. Configuration may allocate only within existing pre-start rules; registration, start, phase execution, service status, stop, retry, detach inspection, and stale-handle rejection add no ordinary post-start heap allocation, hidden thread, file/network I/O, blocking mutex on an RT lane, unbounded wait/retry, spill path, or cross-instance mutable global state.
+  - Extension name/version, negotiated ABI version, phase/backend/service semantic descriptors, relationships, and service interface versions participate in explicit configuration/graph/replay identity. Callback addresses, module handles, user-data pointers, provisional handles, mutable lifecycle state, and observed counters do not. Two Runtime instances using the same entry function receive distinct owners/generations and cannot share handles, service state, callbacks, backend ownership, status rows, cleanup state, or detach readiness.
+  - The supported default package adds only the reviewed `rt/extension_abi.h` header and additive Runtime C++ source surface needed by M19-01; it adds no default target, transitive loader dependency, experimental header, or experimental target. The old `rt/plugin_api.h`, `rt/plugin_manager.hpp`, `plugin_manager.cpp`, sample plugins, and plugin tests remain byte unchanged, experimental, default-uninstalled, and explicitly not a compatibility path for extension ABI version 1.
+  - Stable C ABI v8 remains exactly 70 exports with frozen fingerprint and SONAME 8; `rt/c_api.h`, every device-ABI-v1 declaration/layout/value, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime status numeric values, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log schemas and IDs, existing installed targets and compatibility aliases, release 1.2.1, all support matrices and qualification schemas/workflows, and Apache-2.0 remain unchanged. The extension ABI is a separately versioned registration boundary, not a silent C-ABI-v8 revision or a C++ binary ABI promise.
+  - Documentation and retained evidence define the exact ABI layouts and minimum prefixes, version negotiation, registration state machine, callback/thread rules, capacities, ownership matrix, stop/quiesce/detach order, retry and stale-handle behavior, package delta, threat model, and evolution/rollback policy. They state that in-process extensions are trusted native code, M19-01 does not sandbox or authenticate them, and no fixture, shared-library smoke, hosted CI, documentation, preflight, mock backend, or successful unload-readiness check is Unreal, physical hardware, HIL, field, RT1/RT2, signing, release, deployment, or production evidence.
+  - Focused C/C++ ABI, transaction, phase, backend, service, lifecycle, stale-handle, two-Runtime, no-allocation, package, and loader-isolation tests; complete deterministic local verification; mandatory GitHub CI; and human ABI/API, concurrency/lifetime, security, package/compatibility, and claim-boundary review pass before merge. M19 and CAP-M19 remain incomplete after M19-01.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
-    - python3 tests/test_release_tools.py
-    - python3 tools/qualification.py validate --plan tests/qualification_fixtures/valid-campaign-plan.json --record tests/qualification_fixtures/valid-qualification-record.json --review tests/qualification_fixtures/valid-promotion-review.json --artifact-dir tests/qualification_fixtures/artifacts
-    - proposal_dir=$(mktemp -d /tmp/rtfw-m18-01.XXXXXX) && python3 tools/qualification.py propose --plan tests/qualification_fixtures/valid-campaign-plan.json --record tests/qualification_fixtures/valid-qualification-record.json --review tests/qualification_fixtures/valid-promotion-review.json --artifact-dir tests/qualification_fixtures/artifacts --output "$proposal_dir/promotion-proposal.json" && python3 tools/qualification.py verify-proposal --proposal "$proposal_dir/promotion-proposal.json" --plan tests/qualification_fixtures/valid-campaign-plan.json --record tests/qualification_fixtures/valid-qualification-record.json --review tests/qualification_fixtures/valid-promotion-review.json
     - ./scripts/agent-verify.sh quick
+    - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
+    - cmake --build build/agent-full --parallel 2
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='ExtensionAbi.*:ExtensionRegistration.*:ExtensionLifecycle.*:MemoryPlan.*Extension*:DeterminismReplay.*Extension*:TraceNoAlloc.*Extension*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm19_extension_registration|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data'
+    - cmake -S . -B build/m19-01-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
+    - cmake --build build/m19-01-package --parallel 2
+    - cmake --install build/m19-01-package --prefix "$PWD/build/m19-01-install"
+    - cmake -S tests/package_consumer -B build/m19-01-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m19-01-install"
+    - cmake --build build/m19-01-package-consumer --parallel 2
+    - ctest --test-dir build/m19-01-package-consumer --output-on-failure
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
+    - if nm -u build/agent-full/librtfw_runtime.a | rg '(^|[^A-Za-z])(dlopen|dlsym|dlclose|LoadLibrary|GetProcAddress|FreeLibrary)(A|W)?$'; then exit 1; fi
   focused_tests_to_add:
-    - exact draft/version/closed-object/schema consistency and deterministic valid-fixture validation for NVIDIA, XDMA, combined, RT1, and RT2 plans, records, reviews, and proposals
-    - scope-specific complete tuple, workload, topology, resolved-policy, required-trial, raw-population, resource-trend, thermal, recovery, and shutdown field validation at zero, boundary, maximum valid, and overflow/count limits
-    - byte-exact plan and record digest binding, threshold set equality, source/build/workload/tuple equality, predeclared comparison evaluation, pass/fail propagation, and rejection of record or review substitution
-    - safe artifact-manifest verification for regular files, canonical relative paths, ordering, uniqueness, byte lengths, SHA-256 values, no symlink or directory escape, bounded aggregate bytes, and no unlisted artifact
-    - duplicate-key, invalid UTF-8, non-object, trailing-data, `NaN`/infinity, malformed enum/boolean/integer/string/time/digest/path, unknown property, and excessive nesting or collection rejection without partial output
-    - required long-duration, thermal, saturation, device-loss, reset-rebind, shutdown, latency/deadline, and resource-stability trial applicability plus explicit failure and unsupported/not-applicable handling by scope
-    - failed or exception-bearing review rejection, no authenticated-review claim, deterministic proposal bytes, existing-output refusal, and proof that no tracked matrix, release contract, source artifact, or Git state is mutated
-    - preservation of the existing CUDA/XDMA `evidence_only` validator behavior and explicit rejection of a raw M12 artifact as a complete M18 qualification or promotion input
-    - release-contract and documentation checks requiring all schema/tool paths and truthful qualification wording while retaining every permanent M14.1/M15/M16/M17 gate
+    - C11 and C++20 header self-containment plus exact version-1 constants, required-prefix offsets, record sizes/alignment on LP64 and LLP64, fixed-width fields, calling conventions, zero defaults/reserved tails, and documented direct/static entry symbol
+    - negotiation overlap and exact selection with current/minimum boundaries, short and larger records, unsupported/inconsistent versions, null functions/instances, partial writes, nonzero reserved data, malformed names/enums/booleans, checked size/count overflow, and callback exception containment
+    - all-or-nothing staging and publication after every entry, phase, backend, service, relationship, duplicate-name, capacity, allocation, and existing-Runtime conflict failure, followed by corrected successful registration without leaked provisional or committed handles
+    - CPU phase callback context/scratch/task equivalence to stable C ABI v8, ordinary graph/dependency execution, callback error propagation, zero post-start allocation, and proof that registration/entry callbacks never execute on a runtime lane
+    - device-ABI-v1 backend registration through the canonical HAL-v2 compatibility adapter with success, saturation, early completion, loss/reset, failed initialization/unregister/shutdown, reverse retry, and explicit absence of native HAL-v2 command/topology capability or M17-05 bypass
+    - service initialize, request-stop, quiesce, shutdown, and status ordering across success, startup failure, active callback/job, service failure, backend cleanup failure, first-error retention, unresolved-only retry, idempotence, and zero service execution on executor/device/watchdog lanes
+    - owner/kind/slot/generation validation for zero, foreign, cross-kind, never-issued, detached, reused-slot, and prior-generation handles with transactional output and proof that stale rejection never enters extension code
+    - detach-readiness rejection before successful stop or while any callback/job/backend/service owner remains, pointer clearing and generation retirement on success, direct/static fixture unload after readiness, and no supported-runtime module-loading or path-search dependency
+    - exact extension/control/device storage accounting, overflow and capacity rejection before side effects, conditional semantic identity, unchanged identity when no extension is registered, and two-Runtime isolation of every handle/state/callback/backend/service/cleanup field
+    - default and relocated installed-package C/C++ consumers for the new header and Runtime surface, exact one-header inventory delta, unchanged target/alias inventory, frozen 70-export C ABI/SONAME, and byte-unchanged legacy experimental plugin paths
+    - ThreadSanitizer coverage of phase execution, status inspection, stop/retry/detach, stale calls, concurrent independent runtimes, and backend/service completion without weakening permanent M15/M16/M17 gates
   required_ci:
-    - Documentation contract workflow on pinned Python 3.11 validating schemas, qualification/release tooling, negative fixtures, release digests, support-matrix nonmutation, and truthful claim language
-    - Linux GCC 11 and Clang 14 Debug/RelWithDebInfo FMA on/off jobs with all existing AddressSanitizer, UndefinedBehaviorSanitizer, determinism, M15/M16/M17, no-allocation, and package gates unchanged
-    - Windows Server 2022 MSVC v143 Debug/RelWithDebInfo jobs proving the repository and Python qualification fixtures remain path-portable and do not add a runtime/build dependency
-    - Unified executor GCC ThreadSanitizer, snapshot fuzz smoke, determinism artifact exchange, C/C++ embedding, add_subdirectory, relocated package/archive, exact SDK inventory, frozen C ABI/SONAME, dependency review, SBOM, autotune, and scaling jobs remain mandatory and unchanged
-    - Existing CUDA-toolkit compile/package and node-free XDMA compile/package jobs remain M17 portable build evidence only; no self-hosted CUDA/XDMA qualification workflow or physical hardware run is required or sufficient for M18-01
+    - Documentation contract workflow validating the extension ABI layout/version/state-machine tokens, release digest ledger, exact one-header package delta, frozen C ABI/device ABI/plugin boundary, and truthful M17/M18/M19 claims
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of negotiation, transactional registration, phase/backend/service execution, malformed tables, stop/retry/detach, stale handles, identity, accounting, and two-Runtime isolation
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix proving the same C ABI record prefixes/layout diagnostics, version negotiation, calling convention, DLL fixture symbol, lifecycle, stale-handle, source compatibility, and installed C/C++ consumer behavior
+    - Unified executor GCC ThreadSanitizer job running the complete ExtensionAbi, ExtensionRegistration, ExtensionLifecycle, no-allocation, mock-device compatibility, cleanup/retry, and two-Runtime suites plus every permanent M15/M16/M17 fresh-process gate without weaker filters or timeouts
+    - Determinism GCC and Clang FMA-on/FMA-off jobs and artifact exchange proving unchanged no-extension artifacts and explicit deterministic identity separation for extension semantic descriptors without hashing pointers or mutable lifecycle state
+    - C/C++ embedding, add_subdirectory, installed package, archive relocation, non-default include layout, exact SDK header self-containment/inventory, compatibility aliases, exact 70-export C ABI and SONAME, dependency review, SBOM, autotune, scaling, fuzz-smoke, and release-contract gates
+    - Existing CUDA-toolkit compile/package and node-free XDMA compile/package jobs plus all M14.1/M15/M16/M17 core/memory/command/vendor gates remain mandatory portable build or simulated evidence only; no hardware or qualification workflow is required or sufficient for M19-01
   manual:
-    - Human schema and security review must approve scope-specific required facts, bounds, duplicate-key/non-finite/path handling, digest and canonicalization rules, threshold equality/evaluation, resource-stability semantics, schema-evolution policy, and parser failure behavior.
-    - Human qualification and claim review must confirm that proposal generation cannot mutate a support matrix, that reviewer attribution is not authentication, that plan timestamps do not prove preselection, and that later promotion requires externally verified pre-run plan provenance plus named raw hardware/RT evidence.
-    - Human compatibility review must confirm that no runtime, C/device ABI, installed package, release version, support matrix, hardware workflow/sample, or prior retained evidence changed.
+    - Human extension-ABI and public-API review must approve every version-1 C prefix/layout/calling convention, forward-size rule, negotiation result, provisional/committed handle model, transaction boundary, additive C++ surface, evolution policy, and preservation of stable C ABI v8, device ABI v1, Runtime status, package-target, schema, release, support, and license boundaries.
+    - Human concurrency, lifetime, and security review must confirm entry reentrancy rejection, callback/thread rules, copied-versus-borrowed ownership, service/backend stop ordering, quiescence proof, first-error and retry semantics, generation retirement, pointer clearing before unload readiness, Runtime-instance isolation, bounded accounting, and no post-start allocation, hidden lane, unbounded wait, or runtime loader dependency.
+    - Human package, compatibility, and claim review must confirm the exact one-header default inventory delta, byte-unchanged experimental loader and M15-M18 evidence, no M17-05 workaround, and no implication of sandboxing, authentication, Unreal integration, physical hardware, HIL, latency, RT1/RT2, signing, release, deployment, or production readiness.
 risk:
   class: high
   hazards:
-    - a syntactically valid but incomplete tuple can omit BIOS, kernel, driver, bitstream, topology, policy, workload, or build facts and be mistaken for reproducible qualification
-    - a record can substitute thresholds after measurement, omit failing samples or trials, summarize away misses/resource growth, or bind the wrong plan, source commit, workload, or raw artifact
-    - timestamps and reviewer names are untrusted text and can be misrepresented as cryptographic chronology, authenticated approval, signature, or provenance
-    - unsafe paths, symlinks, duplicate JSON keys, enormous collections, non-finite numbers, or digest confusion can bypass validation, escape the artifact root, exhaust resources, or make reviewers inspect different bytes
-    - a proposal generator can accidentally modify a tracked support matrix, overwrite an input, accept a failed review, or emit nondeterministic bytes that cannot be audited
-    - one generic schema can conflate NVIDIA, XDMA, combined, RT1, and RT2 requirements or allow `not_applicable` to erase a mandatory failure/recovery trial
-    - existing `evidence_only` samples, fake drivers, fixtures, hosted CI, preflight, benchmarks, or documentation can be relabeled as reviewed hardware, HIL, field, latency, RT1, or RT2 evidence
-    - the blocked M17-05 native combined path can be overlooked and a combined proposal can be generated for behavior the baseline cannot execute
-    - release digest or documentation checker edits can weaken a frozen ABI, package, workflow, support, or claim boundary while tooling tests remain green
+    - a size/version check can read beyond a short record, accept an incompatible prefix, interpret an unknown suffix as capability, or diverge between LP64 and LLP64 layouts
+    - sequential phase/backend/service registration can leak a visible prefix when a later record fails unless the complete extension transaction is staged and committed atomically
+    - a copied descriptor can still retain a borrowed string, table, callback, instance, or user-data pointer whose module or owner is released before checked detach
+    - a stale, foreign, cross-kind, or reused-slot handle can reach newly loaded code or another Runtime if owner and generation checks are incomplete
+    - service stop or backend cleanup can deadlock, run on an RT lane, clear ownership after uncertain failure, or report unload readiness while a callback, nested job, submission, completion, or status call remains active
+    - a C++ exception can cross a C callback boundary, or in-process extension code can corrupt the host despite version validation because the ABI is not a sandbox or trust boundary
+    - extension metadata, provisional handles, or callback addresses can enter graph/replay identity nondeterministically or escape exact M15 accounting and post-start allocation limits
+    - reusing the experimental loader can leak `dl`, SimCore, scheduler, feature macros, research headers, or an unsupported package target into the supported runtime
+    - exposing native HAL-v2 tables through the version-1 extension ABI can silently bypass the blocked M17-05 path or duplicate device lifecycle and validation semantics
+    - a fixture DLL/shared object, hosted CI, mock backend, successful stop, or stale-handle test can be overstated as safe arbitrary-code execution, Unreal hot reload, physical integration, RT, or production evidence
   stop_conditions:
-    - the exact baseline is unavailable, dirty, lacks M17-04 ancestry, lacks any retained M15/M16/M17 evidence record, or no longer records the actual M17-05 blocker truthfully
-    - target contracts require M18-01 to repair or complete M17-05, execute the combined sample, or qualify behavior absent from the exact baseline
-    - implementation requires changing runtime/library/sample/build code, stable C ABI v8 or SONAME 8, device ABI v1, HAL/runtime status or schema surfaces, installed package inventory, release version, license, a support matrix, or a hardware/release workflow
-    - a complete bounded offline representation of any approved scope requires guessing a tuple fact, accepting a partial raw population, treating an untrusted timestamp as proof of preselection, or authenticating a reviewer without a separately approved signing/identity design
-    - the tool cannot verify all referenced artifacts inside one explicit root without following symlinks, accepting unsafe paths, unbounded memory/input, non-finite values, duplicate keys, or ambiguous canonicalization
-    - proposal generation cannot be made output-only, deterministic, atomic, non-overwriting, and incapable of modifying support matrices, source evidence, Git, remote systems, or production state
-    - a passing proposal would require allowing a failed threshold, unresolved resource trend, missing applicable loss/reset-rebind/shutdown trial, failed review, unresolved exception, or absent M17-05 combined prerequisite
-    - deterministic tests require physical GPU/FPGA/XDMA hardware, PREEMPT_RT, root privilege, destructive MMIO, firmware/bitstream loading, a controlled timing host, secrets, signing, network access, release, deployment, or production access
-    - mandatory contract, full verification, CI, or human review would need to be skipped, weakened, or relabeled successful
-    - a required schema, tool, fixture, documentation, governance, checker, release-digest, or evidence change falls outside allowed paths or enters a forbidden path
+    - the exact baseline is unavailable, dirty, lacks M17-04 ancestry or M18-01 commit `5eb8f101f692b2aff85f82f4a1660630db750706`, lacks any retained M15/M16/M17/M18-01 evidence record, or no longer records the actual M17-05 blocker truthfully
+    - target contracts or actual code require the supported registration ABI to reuse the experimental plugin manager, introduce a loader dependency into `rtfw_runtime`, or expose a C++ binary layout across the extension boundary
+    - complete transactional registration cannot be achieved without leaving a phase, backend, service, relationship, handle, identity, accounting row, or borrowed owner visible after failure
+    - correct quiescence and detach readiness cannot be proven without unloading code while it may be executing, detaching/canceling a lane, inventing completion, clearing uncertain backend/service ownership, or adding an unbounded wait/retry
+    - implementation requires changing stable C ABI v8 exports/fingerprint/SONAME, `rt/c_api.h`, any device-ABI-v1 declaration/layout/value, HAL-v2 core or extension semantics, Runtime status numeric values, runtime-profile schema 7/25 keys, observability/rate/artifact schema or IDs, existing package targets/aliases, release version, support matrix, qualification schema/workflow, or license
+    - satisfying backend registration requires native HAL-v2 command/topology exposure, repairing or bypassing M17-05, changing CUDA/XDMA code, adding cross-backend synchronization, or claiming a combined or peer path
+    - a service needs an implicit worker, executor-lane blocking, file/network I/O on an RT lane, post-start heap allocation, shared process-global registry, or callback after generation retirement
+    - deterministic tests require Unreal Engine, physical CUDA/FPGA/XDMA hardware, device nodes, root privilege, a controlled timing host, secrets, signing, network access, release, deployment, or production access
+    - mandatory focused, contract, package, full, CI, sanitizer, or human review must be skipped, weakened, or relabeled successful
+    - a required source, test, workflow, documentation, governance, checker, digest, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the four version-1 qualification schemas, offline validator/proposal tool, synthetic fixtures and tests, qualification documentation/governance, release-contract digests, and retained M18-01 evidence as one batch. The batch creates no runtime state, hardware mutation, data migration, support-matrix entry, release, or deployment. If any external draft record was created against schema version 1 before rollback, retain the schema/tool revision needed to read it or explicitly archive that record as non-promotable; never rewrite raw evidence or remove a previously reviewed tuple through this rollback.
-  data_migration: none for repository or runtime data; synthetic fixture outputs under build/ are disposable
-  release_action: Do not publish a release, change any support matrix, promote a tuple, sign an artifact, deploy, or mark M18/CAP-M18 complete from this batch.
+  strategy: Revert the extension-ABI-v1 header and Runtime registration/inspection/detach surface, transactional registry and service lifecycle integration, accounting/identity changes, tests/fixtures/CI, one-header package inventory update, documentation/governance, release digests, and retained M19-01 evidence as one coherent batch. Before removing the feature from a running integration, require checked Runtime stop and checked extension detach to resolve every callback, job, backend, service, and borrowed owner; never unload code or release extension state while readiness is false. No repository data, host setting, support record, release, or deployment is migrated. If an external extension was built against ABI version 1, retain the matching header/runtime revision or mark that artifact explicitly unsupported rather than silently reusing version 1 for incompatible semantics.
+  data_migration: none
+  release_action: Do not publish a release, load or unload an operator module outside tests, promote a support/qualification tuple, mark M17/M18/M19 complete, sign an artifact, deploy, or change production state from this batch.
 evidence:
   output:
-    - docs/evidence/M18-01-<date>.md
-    - exact baseline/M17-04 ancestry, clean initial state, M17-05 blocker reconciliation, changed-file allowlist, commands, exit codes, test counts, required CI run/check identifiers, and human review result
-    - schema identifiers/versions/digests plus complete field, scope, bound, trial-applicability, threshold, canonicalization, and evolution tables
-    - valid synthetic NVIDIA, XDMA, combined, RT1, and RT2 fixture results plus every malformed, substituted, incomplete, failed, unsafe-path, oversized, duplicate-key, non-finite, digest, threshold-drift, resource-instability, review, and output-mutation rejection
-    - artifact manifest paths, sizes, SHA-256 results, aggregate bounds, plan/record/review/proposal digest chain, normalized proposal bytes, and repeatability comparison for synthetic fixtures only
-    - proof that existing M12 raw evidence remains `evidence_only`, all support matrices and hardware workflows/samples are byte unchanged, and no matrix, Git, remote, hardware, release, or deployment mutation occurred
-    - C ABI/device ABI/HAL/status/schema/package/release/license compatibility status, changed and preserved invariants, rollback result, residual risks, and every unperformed validation
-    - explicit record that reviewer attribution and timestamps were not authenticated and that no external pre-run plan chronology, physical run, tuple review, or support promotion occurred
-  claim_boundary: Evidence may establish static schema structure, bounded offline parsing, digest/path verification, deterministic synthetic threshold evaluation, negative mutation handling, proposal nonmutation, release/package compatibility, and portable RT0 tooling behavior only. Synthetic fixtures, existing `evidence_only` files, mocks, fake drivers, hosted CI, preflight, benchmarks, documents, digests, reviewer strings, timestamps, and proposal generation do not establish pre-run chronology, authenticated approval, physical NVIDIA/XDMA/combined behavior, hardware, HIL, field performance, latency, thermal/endurance behavior, RT1, RT2, support promotion, signing, release, deployment, or production readiness. Those claims require later named retained evidence and explicit human approval.
+    - docs/evidence/M19-01-<date>.md
+    - exact baseline and M17-04/M18-01 ancestry, initial worktree state, changed-file allowlist, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
+    - extension ABI version/current-minimum matrix, exact version-1 record/table sizes, alignments, offsets, required prefixes, calling conventions, reserved rules, symbol contract, capacities, and every rejected negotiation/input case on Linux and Windows
+    - complete registration transaction traces for phase/backend/service/relationship success and every injected failure, provisional-to-committed handle maps, no-partial-publication proof, corrected retry, and two-Runtime owner/generation isolation
+    - phase callback context/task/scratch behavior, device-ABI-v1 compatibility traversal, service control-lane lifecycle, exact entry/callback thread identities, stop/quiesce/shutdown/detach order, first-error retention, unresolved ownership, retry, and stale-handle rejection results
+    - fixed extension/control/device storage and M15 ledger reconciliation, configuration and graph/replay identity comparisons, post-start allocation results, ThreadSanitizer results, and pointer/module-handle exclusion proof
+    - clean installed C/C++ consumer and archive-relocation results, exact one-header package inventory delta, no new target or loader dependency, byte-unchanged legacy plugin paths, frozen 70-export C ABI/fingerprint/SONAME, and device/HAL/schema/release/support/license compatibility status
+    - changed and preserved invariants, rollback result, residual risks, and every unperformed Unreal, hot-reload/long-run, physical hardware, CUDA/XDMA/combined, HIL, field, controlled latency, thermal, endurance, RT1, RT2, sandboxing, authentication, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish static C ABI layout, direct/static entry negotiation, unit and shared-library fixture registration, device-v1 mock compatibility, bounded transaction/lifecycle/stale-handle behavior, sanitizer, package, no-allocation, deterministic identity, cross-instance isolation, and portable RT0 functional extension behavior only. An extension remains trusted in-process native code; a fixture library, mock backend, hosted CI, preflight, document, successful quiescence, or unload-readiness result does not establish sandboxing, provenance, authenticated code, Unreal integration, arbitrary-module hot reload, physical hardware, HIL, field performance, worst-case latency, RT1, RT2, support promotion, signing, release, deployment, or production readiness.

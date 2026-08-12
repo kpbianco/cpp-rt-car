@@ -280,6 +280,15 @@ def check_runtime_contract() -> None:
     mapping_smoke = read("tools/autotune/mapping_smoke.py")
     mapping_workflow = read(".github/workflows/autotune-mapping.yml")
     c_header = read("rt/include/rt/c_api.h")
+    extension_header = read("rt/include/rt/extension_abi.h")
+    extension_source = read("rt/src/extension_registration.cpp")
+    extension_test = read("tests/test_extension_registration.cpp")
+    extension_doc = read("docs/extension_registration.md")
+    package_contract = read("tests/package_consumer/package_contract.cmake")
+    package_extension_c = read("tests/package_consumer/extension_consumer.c")
+    package_extension_cpp = read(
+        "tests/package_consumer/extension_cpp_consumer.cpp"
+    )
     roadmap = read("docs/roadmap.md")
     host_doc = read("docs/host_runtime.md")
     graph_doc = read("docs/compiled_graph.md")
@@ -2751,6 +2760,91 @@ def check_runtime_contract() -> None:
                 "the Xilinx driver revision and contain no qualified tuple"
             )
 
+    for token in (
+        "#define RTFW_EXTENSION_ABI_VERSION 1u",
+        "#define RTFW_EXTENSION_ABI_MIN_COMPATIBLE_VERSION 1u",
+        '#define RTFW_EXTENSION_ENTRY_SYMBOL_V1 "rtfw_extension_entry_v1"',
+        "RTFW_EXTENSION_PHASE_CAPACITY 64u",
+        "RTFW_EXTENSION_BACKEND_CAPACITY 16u",
+        "RTFW_EXTENSION_SERVICE_CAPACITY 16u",
+        "RTFW_RUNTIME_EXTENSION_CAPACITY 16u",
+        "rtfw_extension_host_api_v1",
+        "rtfw_extension_descriptor_v1",
+    ):
+        if token not in extension_header:
+            fail(f"M19-01 extension ABI header is missing {token!r}")
+    for token in (
+        "register_extension(",
+        "detach_extension(",
+        "extension_service_status(",
+        "ExtensionLifecycleState",
+        "ExtensionHandle",
+        "ExtensionInfo",
+    ):
+        if token not in runtime_header:
+            fail(f"M19-01 Runtime surface is missing {token!r}")
+    for token in (
+        "invoke_extension_entry",
+        "DeviceV1CompatibilityAdapter",
+        "cleanup_extension_services",
+        "clear_borrowed",
+        "next_extension_generation++",
+    ):
+        if token not in extension_source and token not in runtime_source:
+            fail(f"M19-01 implementation is missing {token!r}")
+    for forbidden in (
+        "dlopen",
+        "dlsym",
+        "dlclose",
+        "LoadLibrary",
+        "GetProcAddress",
+        "FreeLibrary",
+    ):
+        if forbidden in extension_source:
+            fail(f"M19-01 supported extension path uses loader token {forbidden!r}")
+    for token in (
+        "VersionOneLayoutsAndConstantsAreFixed",
+        "NegotiationAndMalformedRecordsFailClosed",
+        "FailedProvisionalGenerationCannotBeReused",
+        "ServicesBackendsRetryDetachAndStaleHandles",
+        "ServiceStartupFailureRollsBackAndRecovers",
+        "OwnersAndGenerationsAreRuntimeLocal",
+    ):
+        if token not in extension_test:
+            fail(f"M19-01 permanent tests are missing {token!r}")
+    for token in (
+        "m19_extension_registration",
+        "test_extension_registration.cpp",
+        "test_extension_fixture",
+    ):
+        if token not in tests_cmake:
+            fail(f"M19-01 CMake tests are missing {token!r}")
+    for token in (
+        "rt/extension_abi.h",
+        "rtfw_check_c_header",
+        "rtfw_check_cpp_header",
+    ):
+        if token not in package_contract:
+            fail(f"M19-01 package contract is missing {token!r}")
+    if "RTFW_EXTENSION_ABI_VERSION" not in package_extension_c:
+        fail("M19-01 installed C consumer does not compile the extension ABI")
+    if "register_extension" not in package_extension_cpp:
+        fail("M19-01 installed C++ consumer does not register a direct entry")
+    for phrase in (
+        "already-resolved",
+        "highest common version",
+        "trusted native code",
+        "performs no unload",
+        "M19-03",
+        "M17-05",
+    ):
+        if phrase.lower() not in extension_doc.lower():
+            fail(f"M19-01 extension documentation is missing {phrase!r}")
+    if "M19 and CAP-M19 remain incomplete" not in read("docs/CURRENT_STATE.md"):
+        fail("current state overstates M19 completion")
+    if "M17-05 remains blocked" not in read("docs/HANDOFF.md"):
+        fail("handoff no longer preserves the M17-05 blocker")
+
 
 def check_qualification_contract() -> None:
     schema_types = {
@@ -2849,6 +2943,7 @@ def main() -> int:
             "docs/host_runtime.md",
             "docs/compiled_graph.md",
             "docs/executor.md",
+            "docs/extension_registration.md",
             "docs/memory_plan.md",
             "docs/cpu_memory_policy.md",
             "docs/time_platform.md",
@@ -2882,6 +2977,7 @@ def main() -> int:
             "rt/include/rt/graph.hpp",
             "rt/include/rt/c_api.h",
             "rt/include/rt/device_abi.h",
+            "rt/include/rt/extension_abi.h",
             "rt/include/rt/device.hpp",
             "rt/include/rt/mock_device.hpp",
             "rt/include/rt/cuda_backend.hpp",
@@ -2895,6 +2991,8 @@ def main() -> int:
             "rt/src/rate_telemetry.cpp",
             "rt/src/aligned_storage.hpp",
             "rt/src/executor.cpp",
+            "rt/src/extension_registration.cpp",
+            "rt/src/extension_registration.hpp",
             "rt/src/host_runtime.cpp",
             "rt/src/memory_policy.hpp",
             "rt/src/memory_policy.cpp",
@@ -2928,6 +3026,7 @@ def main() -> int:
             "samples/cuda_qualification.cpp",
             "samples/xdma_qualification.cpp",
             "tests/test_host_runtime.cpp",
+            "tests/test_extension_registration.cpp",
             "tests/test_rate_dispatch.cpp",
             "tests/test_rate_telemetry.cpp",
             "tests/test_compiled_graph.cpp",
@@ -2948,6 +3047,8 @@ def main() -> int:
             "tests/host_adapter_tests.cpp",
             "tests/runtime_profile_tests.cpp",
             "tests/package_consumer/CMakeLists.txt",
+            "tests/package_consumer/extension_consumer.c",
+            "tests/package_consumer/extension_cpp_consumer.cpp",
             "tests/package_consumer/c_consumer.c",
             "tests/package_consumer/cpp_consumer.cpp",
             "tests/package_consumer/cuda_consumer.cpp",

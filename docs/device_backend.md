@@ -321,3 +321,12 @@ but both native candidate callbacks require its incoming `struct_size` before
 writing the result. Direct candidate tests therefore establish backend-local
 protocol behavior, not successful native command/timeline registration in
 `Runtime`.
+# Extension device-v1 records
+
+An ABI-v1 extension may copy one or more complete
+`rtfw_device_backend_api` version-1 tables. Runtime wraps each table with an
+ownership gate and routes it through the same
+`DeviceV1CompatibilityAdapter` and DeviceManager path as direct registration.
+No HAL-v2 memory/topology or command/timeline table is accepted, so this path
+cannot expose native CUDA/XDMA features or bypass M17-05. Stop retains related
+services until reverse retryable backend shutdown has released ownership.
