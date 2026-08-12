@@ -27,6 +27,7 @@
 #include <exception>
 #include <limits>
 #include <new>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -4014,26 +4015,47 @@ Status Runtime::register_extension(
         }
     }
 
-    std::unique_ptr<detail::ExtensionRegistrationRecord> record;
-    std::vector<Impl::RegisteredCallback> staged_callbacks;
-    std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
-        staged_adapters;
-    std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
-        staged_memory_states;
-    std::vector<detail::DeviceBackendSpec> staged_backends;
-    std::vector<Impl::RegisteredResource> staged_resources;
-    std::vector<detail::GraphDependency> staged_dependencies;
-    std::vector<detail::GraphResourceAccess> staged_accesses;
-    std::vector<std::unique_ptr<detail::ExtensionRegistrationRecord>>
-        replacement_extensions;
-    std::vector<Impl::RegisteredCallback> replacement_callbacks;
-    std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
-        replacement_adapters;
-    std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
-        replacement_memory_states;
-    std::vector<detail::DeviceBackendSpec> replacement_backends;
-    std::vector<Impl::RegisteredResource> replacement_resources;
+    struct RegistrationStorage {
+        std::unique_ptr<detail::ExtensionRegistrationRecord> record;
+        std::vector<Impl::RegisteredCallback> staged_callbacks;
+        std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
+            staged_adapters;
+        std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
+            staged_memory_states;
+        std::vector<detail::DeviceBackendSpec> staged_backends;
+        std::vector<Impl::RegisteredResource> staged_resources;
+        std::vector<detail::GraphDependency> staged_dependencies;
+        std::vector<detail::GraphResourceAccess> staged_accesses;
+        std::vector<std::unique_ptr<detail::ExtensionRegistrationRecord>>
+            replacement_extensions;
+        std::vector<Impl::RegisteredCallback> replacement_callbacks;
+        std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
+            replacement_adapters;
+        std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
+            replacement_memory_states;
+        std::vector<detail::DeviceBackendSpec> replacement_backends;
+        std::vector<Impl::RegisteredResource> replacement_resources;
+    };
+    std::optional<RegistrationStorage> storage;
     try {
+        // Checked-iterator implementations may allocate container proxies even
+        // for an empty vector, so construct every staging container inside the
+        // allocation-failure boundary.
+        storage.emplace();
+        auto& record = storage->record;
+        auto& staged_callbacks = storage->staged_callbacks;
+        auto& staged_adapters = storage->staged_adapters;
+        auto& staged_memory_states = storage->staged_memory_states;
+        auto& staged_backends = storage->staged_backends;
+        auto& staged_resources = storage->staged_resources;
+        auto& staged_dependencies = storage->staged_dependencies;
+        auto& staged_accesses = storage->staged_accesses;
+        auto& replacement_extensions = storage->replacement_extensions;
+        auto& replacement_callbacks = storage->replacement_callbacks;
+        auto& replacement_adapters = storage->replacement_adapters;
+        auto& replacement_memory_states = storage->replacement_memory_states;
+        auto& replacement_backends = storage->replacement_backends;
+        auto& replacement_resources = storage->replacement_resources;
         staged_dependencies = impl_->dependencies;
         staged_accesses = impl_->resource_accesses;
         record =
@@ -4229,6 +4251,17 @@ Status Runtime::register_extension(
         return impl_->fail(Status::internal_error, nullptr);
     }
 
+    auto& record = storage->record;
+    auto& staged_adapters = storage->staged_adapters;
+    auto& staged_memory_states = storage->staged_memory_states;
+    auto& staged_dependencies = storage->staged_dependencies;
+    auto& staged_accesses = storage->staged_accesses;
+    auto& replacement_extensions = storage->replacement_extensions;
+    auto& replacement_callbacks = storage->replacement_callbacks;
+    auto& replacement_adapters = storage->replacement_adapters;
+    auto& replacement_memory_states = storage->replacement_memory_states;
+    auto& replacement_backends = storage->replacement_backends;
+    auto& replacement_resources = storage->replacement_resources;
     for (auto& extension : impl_->extensions) {
         replacement_extensions.push_back(std::move(extension));
     }
