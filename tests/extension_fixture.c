@@ -8,77 +8,123 @@
 #define RTFW_FIXTURE_EXPORT __attribute__((visibility("default")))
 #endif
 
-_Static_assert(sizeof(rtfw_extension_handle_v1) == 16, "extension handle");
-_Static_assert(sizeof(rtfw_extension_phase_v1) == 120, "phase prefix");
-_Static_assert(sizeof(rtfw_extension_backend_v1) == 264, "backend prefix");
-_Static_assert(sizeof(rtfw_extension_service_status_v1) == 64,
+#define RTFW_FIXTURE_CONCAT_INNER(first, second) first##second
+#define RTFW_FIXTURE_CONCAT(first, second) \
+    RTFW_FIXTURE_CONCAT_INNER(first, second)
+#if defined(_MSC_VER)
+#define RTFW_FIXTURE_STATIC_ASSERT(condition, message) \
+    typedef char RTFW_FIXTURE_CONCAT( \
+        rtfw_fixture_static_assert_, __LINE__)[(condition) ? 1 : -1]
+#define RTFW_FIXTURE_ALIGNOF(type) __alignof(type)
+#else
+#define RTFW_FIXTURE_STATIC_ASSERT(condition, message) \
+    _Static_assert(condition, message)
+#define RTFW_FIXTURE_ALIGNOF(type) _Alignof(type)
+#endif
+
+RTFW_FIXTURE_STATIC_ASSERT(
+    sizeof(rtfw_extension_handle_v1) == 16, "extension handle");
+RTFW_FIXTURE_STATIC_ASSERT(
+    sizeof(rtfw_extension_phase_v1) == 120, "phase prefix");
+RTFW_FIXTURE_STATIC_ASSERT(
+    sizeof(rtfw_extension_backend_v1) == 264, "backend prefix");
+RTFW_FIXTURE_STATIC_ASSERT(sizeof(rtfw_extension_service_status_v1) == 64,
                "service status prefix");
-_Static_assert(sizeof(rtfw_extension_service_api_v1) == 88,
+RTFW_FIXTURE_STATIC_ASSERT(sizeof(rtfw_extension_service_api_v1) == 88,
                "service API prefix");
-_Static_assert(sizeof(rtfw_extension_service_v1) == 264, "service prefix");
-_Static_assert(sizeof(rtfw_extension_resource_v1) == 104, "resource prefix");
-_Static_assert(sizeof(rtfw_extension_relationship_v1) == 80,
+RTFW_FIXTURE_STATIC_ASSERT(
+    sizeof(rtfw_extension_service_v1) == 264, "service prefix");
+RTFW_FIXTURE_STATIC_ASSERT(
+    sizeof(rtfw_extension_resource_v1) == 104, "resource prefix");
+RTFW_FIXTURE_STATIC_ASSERT(sizeof(rtfw_extension_relationship_v1) == 80,
                "relationship prefix");
-_Static_assert(sizeof(rtfw_extension_host_api_v1) == 136, "host API prefix");
-_Static_assert(sizeof(rtfw_extension_descriptor_v1) == 216,
+RTFW_FIXTURE_STATIC_ASSERT(
+    sizeof(rtfw_extension_host_api_v1) == 136, "host API prefix");
+RTFW_FIXTURE_STATIC_ASSERT(sizeof(rtfw_extension_descriptor_v1) == 216,
                "descriptor prefix");
-_Static_assert(_Alignof(rtfw_extension_handle_v1) == 4, "handle alignment");
-_Static_assert(_Alignof(rtfw_extension_phase_v1) == 8, "phase alignment");
-_Static_assert(_Alignof(rtfw_extension_backend_v1) == 8, "backend alignment");
-_Static_assert(_Alignof(rtfw_extension_service_status_v1) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_handle_v1) == 4, "handle alignment");
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_phase_v1) == 8, "phase alignment");
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_backend_v1) == 8, "backend alignment");
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_service_status_v1) == 8,
                "service status alignment");
-_Static_assert(_Alignof(rtfw_extension_service_api_v1) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_service_api_v1) == 8,
                "service API alignment");
-_Static_assert(_Alignof(rtfw_extension_service_v1) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_service_v1) == 8,
                "service alignment");
-_Static_assert(_Alignof(rtfw_extension_resource_v1) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_resource_v1) == 8,
                "resource alignment");
-_Static_assert(_Alignof(rtfw_extension_relationship_v1) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_relationship_v1) == 8,
                "relationship alignment");
-_Static_assert(_Alignof(rtfw_extension_host_api_v1) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_host_api_v1) == 8,
                "host API alignment");
-_Static_assert(_Alignof(rtfw_extension_descriptor_v1) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(
+    RTFW_FIXTURE_ALIGNOF(rtfw_extension_descriptor_v1) == 8,
                "descriptor alignment");
-_Static_assert(offsetof(rtfw_extension_handle_v1, kind) == 4,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_handle_v1, kind) == 4,
                "handle kind offset");
-_Static_assert(offsetof(rtfw_extension_handle_v1, slot) == 8,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_handle_v1, slot) == 8,
                "handle slot offset");
-_Static_assert(offsetof(rtfw_extension_handle_v1, generation) == 12,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_handle_v1, generation) == 12,
                "handle generation offset");
-_Static_assert(offsetof(rtfw_extension_phase_v1, callback) == 72,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_phase_v1, callback) == 72,
                "phase callback offset");
-_Static_assert(offsetof(rtfw_extension_phase_v1, reserved) == 88,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_phase_v1, reserved) == 88,
                "phase reserved offset");
-_Static_assert(offsetof(rtfw_extension_backend_v1, api) == 72,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_backend_v1, api) == 72,
                "backend API offset");
-_Static_assert(offsetof(rtfw_extension_backend_v1, reserved) == 232,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_backend_v1, reserved) == 232,
                "backend reserved offset");
-_Static_assert(offsetof(rtfw_extension_service_status_v1, status) == 16,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_service_status_v1, status) == 16,
                "service status value offset");
-_Static_assert(offsetof(rtfw_extension_service_status_v1, observed_value) == 24,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_service_status_v1, observed_value) == 24,
                "service observed value offset");
-_Static_assert(offsetof(rtfw_extension_service_api_v1, initialize) == 16,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_service_api_v1, initialize) == 16,
                "service initialize offset");
-_Static_assert(offsetof(rtfw_extension_service_api_v1, reserved) == 56,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_service_api_v1, reserved) == 56,
                "service API reserved offset");
-_Static_assert(offsetof(rtfw_extension_service_v1, interface_name) == 72,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_service_v1, interface_name) == 72,
                "service interface offset");
-_Static_assert(offsetof(rtfw_extension_service_v1, api) == 144,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_service_v1, api) == 144,
                "service API record offset");
-_Static_assert(offsetof(rtfw_extension_resource_v1, reserved) == 72,
+RTFW_FIXTURE_STATIC_ASSERT(offsetof(rtfw_extension_resource_v1, reserved) == 72,
                "resource reserved offset");
-_Static_assert(offsetof(rtfw_extension_relationship_v1, first) == 16,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_relationship_v1, first) == 16,
                "relationship first offset");
-_Static_assert(offsetof(rtfw_extension_relationship_v1, second) == 32,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_relationship_v1, second) == 32,
                "relationship second offset");
-_Static_assert(offsetof(rtfw_extension_host_api_v1, stage_phase) == 64,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_host_api_v1, stage_phase) == 64,
                "host callback offset");
-_Static_assert(offsetof(rtfw_extension_host_api_v1, reserved) == 104,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_host_api_v1, reserved) == 104,
                "host reserved offset");
-_Static_assert(offsetof(rtfw_extension_descriptor_v1, phase_count) == 144,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_descriptor_v1, phase_count) == 144,
                "descriptor count offset");
-_Static_assert(offsetof(rtfw_extension_descriptor_v1, reserved) == 184,
+RTFW_FIXTURE_STATIC_ASSERT(
+    offsetof(rtfw_extension_descriptor_v1, reserved) == 184,
                "descriptor reserved offset");
+
+#undef RTFW_FIXTURE_ALIGNOF
+#undef RTFW_FIXTURE_STATIC_ASSERT
+#undef RTFW_FIXTURE_CONCAT
+#undef RTFW_FIXTURE_CONCAT_INNER
 
 static uint32_t fixture_calls;
 
