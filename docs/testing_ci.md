@@ -192,6 +192,11 @@ latency qualification and does not prove the complete product contract.
   stability, failure recovery, or completion-latency bound. The destructive
   opt-in self-hosted XDMA workflow emits raw evidence but does not
   automatically qualify a tuple.
+- M17-04 CUDA/XDMA command-capability tests invoke each candidate callback with
+  a default-initialized output record. They do not exercise canonical Runtime
+  discovery, which clears that header and is currently rejected by both
+  callbacks. No successful native command/timeline Runtime integration is
+  established until a positive behavioral registration test passes.
 - Best-effort host-hardening steps on shared runners are not RT evidence.
 - SHA-256 artifact manifests are integrity metadata, not signatures,
   provenance attestations, or proof that two builds are reproducible.

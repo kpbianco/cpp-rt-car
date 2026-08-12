@@ -35,7 +35,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
-| M17 | In progress | M17-01 through M17-03 are merged; M17-04 native CUDA Graph and XDMA control/event facilities are implemented locally; combined execution and qualification remain |
+| M17 | In progress | M17-01 through M17-04 are merged; M17-05 combined sample is blocked by the native command-capability discovery contract mismatch; qualification remains |
 | M18 | Planned | Named CUDA, XDMA, RT1, and RT2 hardware qualification |
 | M19 | Planned | Game-engine, simulation-host, and extension integration kits |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
@@ -655,10 +655,14 @@ user-event operations. It preserves both device-ABI-v1 paths and routes work
 only through the existing isolated submission/service and backend-worker
 model.
 
-Later M17 batches own combined execution and any lifecycle-safe plugin/factory
-ownership later approved by a bounded batch. M17-04 adds no plugin/factory,
-cross-backend timeline, direct-peer, combined, hardware, or qualification
-capability. M17 and CAP-M17 remain incomplete.
+M17-05 owns the portable CPU-CUDA-host-XDMA-CPU sample. Independent review
+found that canonical Runtime discovery clears the command-capability output
+header while both native candidate callbacks require its incoming size. The
+actual `hal_v2_registration()` paths therefore fail before graph configuration.
+The M17-05 sample and behavioral test remain blocked pending an approved repair
+to paths currently forbidden by that batch. No plugin/factory, cross-backend
+timeline, direct-peer, combined-hardware, or qualification capability is
+present. M17 and CAP-M17 remain incomplete.
 
 Exit gates:
 

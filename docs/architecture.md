@@ -402,3 +402,10 @@ event. XDMA uses the existing fixed I/O team for H2C/C2H, bounded 32-bit user-
 BAR operations, and stop-aware event waits. Both adapters retain uncertain
 ownership through drain or checked shutdown; neither adds a cross-backend
 timeline, combined execution, or hardware qualification.
+
+M17-05 review found that these native command tables are not currently
+reachable through canonical Runtime registration: Runtime command-capability
+discovery clears the output header before invocation, while both candidate
+callbacks require the incoming `struct_size`. Registration therefore fails
+before a submission lane or graph is configured. Direct candidate tests cover
+backend-local protocol behavior only and do not establish this integration.
