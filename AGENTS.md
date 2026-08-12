@@ -91,7 +91,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `8f94ced14abf34d7818c44edc73ae3cd204d5b6b`; harness version: `2`.
+- Control revision: `f64ab33fe3dac342001cec22b8994c4732cb0467`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.

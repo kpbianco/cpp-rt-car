@@ -314,3 +314,10 @@ referenced. A backend completion alone authorizes the existing whole-timeline
 publication; neither Runtime nor a backend fabricates completion. New storage
 is fixed backend-private control reported through capability bytes and does
 not change Runtime device-control accounting or the MemoryPlan equation.
+
+Canonical Runtime registration of these command extensions is currently
+blocked. Command-capability discovery clears the caller-owned output header,
+but both native candidate callbacks require its incoming `struct_size` before
+writing the result. Direct candidate tests therefore establish backend-local
+protocol behavior, not successful native command/timeline registration in
+`Runtime`.

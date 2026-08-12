@@ -2,12 +2,11 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-04 starts from exact target
-baseline `122f9919674b5f09e321deb8ba6701f78b2993ce`; M17-03 is merged in PR
-219 at `0d1c95a4e859c9136b28b912735610cd58016e95`, and the baseline changes only
-portfolio-harness metadata after that merge. M17 remains active and incomplete.
-The binding contract is `contracts/active-batch.yaml`, sourced from control
-revision `8f94ced14abf34d7818c44edc73ae3cd204d5b6b`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-05 starts from exact target
+baseline `bdc97d0122effbad07dbf6d4981e1bf0de729437`, the merged M17-04 pull
+request 221. M17 remains active and incomplete. The binding contract is
+`contracts/active-batch.yaml`, sourced from control revision
+`f64ab33fe3dac342001cec22b8994c4732cb0467`.
 
 ## Implemented boundary
 
@@ -51,11 +50,17 @@ and license remain unchanged.
 - Keep the combined sample, cross-backend timelines, device-rate execution,
   physical qualification, support promotion, release, and deployment deferred.
 
-## Completion output
+## M17-05 blocker
 
-Run the exact local validation contract through `./scripts/agent-verify.sh
-full`, package consumers, C ABI verification, and the SONAME check. Record
-acceptance mapping, exact commands/results, identity/accounting facts,
-lifecycle and rollback behavior, residual risks, and unperformed validation in
-`docs/evidence/M17-04-2026-08-12.md`. Mandatory CI and human review remain
-external. Do not commit, push, open a pull request, release, or deploy.
+Canonical Runtime command/timeline discovery clears the capability output
+header before calling the backend, but the native CUDA and XDMA candidate
+callbacks reject an incoming zero `struct_size`. The required M17-05 use of
+the actual candidates through `hal_v2_registration()` therefore fails before
+graph configuration. The active batch forbids the needed `rt/src/` repair and
+forbids a substitute HAL implementation. Do not implement around this
+boundary; first approve a repair batch or explicitly revise M17-05 scope.
+
+The failed prototype, exact commands, rollback, acceptance status, and claim
+boundary are retained in `docs/evidence/M17-05-2026-08-12.md`. The combined
+sample, focused behavioral test, mandatory CI, and human review remain
+unperformed. Do not commit, push, open a pull request, release, or deploy.

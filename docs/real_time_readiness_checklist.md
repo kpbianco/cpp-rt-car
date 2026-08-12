@@ -140,8 +140,10 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 
 ## M17-04 portable vendor-control status
 
-- [x] Native CUDA and XDMA registrations use the existing bounded M17-03
-  submission/service and backend-worker paths without executor-worker calls.
+- [ ] Native CUDA and XDMA command registrations do not yet reach the bounded
+  M17-03 submission/service paths: canonical capability discovery supplies a
+  zeroed header that both candidate callbacks reject. Backend-local tests do
+  prove that direct candidate operations stay off executor workers.
 - [x] CUDA Graph identifiers, copied bindings, one-stream ordering, one-event
   completion, malformed input, timeout, stop, and checked cleanup have
   fake-driver functional gates.

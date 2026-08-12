@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-12
-Batch baseline: `122f9919674b5f09e321deb8ba6701f78b2993ce`
+Batch baseline: `bdc97d0122effbad07dbf6d4981e1bf0de729437`
 
 ## Product state
 
@@ -13,17 +13,18 @@ Batch baseline: `122f9919674b5f09e321deb8ba6701f78b2993ce`
   checkpoint/input-log schema 1, and rate-action schema 1 are unchanged.
 - The installed header and target inventory, 1.x aliases, support matrices,
   and Apache-2.0 license are unchanged.
-- M14, M14.1, M15, and M16 are complete. M17-01 through M17-03 are merged in
-  target history. M17 is active and incomplete; M17-04 is the approved batch.
+- M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 are merged in
+  target history. M17 is active and incomplete; M17-05 is the approved batch.
 
 ## M17-04 implementation
 
 The installed CUDA and XDMA candidate headers retain their exact device-ABI-v1
 `api()` paths and add native `hal_v2_registration(name)` paths. Each native
-registration supplies HAL core v2, memory/topology extension v1, and
-command/timeline extension v1 through the existing canonical Runtime manager.
-Each backend object admits only one chosen registration path until checked
-shutdown succeeds.
+registration exposes HAL core v2, memory/topology extension v1, and
+command/timeline extension v1 tables. The command/timeline tables do not
+currently pass canonical Runtime discovery because of the M17-05 blocker
+below. Each backend object admits only one chosen registration path until
+checked shutdown succeeds.
 
 Both injectable driver tables retain their complete version-1 positional
 prefix and version-1 default. Exact version 2 tables add only the native
@@ -59,16 +60,20 @@ Malformed commands fail before vendor entry; uncertain CUDA or XDMA work
 retains every referenced owner until physical readiness, successful drain, or
 the documented final host reclamation boundary.
 
-## Boundary and next action
+## M17-05 review boundary and next action
 
-M17-04 establishes static, unit, malformed/failure-injected, fake CUDA Graph,
-fixture XDMA control/event, package, lifecycle, compatibility, and portable
-RT0 protocol evidence only. M17 and CAP-M17 remain incomplete. The
-combined CPU-GPU-FPGA-CPU sample belongs to M17-05; physical CUDA/XDMA memory,
-MMIO, interrupts, timing, HIL, field, RT1/RT2, support promotion, signing,
-release, deployment, and production qualification remain deferred.
+M17-04 is merged at the exact M17-05 baseline and establishes static, unit,
+malformed/failure-injected, fake CUDA Graph, fixture XDMA control/event,
+package, lifecycle, compatibility, and portable RT0 protocol evidence only.
 
-Run every command in `contracts/active-batch.yaml`, retain exact results in
-`docs/evidence/M17-04-2026-08-12.md`, and leave mandatory GitHub CI and human
-API, compatibility, concurrency, lifetime, MMIO-safety, accounting, security,
-and claim review as external gates.
+Independent M17-05 review found that canonical Runtime command/timeline
+discovery poisons the capability output header before invocation while both
+native CUDA and XDMA candidate callbacks require a preinitialized incoming
+size. The required `hal_v2_registration()` composition therefore fails before
+graph configuration. Repair requires a separately approved change under the
+currently forbidden `rt/src/` paths. The combined sample and its behavioral
+test are not implemented, and M17/CAP-M17 remain incomplete.
+
+See `docs/evidence/M17-05-2026-08-12.md`. Physical CUDA/XDMA memory, MMIO,
+interrupts, timing, HIL, field, RT1/RT2, support promotion, signing, release,
+deployment, and production qualification remain deferred.
