@@ -99,6 +99,13 @@ This checklist is a release/qualification gate, not a feature inventory. RTFW
   target.
 - [ ] The qualification record is reproducible from a clean checkout.
 
+M18-01 supplies machine-readable version-1 plan, record, review, and proposal
+schemas plus bounded offline validation. Its synthetic fixtures pass only the
+software contract. Every unchecked deployment gate above remains unchecked;
+reviewer attribution and timestamps are unauthenticated, external pre-run plan
+chronology remains a human gate, and no matrix entry is changed. A real combined
+proposal also remains blocked on M17-05.
+
 M15 implements process-local provider/resident handling for phase scratch,
 task scratch, and trace storage only, plus logical control accounting and live
 runtime-stack observation. Declarations are trusted metadata, not independent

@@ -112,6 +112,15 @@ raw file to the complete source commit with a SHA-256 manifest before upload.
 Neither a schema pass nor that integrity manifest promotes the corresponding
 support matrix.
 
+M18 qualification schema version 1 is independent of the package and release
+contract versions. A separately retained campaign plan, complete qualification
+record, exact raw-artifact tree, and passing human review may produce only a
+deterministic `proposal_only` handoff. The reviewer name and timestamp are not
+authentication or cryptographic chronology, and the proposal never edits a
+support matrix. A human must verify external pre-run plan provenance and review
+the separate matrix change. Synthetic fixtures and portable CI are never
+eligible. See [the qualification contract](qualification.md).
+
 ## Security and lifecycle
 
 Supported release lines and reporting instructions are in

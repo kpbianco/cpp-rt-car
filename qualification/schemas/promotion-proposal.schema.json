@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rtfw.dev/qualification/promotion-proposal.schema.json",
+  "title": "RTFW generated promotion proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "evidence_class", "claim_scope", "tuple_id", "proposal_label", "promotion_action", "support_matrix_eligible", "reviewer_authentication", "chronology_proof", "source", "workload", "digests", "decision", "overall_result"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "document_type": {"const": "promotion_proposal"},
+    "evidence_class": {"enum": ["synthetic_fixture", "qualification_campaign"]},
+    "claim_scope": {"enum": ["nvidia", "xdma", "combined", "rt1", "rt2"]},
+    "tuple_id": {"$ref": "#/$defs/identifier"},
+    "proposal_label": {"const": "proposal_only"},
+    "promotion_action": {"const": "human_matrix_change_required"},
+    "support_matrix_eligible": {"type": "boolean"},
+    "reviewer_authentication": {"const": "attribution_only"},
+    "chronology_proof": {"const": "external_human_verification_only"},
+    "source": {"type": "object", "additionalProperties": false, "required": ["commit", "build_id", "product_version"], "properties": {"commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "build_id": {"$ref": "#/$defs/identifier"}, "product_version": {"type": "string", "minLength": 5, "maxLength": 32}}},
+    "workload": {"type": "object", "additionalProperties": false, "required": ["id", "input_id", "input_sha256"], "properties": {"id": {"$ref": "#/$defs/identifier"}, "input_id": {"$ref": "#/$defs/identifier"}, "input_sha256": {"$ref": "#/$defs/sha256"}}},
+    "digests": {"$ref": "#/$defs/digests"},
+    "decision": {"const": "pass"},
+    "overall_result": {"const": "pass"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\\\:/]+(?:/[^\\\\:/]+)*$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["path", "size_bytes", "sha256"], "properties": {"path": {"$ref": "#/$defs/path"}, "size_bytes": {"type": "integer", "minimum": 0, "maximum": 67108864}, "sha256": {"$ref": "#/$defs/sha256"}}},
+    "digests": {"type": "object", "additionalProperties": false, "required": ["plan_sha256", "record_sha256", "review_sha256", "evidence_manifest_sha256", "artifacts"], "properties": {"plan_sha256": {"$ref": "#/$defs/sha256"}, "record_sha256": {"$ref": "#/$defs/sha256"}, "review_sha256": {"$ref": "#/$defs/sha256"}, "evidence_manifest_sha256": {"$ref": "#/$defs/sha256"}, "artifacts": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/artifact"}}}}
+  }
+}

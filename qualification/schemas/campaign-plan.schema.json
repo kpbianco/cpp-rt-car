@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rtfw.dev/qualification/campaign-plan.schema.json",
+  "title": "RTFW qualification campaign plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "evidence_class",
+    "campaign_id",
+    "tuple_id",
+    "scope",
+    "source",
+    "host",
+    "topology",
+    "policy",
+    "workload",
+    "measurement",
+    "accelerator",
+    "trials",
+    "thresholds"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "document_type": {"const": "campaign_plan"},
+    "evidence_class": {"enum": ["synthetic_fixture", "qualification_campaign"]},
+    "campaign_id": {"$ref": "#/$defs/identifier"},
+    "tuple_id": {"$ref": "#/$defs/identifier"},
+    "scope": {"enum": ["nvidia", "xdma", "combined", "rt1", "rt2"]},
+    "source": {"$ref": "#/$defs/source"},
+    "host": {"$ref": "#/$defs/host"},
+    "topology": {"$ref": "#/$defs/topology"},
+    "policy": {"$ref": "#/$defs/policy"},
+    "workload": {"$ref": "#/$defs/workload"},
+    "measurement": {"$ref": "#/$defs/measurement"},
+    "accelerator": {"$ref": "#/$defs/accelerator"},
+    "trials": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/trial"}
+    },
+    "thresholds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/threshold"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"scope": {"const": "nvidia"}}},
+      "then": {"properties": {"accelerator": {"required": ["nvidia"]}}}
+    },
+    {
+      "if": {"properties": {"scope": {"const": "xdma"}}},
+      "then": {"properties": {"accelerator": {"required": ["xdma"]}}}
+    },
+    {
+      "if": {"properties": {"scope": {"const": "combined"}}},
+      "then": {"properties": {"accelerator": {"required": ["nvidia", "xdma", "host_staging"]}}}
+    },
+    {
+      "if": {"properties": {"scope": {"const": "rt2"}}},
+      "then": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "rt2": {
+                "properties": {
+                  "applicable": {"const": true},
+                  "preempt_rt": {"const": true}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "text": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "scope": {"enum": ["nvidia", "xdma", "combined", "rt1", "rt2"]},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "build_id", "product_version"],
+      "properties": {
+        "commit": {"$ref": "#/$defs/commit"},
+        "build_id": {"$ref": "#/$defs/identifier"},
+        "product_version": {"type": "string", "maxLength": 32, "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"}
+      }
+    },
+    "kernel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "configuration_sha256", "boot_parameters"],
+      "properties": {
+        "version": {"$ref": "#/$defs/text"},
+        "configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "boot_parameters": {"$ref": "#/$defs/text"}
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "motherboard", "bios_firmware", "memory", "operating_system", "kernel", "compiler"],
+      "properties": {
+        "cpu": {"$ref": "#/$defs/text"},
+        "motherboard": {"$ref": "#/$defs/text"},
+        "bios_firmware": {"$ref": "#/$defs/text"},
+        "memory": {"$ref": "#/$defs/text"},
+        "operating_system": {"$ref": "#/$defs/text"},
+        "kernel": {"$ref": "#/$defs/kernel"},
+        "compiler": {"$ref": "#/$defs/text"}
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["numa", "iommu", "irq", "power"],
+      "properties": {
+        "numa": {"$ref": "#/$defs/text"},
+        "iommu": {"$ref": "#/$defs/text"},
+        "irq": {"$ref": "#/$defs/text"},
+        "power": {"$ref": "#/$defs/text"}
+      }
+    },
+    "rt2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applicable", "preempt_rt", "isolation", "irq_placement", "scheduling", "locking"],
+      "properties": {
+        "applicable": {"type": "boolean"},
+        "preempt_rt": {"type": "boolean"},
+        "isolation": {"$ref": "#/$defs/text"},
+        "irq_placement": {"$ref": "#/$defs/text"},
+        "scheduling": {"$ref": "#/$defs/text"},
+        "locking": {"$ref": "#/$defs/text"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "threads", "memory", "time", "measured_host_policy", "rt2"],
+      "properties": {
+        "runtime": {"$ref": "#/$defs/text"},
+        "threads": {"$ref": "#/$defs/text"},
+        "memory": {"$ref": "#/$defs/text"},
+        "time": {"$ref": "#/$defs/text"},
+        "measured_host_policy": {"$ref": "#/$defs/text"},
+        "rt2": {"$ref": "#/$defs/rt2"}
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "input_id", "input_sha256"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "input_id": {"$ref": "#/$defs/identifier"},
+        "input_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warmup_samples", "duration_seconds", "sample_count"],
+      "properties": {
+        "warmup_samples": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 31536000},
+        "sample_count": {"type": "integer", "minimum": 1, "maximum": 10000000}
+      }
+    },
+    "nvidia": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gpu", "pci_bdf", "pcie_link", "cuda_driver", "cuda_toolkit", "firmware", "power_policy", "clock_policy"],
+      "properties": {
+        "gpu": {"$ref": "#/$defs/text"},
+        "pci_bdf": {"$ref": "#/$defs/text"},
+        "pcie_link": {"$ref": "#/$defs/text"},
+        "cuda_driver": {"$ref": "#/$defs/text"},
+        "cuda_toolkit": {"$ref": "#/$defs/text"},
+        "firmware": {"$ref": "#/$defs/text"},
+        "power_policy": {"$ref": "#/$defs/text"},
+        "clock_policy": {"$ref": "#/$defs/text"}
+      }
+    },
+    "xdma": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fpga_part", "pci_bdf", "pcie_link", "driver_revision", "module_parameters", "firmware_or_bitstream_sha256", "ip_configuration", "memory_map"],
+      "properties": {
+        "fpga_part": {"$ref": "#/$defs/text"},
+        "pci_bdf": {"$ref": "#/$defs/text"},
+        "pcie_link": {"$ref": "#/$defs/text"},
+        "driver_revision": {"$ref": "#/$defs/text"},
+        "module_parameters": {"$ref": "#/$defs/text"},
+        "firmware_or_bitstream_sha256": {"$ref": "#/$defs/sha256"},
+        "ip_configuration": {"$ref": "#/$defs/text"},
+        "memory_map": {"$ref": "#/$defs/text"}
+      }
+    },
+    "host_staging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "direct_peer_dma"],
+      "properties": {
+        "path": {"$ref": "#/$defs/text"},
+        "direct_peer_dma": {"const": false}
+      }
+    },
+    "accelerator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nvidia": {"$ref": "#/$defs/nvidia"},
+        "xdma": {"$ref": "#/$defs/xdma"},
+        "host_staging": {"$ref": "#/$defs/host_staging"}
+      }
+    },
+    "trial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "required", "applicability", "rationale"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "kind": {"enum": ["functional", "endurance", "thermal", "saturation", "device_loss", "reset_rebind", "shutdown"]},
+        "required": {"type": "boolean"},
+        "applicability": {"enum": ["applicable", "not_applicable"]},
+        "rationale": {"$ref": "#/$defs/text"}
+      }
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "metric", "unit", "population", "statistic", "comparison", "bound", "miss_allowance", "error_allowance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "metric": {"$ref": "#/$defs/identifier"},
+        "unit": {"$ref": "#/$defs/identifier"},
+        "population": {"$ref": "#/$defs/identifier"},
+        "statistic": {"$ref": "#/$defs/identifier"},
+        "comparison": {"enum": ["le", "lt", "ge", "gt", "eq"]},
+        "bound": {"type": "number"},
+        "miss_allowance": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "error_allowance": {"type": "integer", "minimum": 0, "maximum": 10000000}
+      }
+    }
+  }
+}

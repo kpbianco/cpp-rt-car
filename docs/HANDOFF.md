@@ -2,11 +2,11 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-05 starts from exact target
-baseline `bdc97d0122effbad07dbf6d4981e1bf0de729437`, the merged M17-04 pull
-request 221. M17 remains active and incomplete. The binding contract is
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M18-01 starts from exact target
+baseline `e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`. M17 remains active and
+incomplete because M17-05 is blocked. The binding M18-01 contract is
 `contracts/active-batch.yaml`, sourced from control revision
-`f64ab33fe3dac342001cec22b8994c4732cb0467`.
+`a729f1460f56f24f904b45faf4f37157494f847b`.
 
 ## Implemented boundary
 
@@ -64,3 +64,22 @@ The failed prototype, exact commands, rollback, acceptance status, and claim
 boundary are retained in `docs/evidence/M17-05-2026-08-12.md`. The combined
 sample, focused behavioral test, mandatory CI, and human review remain
 unperformed. Do not commit, push, open a pull request, release, or deploy.
+
+## M18-01 implementation handoff
+
+`qualification/schemas/` contains independent version-1 plan, record, review,
+and proposal schemas. `tools/qualification.py` uses only Python 3.11 standard
+library facilities and performs strict bounded parsing, exact-byte plan/record/
+review binding, canonical embedded-manifest hashing, complete trial and
+threshold comparison, artifact-tree verification, and atomic non-overwriting
+proposal output. `tests/qualification_fixtures/` contains only synthetic data.
+
+The precise bounds, canonicalization, evolution, review, commands, rollback,
+and claim boundary are in `docs/qualification.md`. Existing M12 CUDA/XDMA
+`evidence_only` records remain raw inputs only. The tool does not mutate a
+support matrix and does not authenticate reviewer attribution or prove plan
+chronology. Non-synthetic combined promotion remains blocked on M17-05.
+
+After local verification, mandatory GitHub CI and human schema, security,
+qualification, compatibility, and claim-boundary review remain external merge
+gates. No physical campaign or support promotion belongs to M18-01.

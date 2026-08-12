@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "document_type": "promotion_review",
+  "evidence_class": "synthetic_fixture",
+  "scope": "nvidia",
+  "tuple_id": "fixture-nvidia-tuple",
+  "plan_sha256": "b6fbf139ef733a486302dd5c69ffe8b74d51bc17e446ee187bcebb8568d61a1e",
+  "record_sha256": "68da564962e4b1a375b282a9249c35b5e788064334fb5792e191a53961d45c41",
+  "evidence_manifest_sha256": "1dbed12b0734b1a0ad58f0c3d38b512bde5647be9857b77b606b3923da7efdd5",
+  "reviewer": "synthetic-reviewer",
+  "reviewed_at": "2026-08-12T00:00:02Z",
+  "decision": "pass",
+  "rationale": "synthetic fixture review only",
+  "exceptions": [],
+  "pre_run_provenance_verified": true,
+  "reviewer_authentication": "attribution_only"
+}

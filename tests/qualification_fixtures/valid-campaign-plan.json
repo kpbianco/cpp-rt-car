@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "document_type": "campaign_plan",
+  "evidence_class": "synthetic_fixture",
+  "campaign_id": "fixture-nvidia-campaign",
+  "tuple_id": "fixture-nvidia-tuple",
+  "scope": "nvidia",
+  "source": {
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "build_id": "fixture-build",
+    "product_version": "1.2.1"
+  },
+  "host": {
+    "cpu": "synthetic cpu",
+    "motherboard": "synthetic motherboard",
+    "bios_firmware": "synthetic bios",
+    "memory": "synthetic memory",
+    "operating_system": "synthetic linux",
+    "kernel": {
+      "version": "synthetic kernel",
+      "configuration_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "boot_parameters": "synthetic boot"
+    },
+    "compiler": "synthetic compiler"
+  },
+  "topology": {
+    "numa": "synthetic numa",
+    "iommu": "synthetic iommu",
+    "irq": "synthetic irq",
+    "power": "synthetic power"
+  },
+  "policy": {
+    "runtime": "resolved synthetic runtime",
+    "threads": "resolved synthetic threads",
+    "memory": "resolved synthetic memory",
+    "time": "resolved synthetic time",
+    "measured_host_policy": "synthetic host policy",
+    "rt2": {
+      "applicable": false,
+      "preempt_rt": false,
+      "isolation": "not applicable",
+      "irq_placement": "not applicable",
+      "scheduling": "not applicable",
+      "locking": "not applicable"
+    }
+  },
+  "workload": {
+    "id": "fixture-workload",
+    "input_id": "fixture-input",
+    "input_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "measurement": {
+    "warmup_samples": 0,
+    "duration_seconds": 1,
+    "sample_count": 1
+  },
+  "accelerator": {
+    "nvidia": {
+      "gpu": "synthetic gpu",
+      "pci_bdf": "0000:01:00.0",
+      "pcie_link": "synthetic pcie",
+      "cuda_driver": "synthetic driver",
+      "cuda_toolkit": "synthetic toolkit",
+      "firmware": "synthetic firmware",
+      "power_policy": "synthetic power",
+      "clock_policy": "synthetic clocks"
+    }
+  },
+  "trials": [
+    {"id": "functional", "kind": "functional", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "endurance", "kind": "endurance", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "thermal", "kind": "thermal", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "saturation", "kind": "saturation", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "device-loss", "kind": "device_loss", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "reset-rebind", "kind": "reset_rebind", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"},
+    {"id": "shutdown", "kind": "shutdown", "required": true, "applicability": "applicable", "rationale": "synthetic fixture"}
+  ],
+  "thresholds": [
+    {"id": "completion-limit", "metric": "completion_ns", "unit": "ns", "population": "completion", "statistic": "maximum", "comparison": "le", "bound": 10, "miss_allowance": 0, "error_allowance": 0}
+  ]
+}

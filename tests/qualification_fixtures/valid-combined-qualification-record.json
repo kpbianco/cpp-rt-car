@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "document_type": "qualification_record",
+  "evidence_class": "synthetic_fixture",
+  "campaign_id": "fixture-combined-campaign",
+  "tuple_id": "fixture-combined-tuple",
+  "scope": "combined",
+  "plan_sha256": "bf15f11547aba3953edd2841e3120eee9fac5cfa2b077ca867eda4853c074c2a",
+  "source": {
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "build_id": "fixture-build",
+    "product_version": "1.2.1"
+  },
+  "host": {
+    "cpu": "synthetic cpu",
+    "motherboard": "synthetic motherboard",
+    "bios_firmware": "synthetic bios",
+    "memory": "synthetic memory",
+    "operating_system": "synthetic linux",
+    "kernel": {
+      "version": "synthetic kernel",
+      "configuration_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "boot_parameters": "synthetic boot"
+    },
+    "compiler": "synthetic compiler"
+  },
+  "topology": {
+    "numa": "synthetic numa",
+    "iommu": "synthetic iommu",
+    "irq": "synthetic irq",
+    "power": "synthetic power"
+  },
+  "policy": {
+    "runtime": "resolved synthetic runtime",
+    "threads": "resolved synthetic threads",
+    "memory": "resolved synthetic memory",
+    "time": "resolved synthetic time",
+    "measured_host_policy": "synthetic host policy",
+    "rt2": {
+      "applicable": false,
+      "preempt_rt": false,
+      "isolation": "not applicable",
+      "irq_placement": "not applicable",
+      "scheduling": "not applicable",
+      "locking": "not applicable"
+    }
+  },
+  "workload": {
+    "id": "fixture-workload",
+    "input_id": "fixture-input",
+    "input_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "accelerator": {
+    "nvidia": {
+      "gpu": "synthetic gpu",
+      "pci_bdf": "0000:01:00.0",
+      "pcie_link": "synthetic pcie",
+      "cuda_driver": "synthetic driver",
+      "cuda_toolkit": "synthetic toolkit",
+      "firmware": "synthetic firmware",
+      "power_policy": "synthetic power",
+      "clock_policy": "synthetic clocks"
+    },
+    "xdma": {
+      "fpga_part": "synthetic fpga",
+      "pci_bdf": "0000:02:00.0",
+      "pcie_link": "synthetic pcie",
+      "driver_revision": "synthetic driver",
+      "module_parameters": "synthetic parameters",
+      "firmware_or_bitstream_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "ip_configuration": "synthetic ip",
+      "memory_map": "synthetic memory map"
+    },
+    "host_staging": {
+      "path": "bounded copied host staging",
+      "direct_peer_dma": false
+    }
+  },
+  "started_at": "2026-08-12T00:00:00Z",
+  "ended_at": "2026-08-12T00:00:01Z",
+  "artifact_manifest": [
+    {
+      "path": "raw.json",
+      "size_bytes": 58,
+      "sha256": "5a50e1af873d23adc726db0da8a1a93942a4a5a586d8db9b5809a9dda91f12a2"
+    }
+  ],
+  "evidence_manifest_sha256": "1dbed12b0734b1a0ad58f0c3d38b512bde5647be9857b77b606b3923da7efdd5",
+  "raw_populations": [
+    {
+      "id": "release",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "wake",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "compute",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "submit",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "poll",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "completion",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "slack",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "miss",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "temperature",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "clock",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "power",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "memory",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "queue",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "error",
+      "artifact_path": "raw.json"
+    },
+    {
+      "id": "recovery",
+      "artifact_path": "raw.json"
+    }
+  ],
+  "resource_trends": [
+    {
+      "id": "resident-bytes",
+      "start": 1,
+      "end": 1,
+      "maximum": 1,
+      "stable": true
+    }
+  ],
+  "thermal_trends": [
+    {
+      "id": "temperature-c",
+      "start": 20,
+      "end": 20,
+      "maximum": 20,
+      "stable": true
+    }
+  ],
+  "device_health": {
+    "healthy": true,
+    "losses": 0,
+    "recovered": true
+  },
+  "trials": [
+    {
+      "id": "functional",
+      "status": "pass",
+      "artifact_path": "raw.json",
+      "recovery": {
+        "attempted": false,
+        "success": true,
+        "details": "synthetic fixture recovery state"
+      }
+    },
+    {
+      "id": "endurance",
+      "status": "pass",
+      "artifact_path": "raw.json",
+      "recovery": {
+        "attempted": false,
+        "success": true,
+        "details": "synthetic fixture recovery state"
+      }
+    },
+    {
+      "id": "thermal",
+      "status": "pass",
+      "artifact_path": "raw.json",
+      "recovery": {
+        "attempted": false,
+        "success": true,
+        "details": "synthetic fixture recovery state"
+      }
+    },
+    {
+      "id": "saturation",
+      "status": "pass",
+      "artifact_path": "raw.json",
+      "recovery": {
+        "attempted": false,
+        "success": true,
+        "details": "synthetic fixture recovery state"
+      }
+    },
+    {
+      "id": "device-loss",
+      "status": "pass",
+      "artifact_path": "raw.json",
+      "recovery": {
+        "attempted": false,
+        "success": true,
+        "details": "synthetic fixture recovery state"
+      }
+    },
+    {
+      "id": "reset-rebind",
+      "status": "pass",
+      "artifact_path": "raw.json",
+      "recovery": {
+        "attempted": true,
+        "success": true,
+        "details": "synthetic fixture recovery state"
+      }
+    },
+    {
+      "id": "shutdown",
+      "status": "pass",
+      "artifact_path": "raw.json",
+      "recovery": {
+        "attempted": false,
+        "success": true,
+        "details": "synthetic fixture recovery state"
+      }
+    }
+  ],
+  "thresholds": [
+    {
+      "id": "completion-limit",
+      "definition": {
+        "id": "completion-limit",
+        "metric": "completion_ns",
+        "unit": "ns",
+        "population": "completion",
+        "statistic": "maximum",
+        "comparison": "le",
+        "bound": 10,
+        "miss_allowance": 0,
+        "error_allowance": 0
+      },
+      "observed": 0,
+      "misses": 0,
+      "errors": 0,
+      "passed": true
+    }
+  ],
+  "overall_result": "pass"
+}

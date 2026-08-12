@@ -1,36 +1,35 @@
 schema_version: 1
 batch:
-  id: M17-05
-  title: Add CPU GPU FPGA CPU graph sample
-  goal: Add one portable, deterministic sample that composes the existing native HAL-v2 CUDA and XDMA candidates in a single Runtime graph, demonstrates CPU preparation, explicit CUDA staged upload/Graph/download, a bounded host-staging handoff, explicit XDMA transfer/control/event/transfer, and CPU validation, while adding no runtime or backend capability and making no physical hardware, peer-DMA, latency, or support claim.
+  id: M18-01
+  title: Add qualification schemas and promotion tools
+  goal: Add versioned machine-readable campaign-plan, qualification-record, review, and promotion-proposal schemas plus bounded offline validation and proposal tooling that binds exact tuple provenance, predeclared thresholds, retained raw artifacts, required trials, and an explicit human decision without running hardware, changing a support matrix, or claiming that portable validation qualifies any tuple.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
-    - products/cpp-rt-car/PRD.md#cap-m17--hal-v2-and-heterogeneous-memory
-    - products/cpp-rt-car/acceptance.yaml#CAP-M17
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-17
-  milestone: products/cpp-rt-car/roadmap.yaml#M17
+    - products/cpp-rt-car/PRD.md#cap-m18--real-hardware-and-rt-qualification
+    - products/cpp-rt-car/acceptance.yaml#CAP-M18
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-18
+    - products/cpp-rt-car/risk-register.yaml#R-006
+  milestone: products/cpp-rt-car/roadmap.yaml#M18
   target_contracts:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/hal_v2.md
-    - docs/heterogeneous_memory.md
-    - docs/device_backend.md
-    - docs/cuda_backend.md
-    - docs/xdma_backend.md
-    - docs/host_runtime.md
-    - docs/executor.md
-    - docs/cpu_memory_policy.md
-    - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/observability.md
-    - docs/testing_ci.md
-    - docs/c_abi.md
     - docs/release_policy.md
     - docs/real_time_readiness_checklist.md
+    - docs/testing_ci.md
     - docs/security_supply_chain.md
     - docs/threat_model.md
+    - docs/cuda_backend.md
+    - docs/xdma_backend.md
+    - docs/cuda_support_matrix.json
+    - docs/xdma_support_matrix.json
+    - docs/portable_support_matrix.json
+    - tools/check_hardware_evidence.py
+    - tools/release_manifest.py
+    - tests/test_release_tools.py
+    - .github/workflows/cuda-qualification.yml
+    - .github/workflows/xdma-qualification.yml
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -43,10 +42,11 @@ sources:
     - docs/evidence/M17-02-2026-08-06.md
     - docs/evidence/M17-03-2026-08-11.md
     - docs/evidence/M17-04-2026-08-12.md
-  baseline_commit: bdc97d0122effbad07dbf6d4981e1bf0de729437
+    - docs/evidence/M17-05-2026-08-12.md
+  baseline_commit: e5f10cc572fa9ba3d4dd488781c310dafb34dfd2
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M17-05.yaml
-  control_plane_revision: f64ab33fe3dac342001cec22b8994c4732cb0467  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M18-01.yaml
+  control_plane_revision: a729f1460f56f24f904b45faf4f37157494f847b  # pragma: allowlist secret
 dependencies:
   - M17-04
 scope:
@@ -55,32 +55,26 @@ scope:
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
-    - samples/CMakeLists.txt
-    - samples/cpu_gpu_fpga_cpu.cpp
-    - tests/CMakeLists.txt
-    - tests/test_cpu_gpu_fpga_cpu_sample.cpp
-    - CMakeLists.txt
-    - .github/workflows/ci.yml
+    - qualification/schemas/campaign-plan.schema.json
+    - qualification/schemas/qualification-record.schema.json
+    - qualification/schemas/promotion-review.schema.json
+    - qualification/schemas/promotion-proposal.schema.json
+    - tools/qualification.py
+    - tests/test_release_tools.py
+    - tests/qualification_fixtures/*.json
+    - tests/qualification_fixtures/artifacts/*
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
+    - docs/qualification.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/hal_v2.md
-    - docs/heterogeneous_memory.md
-    - docs/device_backend.md
-    - docs/cuda_backend.md
-    - docs/xdma_backend.md
-    - docs/host_runtime.md
-    - docs/executor.md
-    - docs/cpu_memory_policy.md
-    - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/observability.md
-    - docs/testing_ci.md
-    - docs/c_abi.md
+    - docs/release_policy.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M17-05-*.md
+    - docs/testing_ci.md
+    - docs/security_supply_chain.md
+    - docs/threat_model.md
+    - docs/evidence/M18-01-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -90,12 +84,23 @@ scope:
     - abi/rtfw_c_abi_v8.sha256
     - rt/include/rt/
     - rt/src/
-    - src/c_abi.cpp
-    - core/include/core/
+    - src/
+    - core/
+    - include/
+    - samples/
+    - examples/
+    - tests/CMakeLists.txt
+    - CMakeLists.txt
+    - cmake/
     - configs/
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
+    - tools/check_hardware_evidence.py
+    - tools/release_manifest.py
+    - tools/rt_harden.sh
+    - tools/rt_harden.ps1
+    - .github/workflows/
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -108,107 +113,90 @@ scope:
     - docs/evidence/M17-02-2026-08-06.md
     - docs/evidence/M17-03-2026-08-11.md
     - docs/evidence/M17-04-2026-08-12.md
-    - .github/workflows/cuda-qualification.yml
-    - .github/workflows/xdma-qualification.yml
-    - .github/workflows/release.yml
-    - samples/cuda_qualification.cpp
-    - samples/xdma_qualification.cpp
-    - include/simcore/
-    - hal/
-    - gpu/
-    - examples/
+    - docs/evidence/M17-05-2026-08-12.md
+    - release/rtfw-release-contract.schema.json
     - LICENSE
     - VERSION.txt
 acceptance:
-  - The exact clean baseline is `bdc97d0122effbad07dbf6d4981e1bf0de729437`, the merged M17-04 pull request 221. It contains M17-04 commit ancestry and `docs/evidence/M17-04-2026-08-12.md`; target history, governance, current-state, handoff, and roadmap are reconciled to that fact without rewriting retained evidence or inventing a hosted-CI run, check count, successful local ThreadSanitizer result, or human-review object.
-  - A top-level default build adds exactly one non-installed `sample_cpu_gpu_fpga_cpu` executable using only existing installed/public Runtime, CUDA-candidate, and XDMA-candidate C++ headers and existing `rtfw_runtime`, `rtfw_cuda_backend`, and `rtfw_xdma_backend` targets. It builds and runs without a CUDA toolkit, GPU, XDMA device node, kernel driver, root privilege, firmware, bitstream, network access, or secrets.
-  - The sample constructs the actual `CudaDeviceBackend` and `XdmaDeviceBackend` candidate classes with bounded injected version-2 driver tables, registers both through their existing native `hal_v2_registration()` paths in one `rt::Runtime`, and uses fixed capacities and caller-owned fixed storage. It does not reimplement a generic substitute HAL backend, call either device-ABI-v1 `api()` path, or add/change any Runtime, HAL, CUDA, XDMA, ABI, schema, package, support, or release API.
-  - "The compiled graph is an explicit dependency chain: CPU preparation; one CUDA batch; one CPU host-staging handoff; one XDMA batch; and CPU validation. The CUDA and XDMA phases each use a backend-local timeline only for their own accepted/completed value. Cross-backend order comes solely from the ordinary compiled-graph dependency and the completed host-staging copy; no timeline handle crosses a backend and no direct GPU-to-FPGA peer path is declared or implied."
-  - CPU preparation writes a fixed deterministic input to a CUDA staging object discovered and registered through the existing staged-memory contract. The CUDA batch declaration and provider issue exactly one `copy_to_device`, one stable-ID caller-owned pre-registered Graph dispatch, and one `copy_from_device`, in that order, with exact logical range/access bindings, one finite timeout, and one same-backend signal. The injected CUDA driver models opaque device storage and a deterministic transform but remains fake protocol evidence.
-  - After the CUDA batch is wholly complete, a bounded CPU callback copies the exact downloaded result from the CUDA-owned host region into a disjoint XDMA-owned borrowed-host staging region. The regions do not overlap, are not registered to both backends, and the bridge performs no allocation, vendor call, hidden synchronization, pointer-derived identity, or peer-memory claim.
-  - The XDMA batch then issues explicit H2C, bounded 32-bit little-endian control-write trigger, finite user-event wait, and C2H commands in declared order using stable existing opcodes, exact logical references, one finite timeout, and one same-backend signal. Its injected driver owns fixed simulated card/control/event state and deterministically transforms the staged payload; it does not access a user BAR, event node, PCI function, driver, firmware, bitstream, or physical FPGA.
-  - The final CPU callback verifies every output byte/value, the expected event value, exact phase and injected-driver call order, one Graph launch, one XDMA trigger/event, and absence of executor-worker vendor entry. After each successful step, the host inspects both completed backend-local timeline values. The executable returns nonzero on any mismatch and on success prints a stable concise result that explicitly identifies `evidence=simulated_protocol`, `physical_hardware=false`, and `direct_peer_dma=false`.
-  - The sample performs at least two complete frames with deterministic input/output and monotonically increasing backend-local signal values, retains one accepted-before-complete result per device phase per frame, and observes no ordinary heap allocation during the measured post-start `Runtime::step()` interval. A second independent sample fixture proves that backend state, graph IDs, card storage, timelines, buffers, call logs, and cleanup ownership are not shared across Runtime instances.
-  - Failure-focused coverage injects at least CUDA Graph failure and XDMA event/transfer failure after valid prior work and proves that the dependent CPU bridge/validation phase does not run, no later backend is submitted after an upstream failure, checked stop retains and resolves the existing quarantine/ownership state, and a fresh independent sample run succeeds. It does not weaken timeouts, use timing-only assertions, fabricate completion, or require physical hardware.
-  - Startup, success, injected failure, and checked stop preserve M17-01 through M17-04 exception containment, fixed capacity, accepted-before-complete causality, whole-completion publication, first-error retention, reverse cleanup, unresolved-only retry, caller-owned Graph/buffer lifetime, and no detached work. The sample adds no runtime-owned or backend-owned lane, queue, MemoryPlan row, provider region, status, schema, exported symbol, installed header/target, or support record.
-  - Stable C ABI v8 with exactly 70 exports and frozen fingerprint, SONAME 8, every device-ABI-v1 declaration/layout/value and candidate behavior, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime status values, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log schemas and IDs, package inventory and aliases, release 1.2.1, support matrices, and Apache-2.0 remain unchanged.
-  - Target governance, current state, handoff, roadmap, architecture/device/vendor/testing/readiness contracts, README, release digest ledger, and retained M17-05 evidence describe the sample as portable simulated RT0 protocol evidence. After focused, full local, mandatory CI, and human gates pass, M17/CAP-M17 may be marked functionally complete, while every physical CUDA/XDMA/combined, hardware, HIL, field, latency, RT1/RT2, signing, release, deployment, and production claim remains M18 or later work.
+  - The implementation starts from the exact clean default-branch baseline `e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`. That baseline records M17-05 as blocked by the native command-capability discovery mismatch and contains no combined sample; M18-01 neither repairs that defect nor marks M17/CAP-M17 complete. Offline schema/tool work may proceed from the completed M17-04 foundation, but no combined qualification or promotion may rely on the absent M17-05 behavior.
+  - Four draft-2020-12 JSON schemas with independent schema version 1 define a campaign plan, qualification record, promotion review, and generated promotion proposal. Each top-level and security-sensitive nested object is closed to unknown properties, uses bounded strings and arrays, rejects duplicate identities, requires canonical lowercase SHA-256 and complete 40-character source commits, and distinguishes `nvidia`, `xdma`, `combined`, `rt1`, and `rt2` scopes without changing any runtime, ABI, package, observability, checkpoint, input-log, rate-action, or release schema.
+  - A campaign plan is a separately retained pre-run object. It names one immutable campaign and tuple, runtime source/build identity, product version, CPU, motherboard, BIOS/firmware, memory, operating system, kernel/configuration/boot parameters, compiler, resolved runtime/thread/memory/time policy, workload and input identity, warm-up and duration/sample bounds, topology/NUMA/IOMMU/IRQ/power policy, applicable accelerator/driver/firmware/bitstream facts, required functional/endurance/thermal/saturation/loss/reset-rebind/shutdown trials, and every pass/fail threshold with exact metric, unit, population, statistic, comparison, bound, and miss/error allowance.
+  - "Scope-specific validation fails closed when required tuple or trial facts are absent: NVIDIA requires exact GPU/PCIe/CUDA driver/toolkit/power-clock identity; XDMA requires exact FPGA part/BDF/link/driver/module/firmware-or-bitstream/IP/memory-map identity; combined requires both identities and the declared host-staging path without implying peer DMA; RT1 requires a named measured host policy and latency/deadline populations; RT2 additionally requires PREEMPT_RT kernel/config/boot/isolation/IRQ/scheduling/locking evidence. RT2 remains optional and cannot be inferred from RT1 or preflight success."
+  - A qualification record is immutable run output bound by byte-exact SHA-256 to the campaign plan, exact target source commit and runtime build, resolved observed tuple/policy, start/end times, workload, raw artifact manifest, resource and thermal trends, and every planned trial and threshold evaluation. It preserves raw release, wake, compute, submit, poll, completion, slack, miss, temperature, clock, power, memory, queue, error, and recovery artifact references where applicable; missing, duplicate, unsafe, unlisted, symlinked, oversized, digest-mismatched, non-finite, out-of-range, or plan-divergent data rejects the record rather than being defaulted or summarized away.
+  - The existing M12 `evidence_only` CUDA/XDMA JSON and source-bound artifact manifests remain valid raw inputs but never become a qualification record or passing threshold evaluation by themselves. The new validator accepts them only as retained artifacts referenced by a complete M18 record and never changes their schema, workflow, sample, meaning, or claim label.
+  - A promotion review is a separate byte-digest-bound decision naming the exact plan, record, raw-evidence manifest, qualification scope and tuple ID, reviewer identifier, review time, decision, rationale, and exceptions. A passing review requires a passing record, no unresolved exception, every applicable mandatory trial and predeclared threshold to pass, and exact digest agreement. The reviewer field is attribution metadata, not authentication or a signature; signing and identity assurance remain M20/manual governance.
+  - The `tools/qualification.py` implementation uses only the Python 3.11 standard library and bounded file/collection limits. Its validation command checks schema version/shape and all cross-document semantics, verifies every retained artifact as a regular in-tree file by exact relative path, byte count, and SHA-256, rejects JSON duplicate keys and `NaN`/infinity, reports all deterministic validation errors without exposing artifact contents, and returns nonzero without a partial output on any failure.
+  - The proposal command consumes only a fully validated plan, record, artifact directory, and explicit passing review and writes a new deterministic canonical proposal to an explicit nonexisting output path. The proposal contains exact tuple/claim scope plus plan, record, review, source, build, workload, evidence-manifest, and artifact digests and is labeled `proposal_only` and `human_matrix_change_required`; repeated inputs produce byte-identical output. It never edits a support matrix, release contract, qualification record, source artifact, Git state, remote service, or production setting and does not authenticate the reviewer.
+  - Validation proves threshold integrity only by binding the run and review to a separately retained plan digest. Untrusted timestamps or a validator pass cannot prove that the plan existed before measurement; promotion remains blocked unless a human reviewer verifies the plan's externally retained pre-run provenance. The tool rejects plan/record threshold drift and post-run threshold additions but never claims cryptographic chronology.
+  - Synthetic fixtures cover one minimal valid plan/record/review/proposal for every scope plus negative mutations for every required field group, scope mismatch, plan/record/review digest mismatch, changed thresholds, missing trials, failed resource trend, unstable resource growth, unhealthy/lost device, malformed recovery, unsafe paths, symlinks, unlisted artifacts, duplicate JSON keys, non-finite numbers, size/count limits, failed review, unresolved exceptions, existing output, and attempted in-place matrix mutation. Fixture output is explicitly `synthetic_fixture` and cannot be copied into a support matrix.
+  - Documentation and deterministic contract checks define schema evolution, artifact layout, canonical digest rules, review and rollback procedure, the M17-05 prerequisite boundary for later combined work, and the exact distinction among fixture, portable CI, raw hardware evidence, reviewed qualification, and support promotion. No document claims that M18-01 qualifies NVIDIA, XDMA, combined, RT1, or RT2 behavior.
+  - Stable C ABI v8 with exactly 70 exports and frozen fingerprint, SONAME 8, device ABI v1, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime statuses, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log schemas and IDs, installed targets/headers and aliases, release 1.2.1, all three existing support matrices and claims, qualification workflows/samples, and Apache-2.0 remain unchanged.
+  - Focused qualification-tool tests, complete deterministic local verification, mandatory GitHub CI, and human schema, security, promotion, compatibility, and claim-boundary review pass before merge. M18/CAP-M18 remain incomplete and no tuple is promoted by this batch.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
+    - python3 tests/test_release_tools.py
+    - python3 tools/qualification.py validate --plan tests/qualification_fixtures/valid-campaign-plan.json --record tests/qualification_fixtures/valid-qualification-record.json --review tests/qualification_fixtures/valid-promotion-review.json --artifact-dir tests/qualification_fixtures/artifacts
+    - proposal_dir=$(mktemp -d /tmp/rtfw-m18-01.XXXXXX) && python3 tools/qualification.py propose --plan tests/qualification_fixtures/valid-campaign-plan.json --record tests/qualification_fixtures/valid-qualification-record.json --review tests/qualification_fixtures/valid-promotion-review.json --artifact-dir tests/qualification_fixtures/artifacts --output "$proposal_dir/promotion-proposal.json" && python3 tools/qualification.py verify-proposal --proposal "$proposal_dir/promotion-proposal.json" --plan tests/qualification_fixtures/valid-campaign-plan.json --record tests/qualification_fixtures/valid-qualification-record.json --review tests/qualification_fixtures/valid-promotion-review.json
     - ./scripts/agent-verify.sh quick
-    - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
-    - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/samples/sample_cpu_gpu_fpga_cpu
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm17_cpu_gpu_fpga_cpu_sample|m17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data'
-    - cmake -S . -B build/m17-05-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
-    - cmake --build build/m17-05-package --parallel 2
-    - cmake --install build/m17-05-package --prefix "$PWD/build/m17-05-install"
-    - cmake -S tests/package_consumer -B build/m17-05-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m17-05-install"
-    - cmake --build build/m17-05-package-consumer --parallel 2
-    - ctest --test-dir build/m17-05-package-consumer --output-on-failure
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
   focused_tests_to_add:
-    - default portable build and CTest execution of the sample on a host with no CUDA toolkit, GPU, XDMA node, firmware, bitstream, or privilege
-    - exact CPU-prepare, CUDA upload/Graph/download, CPU host bridge, XDMA H2C/control/event/C2H, and CPU-validate dependency and injected-call order with deterministic final bytes
-    - backend-local timeline ownership and monotonic values across at least two frames, with explicit rejection or construction-time proof that no CUDA handle appears in an XDMA wait/signal or vice versa
-    - disjoint CUDA and XDMA host registrations, explicit bounded bridge copy, stable Graph/control/event opcodes, and no peer-memory, cross-backend-timeline, implicit synchronization, or shared dual-backend registration
-    - executor/provider versus Runtime submission/service and XDMA fixed-worker thread identity, proving no injected vendor callback runs on an executor worker
-    - measured post-start complete-frame no-allocation, fixed callback counts, queue/timeline bounds, and deterministic repeated output
-    - two independent Runtime/backend/sample fixtures with isolated graph IDs, device/card state, buffers, timelines, call traces, stop state, and successful reverse cleanup
-    - CUDA Graph and XDMA event/transfer injected failures with downstream callback suppression, no later-backend submit after upstream failure, exact terminal status, checked stop/quarantine cleanup, and successful fresh-run recovery
-    - stable success output and evidence labels that state simulated protocol, no physical hardware, and no direct peer DMA
-    - permanent M14.1/M15/M16/M17-01 through M17-04 lifecycle, compatibility, accounting, no-allocation, sanitizer, determinism, package, and claim-boundary regressions
+    - exact draft/version/closed-object/schema consistency and deterministic valid-fixture validation for NVIDIA, XDMA, combined, RT1, and RT2 plans, records, reviews, and proposals
+    - scope-specific complete tuple, workload, topology, resolved-policy, required-trial, raw-population, resource-trend, thermal, recovery, and shutdown field validation at zero, boundary, maximum valid, and overflow/count limits
+    - byte-exact plan and record digest binding, threshold set equality, source/build/workload/tuple equality, predeclared comparison evaluation, pass/fail propagation, and rejection of record or review substitution
+    - safe artifact-manifest verification for regular files, canonical relative paths, ordering, uniqueness, byte lengths, SHA-256 values, no symlink or directory escape, bounded aggregate bytes, and no unlisted artifact
+    - duplicate-key, invalid UTF-8, non-object, trailing-data, `NaN`/infinity, malformed enum/boolean/integer/string/time/digest/path, unknown property, and excessive nesting or collection rejection without partial output
+    - required long-duration, thermal, saturation, device-loss, reset-rebind, shutdown, latency/deadline, and resource-stability trial applicability plus explicit failure and unsupported/not-applicable handling by scope
+    - failed or exception-bearing review rejection, no authenticated-review claim, deterministic proposal bytes, existing-output refusal, and proof that no tracked matrix, release contract, source artifact, or Git state is mutated
+    - preservation of the existing CUDA/XDMA `evidence_only` validator behavior and explicit rejection of a raw M12 artifact as a complete M18 qualification or promotion input
+    - release-contract and documentation checks requiring all schema/tool paths and truthful qualification wording while retaining every permanent M14.1/M15/M16/M17 gate
   required_ci:
-    - Documentation contract workflow covering the sample topology, host-staging boundary, simulated-evidence labels, quick start, release contract, frozen C/device ABI, exact SDK inventory, and all permanent M15/M16/M17 gates
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off matrix building and running `m17_cpu_gpu_fpga_cpu_sample` with AddressSanitizer and UndefinedBehaviorSanitizer coverage of success, injected failure, two-runtime isolation, and cleanup
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix building and running the injected portable sample with identical graph order, stable opcodes, outputs, evidence labels, source compatibility, and no Linux/CUDA-toolkit/device-node leakage
-    - Unified executor GCC ThreadSanitizer job running the sample success/failure/isolation cases plus complete VendorHalV2, CUDA Graph/fake-driver, XDMA control/event, CommandBatch, HeterogeneousMemory, HAL-v2/v1-adapter, blocked-stop, and permanent M15/M16 processes without weaker exclusions or timeouts
-    - Determinism GCC and Clang FMA-on/FMA-off jobs and artifact exchange remain byte exact for existing fixtures; the sample must produce the same integer result and declared stage order on each portable compiler tuple without being promoted to D2/D3 evidence
-    - C and C++ embedding smoke builds and runs `sample_cpu_gpu_fpga_cpu` beside existing samples on GCC and Clang without a CUDA toolkit or XDMA node
-    - C/C++ embedding, add_subdirectory, installed package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI, dependency review, SBOM, autotune, and scaling gates prove the sample did not change the installed product surface
-    - Existing node-free XDMA and CUDA-toolkit compile/install/consumer gates remain mandatory M17-04 build/package evidence only and do not execute or qualify hardware
-    - Existing no-allocation, bounded-memory/control-ledger, M14.1 recovery, M15 rollback, M16 timeline/data/dispatch/shedding/telemetry, all M17 core/memory/command/vendor compatibility, sanitizer, fuzz-smoke, observability-schema, release-contract, package, CUDA fake-driver, and XDMA portable gates
+    - Documentation contract workflow on pinned Python 3.11 validating schemas, qualification/release tooling, negative fixtures, release digests, support-matrix nonmutation, and truthful claim language
+    - Linux GCC 11 and Clang 14 Debug/RelWithDebInfo FMA on/off jobs with all existing AddressSanitizer, UndefinedBehaviorSanitizer, determinism, M15/M16/M17, no-allocation, and package gates unchanged
+    - Windows Server 2022 MSVC v143 Debug/RelWithDebInfo jobs proving the repository and Python qualification fixtures remain path-portable and do not add a runtime/build dependency
+    - Unified executor GCC ThreadSanitizer, snapshot fuzz smoke, determinism artifact exchange, C/C++ embedding, add_subdirectory, relocated package/archive, exact SDK inventory, frozen C ABI/SONAME, dependency review, SBOM, autotune, and scaling jobs remain mandatory and unchanged
+    - Existing CUDA-toolkit compile/package and node-free XDMA compile/package jobs remain M17 portable build evidence only; no self-hosted CUDA/XDMA qualification workflow or physical hardware run is required or sufficient for M18-01
   manual:
-    - Human API, architecture, and compatibility review must confirm that the sample uses only existing public C++ surfaces, adds no installed API/target or runtime capability, preserves every ABI/schema/release/support boundary, and is the smallest host-staged graph that satisfies CAP-M17.
-    - Human concurrency, lifetime, and safety review must confirm exact graph dependency order, disjoint host ownership, bounded bridge copy, backend-local timelines, vendor-call thread identities, accepted-before-complete publication, fixed storage, failure suppression, quarantine, reverse retryable cleanup, no detached work, and no post-start frame allocation.
-    - Human claim review must confirm that names such as GPU and FPGA describe injected protocol roles only; the executable, README, docs, and evidence must not imply physical Graph execution, MMIO, interrupts, DMA, HIL, field, latency, RT1/RT2, support, release, deployment, or production readiness.
-    - Physical combined execution is not required or authorized by M17-05. Any later physical run requires a named M18 tuple, reviewed GPU/FPGA/driver/firmware/bitstream/BDF/topology/workload plan, preselected thresholds where timing is measured, and separate human promotion approval.
+    - Human schema and security review must approve scope-specific required facts, bounds, duplicate-key/non-finite/path handling, digest and canonicalization rules, threshold equality/evaluation, resource-stability semantics, schema-evolution policy, and parser failure behavior.
+    - Human qualification and claim review must confirm that proposal generation cannot mutate a support matrix, that reviewer attribution is not authentication, that plan timestamps do not prove preselection, and that later promotion requires externally verified pre-run plan provenance plus named raw hardware/RT evidence.
+    - Human compatibility review must confirm that no runtime, C/device ABI, installed package, release version, support matrix, hardware workflow/sample, or prior retained evidence changed.
 risk:
   class: high
   hazards:
-    - an ordinary graph dependency can be mistaken for a cross-backend hardware fence even though correctness depends on complete CUDA download, CPU bridge completion, and later XDMA upload
-    - overlapping or dual-registered host storage can obscure ownership, race two backends, or imply a peer/coherent path that the Runtime explicitly does not provide
-    - a fake CUDA Graph or XDMA control/event driver can mutate data synchronously in a way that hides missing accepted-before-complete, staging, timeout, quarantine, or thread-isolation behavior
-    - sample callback or driver state can allocate after start, use dynamic logs, race submission/service/backend workers, leak between Runtime instances, or outlive checked cleanup
-    - timeline handles or mutable values can accidentally cross backend boundaries or enter declarations inconsistently, causing invalid identity or a false cross-device synchronization story
-    - an upstream failure can still allow the host bridge, XDMA phase, or final validator to run if graph-token release and cancellation are asserted only by final output
-    - adding a default-built sample can leak toolkit, Linux-driver, warning, feature-macro, dependency, installed-target, or package requirements into otherwise portable builds
-    - success wording, GPU/FPGA naming, deterministic output, hosted CI, or benchmarks can be overstated as physical combined execution, peer DMA, hardware, HIL, bounded latency, RT1, or RT2 qualification
+    - a syntactically valid but incomplete tuple can omit BIOS, kernel, driver, bitstream, topology, policy, workload, or build facts and be mistaken for reproducible qualification
+    - a record can substitute thresholds after measurement, omit failing samples or trials, summarize away misses/resource growth, or bind the wrong plan, source commit, workload, or raw artifact
+    - timestamps and reviewer names are untrusted text and can be misrepresented as cryptographic chronology, authenticated approval, signature, or provenance
+    - unsafe paths, symlinks, duplicate JSON keys, enormous collections, non-finite numbers, or digest confusion can bypass validation, escape the artifact root, exhaust resources, or make reviewers inspect different bytes
+    - a proposal generator can accidentally modify a tracked support matrix, overwrite an input, accept a failed review, or emit nondeterministic bytes that cannot be audited
+    - one generic schema can conflate NVIDIA, XDMA, combined, RT1, and RT2 requirements or allow `not_applicable` to erase a mandatory failure/recovery trial
+    - existing `evidence_only` samples, fake drivers, fixtures, hosted CI, preflight, benchmarks, or documentation can be relabeled as reviewed hardware, HIL, field, latency, RT1, or RT2 evidence
+    - the blocked M17-05 native combined path can be overlooked and a combined proposal can be generated for behavior the baseline cannot execute
+    - release digest or documentation checker edits can weaken a frozen ABI, package, workflow, support, or claim boundary while tooling tests remain green
   stop_conditions:
-    - the exact baseline is unavailable, dirty, lacks merged M17-04 commit `bdc97d0122effbad07dbf6d4981e1bf0de729437`, or lacks any retained M15/M16/M17-01 through M17-04 evidence record
-    - actual baseline code or target contracts show that the existing public Runtime and native CUDA/XDMA candidate surfaces cannot express the graph with a bounded CPU host-staging bridge and backend-local timelines
-    - satisfying the sample requires changing any file under `rt/include/rt/` or `rt/src/`, adding a Runtime/HAL/vendor operation, changing a protected ABI/schema/status/package surface, or weakening M17-01 through M17-04 validation or lifecycle behavior
-    - correctness requires overlapping/dual-registered host regions, a cross-backend timeline or fence, direct GPU-to-FPGA peer DMA, device-rate dispatch, hidden synchronization, a new lane, unbounded retry, detached work, or allocation on the measured post-start frame path
-    - the sample cannot prove that the CPU bridge runs only after complete CUDA download or that XDMA submission and final validation are suppressed after an upstream failure
-    - a portable deterministic test requires timing sleeps/tolerances, a CUDA toolkit, physical GPU/FPGA, XDMA nodes, root privilege, a fixed PCI/IRQ/IOMMU topology, destructive MMIO, firmware/bitstream access, secrets, signing, release, deployment, or production access
-    - mandatory sanitizer, package, compatibility, no-allocation, full verification, or human review would need to be skipped, weakened, or relabeled successful
-    - a required source, sample, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
+    - the exact baseline is unavailable, dirty, lacks M17-04 ancestry, lacks any retained M15/M16/M17 evidence record, or no longer records the actual M17-05 blocker truthfully
+    - target contracts require M18-01 to repair or complete M17-05, execute the combined sample, or qualify behavior absent from the exact baseline
+    - implementation requires changing runtime/library/sample/build code, stable C ABI v8 or SONAME 8, device ABI v1, HAL/runtime status or schema surfaces, installed package inventory, release version, license, a support matrix, or a hardware/release workflow
+    - a complete bounded offline representation of any approved scope requires guessing a tuple fact, accepting a partial raw population, treating an untrusted timestamp as proof of preselection, or authenticating a reviewer without a separately approved signing/identity design
+    - the tool cannot verify all referenced artifacts inside one explicit root without following symlinks, accepting unsafe paths, unbounded memory/input, non-finite values, duplicate keys, or ambiguous canonicalization
+    - proposal generation cannot be made output-only, deterministic, atomic, non-overwriting, and incapable of modifying support matrices, source evidence, Git, remote systems, or production state
+    - a passing proposal would require allowing a failed threshold, unresolved resource trend, missing applicable loss/reset-rebind/shutdown trial, failed review, unresolved exception, or absent M17-05 combined prerequisite
+    - deterministic tests require physical GPU/FPGA/XDMA hardware, PREEMPT_RT, root privilege, destructive MMIO, firmware/bitstream loading, a controlled timing host, secrets, signing, network access, release, deployment, or production access
+    - mandatory contract, full verification, CI, or human review would need to be skipped, weakened, or relabeled successful
+    - a required schema, tool, fixture, documentation, governance, checker, release-digest, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the portable combined sample source, its focused CTest/build/CI wiring, documentation/governance updates, release digest changes, and retained M17-05 evidence as one batch. Before discarding an executing sample, stop new frames, let each accepted CUDA/XDMA batch complete or remain quarantined under existing ownership, join Runtime submission/service and XDMA worker lanes through checked stop, and retain every caller-owned Graph, buffer, fake-driver, and backend object until cleanup succeeds. The exact M17-04 baseline and separate CUDA/XDMA native candidate examples remain the fallback; no data migration, device reset, host setting, support-matrix change, release, or deployment rollback is authorized.
-  data_migration: none
-  release_action: Do not publish a release, promote CUDA/XDMA/combined/peer/RT support, alter qualification records, execute physical MMIO, or mark M17/CAP-M17 complete until every focused, full local, mandatory CI, and human gate passes and retained evidence supports only the approved functional claim.
+  strategy: Revert the four version-1 qualification schemas, offline validator/proposal tool, synthetic fixtures and tests, qualification documentation/governance, release-contract digests, and retained M18-01 evidence as one batch. The batch creates no runtime state, hardware mutation, data migration, support-matrix entry, release, or deployment. If any external draft record was created against schema version 1 before rollback, retain the schema/tool revision needed to read it or explicitly archive that record as non-promotable; never rewrite raw evidence or remove a previously reviewed tuple through this rollback.
+  data_migration: none for repository or runtime data; synthetic fixture outputs under build/ are disposable
+  release_action: Do not publish a release, change any support matrix, promote a tuple, sign an artifact, deploy, or mark M18/CAP-M18 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M17-05-<date>.md
-    - exact baseline/M17-04 ancestry, clean initial state, changed-file allowlist, commands, exit codes, sample/CTest/package/full counts, required CI run/check identifiers, and human review result
-    - complete graph declaration and compiled order for CPU preparation, CUDA batch, CPU host bridge, XDMA batch, and CPU validation, including every dependency and backend-local timeline owner/value
-    - fixed input, CUDA staged memory declaration, Graph ID/bindings, upload/Graph/download commands, CPU bridge bytes, XDMA H2C/control/event/C2H commands, final output, and normalized injected-driver call trace for every frame
-    - proof of disjoint host spans, no cross-backend timeline handle, no dual registration, no peer-memory/direct-DMA path, no implicit synchronization, no toolkit/device-node access, and stable simulated-evidence output labels
-    - provider/executor, Runtime submission/service, and XDMA worker thread identities plus accepted-before-complete, whole-completion, downstream suppression, failure status, quarantine, checked-stop, fresh-run recovery, and two-runtime isolation results
-    - exact fixed sample/backend storage and existing Runtime/backend-private accounting boundary, measured post-start allocation result, sanitizer/ThreadSanitizer results, callback and vendor-call counts, and reverse cleanup state
-    - proof that C ABI/device ABI/HAL versions, Runtime statuses, schemas/IDs, installed headers/targets, package aliases, release version, support matrices, license, and all M17-04 device-ABI-v1/native-v2 behavior remain unchanged
-    - changed and preserved invariants, rollback result, residual risks, and all unperformed physical Graph, device memory/pinning/coherency/topology/timestamp, XDMA DMA/MMIO/interrupt/firmware/bitstream/BDF, combined-hardware, HIL, field, controlled-performance, latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static, sample, unit, malformed/failure-injected, fake CUDA Graph, simulated XDMA transfer/control/event, sanitizer, package, fixed-storage/no-allocation, lifecycle-recovery, concurrency, cross-instance, and portable RT0 functional composition only. The combined graph demonstrates an explicit host-staged software protocol; it is not physical GPU or FPGA execution, a hardware fence, direct peer DMA, device coherence, safe MMIO, an interrupt/cancellation guarantee, bounded vendor latency, HIL, field, RT1, RT2, support promotion, signing, release, deployment, or production readiness. Those claims require named retained M18-or-later evidence and human approval.
+    - docs/evidence/M18-01-<date>.md
+    - exact baseline/M17-04 ancestry, clean initial state, M17-05 blocker reconciliation, changed-file allowlist, commands, exit codes, test counts, required CI run/check identifiers, and human review result
+    - schema identifiers/versions/digests plus complete field, scope, bound, trial-applicability, threshold, canonicalization, and evolution tables
+    - valid synthetic NVIDIA, XDMA, combined, RT1, and RT2 fixture results plus every malformed, substituted, incomplete, failed, unsafe-path, oversized, duplicate-key, non-finite, digest, threshold-drift, resource-instability, review, and output-mutation rejection
+    - artifact manifest paths, sizes, SHA-256 results, aggregate bounds, plan/record/review/proposal digest chain, normalized proposal bytes, and repeatability comparison for synthetic fixtures only
+    - proof that existing M12 raw evidence remains `evidence_only`, all support matrices and hardware workflows/samples are byte unchanged, and no matrix, Git, remote, hardware, release, or deployment mutation occurred
+    - C ABI/device ABI/HAL/status/schema/package/release/license compatibility status, changed and preserved invariants, rollback result, residual risks, and every unperformed validation
+    - explicit record that reviewer attribution and timestamps were not authenticated and that no external pre-run plan chronology, physical run, tuple review, or support promotion occurred
+  claim_boundary: Evidence may establish static schema structure, bounded offline parsing, digest/path verification, deterministic synthetic threshold evaluation, negative mutation handling, proposal nonmutation, release/package compatibility, and portable RT0 tooling behavior only. Synthetic fixtures, existing `evidence_only` files, mocks, fake drivers, hosted CI, preflight, benchmarks, documents, digests, reviewer strings, timestamps, and proposal generation do not establish pre-run chronology, authenticated approval, physical NVIDIA/XDMA/combined behavior, hardware, HIL, field performance, latency, thermal/endurance behavior, RT1, RT2, support promotion, signing, release, deployment, or production readiness. Those claims require later named retained evidence and explicit human approval.
