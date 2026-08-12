@@ -217,7 +217,7 @@
     "rt/src/hal_v2.hpp": "ebf04e441c6a5880c05a10001ff94d32ba9bd89ab0d367c3ff46280b05f4dc63",
     "rt/src/heterogeneous_memory.cpp": "a9943b2d54061bbf0b71903113a81672c2cc20435b43dc4a6a6290c5cb2aa8b5",
     "rt/src/heterogeneous_memory.hpp": "5aa4436777fa86902ce0a13d05ee7c423d8fda5a04c852c6f81217c240a3dbe2",
-    "rt/src/host_runtime.cpp": "6990abd86d52802243cd9b4b7ec5762708e85f096fa17895065011e98753eb06",
+    "rt/src/host_runtime.cpp": "bf5e5a50603204aab8fd2406fd2ee3af06ee5bd19473b9054ba327705e809015",
     "rt/src/memory_policy.cpp": "f02f81d0b06425b7b39df3d5f6d13c065ffba370eeadaf3ec8b48f0afd9abf7d",
     "rt/src/memory_policy.hpp": "106fa60a74400c4f170ca0f0a44cef16608a4fa898dca881ae42c292e0e216eb",
     "rt/src/rate_dispatch.cpp": "ff44ea588192cfc4680f9fa41d921c89442eea7c2f639b3aab28160dd2263181",

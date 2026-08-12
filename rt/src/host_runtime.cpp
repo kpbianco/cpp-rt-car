@@ -27,7 +27,6 @@
 #include <exception>
 #include <limits>
 #include <new>
-#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -4036,12 +4035,13 @@ Status Runtime::register_extension(
         std::vector<detail::DeviceBackendSpec> replacement_backends;
         std::vector<Impl::RegisteredResource> replacement_resources;
     };
-    std::optional<RegistrationStorage> storage;
+    std::unique_ptr<RegistrationStorage> storage;
     try {
-        // Checked-iterator implementations may allocate container proxies even
-        // for an empty vector, so construct every staging container inside the
-        // allocation-failure boundary.
-        storage.emplace();
+        // Allocate the owner before constructing checked-iterator containers.
+        // Their default constructors are noexcept even when a debug runtime
+        // allocates an empty-container proxy, so the catchable allocation must
+        // happen first.
+        storage = std::make_unique<RegistrationStorage>();
         auto& record = storage->record;
         auto& staged_callbacks = storage->staged_callbacks;
         auto& staged_adapters = storage->staged_adapters;
