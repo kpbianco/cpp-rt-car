@@ -24,6 +24,7 @@
     "profile": {
       "enum": [
         "assurance",
+        "asset-production",
         "product-data",
         "hardware-embedded",
         "rapid-prototype"
@@ -45,6 +46,18 @@
       "type": "array",
       "items": {"type": "string", "minLength": 1},
       "minItems": 1
+    },
+    "onboarding_verification_mode": {
+      "enum": ["standard", "hold-safe-structural"]
+    },
+    "hold_safe_onboarding_source": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._/-]+$"
+    },
+    "preserve_harness_revision_while_active_batch": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
     },
     "claim_boundary": {"type": "string", "minLength": 1},
     "batches": {
