@@ -241,7 +241,7 @@
     "samples/CMakeLists.txt": "e2eb451eeff9a79dca27b46300dc46e1b8d4be4c320c29f41d6ab0bd8f075e4b",
     "samples/embed_cpp/mini_app.cpp": "5ce18e5af708434b02b918cf821e3401ff16179163cb132065cbdd087aa25e08",
     "src/runtime_profile_demo.cpp": "d8b7d00ea3bca701deac84a4ced1b72cd9c9cd3bfc9a33bf72e39fb2d50a02a1",
-    "tests/CMakeLists.txt": "1a896be63607f411ccfb1f55bd3d51f9ff4f18cd6b72649c76dcd41cd737be10",
+    "tests/CMakeLists.txt": "5e5eaac2f750ade9c99709ff40cdc6a24922b084ae901b996e439e9b0a74d9a3",
     "tests/add_subdirectory_consumer/CMakeLists.txt": "99aead1a31e943b8993635dfa2995697ad98227c587e685890287973d382b29e",
     "tests/add_subdirectory_consumer/main.cpp": "698d47ec1edbceeb0c72821ae0c8a49ecc2dc9f5e57a1ee9e11e7115e2554f42",
     "tests/determinism_artifact.cpp": "9ab84eccc085eea6d2ebc5055e524f4ea7f0f15104d98604eecd37b34e8569ab",
