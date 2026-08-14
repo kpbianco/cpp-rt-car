@@ -13,7 +13,7 @@
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$"},
         "name": {"type": "string", "minLength": 1},
-        "profile": {"enum": ["assurance", "product-data", "hardware-embedded", "rapid-prototype"]},
+        "profile": {"enum": ["assurance", "asset-production", "product-data", "hardware-embedded", "rapid-prototype"]},
         "repositories": {"type": "array", "items": {"type": "string"}, "minItems": 1}
       }
     },
