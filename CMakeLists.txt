@@ -620,6 +620,7 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/heterogeneous_memory.cpp
     rt/src/device_manager.cpp
     rt/src/executor.cpp
+    rt/src/extension_registration.cpp
     rt/src/host_runtime.cpp
     rt/src/memory_policy.cpp
     rt/src/mock_device.cpp
@@ -1045,6 +1046,7 @@ install(
     FILES
         rt/include/rt/c_api.h
         rt/include/rt/device_abi.h
+        rt/include/rt/extension_abi.h
         rt/include/rt/canonical_bytes.hpp
         rt/include/rt/config.hpp
         rt/include/rt/device.hpp

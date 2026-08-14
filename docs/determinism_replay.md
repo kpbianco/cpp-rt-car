@@ -283,3 +283,12 @@ stable XDMA control offset/event opcode and logical result reference. Native
 handles, driver pointers, file descriptors, host addresses, timestamps,
 health, and mutable queue state remain excluded. Selecting the unchanged
 device-ABI-v1 paths therefore retains the byte-exact M17-03 identity path.
+# Extension semantic identity
+
+Configuration, graph, and replay identity conditionally include copied
+extension name/version, negotiated ABI, phase/backend/resource semantic names
+and capabilities, service names/interface versions, and local relationships.
+They exclude callback and instance addresses, module handles, provisional
+handles, owner/generation values, mutable lifecycle state, and observed status
+counters. With no extension registered, all existing identity values are
+unchanged.

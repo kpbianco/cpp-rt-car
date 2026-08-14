@@ -295,3 +295,12 @@ field, bounded-latency, RT1/RT2, signing, release, deployment, or production
 evidence. Mandatory GitHub CI and human API,
 compatibility, concurrency, lifetime, memory-order, accounting, security, and
 claim review remain external merge gates.
+# M19-01 permanent gates
+
+`m19_extension_registration` retains C/C++ layout, negotiation, malformed
+input, transactional publication, phase, device-v1 adapter, service lifecycle,
+retry, stale handle, two-Runtime, identity, accounting, and no-allocation
+coverage. Linux GCC/Clang, Windows v143, sanitizer, deterministic, installed
+package, archive, C ABI, dependency, vendor compile, and documentation/release
+contract jobs remain mandatory. These are portable RT0/static/simulated gates,
+not physical, Unreal, HIL, field, RT1/RT2, or production evidence.

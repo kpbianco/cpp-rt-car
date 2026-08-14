@@ -5,6 +5,7 @@
 #include "command_batch.hpp"
 #include "device_manager.hpp"
 #include "executor.hpp"
+#include "extension_registration.hpp"
 #include "memory_policy.hpp"
 #include "native_platform_preflight.hpp"
 #include "rate_dispatch.hpp"
@@ -812,6 +813,7 @@ struct Runtime::Impl {
     }
 
     ~Impl() {
+        const auto extension_stop = request_extension_stop();
         bool lanes_clean = true;
         if (devices) {
             lanes_clean = devices->stop() == Status::ok;
@@ -820,12 +822,13 @@ struct Runtime::Impl {
             lanes_clean = executor->stop() == Status::ok && lanes_clean;
         }
         lanes_clean = watchdog.stop() == Status::ok && lanes_clean;
-        bool memory_clean = lanes_clean;
-        if (resident_regions && lanes_clean) {
-            memory_clean = resident_regions->rollback(
-                cpu_memory_policy_report);
+        const auto extension_cleanup = cleanup_extension_services();
+        bool memory_clean = lanes_clean && extension_cleanup == Status::ok;
+        if (resident_regions && memory_clean) {
+            memory_clean = resident_regions->rollback(cpu_memory_policy_report);
         }
-        if (!lanes_clean || !memory_clean) {
+        if (extension_stop != Status::ok || !lanes_clean ||
+            extension_cleanup != Status::ok || !memory_clean) {
             // A destructor cannot return cleanup status. Returning here would
             // destroy ownership records and provider tokens while a lane,
             // backend, or stack cleanup is unresolved. Checked stop is the
@@ -840,7 +843,9 @@ struct Runtime::Impl {
     }
 
     [[nodiscard]] bool provider_callback_active() const noexcept {
-        return memory_provider_callback_active.load(std::memory_order_acquire);
+        return memory_provider_callback_active.load(std::memory_order_acquire) ||
+               extension_control_callback_active.load(
+                   std::memory_order_acquire);
     }
 
     void clear_error() noexcept {
@@ -913,6 +918,152 @@ struct Runtime::Impl {
         DeviceTimelineHandle timeline) const noexcept {
         return timeline.valid() && timeline.owner() == graph_owner &&
                timeline.index() < device_timelines.size();
+    }
+
+    [[nodiscard]] bool valid_extension(
+        ExtensionHandle extension) const noexcept {
+        if (!extension.valid() || extension.owner != graph_owner ||
+            extension.slot >= extensions.size() ||
+            !extensions[extension.slot]) {
+            return false;
+        }
+        const auto& record = *extensions[extension.slot];
+        return record.generation.load(std::memory_order_acquire) ==
+                   extension.generation &&
+               record.state.load(std::memory_order_acquire) !=
+                   ExtensionLifecycleState::detached;
+    }
+
+    [[nodiscard]] Status initialize_extension_services() noexcept {
+        for (auto& extension : extensions) {
+            if (!extension || extension->unload_ready.load(
+                    std::memory_order_acquire)) {
+                continue;
+            }
+            extension->open_admission();
+            extension->state.store(
+                ExtensionLifecycleState::registered,
+                std::memory_order_release);
+            for (std::size_t index = 0;
+                 index < extension->service_count; ++index) {
+                extension_control_callback_active.store(
+                    true, std::memory_order_release);
+                const auto status =
+                    extension->services[index].call_initialize();
+                extension_control_callback_active.store(
+                    false, std::memory_order_release);
+                if (status != Status::ok) {
+                    extension->state.store(
+                        ExtensionLifecycleState::failed,
+                        std::memory_order_release);
+                    (void)request_extension_stop();
+                    const auto cleanup = cleanup_extension_services();
+                    return cleanup == Status::ok ? status : cleanup;
+                }
+            }
+        }
+        return Status::ok;
+    }
+
+    [[nodiscard]] Status request_extension_stop() noexcept {
+        Status first = Status::ok;
+        for (auto& extension : extensions) {
+            if (!extension || extension->unload_ready.load(
+                    std::memory_order_acquire)) {
+                continue;
+            }
+            extension->close_admission();
+            extension->state.store(
+                ExtensionLifecycleState::stop_requested,
+                std::memory_order_release);
+            for (std::size_t index = 0;
+                 index < extension->service_count; ++index) {
+                extension_control_callback_active.store(
+                    true, std::memory_order_release);
+                const auto status =
+                    extension->services[index].call_request_stop();
+                extension_control_callback_active.store(
+                    false, std::memory_order_release);
+                if (first == Status::ok && status != Status::ok) {
+                    first = status;
+                }
+            }
+        }
+        return first;
+    }
+
+    [[nodiscard]] Status cleanup_extension_services() noexcept {
+        Status first = Status::ok;
+        for (std::size_t extension_index = extensions.size();
+             extension_index != 0; --extension_index) {
+            auto& extension = extensions[extension_index - 1];
+            if (!extension || extension->unload_ready.load(
+                    std::memory_order_acquire)) {
+                continue;
+            }
+            for (std::size_t service_index = extension->service_count;
+                 service_index != 0; --service_index) {
+                const auto local_service = service_index - 1;
+                if (!extension->services[local_service].released.load(
+                        std::memory_order_acquire) &&
+                    !extension->services[local_service].stop_requested.load(
+                        std::memory_order_acquire)) {
+                    if (first == Status::ok) {
+                        first = Status::invalid_state;
+                    }
+                    continue;
+                }
+                bool backend_pending = false;
+                for (std::size_t backend = 0;
+                     backend < extension->backend_count; ++backend) {
+                    if (extension->service_backend_relationships
+                            [local_service][backend] &&
+                        !extension->backends[backend].released.load(
+                            std::memory_order_acquire)) {
+                        backend_pending = true;
+                        break;
+                    }
+                }
+                if (backend_pending) {
+                    if (first == Status::ok) {
+                        first = Status::invalid_state;
+                    }
+                    continue;
+                }
+                extension_control_callback_active.store(
+                    true, std::memory_order_release);
+                const auto quiesce =
+                    extension->services[local_service].call_quiesce();
+                Status shutdown = Status::ok;
+                if (quiesce == Status::ok) {
+                    shutdown = extension->services[local_service]
+                        .call_shutdown();
+                }
+                extension_control_callback_active.store(
+                    false, std::memory_order_release);
+                if (first == Status::ok && quiesce != Status::ok) {
+                    first = quiesce;
+                }
+                if (first == Status::ok && shutdown != Status::ok) {
+                    first = shutdown;
+                }
+            }
+            if (extension->callbacks_quiescent() &&
+                extension->backends_released() &&
+                extension->services_released()) {
+                extension->state.store(
+                    ExtensionLifecycleState::quiescent,
+                    std::memory_order_release);
+            } else {
+                extension->state.store(
+                    ExtensionLifecycleState::cleanup_pending,
+                    std::memory_order_release);
+                if (first == Status::ok) {
+                    first = Status::invalid_state;
+                }
+            }
+        }
+        return first;
     }
 
     [[nodiscard]] std::uint64_t compute_graph_id() const noexcept {
@@ -1181,6 +1332,40 @@ struct Runtime::Impl {
                 }
             }
         }
+        if (!extensions.empty()) {
+            hash_u64(hash, 0x4d31392d65787431ull);
+            hash_u64(hash, extensions.size());
+            for (const auto& extension_ptr : extensions) {
+                const auto& extension = *extension_ptr;
+                hash_string(hash, identifier_view(extension.name));
+                hash_string(hash, identifier_view(extension.version));
+                hash_u64(hash, extension.negotiated_abi_version);
+                hash_u64(hash, extension.phase_count);
+                hash_u64(hash, extension.backend_count);
+                hash_u64(hash, extension.service_count);
+                hash_u64(hash, extension.resource_count);
+                hash_u64(hash, extension.relationship_count);
+                for (std::size_t index = 0;
+                     index < extension.service_count; ++index) {
+                    const auto& service =
+                        extension.service_descriptors[index];
+                    hash_string(hash, std::string_view(service.name));
+                    hash_string(
+                        hash, std::string_view(service.interface_name));
+                    hash_u64(hash, service.interface_version);
+                }
+                for (std::size_t index = 0;
+                     index < extension.relationship_count; ++index) {
+                    const auto& relation = extension.relationships[index];
+                    hash_u64(hash, relation.kind);
+                    hash_u64(hash, relation.access);
+                    hash_u64(hash, relation.first.kind);
+                    hash_u64(hash, relation.first.slot);
+                    hash_u64(hash, relation.second.kind);
+                    hash_u64(hash, relation.second.slot);
+                }
+            }
+        }
         return hash;
     }
 
@@ -1198,6 +1383,30 @@ struct Runtime::Impl {
             hash_string(hash, kRateDispatchStateName);
             hash_u64(hash, kRateDispatchStateSchema);
             hash_u64(hash, active_checkpoint_state.size());
+        }
+        return hash;
+    }
+
+    [[nodiscard]] std::uint64_t compute_config_id() const noexcept {
+        const auto base = config_identifier(config);
+        if (extensions.empty()) {
+            return base;
+        }
+        std::uint64_t hash = kFnvOffset;
+        hash_u64(hash, base);
+        hash_u64(hash, 0x4d31392d63666731ull);
+        for (const auto& extension_ptr : extensions) {
+            const auto& extension = *extension_ptr;
+            hash_string(hash, identifier_view(extension.name));
+            hash_string(hash, identifier_view(extension.version));
+            hash_u64(hash, extension.negotiated_abi_version);
+            for (std::size_t index = 0;
+                 index < extension.service_count; ++index) {
+                const auto& service = extension.service_descriptors[index];
+                hash_string(hash, std::string_view(service.name));
+                hash_string(hash, std::string_view(service.interface_name));
+                hash_u64(hash, service.interface_version);
+            }
         }
         return hash;
     }
@@ -3349,10 +3558,14 @@ struct Runtime::Impl {
     MemoryProvider memory_provider{};
     bool memory_provider_set = false;
     std::atomic<bool> memory_provider_callback_active{false};
+    std::atomic<bool> extension_control_callback_active{false};
     HostExecutorAdapter host_executor{};
     bool host_executor_set = false;
     RuntimeState state = RuntimeState::configuring;
     NumericalPolicy numerics{};
+    std::vector<std::unique_ptr<detail::ExtensionRegistrationRecord>>
+        extensions;
+    std::uint32_t next_extension_generation = 1;
     std::vector<RegisteredCallback> callbacks;
     std::vector<detail::DeviceBackendSpec> device_backends;
     std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
@@ -3667,6 +3880,422 @@ Status Runtime::register_callback(
         return impl_->fail(Status::internal_error, nullptr);
     }
 
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_extension(
+    rtfw_extension_entry_fn_v1 entry,
+    ExtensionHandle& out_extension) noexcept {
+    out_extension = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "extension registration or another control callback is active");
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "extension registration requires configuring state");
+    }
+    if (!entry) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "extension entry function is required");
+    }
+    if (impl_->extensions.size() >= RTFW_RUNTIME_EXTENSION_CAPACITY ||
+        impl_->next_extension_generation == 0 ||
+        impl_->next_extension_generation ==
+            std::numeric_limits<std::uint32_t>::max()) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "extension capacity or generation space is exhausted");
+    }
+
+    const auto registration_generation =
+        impl_->next_extension_generation++;
+    detail::ExtensionRegistrationTransaction transaction;
+    impl_->extension_control_callback_active.store(
+        true, std::memory_order_release);
+    const auto entry_status = detail::invoke_extension_entry(
+        entry,
+        impl_->graph_owner,
+        registration_generation,
+        impl_->config.callback_capacity - impl_->callbacks.size(),
+        impl_->config.device_backend_capacity -
+            impl_->device_backends.size(),
+        transaction);
+    impl_->extension_control_callback_active.store(
+        false, std::memory_order_release);
+    if (entry_status != Status::ok) {
+        return impl_->fail(
+            entry_status,
+            "extension entry or staged ABI records were rejected");
+    }
+    if (transaction.phase_count >
+            impl_->config.callback_capacity - impl_->callbacks.size() ||
+        transaction.backend_count >
+            impl_->config.device_backend_capacity -
+                impl_->device_backends.size()) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "extension exceeds configured Runtime capacities");
+    }
+
+    const auto fixed_name = [](const auto& name) {
+        return std::string_view(
+            name,
+            std::char_traits<char>::length(name));
+    };
+    const auto duplicate_fixed = [&](const auto& records, std::size_t count) {
+        for (std::size_t index = 0; index < count; ++index) {
+            for (std::size_t earlier = 0; earlier < index; ++earlier) {
+                if (fixed_name(records[index].name) ==
+                    fixed_name(records[earlier].name)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    if (duplicate_fixed(transaction.phases, transaction.phase_count) ||
+        duplicate_fixed(transaction.backends, transaction.backend_count) ||
+        duplicate_fixed(transaction.services, transaction.service_count) ||
+        duplicate_fixed(transaction.resources, transaction.resource_count)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "extension-local names must be unique by kind");
+    }
+    const auto extension_name = fixed_name(transaction.descriptor.name);
+    for (const auto& existing : impl_->extensions) {
+        if (existing && identifier_view(existing->name) == extension_name) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "extension names must be unique");
+        }
+    }
+    for (std::size_t index = 0; index < transaction.phase_count; ++index) {
+        const auto name = fixed_name(transaction.phases[index].name);
+        if (std::any_of(
+                impl_->callbacks.begin(), impl_->callbacks.end(),
+                [&](const Impl::RegisteredCallback& callback) {
+                    return callback.name == name;
+                })) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "extension phase conflicts with an existing phase");
+        }
+    }
+    for (std::size_t index = 0; index < transaction.backend_count; ++index) {
+        const auto name = fixed_name(transaction.backends[index].name);
+        if (std::any_of(
+                impl_->device_backends.begin(), impl_->device_backends.end(),
+                [&](const detail::DeviceBackendSpec& backend) {
+                    return backend.name == name;
+                })) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "extension backend conflicts with an existing backend");
+        }
+    }
+    for (std::size_t index = 0; index < transaction.resource_count; ++index) {
+        const auto name = fixed_name(transaction.resources[index].name);
+        if (std::any_of(
+                impl_->resources.begin(), impl_->resources.end(),
+                [&](const Impl::RegisteredResource& resource) {
+                    return resource.name == name;
+                })) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "extension resource conflicts with an existing resource");
+        }
+    }
+
+    struct RegistrationStorage {
+        std::unique_ptr<detail::ExtensionRegistrationRecord> record;
+        std::vector<Impl::RegisteredCallback> staged_callbacks;
+        std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
+            staged_adapters;
+        std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
+            staged_memory_states;
+        std::vector<detail::DeviceBackendSpec> staged_backends;
+        std::vector<Impl::RegisteredResource> staged_resources;
+        std::vector<detail::GraphDependency> staged_dependencies;
+        std::vector<detail::GraphResourceAccess> staged_accesses;
+        std::vector<std::unique_ptr<detail::ExtensionRegistrationRecord>>
+            replacement_extensions;
+        std::vector<Impl::RegisteredCallback> replacement_callbacks;
+        std::vector<std::unique_ptr<detail::DeviceV1CompatibilityAdapter>>
+            replacement_adapters;
+        std::vector<std::unique_ptr<detail::HeterogeneousMemoryState>>
+            replacement_memory_states;
+        std::vector<detail::DeviceBackendSpec> replacement_backends;
+        std::vector<Impl::RegisteredResource> replacement_resources;
+    };
+    std::unique_ptr<RegistrationStorage> storage;
+    try {
+        // Allocate the owner before constructing checked-iterator containers.
+        // Their default constructors are noexcept even when a debug runtime
+        // allocates an empty-container proxy, so the catchable allocation must
+        // happen first.
+        storage = std::make_unique<RegistrationStorage>();
+        auto& record = storage->record;
+        auto& staged_callbacks = storage->staged_callbacks;
+        auto& staged_adapters = storage->staged_adapters;
+        auto& staged_memory_states = storage->staged_memory_states;
+        auto& staged_backends = storage->staged_backends;
+        auto& staged_resources = storage->staged_resources;
+        auto& staged_dependencies = storage->staged_dependencies;
+        auto& staged_accesses = storage->staged_accesses;
+        auto& replacement_extensions = storage->replacement_extensions;
+        auto& replacement_callbacks = storage->replacement_callbacks;
+        auto& replacement_adapters = storage->replacement_adapters;
+        auto& replacement_memory_states = storage->replacement_memory_states;
+        auto& replacement_backends = storage->replacement_backends;
+        auto& replacement_resources = storage->replacement_resources;
+        staged_dependencies = impl_->dependencies;
+        staged_accesses = impl_->resource_accesses;
+        record =
+            std::make_unique<detail::ExtensionRegistrationRecord>();
+        std::copy_n(
+            transaction.descriptor.name,
+            RTFW_EXTENSION_IDENTIFIER_CAPACITY,
+            record->name.begin());
+        std::copy_n(
+            transaction.descriptor.version,
+            RTFW_EXTENSION_IDENTIFIER_CAPACITY,
+            record->version.begin());
+        record->negotiated_abi_version = RTFW_EXTENSION_ABI_VERSION;
+        record->generation = registration_generation;
+        record->slot = static_cast<std::uint32_t>(impl_->extensions.size());
+        record->phase_count = transaction.phase_count;
+        record->backend_count = transaction.backend_count;
+        record->service_count = transaction.service_count;
+        record->resource_count = transaction.resource_count;
+        record->relationship_count = transaction.relationship_count;
+
+        staged_callbacks.reserve(transaction.phase_count);
+        for (std::size_t index = 0;
+             index < transaction.phase_count; ++index) {
+            record->phase_descriptors[index] = transaction.phases[index];
+            record->phases[index].callback =
+                transaction.phases[index].callback;
+            record->phases[index].user_data =
+                transaction.phases[index].user_data;
+            record->phase_indices[index] = static_cast<std::uint32_t>(
+                impl_->callbacks.size() + index);
+            staged_callbacks.push_back(Impl::RegisteredCallback{
+                std::string(fixed_name(transaction.phases[index].name)),
+                Impl::PhaseKind::cpu,
+                &detail::ExtensionPhaseOwner::invoke,
+                nullptr,
+                nullptr,
+                &record->phases[index],
+                0,
+                {},
+            });
+        }
+
+        staged_adapters.reserve(transaction.backend_count);
+        staged_memory_states.reserve(transaction.backend_count);
+        staged_backends.reserve(transaction.backend_count);
+        for (std::size_t index = 0;
+             index < transaction.backend_count; ++index) {
+            record->backend_descriptors[index] =
+                transaction.backends[index];
+            record->backends[index].initialize_from(
+                transaction.backends[index].api);
+            auto adapter =
+                std::make_unique<detail::DeviceV1CompatibilityAdapter>(
+                    record->backends[index].forwarding);
+            HalV2Capabilities capabilities;
+            HalV2Status hal_status = HalV2Status::internal_error;
+            impl_->extension_control_callback_active.store(
+                true, std::memory_order_release);
+            try {
+                hal_status = adapter->api().get_capabilities(
+                    adapter->api().instance, &capabilities);
+            } catch (...) {
+                hal_status = HalV2Status::internal_error;
+            }
+            impl_->extension_control_callback_active.store(
+                false, std::memory_order_release);
+            const auto status = detail::hal_v2_status_to_runtime(hal_status);
+            if (status != Status::ok ||
+                !detail::validate_hal_v2_capabilities(capabilities)) {
+                return impl_->fail(
+                    status == Status::ok ? Status::invalid_argument : status,
+                    "extension backend capabilities were rejected");
+            }
+            auto memory_state =
+                std::make_unique<detail::HeterogeneousMemoryState>();
+            detail::make_implicit_host_memory_state(
+                capabilities, *memory_state);
+            record->backend_indices[index] = static_cast<std::uint32_t>(
+                impl_->device_backends.size() + index);
+            auto* adapter_instance = adapter.get();
+            auto* memory_instance = memory_state.get();
+            staged_adapters.push_back(std::move(adapter));
+            staged_memory_states.push_back(std::move(memory_state));
+            staged_backends.push_back(detail::DeviceBackendSpec{
+                std::string(fixed_name(transaction.backends[index].name)),
+                adapter_instance->api(),
+                capabilities,
+                detail::HalBackendKind::adapted_device_abi_v1,
+                adapter_instance,
+                memory_instance,
+                nullptr,
+            });
+        }
+
+        staged_resources.reserve(transaction.resource_count);
+        for (std::size_t index = 0;
+             index < transaction.resource_count; ++index) {
+            record->resource_descriptors[index] =
+                transaction.resources[index];
+            record->resource_indices[index] = static_cast<std::uint32_t>(
+                impl_->resources.size() + index);
+            staged_resources.push_back(Impl::RegisteredResource{
+                std::string(fixed_name(transaction.resources[index].name))});
+        }
+        for (std::size_t index = 0;
+             index < transaction.service_count; ++index) {
+            record->service_descriptors[index] =
+                transaction.services[index];
+            record->services[index].initialize_from(
+                transaction.services[index].api);
+        }
+        for (std::size_t index = 0;
+             index < transaction.relationship_count; ++index) {
+            const auto& relationship = transaction.relationships[index];
+            record->relationships[index] = relationship;
+            switch (relationship.kind) {
+            case RTFW_EXTENSION_RELATIONSHIP_PHASE_DEPENDENCY:
+                staged_dependencies.push_back(detail::GraphDependency{
+                    PhaseHandle{
+                        impl_->graph_owner,
+                        record->phase_indices[relationship.first.slot]},
+                    PhaseHandle{
+                        impl_->graph_owner,
+                        record->phase_indices[relationship.second.slot]},
+                });
+                break;
+            case RTFW_EXTENSION_RELATIONSHIP_PHASE_RESOURCE:
+                staged_accesses.push_back(detail::GraphResourceAccess{
+                    PhaseHandle{
+                        impl_->graph_owner,
+                        record->phase_indices[relationship.first.slot]},
+                    ResourceHandle{
+                        impl_->graph_owner,
+                        record->resource_indices[relationship.second.slot]},
+                    relationship.access == RTFW_EXTENSION_RESOURCE_ACCESS_READ
+                        ? ResourceAccess::read
+                        : ResourceAccess::write,
+                });
+                break;
+            case RTFW_EXTENSION_RELATIONSHIP_SERVICE_BACKEND:
+                record->service_backend_relationships
+                    [relationship.first.slot][relationship.second.slot] = true;
+                break;
+            default:
+                return impl_->fail(Status::internal_error, nullptr);
+            }
+        }
+
+        std::vector<PhaseHandle> validation_order;
+        detail::GraphCompileDiagnostic diagnostic;
+        const auto graph_status = detail::compile_graph(
+            impl_->graph_owner,
+            impl_->callbacks.size() + transaction.phase_count,
+            impl_->resources.size() + transaction.resource_count,
+            staged_dependencies,
+            staged_accesses,
+            validation_order,
+            diagnostic);
+        if (graph_status != Status::ok) {
+            return impl_->fail_compile(graph_status, diagnostic);
+        }
+
+        replacement_extensions.reserve(impl_->extensions.size() + 1);
+        replacement_callbacks = impl_->callbacks;
+        replacement_callbacks.reserve(
+            impl_->callbacks.size() + staged_callbacks.size());
+        for (auto& callback : staged_callbacks) {
+            replacement_callbacks.push_back(std::move(callback));
+        }
+        replacement_adapters.reserve(
+            impl_->device_v1_adapters.size() + staged_adapters.size());
+        replacement_memory_states.reserve(
+            impl_->device_memory_states.size() +
+                staged_memory_states.size());
+        replacement_backends = impl_->device_backends;
+        replacement_backends.reserve(
+            impl_->device_backends.size() + staged_backends.size());
+        for (auto& backend : staged_backends) {
+            replacement_backends.push_back(std::move(backend));
+        }
+        replacement_resources = impl_->resources;
+        replacement_resources.reserve(
+            impl_->resources.size() + staged_resources.size());
+        for (auto& resource : staged_resources) {
+            replacement_resources.push_back(std::move(resource));
+        }
+        staged_dependencies.reserve(staged_dependencies.size());
+        staged_accesses.reserve(staged_accesses.size());
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+
+    auto& record = storage->record;
+    auto& staged_adapters = storage->staged_adapters;
+    auto& staged_memory_states = storage->staged_memory_states;
+    auto& staged_dependencies = storage->staged_dependencies;
+    auto& staged_accesses = storage->staged_accesses;
+    auto& replacement_extensions = storage->replacement_extensions;
+    auto& replacement_callbacks = storage->replacement_callbacks;
+    auto& replacement_adapters = storage->replacement_adapters;
+    auto& replacement_memory_states = storage->replacement_memory_states;
+    auto& replacement_backends = storage->replacement_backends;
+    auto& replacement_resources = storage->replacement_resources;
+    for (auto& extension : impl_->extensions) {
+        replacement_extensions.push_back(std::move(extension));
+    }
+    replacement_extensions.push_back(std::move(record));
+    impl_->extensions.swap(replacement_extensions);
+    impl_->callbacks.swap(replacement_callbacks);
+    for (auto& adapter : impl_->device_v1_adapters) {
+        replacement_adapters.push_back(std::move(adapter));
+    }
+    for (auto& adapter : staged_adapters) {
+        replacement_adapters.push_back(std::move(adapter));
+    }
+    impl_->device_v1_adapters.swap(replacement_adapters);
+    for (auto& memory : impl_->device_memory_states) {
+        replacement_memory_states.push_back(std::move(memory));
+    }
+    for (auto& memory : staged_memory_states) {
+        replacement_memory_states.push_back(std::move(memory));
+    }
+    impl_->device_memory_states.swap(replacement_memory_states);
+    impl_->device_backends.swap(replacement_backends);
+    impl_->resources.swap(replacement_resources);
+    impl_->dependencies.swap(staged_dependencies);
+    impl_->resource_accesses.swap(staged_accesses);
+    const auto& committed = *impl_->extensions.back();
+    const auto slot = committed.slot;
+    const auto generation =
+        committed.generation.load(std::memory_order_acquire);
+    out_extension = ExtensionHandle{
+        impl_->graph_owner,
+        RTFW_EXTENSION_HANDLE_EXTENSION,
+        slot,
+        generation,
+    };
     impl_->clear_error();
     return Status::ok;
 }
@@ -5531,6 +6160,12 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_runtime_array(
         impl_->callbacks.capacity(),
         sizeof(Impl::RegisteredCallback));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->extensions.capacity(),
+        sizeof(std::unique_ptr<detail::ExtensionRegistrationRecord>));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->extensions.size(),
+        sizeof(detail::ExtensionRegistrationRecord));
     for (const auto& callback : impl_->callbacks) {
         const auto object_begin = reinterpret_cast<std::uintptr_t>(&callback);
         const auto object_end = object_begin + sizeof(callback);
@@ -5819,7 +6454,7 @@ Status Runtime::finalize() noexcept {
         control_extents.reserve(
             32 + impl_->config.worker_count +
             impl_->callbacks.size() + impl_->device_backends.size() +
-            impl_->resources.size());
+            impl_->resources.size() + impl_->extensions.size());
         std::uint64_t next_extent_id = 1;
         const auto add_runtime_extent =
             [&](const void* data, std::size_t count, std::size_t size) {
@@ -5845,6 +6480,16 @@ Status Runtime::finalize() noexcept {
                 }
             };
         add_runtime_extent(impl_.get(), 1, sizeof(Impl));
+        add_runtime_extent(
+            impl_->extensions.data(),
+            impl_->extensions.capacity(),
+            sizeof(std::unique_ptr<detail::ExtensionRegistrationRecord>));
+        for (const auto& extension : impl_->extensions) {
+            add_runtime_extent(
+                extension.get(),
+                extension ? 1 : 0,
+                sizeof(detail::ExtensionRegistrationRecord));
+        }
         add_runtime_extent(
             impl_->callbacks.data(),
             impl_->callbacks.capacity(),
@@ -6103,7 +6748,7 @@ Status Runtime::finalize() noexcept {
         impl_->state_schema_id);
     impl_->observability = {};
     impl_->observability.config_id =
-        config_identifier(impl_->config);
+        impl_->compute_config_id();
     impl_->observability.runtime_id =
         static_cast<std::uint64_t>(impl_->graph_owner);
     impl_->observability.trace_capacity =
@@ -6351,6 +6996,7 @@ Status Runtime::start() noexcept {
         [&](Status failure,
             const char* diagnostic,
             bool retry_device_cleanup = true) {
+            const auto extension_stop = impl_->request_extension_stop();
             impl_->thread_startup_gate.abort();
             const bool watchdog_lane_present =
                 impl_->runtime_stack_results_available &&
@@ -6375,6 +7021,16 @@ Status Runtime::start() noexcept {
             }
             if (watchdog_cleanup == Status::ok) {
                 impl_->watchdog_started = false;
+            }
+            const auto extension_cleanup =
+                impl_->cleanup_extension_services();
+            if (cleanup_status == Status::ok &&
+                extension_stop != Status::ok) {
+                cleanup_status = extension_stop;
+            }
+            if (cleanup_status == Status::ok &&
+                extension_cleanup != Status::ok) {
+                cleanup_status = extension_cleanup;
             }
             if (impl_->runtime_stack_results_available) {
                 (void)detail::aggregate_runtime_stack_startup_results(
@@ -6414,13 +7070,21 @@ Status Runtime::start() noexcept {
             impl_->stop_pending = impl_->lane_cleanup_pending ||
                 impl_->memory_cleanup_pending;
             return impl_->fail(
-                failure,
+                cleanup_status == Status::ok ? failure : cleanup_status,
                 impl_->lane_cleanup_pending
                     ? "startup failed and device/thread/stack cleanup is pending; retry stop"
                     : impl_->memory_cleanup_pending
                         ? "startup failed and resident-memory rollback is pending; retry start or stop"
                         : diagnostic);
         };
+
+    const auto extension_initialize_status =
+        impl_->initialize_extension_services();
+    if (extension_initialize_status != Status::ok) {
+        return rollback_startup(
+            extension_initialize_status,
+            "extension service initialization failed");
+    }
 
     if (impl_->config.watchdog_timeout_ns != 0) {
         const auto status = impl_->watchdog.start(
@@ -6584,6 +7248,14 @@ Status Runtime::start() noexcept {
     impl_->lane_cleanup_pending = false;
     impl_->memory_cleanup_pending = false;
     impl_->state = RuntimeState::running;
+    for (auto& extension : impl_->extensions) {
+        if (extension && !extension->unload_ready.load(
+                std::memory_order_acquire)) {
+            extension->state.store(
+                ExtensionLifecycleState::running,
+                std::memory_order_release);
+        }
+    }
     impl_->clear_error();
     impl_->record(
         RuntimeTraceEventType::started,
@@ -7100,21 +7772,6 @@ Status Runtime::stop() noexcept {
     if (impl_->provider_callback_active()) {
         return Status::invalid_state;
     }
-    if (impl_->in_step.load(std::memory_order_acquire) ||
-        impl_->in_periodic_run.load(std::memory_order_acquire) ||
-        impl_->in_replay.load(std::memory_order_acquire)) {
-        if (g_active_runtime_callback != impl_.get() && impl_->devices &&
-            impl_->devices->batch_backend_count() != 0) {
-            (void)impl_->devices->request_batch_stop();
-            return impl_->fail(
-                Status::invalid_state,
-                "batch stop requested; retry checked stop after active "
-                "execution quiesces");
-        }
-        return impl_->fail(
-            Status::invalid_state,
-            "stop cannot run from a callback or periodic loop");
-    }
     if (impl_->state == RuntimeState::stopped) {
         impl_->clear_error();
         return Status::ok;
@@ -7124,6 +7781,24 @@ Status Runtime::stop() noexcept {
         return impl_->fail(Status::invalid_state, "stop requires finalized or running state");
     }
 
+    const auto extension_stop_status = impl_->request_extension_stop();
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        if (g_active_runtime_callback != impl_.get() && impl_->devices &&
+            impl_->devices->batch_backend_count() != 0) {
+            (void)impl_->devices->request_batch_stop();
+            return impl_->fail(
+                Status::invalid_state,
+                "extension and batch stop requested; retry checked stop "
+                "after active execution quiesces");
+        }
+        return impl_->fail(
+            Status::invalid_state,
+            "extension stop requested; retry checked stop after active "
+            "execution quiesces");
+    }
+
     const bool watchdog_lane_present =
         impl_->runtime_stack_results_available &&
         impl_->config.watchdog_timeout_ns != 0;
@@ -7131,7 +7806,11 @@ Status Runtime::stop() noexcept {
     if (impl_->devices) {
         device_cleanup_status = impl_->devices->stop();
     }
-    Status cleanup_status = device_cleanup_status;
+    Status cleanup_status = extension_stop_status;
+    if (cleanup_status == Status::ok &&
+        device_cleanup_status != Status::ok) {
+        cleanup_status = device_cleanup_status;
+    }
     if (impl_->executor) {
         const auto status = impl_->executor->stop();
         if (cleanup_status == Status::ok && status != Status::ok) {
@@ -7189,8 +7868,15 @@ Status Runtime::stop() noexcept {
             cleanup_status = aggregation_status;
         }
     }
+    const auto extension_cleanup_status =
+        impl_->cleanup_extension_services();
+    if (cleanup_status == Status::ok &&
+        extension_cleanup_status != Status::ok) {
+        cleanup_status = extension_cleanup_status;
+    }
     const bool lanes_clean = cleanup_status == Status::ok &&
-        (!impl_->devices || !impl_->devices->cleanup_pending());
+        (!impl_->devices || !impl_->devices->cleanup_pending()) &&
+        extension_cleanup_status == Status::ok;
     if (!lanes_clean) {
         impl_->lane_cleanup_pending = true;
         impl_->memory_cleanup_pending = false;
@@ -7201,7 +7887,10 @@ Status Runtime::stop() noexcept {
                 : cleanup_status,
             device_cleanup_status != Status::ok
                 ? "device teardown failed; device/thread/stack cleanup failed; retry stop before releasing borrowed resources"
-                : "thread/stack cleanup failed; retry stop before releasing borrowed resources");
+                : extension_cleanup_status != Status::ok ||
+                      extension_stop_status != Status::ok
+                    ? "extension cleanup failed; retry stop before releasing borrowed resources"
+                    : "thread/stack cleanup failed; retry stop before releasing borrowed resources");
     }
     impl_->lane_cleanup_pending = false;
     if (impl_->resident_regions) {
@@ -7227,6 +7916,79 @@ Status Runtime::stop() noexcept {
         impl_->clock_now(),
         0);
     impl_->state = RuntimeState::stopped;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::detach_extension(
+    ExtensionHandle extension,
+    bool& unload_ready) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::stopped) {
+        return impl_->fail(
+            Status::invalid_state,
+            "extension detach requires successful checked stop");
+    }
+    if (!impl_->valid_extension(extension)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "extension detach received a stale, foreign, or wrong-kind handle");
+    }
+    auto& record = *impl_->extensions[extension.slot];
+    if (record.state.load(std::memory_order_acquire) !=
+            ExtensionLifecycleState::quiescent ||
+        !record.callbacks_quiescent() || !record.backends_released() ||
+        !record.services_released()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "extension ownership remains unresolved; retry checked stop");
+    }
+    record.clear_borrowed();
+    record.generation.fetch_add(1, std::memory_order_acq_rel);
+    record.state.store(
+        ExtensionLifecycleState::detached,
+        std::memory_order_release);
+    record.unload_ready.store(true, std::memory_order_release);
+    unload_ready = true;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::extension_service_status(
+    ExtensionHandle extension,
+    std::size_t service_index,
+    rtfw_extension_service_status_v1& status) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (!impl_->valid_extension(extension)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "service status received a stale, foreign, or wrong-kind handle");
+    }
+    auto& record = *impl_->extensions[extension.slot];
+    if (service_index >= record.service_count) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "service status index is outside the extension service table");
+    }
+    impl_->extension_control_callback_active.store(
+        true, std::memory_order_release);
+    const auto result =
+        record.services[service_index].call_status(status);
+    impl_->extension_control_callback_active.store(
+        false, std::memory_order_release);
+    if (result != Status::ok) {
+        return impl_->fail(result, "extension service status failed");
+    }
     impl_->clear_error();
     return Status::ok;
 }
@@ -7328,6 +8090,59 @@ std::size_t Runtime::callback_count() const noexcept {
     return impl_ && !impl_->provider_callback_active()
         ? impl_->callbacks.size()
         : 0;
+}
+
+std::size_t Runtime::extension_count() const noexcept {
+    return impl_ && !impl_->provider_callback_active()
+        ? impl_->extensions.size()
+        : 0;
+}
+
+bool Runtime::extension_at(
+    std::size_t index,
+    ExtensionInfo& info) const noexcept {
+    if (!impl_ || impl_->provider_callback_active() ||
+        index >= impl_->extensions.size() || !impl_->extensions[index]) {
+        return false;
+    }
+    const auto& record = *impl_->extensions[index];
+    ExtensionInfo candidate;
+    candidate.name = record.name;
+    candidate.version = record.version;
+    candidate.negotiated_abi_version = record.negotiated_abi_version;
+    candidate.state = record.state.load(std::memory_order_acquire);
+    candidate.generation =
+        record.generation.load(std::memory_order_acquire);
+    candidate.phase_count = static_cast<std::uint32_t>(record.phase_count);
+    candidate.backend_count = static_cast<std::uint32_t>(record.backend_count);
+    candidate.service_count = static_cast<std::uint32_t>(record.service_count);
+    candidate.resource_count = static_cast<std::uint32_t>(record.resource_count);
+    candidate.relationship_count =
+        static_cast<std::uint32_t>(record.relationship_count);
+    candidate.unload_ready =
+        record.unload_ready.load(std::memory_order_acquire);
+    info = candidate;
+    return true;
+}
+
+Status Runtime::extension_info(
+    ExtensionHandle extension,
+    ExtensionInfo& info) const noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (!impl_->valid_extension(extension)) {
+        return Status::invalid_handle;
+    }
+    ExtensionInfo candidate;
+    if (!extension_at(extension.slot, candidate)) {
+        return Status::internal_error;
+    }
+    info = candidate;
+    return Status::ok;
 }
 
 std::size_t Runtime::device_backend_count() const noexcept {

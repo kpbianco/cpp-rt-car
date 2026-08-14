@@ -15,6 +15,9 @@
 #include <new>
 #include <span>
 
+extern "C" rtfw_status RTFW_EXTENSION_CALL rtfw_extension_entry_v1(
+    const rtfw_extension_host_api_v1*, rtfw_extension_descriptor_v1*);
+
 #if defined(_MSC_VER)
 #include <malloc.h>
 #endif
@@ -22,6 +25,7 @@
 namespace {
 std::atomic<std::size_t> g_allocation_count{0};
 std::atomic<bool> g_track_allocations{false};
+std::atomic<std::ptrdiff_t> g_fail_after{-1};
 
 void record_allocation() noexcept {
     if (g_track_allocations.load(std::memory_order_relaxed)) {
@@ -39,6 +43,11 @@ std::size_t align_up(std::size_t value, std::size_t alignment) {
 }
 
 void* allocate_raw(std::size_t size) {
+    const auto remaining = g_fail_after.load(std::memory_order_relaxed);
+    if (remaining >= 0 &&
+        g_fail_after.fetch_sub(1, std::memory_order_relaxed) == 0) {
+        throw std::bad_alloc();
+    }
     if (size == 0) size = 1;
     if (void* ptr = std::malloc(size)) {
         return ptr;
@@ -56,6 +65,11 @@ void deallocate_raw(void* ptr) noexcept {
 }
 
 void* allocate_aligned(std::size_t size, std::size_t alignment) {
+    const auto remaining = g_fail_after.load(std::memory_order_relaxed);
+    if (remaining >= 0 &&
+        g_fail_after.fetch_sub(1, std::memory_order_relaxed) == 0) {
+        throw std::bad_alloc();
+    }
     if (alignment < alignof(std::max_align_t)) {
         alignment = alignof(std::max_align_t);
     }
@@ -1762,4 +1776,54 @@ TEST(TraceNoAlloc, RateTelemetryShedRecoverInspectAndStopDoNotAllocate) {
     EXPECT_EQ(late.rate.shed_transitions, 1u);
     EXPECT_EQ(recovered.rate.recovery_transitions, 1u);
     EXPECT_EQ(read.records_read, 4u);
+}
+
+TEST(TraceNoAlloc, ExtensionExecuteInspectStopAndDetachDoNotAllocate) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 2;
+    config.executor_queue_capacity = 2;
+    config.task_scratch_slots = 2;
+    config.trace_capacity = 16;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    rt::ExtensionHandle extension;
+    ASSERT_EQ(
+        runtime.register_extension(&rtfw_extension_entry_v1, extension),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    rt::ExtensionInfo info;
+    bool ready = false;
+    bool complete = false;
+    {
+        AllocationGuard guard;
+        complete = runtime.step({
+            1, std::chrono::milliseconds(1), std::nullopt}) == rt::Status::ok;
+        complete = runtime.extension_info(extension, info) == rt::Status::ok &&
+            runtime.stop() == rt::Status::ok && complete;
+        complete = runtime.detach_extension(extension, ready) == rt::Status::ok &&
+            complete;
+    }
+    EXPECT_TRUE(complete);
+    EXPECT_TRUE(ready);
+    EXPECT_EQ(allocation_count(), 0u);
+}
+
+TEST(ExtensionRegistration, AllocationFailurePublishesNothingAndRecovers) {
+    rt::Runtime runtime;
+    rt::RuntimeConfig config;
+    config.callback_capacity = 2;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+    rt::ExtensionHandle extension;
+    g_fail_after.store(0, std::memory_order_release);
+    const auto failure =
+        runtime.register_extension(&rtfw_extension_entry_v1, extension);
+    g_fail_after.store(-1, std::memory_order_release);
+    EXPECT_EQ(failure, rt::Status::resource_exhausted);
+    EXPECT_FALSE(extension.valid());
+    EXPECT_EQ(runtime.extension_count(), 0u);
+    EXPECT_EQ(runtime.callback_count(), 0u);
+    EXPECT_EQ(
+        runtime.register_extension(&rtfw_extension_entry_v1, extension),
+        rt::Status::ok);
 }

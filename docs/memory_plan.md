@@ -381,3 +381,13 @@ reported through vendor capabilities where applicable and are not added to
 Runtime-owned `device_control_bytes`. The six-row equation, twelve region
 identities, three provider-backed regions, and runtime-stack accounting remain
 unchanged.
+# Extension control accounting
+
+M19-01 fixed extension descriptors, handle maps, owner gates, relationships,
+and lifecycle bookkeeping are counted exactly once in
+`runtime_control_bytes`. DeviceManager storage created for extension
+device-v1 backends remains in `device_control_bytes`. No seventh MemoryPlan
+row or provider region exists. Registration may allocate only while
+configuring; start, phase dispatch, service status, checked stop/retry,
+inspection, detach, and stale-handle rejection do not allocate ordinary heap
+memory.

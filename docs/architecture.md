@@ -429,3 +429,22 @@ mutation path. See [the qualification contract](qualification.md).
 This plane is not a scheduler or HAL capability. The combined synthetic fixture
 does not bypass the M17-05 blocker; non-synthetic combined promotion fails
 closed until the native registration path exists.
+
+## M19-01 extension transaction and ownership
+
+The host calls one already-resolved C entry function while Runtime is
+configuring. Staging callbacks write only a fixed transaction record. After
+version, prefix, name, reserved-field, capacity, handle, relationship, device
+capability, and graph validation, prepared Runtime vectors are swapped in one
+nonthrowing commit. Each failed attempt consumes its provisional generation.
+
+Committed CPU owners feed the ordinary compiled graph. Device owners wrap the
+copied device-ABI-v1 table and feed the existing compatibility adapter and
+DeviceManager. Service owners have no lane: initialize, status, stop, quiesce,
+and shutdown execute synchronously on the serialized host control path. Stop
+closes admission before lane cleanup; related services remain borrowed until
+backend ownership resolves. Detach clears borrowed callables and retires the
+generation. Fixed records are accounted in existing runtime-control bytes,
+with canonical DeviceManager bytes remaining in device-control. There is no
+loader, module registry, global extension registry, provider region, or native
+HAL-v2 capability path.

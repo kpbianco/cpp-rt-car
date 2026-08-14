@@ -41,3 +41,12 @@ Untrusted extensions require an out-of-process boundary; the tiny
 
 See [security status](security_supply_chain.md) and the
 [product contract](product_contract.md).
+# M19-01 extension threats
+
+An extension executes trusted native code in-process and can corrupt the host;
+ABI checks do not create isolation. Mitigated integration hazards include
+short/forward records, incompatible ranges, poisoned partial transactions,
+forged or stale handles, exceptions crossing callbacks, service/backend
+teardown ordering, and premature callable clearing. The host must authenticate
+code and retain it until checked detach. Runtime has no loader, path search,
+module handle, sandbox, or hot-reload orchestration.

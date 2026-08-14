@@ -234,3 +234,10 @@ hidden worker creation, or partially accepted timeline state.
 Potentially blocking submit is isolated to one precreated lane per opted-in
 backend. That lane cannot invoke application callbacks and is reported as
 `thread.device-submission`, role 6.
+# Extension phases
+
+ABI-v1 extension CPU phases are ordinary compiled-graph phases. They receive
+the stable C-ABI-v8 context, fixed phase/task scratch, and synchronous nested
+task table under the selected existing executor policy. Registration and
+service callbacks never execute on an executor worker, and M19-01 adds no
+worker, queue, spill, inline bypass, or post-start allocation path.

@@ -102,6 +102,7 @@ set(expected_headers
     rt/cuda_backend.hpp
     rt/device.hpp
     rt/device_abi.h
+    rt/extension_abi.h
     rt/graph.hpp
     rt/mock_device.hpp
     rt/observability_export.hpp
@@ -165,12 +166,14 @@ endfunction()
 
 rtfw_check_c_header("rt/c_api.h" c_api rtfw::c_shared)
 rtfw_check_c_header("rt/device_abi.h" device_abi rtfw::c_shared)
+rtfw_check_c_header("rt/extension_abi.h" extension_abi_c rtfw::runtime)
 rtfw_check_c_header("rtfw/version.h" version_c rtfw::c_shared)
 
 rtfw_check_cpp_header("core/units.hpp" units rtfw::runtime)
 rtfw_check_cpp_header("rt/canonical_bytes.hpp" canonical_bytes rtfw::runtime)
 rtfw_check_cpp_header("rt/config.hpp" config rtfw::runtime)
 rtfw_check_cpp_header("rt/device.hpp" device rtfw::runtime)
+rtfw_check_cpp_header("rt/extension_abi.h" extension_abi_cpp rtfw::runtime)
 rtfw_check_cpp_header("rt/graph.hpp" graph rtfw::runtime)
 rtfw_check_cpp_header("rt/mock_device.hpp" mock_device rtfw::runtime)
 rtfw_check_cpp_header(

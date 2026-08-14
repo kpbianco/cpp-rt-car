@@ -109,6 +109,7 @@ if (SIM_GTEST_AVAILABLE)
     # M15 CPU/memory policy is part of the supported runtime and must remain in both the
     # default and experimental-enabled GoogleTest configurations.
     list(APPEND TEST_SOURCES
+        test_extension_registration.cpp
         test_command_batch.cpp
         test_heterogeneous_memory.cpp
         test_hal_v2.cpp
@@ -134,12 +135,30 @@ if (SIM_GTEST_AVAILABLE)
     endif()
 
     add_executable(simcore_tests ${TEST_SOURCES})
+    add_library(test_extension_fixture SHARED extension_fixture.c)
+    target_include_directories(
+        test_extension_fixture
+        PRIVATE
+            ${RTFW_PROJECT_SOURCE_DIR}/include
+            ${RTFW_PROJECT_SOURCE_DIR}/rt/include)
+    set_target_properties(
+        test_extension_fixture PROPERTIES OUTPUT_NAME extension_fixture)
+    add_library(test_extension_fixture_bad SHARED extension_fixture_bad.c)
+    target_include_directories(
+        test_extension_fixture_bad
+        PRIVATE
+            ${RTFW_PROJECT_SOURCE_DIR}/include
+            ${RTFW_PROJECT_SOURCE_DIR}/rt/include)
+    set_target_properties(
+        test_extension_fixture_bad PROPERTIES OUTPUT_NAME extension_fixture_bad)
     target_link_libraries(
         simcore_tests
         PRIVATE
             rtfw_runtime
             rtfw_cuda_backend
             rtfw_xdma_backend
+            test_extension_fixture
+            test_extension_fixture_bad
             ${SIM_GTEST_LIBRARIES})
     if (RTFW_BUILD_EXPERIMENTAL)
         target_link_libraries(
@@ -192,6 +211,11 @@ if (SIM_GTEST_AVAILABLE)
 
     add_test(NAME simcore_all COMMAND simcore_tests)
     set_tests_properties(simcore_all PROPERTIES TIMEOUT 180)
+    add_test(
+        NAME m19_extension_registration
+        COMMAND simcore_tests
+            --gtest_filter=ExtensionAbi.*:ExtensionRegistration.*:ExtensionLifecycle.*:MemoryPlan.*Extension*:DeterminismReplay.*Extension*:TraceNoAlloc.*Extension*)
+    set_tests_properties(m19_extension_registration PROPERTIES TIMEOUT 60)
     add_test(
         NAME m17_command_batch_timeline
         COMMAND simcore_tests

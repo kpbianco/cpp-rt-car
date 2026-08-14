@@ -68,3 +68,11 @@ defined in the repository [security policy](../SECURITY.md).
 - Qualification input and proposal safety: `tools/qualification.py`,
   `qualification/schemas/`, and [qualification contract](qualification.md)
 - Threat boundaries: [threat model](threat_model.md)
+# Trusted in-process extensions
+
+Extension ABI validation is not a sandbox or authentication mechanism. The
+embedding host owns artifact provenance, trust policy, symbol resolution,
+module lifetime, and unload. Runtime never searches or loads a path. Unknown
+suffix bytes are ignored, known reserved fields must be zero, and malformed or
+incompatible records fail before publication. A successful fixture or unload
+readiness check does not establish safe arbitrary native code.

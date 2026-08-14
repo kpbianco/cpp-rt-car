@@ -2,11 +2,26 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M18-01 starts from exact target
-baseline `e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`. M17 remains active and
-incomplete because M17-05 is blocked. The binding M18-01 contract is
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M19-01 starts from exact target
+baseline `5eb8f101f692b2aff85f82f4a1660630db750706`. M17 remains active and
+incomplete because M17-05 is blocked. The binding M19-01 contract is
 `contracts/active-batch.yaml`, sourced from control revision
-`a729f1460f56f24f904b45faf4f37157494f847b`.
+`e2ce44f28d3d3f92d7a8bf4d4f1c4ba7b563a185`.
+
+## M19-01 implementation handoff
+
+`rt/extension_abi.h` is the independently versioned C11 ABI v1. Runtime takes
+only an already-resolved entry pointer and transactionally stages fixed CPU
+phases, device-v1 backends, services, resources, and local relationships.
+Generational owner/kind/slot handles reject failed, foreign, wrong-kind, stale,
+and detached uses. The full ABI layout, copied/borrowed matrix, lifecycle,
+control-thread rule, retry order, accounting, identity, evolution, and trust
+boundary are in `docs/extension_registration.md`.
+
+Do not add a loader or release extension code until `stop()` and
+`detach_extension()` both succeed. M19-03 owns Unreal and host module unload
+orchestration. M19 and CAP-M19 remain incomplete. M17-05 remains blocked and
+M18 remains unpromoted.
 
 ## Implemented boundary
 

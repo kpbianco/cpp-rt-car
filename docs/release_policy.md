@@ -129,3 +129,11 @@ artifact corruption or substitution only when the manifest itself is obtained
 from a trusted channel. RTFW 1.2 does not claim signed releases,
 bit-for-bit-reproducible builds, plugin isolation, or safe execution of
 untrusted native callbacks.
+# Extension ABI v1 release boundary
+
+M19-01 adds one installed header and an additive C++ source API without
+changing release 1.2.1, C ABI v8, SONAME 8, device ABI v1, target/component
+inventory, support matrices, or qualification state. Extension ABI v1 may be
+removed only as one coherent rollback before a release depends on it, or
+evolved compatibly by appending size-guarded fields. An incompatible change
+requires a new ABI version and symbol.

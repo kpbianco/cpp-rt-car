@@ -52,3 +52,11 @@ executor and service-lane ownership.
 - Negative raw-thread test: `tests/thread_violation.cpp`,
   `tests/CMakeLists.txt`
 - ABI milestone: [roadmap](roadmap.md)
+# Extension integration governance
+
+Hosts resolve and authenticate extension code before passing a direct ABI-v1
+entry pointer. They retain every module and borrowed instance until checked
+Runtime stop and checked detach both succeed. Runtime accepts no path or module
+handle. The experimental plugin API/manager remains default-uninstalled and is
+not a compatibility or migration path. ABI-v1 incompatible evolution requires
+a new version and entry symbol.

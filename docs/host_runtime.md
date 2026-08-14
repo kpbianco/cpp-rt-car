@@ -481,3 +481,13 @@ bounded copy attempt. Concurrent host stop during a blocked submit issues the
 nonblocking stop request and returns `invalid_state`; the host retries checked
 stop after the active step quiesces. Callback-reentrant stop remains
 side-effect-free. No new status or schema is introduced.
+# M19-01 extension lifecycle
+
+While configuring, `register_extension` stages and commits one complete ABI-v1
+extension. Services initialize in registration order before Runtime lanes and
+backends. `stop` closes extension admission first, continues independent
+cleanup while retaining the first error, and cleans services in reverse only
+after related backend ownership resolves. `detach_extension` is checked,
+clears borrowed callables, retires the generation, and reports readiness
+without unloading. Details are in
+[extension registration](extension_registration.md).
