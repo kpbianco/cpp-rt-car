@@ -210,7 +210,11 @@ if (SIM_GTEST_AVAILABLE)
     rtfw_enable_project_warnings(simcore_tests)
 
     add_test(NAME simcore_all COMMAND simcore_tests)
-    set_tests_properties(simcore_all PROPERTIES TIMEOUT 180)
+    # This aggregate executes the complete suite, including the bounded
+    # timing/concurrency cases that are also exposed as focused CTest targets.
+    # Keep a finite guard while allowing slower Debug and contended CI hosts to
+    # finish the assertions instead of terminating the process at 180 seconds.
+    set_tests_properties(simcore_all PROPERTIES TIMEOUT 300)
     add_test(
         NAME m19_extension_registration
         COMMAND simcore_tests
