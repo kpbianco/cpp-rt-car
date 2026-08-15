@@ -304,3 +304,28 @@ coverage. Linux GCC/Clang, Windows v143, sanitizer, deterministic, installed
 package, archive, C ABI, dependency, vendor compile, and documentation/release
 contract jobs remain mandatory. These are portable RT0/static/simulated gates,
 not physical, Unreal, HIL, field, RT1/RT2, or production evidence.
+
+# M19-02 Unreal gates
+
+`.github/workflows/unreal.yml` is an additional mandatory self-hosted gate for
+changes to the source plugin, fixture, verifier, Runtime source, or adapter
+contract. It binds Unreal `5.8.1-release` commit
+`71fe36aac5a8df5ccd66c763ffc902b29b6a9c43`, Debian 12 x86-64, and Epic's
+bundled Clang/libc++/lld 20.1.8 tuple. The job builds a complete relocated
+default RTFW SDK, then Development editor and game targets, a Shipping game
+target, editor automation, and engine-supported Clang static analysis.
+
+The `RTFW.M19_02` automation set covers passive load; malformed capacities and
+attachment; exact-once, saturation, help, retirement, launch rejection, stale
+dispatch, stop admission, and generation exhaustion; three-region allocator
+success, acquire/apply/observe failure, unsupported policy, rollback retry, and
+release; clock/frame conversion; host-driven failure; performance budgets; and
+two instances. UBT/commandlet logs, automation JSON, build manifests, engine
+and compiler identity, and the Runtime archive digest are retained.
+
+The standard CI, package, C ABI, release-contract, sanitizer, determinism, and
+M15-M19-01 gates remain mandatory because Unreal automation does not replace
+them. Unavailable engine sanitizer/allocation instrumentation is recorded as
+unperformed. No editor test or non-editor compilation proves packaged-game,
+world lifecycle, unload/hot reload, worst-case timing, RT1/RT2, or production
+behavior.

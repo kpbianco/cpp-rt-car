@@ -1,7 +1,8 @@
 # Current state
 
-Last audited: 2026-08-12
-Batch baseline: `5eb8f101f692b2aff85f82f4a1660630db750706`
+Last audited: 2026-08-15
+M19-02 contractual baseline: `dbedb8ba9779b0a39676576326d689702659872f`
+Review worktree head: `db8d14a523e6c79895ade4a0db003513f625312f`
 
 ## Product state
 
@@ -18,7 +19,25 @@ Batch baseline: `5eb8f101f692b2aff85f82f4a1660630db750706`
   target history. M17 remains active and incomplete because M17-05 is blocked.
   M18-01 offline qualification schemas and tools are implemented from the
   completed M17-04 foundation; M18 and CAP-M18 remain incomplete. M19-01 adds
-  extension ABI v1; M19 and CAP-M19 remain incomplete.
+  extension ABI v1. An uncommitted M19-02 Unreal adapter candidate is under
+  review; M19 and CAP-M19 remain incomplete.
+
+## M19-02 Unreal adapter candidate
+
+The opt-in source plugin binds the existing host-executor, three-region
+memory-provider, Runtime clock, and host-frame surfaces to the pinned Unreal
+Engine 5.8.1 source tuple. The runtime module is passive and adds no default
+CMake target, installed header, package component, Runtime/world registry,
+delegate, worker, loader, or C ABI surface. The exact ownership, task-node,
+allocator, clock, build, and claim boundaries are in
+`docs/unreal_adapter.md`.
+
+This review repaired pinned-UBT rules compatibility, the Unreal workflow's
+build-before-install order, retained command logging, and missing allocator
+observe-failure rollback coverage. Exact engine C++ build and automation are
+not claimed complete in this worktree until the approved runner passes the
+mandatory workflow and human review. M19-03 still owns world lifecycle,
+checked extension detach, module unload, and hot reload.
 
 ## M19-01 extension registration
 

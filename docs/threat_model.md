@@ -50,3 +50,21 @@ forged or stale handles, exceptions crossing callbacks, service/backend
 teardown ordering, and premature callable clearing. The host must authenticate
 code and retain it until checked detach. Runtime has no loader, path search,
 module handle, sandbox, or hot-reload orchestration.
+
+# M19-02 Unreal adapter threats
+
+The Unreal module and relocated RTFW archive execute trusted native C++ in one
+engine process. A substituted SDK root, incompatible compiler/runtime build, or
+untrusted plugin source can corrupt that process; path and compiler checks are
+integration controls, not a sandbox or signature. The pinned D-009 task node
+can retain scheduler references after RTFW execution, so slot reuse requires
+engine completion as well as the Runtime callback return. Premature Runtime,
+adapter, or module destruction can otherwise create use-after-free.
+
+Capacity exhaustion, launch rejection, stale dispatch, and generation
+exhaustion fail without invoking a later job. Provider tokens retain ownership
+across failed rollback and are released only after checked recovery. Allocator
+extent metadata never establishes residency, locking, pinning, NUMA placement,
+or physical commitment. The clock maps one monotonic engine source and owns no
+sleep. World ownership, detach, unload, and hot reload are absent rather than
+implicitly safe.

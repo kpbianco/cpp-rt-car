@@ -448,3 +448,32 @@ generation. Fixed records are accounted in existing runtime-control bytes,
 with canonical DeviceManager bytes remaining in device-control. There is no
 loader, module registry, global extension registry, provider region, or native
 HAL-v2 capability path.
+
+## M19-02 Unreal adapter boundary
+
+The source-distributed `RTFWUnreal` module is outside the default CMake and
+installed-package graph. It links a separately relocated `rtfw_runtime` archive
+built from the same revision with the pinned Unreal compiler, libc++, lld,
+architecture, exception model, and compatible configuration. The module does
+not compile Runtime sources or use the experimental plugin manager.
+
+One instance-owned job adapter preallocates embedded
+`LowLevelTasks::FTask` nodes and copied host jobs. Its atomic generation/state
+word separates reservation, acceptance, execution, scheduler retirement, and
+reuse. The only D-009 exception is the exact pinned public-source low-level
+task node and launch surface; no engine Private header or worker/queue control
+surface enters the adapter. Unreal workers and queue internals remain external
+and verify-only.
+
+One instance-owned provider maps only phase scratch, task scratch, and trace
+storage to public `FMemory` allocation. The allocator extent is checked twice,
+but no OS residency, locking, pinning, NUMA, guard, huge-page, or physical fact
+is inferred. Apply/observe failure and rollback error retain ownership for the
+existing reverse retry transaction.
+
+One instance-owned clock converts the matching Unreal monotonic cycle source
+to nondecreasing nanoseconds. It implements no sleep, and the frame helper maps
+only explicit frame/delta/deadline/nominal-release input. The module has no
+startup behavior or Runtime/world registry. World ownership, extension detach,
+module unload, and hot reload remain outside M19-02. See
+`docs/unreal_adapter.md`.

@@ -173,3 +173,21 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - Runtime start/status/stop/retry/detach add no ordinary heap allocation.
 - Portable tests do not qualify extension code, Unreal, hardware, HIL, field,
   latency, RT1, RT2, signing, release, deployment, or production use.
+
+# M19-02 Unreal adapter checklist
+
+- [ ] The exact licensed engine commit, bundled compiler/runtime, runner
+  custody, and relocated Runtime archive digest are retained and human
+  approved.
+- [ ] Editor/game/Shipping builds, `RTFW.M19_02` automation, static analysis,
+  standard full/package/ABI gates, and human task/lifetime/allocator/time review
+  all pass.
+- [ ] Adapter-owned and engine-internal allocation observations are separated;
+  any engine-internal submit/help allocation blocks a no-allocation or RT claim.
+- [ ] Task retirement, checked Runtime stop, provider rollback/release, and two
+  instances pass without implying world ownership or module unload.
+- [ ] Functional timing thresholds were selected before measurement and are
+  compared only on the retained identical tuple.
+- [ ] Packaged-game, world lifecycle, detach, unload/hot reload, physical
+  hardware/HIL, field, controlled latency, RT1, RT2, signing, release,
+  deployment, and production validation remain explicitly unperformed.

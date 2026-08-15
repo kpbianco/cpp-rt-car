@@ -86,6 +86,18 @@ borrowed code/instance lifetime. Runtime performs no discovery or unload, and
 the experimental plugin manager is not a compatibility path. M19 and CAP-M19
 remain incomplete.
 
+M19-02 adds an opt-in source-distributed Unreal adapter candidate for one exact
+licensed-engine commit and compatible Clang/libc++/lld tuple. It binds only the
+existing host-executor, three active memory-provider regions, instance clock,
+and host-frame context. The runtime module is passive; it owns no Runtime,
+world, delegate, worker, loader, or global registry. Engine task storage is
+pre-reserved, allocator policy observations remain explicit and limited, and
+the clock supports host-driven steps but not Runtime-owned sleep. M19-02 adds
+no default SDK target/header, C/device/extension ABI, schema, support tuple, or
+RT claim. World ownership, checked detach, module unload, hot reload, and the
+complete sample remain M19-03/M19-04 work, so M19 and CAP-M19 remain
+incomplete.
+
 ## Claim policy
 
 Repository documentation and releases use the following terms precisely:

@@ -244,3 +244,29 @@ The supported default package installs exactly one additional header,
 loader dependency. Both C11 and C++20 installed consumers compile the header;
 the C++ consumer registers a direct/static entry function. Experimental plugin
 headers and targets remain excluded from the default install.
+
+# M19-02 Unreal source plugin
+
+The Unreal adapter is not built or installed by CMake. Build a complete
+relocated default SDK with the exact Unreal bundled Clang/libc++/lld toolchain,
+then invoke the governed staging wrapper:
+
+```bash
+bash scripts/verify-unreal.sh \
+  --engine-root "$RTFW_UNREAL_ENGINE_ROOT" \
+  --sdk-root "$PWD/build/m19-02-sdk-install" \
+  --configuration Development
+```
+
+The wrapper rejects the wrong engine tag, commit, version, compiler, linker,
+archive compiler identity, configuration, or missing SDK surface before
+staging. `RTFWUnreal.Build.cs` also rejects non-Linux, multi-architecture, and
+non-x86-64 targets and links only the relocated `librtfw_runtime.a`. The RTFW
+archive and Unreal module must share compiler, libc++, lld, architecture,
+exception model, and compatible configuration; the C++ boundary is not a
+portable binary ABI.
+
+Development builds both editor and game targets and runs automation. Shipping
+is a non-editor build-only gate. Complete UBT and commandlet output is retained
+under the configuration-specific report directory. See
+[the Unreal adapter contract](unreal_adapter.md).

@@ -137,3 +137,13 @@ inventory, support matrices, or qualification state. Extension ABI v1 may be
 removed only as one coherent rollback before a release depends on it, or
 evolved compatibly by appending size-guarded fields. An incompatible change
 requires a new ABI version and symbol.
+
+# M19-02 Unreal release boundary
+
+The source Unreal plugin is not part of release 1.2.1, any default installed
+target/header/component, or any portable support matrix. Its pinned engine
+workflow may retain tuple-local review artifacts but cannot publish a plugin,
+alter a support record, or inherit release, packaged-game, unload, latency,
+RT1/RT2, deployment, or production status. Publishing or supporting an Unreal
+artifact requires a later explicitly approved release batch with license,
+packaging, signing, lifecycle, compatibility, and rollback review.

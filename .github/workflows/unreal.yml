@@ -1,0 +1,93 @@
+name: Unreal 5.8.1 adapter
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/unreal.yml"
+      - "integrations/unreal/**"
+      - "scripts/verify-unreal.*"
+      - "tests/unreal/**"
+      - "rt/**"
+      - "CMakeLists.txt"
+      - "docs/unreal_adapter.md"
+      - "release/rtfw-release-contract.json"
+
+concurrency:
+  group: unreal-m19-02-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  approved-unreal:
+    name: UE 5.8.1 Debian 12 editor, game, automation, and budgets
+    runs-on: [self-hosted, linux, x64, debian-12, unreal-5.8.1]
+    timeout-minutes: 180
+    env:
+      RTFW_UNREAL_ENGINE_ROOT: /nas/kbianco/unreal/UnrealEngine-5.8.1-m19-02-writable
+      RTFW_UNREAL_COMMIT: 71fe36aac5a8df5ccd66c763ffc902b29b6a9c43
+      RTFW_UNREAL_TAG: 5.8.1-release
+      RTFW_UNREAL_TOOLCHAIN: v26_clang-20.1.8-rockylinux8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Validate approved engine and toolchain custody
+        run: |
+          test "$(git -C "$RTFW_UNREAL_ENGINE_ROOT" rev-parse HEAD)" = "$RTFW_UNREAL_COMMIT"
+          test "$(git -C "$RTFW_UNREAL_ENGINE_ROOT" describe --tags --exact-match HEAD)" = "$RTFW_UNREAL_TAG"
+          test -x "$RTFW_UNREAL_ENGINE_ROOT/Engine/Build/BatchFiles/RunUAT.sh"
+          test -x "$RTFW_UNREAL_ENGINE_ROOT/Engine/Build/BatchFiles/Linux/Build.sh"
+          test -x "$RTFW_UNREAL_ENGINE_ROOT/Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64/$RTFW_UNREAL_TOOLCHAIN/x86_64-unknown-linux-gnu/bin/clang++"
+      - name: Build exact-revision relocated runtime SDK with Unreal toolchain
+        run: |
+          toolchain="$RTFW_UNREAL_ENGINE_ROOT/Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64/$RTFW_UNREAL_TOOLCHAIN/x86_64-unknown-linux-gnu"
+          cmake -S . -B build/m19-02-unreal-sdk \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$toolchain/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$toolchain/bin/clang++" \
+            -DCMAKE_SYSROOT="$toolchain" \
+            -DCMAKE_CXX_FLAGS=-stdlib=libc++ \
+            -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld -stdlib=libc++" \
+            -DRTFW_BUILD_ID="${GITHUB_SHA}" \
+            -DENABLE_TESTS=OFF \
+            -DRTFW_BUILD_EXPERIMENTAL=OFF \
+            -DRTFW_BUILD_EXAMPLES=OFF \
+            -DRTFW_BUILD_RUNTIME_DEMO=OFF \
+            -DSIM_WERROR=ON
+          cmake --build build/m19-02-unreal-sdk --parallel 2
+          cmake --install build/m19-02-unreal-sdk --prefix "$RUNNER_TEMP/rtfw-unreal-sdk"
+      - name: Build editor and game targets and run M19-02 automation
+        run: |
+          bash scripts/verify-unreal.sh \
+            --engine-root "$RTFW_UNREAL_ENGINE_ROOT" \
+            --sdk-root "$RUNNER_TEMP/rtfw-unreal-sdk" \
+            --configuration Development
+      - name: Build Shipping game target
+        run: |
+          bash scripts/verify-unreal.sh \
+            --engine-root "$RTFW_UNREAL_ENGINE_ROOT" \
+            --sdk-root "$RUNNER_TEMP/rtfw-unreal-sdk" \
+            --configuration Shipping \
+            --build-only
+      - name: Run engine-supported Clang static analysis
+        run: |
+          export RTFW_UNREAL_SDK_ROOT="$RUNNER_TEMP/rtfw-unreal-sdk"
+          "$RTFW_UNREAL_ENGINE_ROOT/Engine/Build/BatchFiles/Linux/Build.sh" \
+            RTFWUnrealTestHostEditor Linux Development \
+            -Project="$GITHUB_WORKSPACE/build/m19-02-unreal-development/project/RTFWUnrealTestHost.uproject" \
+            -StaticAnalyzer=clang -WaitMutex -UsePrecompiled -DisableAdaptiveUnity -MaxParallelActions=4 \
+            2>&1 | tee "$GITHUB_WORKSPACE/build/m19-02-unreal-development/reports/ubt-static-analysis.log"
+      - name: Archive complete tuple logs and machine-readable reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unreal-m19-02-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/m19-02-unreal-*/reports/**
+            build/m19-02-unreal-*/project/Saved/Logs/**
+            build/m19-02-unreal-*/project/Saved/Automation/**
+            build/m19-02-unreal-*/project/Intermediate/Build/**/Manifest.xml
