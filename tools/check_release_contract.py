@@ -58,6 +58,7 @@ HASHED_CONTRACT_PATHS = {
     ".github/workflows/docs-contract.yml",
     ".github/workflows/release.yml",
     ".github/workflows/scaling-smoke.yml",
+    ".github/workflows/unreal.yml",
     ".github/workflows/xdma-qualification.yml",
     "CHANGELOG.md",
     "CMakeLists.txt",
@@ -108,8 +109,17 @@ HASHED_CONTRACT_PATHS = {
     "docs/testing_ci.md",
     "docs/threat_model.md",
     "docs/time_platform.md",
+    "docs/unreal_adapter.md",
     "docs/xdma_backend.md",
     "docs/xdma_support_matrix.json",
+    "integrations/unreal/RTFWUnreal/RTFWUnreal.uplugin",
+    "integrations/unreal/RTFWUnreal/Source/RTFWUnreal/Private/RTFWUnrealAdapters.cpp",
+    "integrations/unreal/RTFWUnreal/Source/RTFWUnreal/Private/RTFWUnrealModule.cpp",
+    "integrations/unreal/RTFWUnreal/Source/RTFWUnreal/Public/RTFWUnrealAdapters.h",
+    "integrations/unreal/RTFWUnreal/Source/RTFWUnreal/RTFWUnreal.Build.cs",
+    "integrations/unreal/RTFWUnreal/Source/RTFWUnrealTests/Private/RTFWUnrealAutomationTests.cpp",
+    "integrations/unreal/RTFWUnreal/Source/RTFWUnrealTests/Private/RTFWUnrealTestsModule.cpp",
+    "integrations/unreal/RTFWUnreal/Source/RTFWUnrealTests/RTFWUnrealTests.Build.cs",
     "include/rtfw/version.h",
     "include/simcore/SimCore.hpp",
     "profiles/README.md",
@@ -177,6 +187,8 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/xdma_linux.cpp",
     "samples/CMakeLists.txt",
     "samples/embed_cpp/mini_app.cpp",
+    "scripts/verify-unreal.ps1",
+    "scripts/verify-unreal.sh",
     "src/runtime_profile_demo.cpp",
     "tests/CMakeLists.txt",
     "tests/extension_fixture.c",
@@ -221,6 +233,12 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_thread_policy.cpp",
     "tests/test_trace_noalloc.cpp",
     "tests/test_vendor_hal_v2.cpp",
+    "tests/unreal/Config/DefaultEngine.ini",
+    "tests/unreal/RTFWUnrealTestHost.uproject",
+    "tests/unreal/Source/RTFWUnrealTestHost.Target.cs",
+    "tests/unreal/Source/RTFWUnrealTestHost/Private/RTFWUnrealTestHostModule.cpp",
+    "tests/unreal/Source/RTFWUnrealTestHost/RTFWUnrealTestHost.Build.cs",
+    "tests/unreal/Source/RTFWUnrealTestHostEditor.Target.cs",
     "tests/runtime_profile_tests.cpp",
     "tests/xdma_backend_tests.cpp",
     "tools/autotune/config.schema.json",
@@ -1434,6 +1452,60 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     ):
         if token not in ci:
             errors.append(f"M19-01 CI: missing {token!r}")
+
+    unreal_source = load_text(
+        root,
+        "integrations/unreal/RTFWUnreal/Source/RTFWUnreal/Private/RTFWUnrealAdapters.cpp",
+        errors,
+    )
+    unreal_test = load_text(
+        root,
+        "integrations/unreal/RTFWUnreal/Source/RTFWUnrealTests/Private/RTFWUnrealAutomationTests.cpp",
+        errors,
+    )
+    unreal_doc = load_text(root, "docs/unreal_adapter.md", errors)
+    unreal_workflow = load_text(root, ".github/workflows/unreal.yml", errors)
+    unreal_verifier = load_text(root, "scripts/verify-unreal.sh", errors)
+    for token in (
+        "LowLevelTasks::FTask",
+        "LowLevelTasks::TryLaunch",
+        "FMemory::Malloc",
+        "supports_absolute_sleep",
+    ):
+        if token not in unreal_source:
+            errors.append(f"M19-02 implementation: missing {token!r}")
+    for token in (
+        "RTFW.M19_02",
+        "GenerationWrapFailsClosed",
+        "observe failure aborts start",
+    ):
+        if token not in unreal_test:
+            errors.append(f"M19-02 tests: missing {token!r}")
+    for phrase in (
+        "M19-03",
+        "does not establish packaged-game",
+        "D-009",
+        "not a default CMake target",
+    ):
+        if phrase.lower() not in unreal_doc.lower():
+            errors.append(f"M19-02 documentation: missing {phrase!r}")
+    for token in (
+        "71fe36aac5a8df5ccd66c763ffc902b29b6a9c43",
+        "cmake --build build/m19-02-unreal-sdk --parallel 2",
+        "scripts/verify-unreal.sh",
+        "unreal-5.8.1",
+    ):
+        if token not in unreal_workflow:
+            errors.append(f"M19-02 CI: missing {token!r}")
+    for token in (
+        "71fe36aac5a8df5ccd66c763ffc902b29b6a9c43",
+        "EXPECTED_ENGINE_TAG=5.8.1-release",
+        "v26_clang-20.1.8-rockylinux8",
+        "rtfw-runtime.sha256",
+        "ubt-editor-development.log",
+    ):
+        if token not in unreal_verifier:
+            errors.append(f"M19-02 verifier: missing {token!r}")
 
     return errors
 

@@ -6,7 +6,7 @@ control_plane:
   repository: kpbianco/portfolio-control
   profile_path: profiles/assurance.yaml
   product_path: products/cpp-rt-car
-  source_revision: ec3ad1d6431dd1c046622d43ea65fd524f4c57a5  # pragma: allowlist secret
+  source_revision: 1032a7cda347dbd9fe9e9984836ae0280be888b7  # pragma: allowlist secret
 audited_baseline: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
 autonomy:
   level: 2

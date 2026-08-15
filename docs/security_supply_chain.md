@@ -76,3 +76,21 @@ module lifetime, and unload. Runtime never searches or loads a path. Unknown
 suffix bytes are ignored, known reserved fields must be zero, and malformed or
 incompatible records fail before publication. A successful fixture or unload
 readiness check does not establish safe arbitrary native code.
+
+# Unreal source integration
+
+The M19-02 plugin is source only and requires separately licensed access to the
+exact Unreal checkout. No engine source or binary is vendored or redistributed
+by RTFW. `RTFW_UNREAL_ENGINE_ROOT` and `RTFW_UNREAL_SDK_ROOT` are trusted build
+inputs, not authentication boundaries. The governed verifier checks the engine
+commit/tag/version, bundled compiler/linker identity, runtime-archive compiler
+comment, and retains the archive digest; the CI job builds that archive from
+the checked-out target revision. A caller that bypasses the verifier can link
+arbitrary native code into the engine process.
+
+The plugin uses only public engine headers except for the exact D-009
+`LowLevelTasks::FTask`/`TryLaunch` source exception. It adds no download,
+network, credential, loader, path-search, or dynamic-module operation. Engine
+license approval, runner custody, and post-run artifact access remain human
+controls. A digest or exact commit proves identity/integrity only, not safety,
+absence of engine-internal allocation, or signed provenance.

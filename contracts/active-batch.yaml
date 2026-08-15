@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M19-01
-  title: Add size-versioned extension registration ABI
-  goal: Add a supported, bounded, size-versioned C extension ABI and additive C++ Runtime registration surface that transactionally registers CPU phases, device-ABI-v1 backends, and control-lane services with explicit ownership, version negotiation, quiescent checked stop, detach readiness, and stale-handle rejection, without using the experimental plugin loader, changing stable C ABI v8, or loading a dynamic library inside the runtime.
+  id: M19-02
+  title: Add Unreal jobs allocator and clock adapter
+  goal: Add an opt-in Unreal Engine runtime plugin that binds the existing RTFW host-executor, three-region memory-provider, and per-Runtime clock/frame surfaces to bounded Unreal facilities, including the exact-version LowLevelTasks exception approved by D-009, with fixed-capacity job ownership, truthful allocator observations, checked engine-time conversion, and real approved-engine build and automation evidence, while deferring world ownership, Runtime lifecycle orchestration, module unload, and the complete engine sample.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -11,34 +11,41 @@ sources:
     - products/cpp-rt-car/telemetry-plan.yaml#Q-19
     - products/cpp-rt-car/risk-register.yaml#R-001
     - products/cpp-rt-car/risk-register.yaml#R-007
+    - products/cpp-rt-car/decision-log.md#d-009--permit-an-exact-version-unreal-lowleveltasks-exception
   milestone: products/cpp-rt-car/roadmap.yaml#M19
   target_contracts:
     - AGENTS.md
     - contracts/repo-profile.yaml
     - contracts/profile-requirements.yaml
     - contracts/verification.yaml
+    - contracts/active-batch.yaml
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/devex_governance.md
+    - docs/adr/0001-one-executor-boundary.md
+    - docs/adr/0002-host-driven-time.md
+    - docs/executor.md
+    - docs/cpu_memory_policy.md
+    - docs/memory_plan.md
+    - docs/host_runtime.md
+    - docs/time_platform.md
+    - docs/extension_registration.md
     - docs/build_tooling.md
     - docs/testing_ci.md
     - docs/c_abi.md
-    - docs/device_backend.md
-    - docs/hal_v2.md
     - docs/release_policy.md
     - docs/security_supply_chain.md
     - docs/threat_model.md
     - docs/real_time_readiness_checklist.md
-    - rt/include/rt/c_api.h
-    - rt/include/rt/device_abi.h
+    - rt/include/rt/config.hpp
     - rt/include/rt/runtime.hpp
-    - rt/include/rt/plugin_api.h
-    - rt/include/rt/plugin_manager.hpp
-    - rt/src/plugin_manager.cpp
-    - tests/test_plugin_manager.cpp
+    - rt/src/executor.cpp
+    - rt/src/memory_policy.cpp
+    - tests/host_adapter_tests.cpp
+    - tests/test_memory_policy.cpp
+    - tests/test_host_runtime.cpp
     - CMakeLists.txt
     - tests/CMakeLists.txt
     - .github/workflows/ci.yml
@@ -57,60 +64,61 @@ sources:
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-05-2026-08-12.md
     - docs/evidence/M18-01-2026-08-12.md
-  baseline_commit: 5eb8f101f692b2aff85f82f4a1660630db750706
+    - docs/evidence/M19-01-2026-08-12.md
+  baseline_commit: dbedb8ba9779b0a39676576326d689702659872f
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M19-01.yaml
-  control_plane_revision: e2ce44f28d3d3f92d7a8bf4d4f1c4ba7b563a185  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M19-02.yaml
+  control_plane_revision: 1032a7cda347dbd9fe9e9984836ae0280be888b7  # pragma: allowlist secret
 dependencies:
-  - M17-04
+  - M19-01
 scope:
   allowed_paths:
     - .portfolio-harness.json
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
-    - rt/include/rt/extension_abi.h
-    - rt/include/rt/runtime.hpp
-    - rt/src/extension_registration.cpp
-    - rt/src/extension_registration.hpp
-    - rt/src/host_runtime.cpp
-    - rt/src/resource_policy.cpp
-    - rt/src/resource_policy.hpp
-    - tests/test_extension_registration.cpp
-    - tests/test_host_runtime.cpp
-    - tests/test_device_runtime.cpp
-    - tests/test_memory_plan.cpp
-    - tests/test_determinism_replay.cpp
-    - tests/test_trace_noalloc.cpp
-    - tests/extension_fixture.c
-    - tests/extension_fixture_bad.c
-    - tests/package_consumer/extension_consumer.c
-    - tests/package_consumer/extension_cpp_consumer.cpp
-    - tests/package_consumer/CMakeLists.txt
-    - tests/package_consumer/package_contract.cmake
-    - tests/CMakeLists.txt
+    - contracts/profile-requirements.yaml
+    - contracts/verification.yaml
+    - contracts/verification.commands
+    - integrations/unreal/RTFWUnreal/RTFWUnreal.uplugin
+    - integrations/unreal/RTFWUnreal/Source/RTFWUnreal/RTFWUnreal.Build.cs
+    - integrations/unreal/RTFWUnreal/Source/RTFWUnreal/Public/*
+    - integrations/unreal/RTFWUnreal/Source/RTFWUnreal/Private/*
+    - integrations/unreal/RTFWUnreal/Source/RTFWUnrealTests/RTFWUnrealTests.Build.cs
+    - integrations/unreal/RTFWUnreal/Source/RTFWUnrealTests/Private/*
+    - tests/unreal/RTFWUnrealTestHost.uproject
+    - tests/unreal/Config/DefaultEngine.ini
+    - tests/unreal/Source/RTFWUnrealTestHost.Target.cs
+    - tests/unreal/Source/RTFWUnrealTestHostEditor.Target.cs
+    - tests/unreal/Source/RTFWUnrealTestHost/RTFWUnrealTestHost.Build.cs
+    - tests/unreal/Source/RTFWUnrealTestHost/Private/*
+    - scripts/verify-unreal.ps1
+    - scripts/verify-unreal.sh
     - CMakeLists.txt
+    - tests/CMakeLists.txt
     - .github/workflows/ci.yml
+    - .github/workflows/unreal.yml
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/extension_registration.md
-    - docs/host_runtime.md
+    - docs/unreal_adapter.md
     - docs/executor.md
-    - docs/device_backend.md
+    - docs/cpu_memory_policy.md
     - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/c_abi.md
-    - docs/devex_governance.md
+    - docs/host_runtime.md
+    - docs/time_platform.md
+    - docs/extension_registration.md
     - docs/build_tooling.md
     - docs/testing_ci.md
+    - docs/c_abi.md
     - docs/release_policy.md
     - docs/security_supply_chain.md
     - docs/threat_model.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M19-01-*.md
+    - docs/plans/AGENTIC_DELIVERY_GAPS.md
+    - docs/evidence/M19-02-*.md
     - README.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
@@ -121,37 +129,25 @@ scope:
     - rt/include/rt/c_api.h
     - src/c_abi.cpp
     - rt/include/rt/device_abi.h
+    - rt/include/rt/extension_abi.h
+    - rt/include/rt/config.hpp
+    - rt/include/rt/runtime.hpp
     - rt/include/rt/device.hpp
-    - rt/src/hal_v2.cpp
-    - rt/src/hal_v2.hpp
-    - rt/src/heterogeneous_memory.cpp
-    - rt/src/heterogeneous_memory.hpp
-    - rt/src/command_batch.cpp
-    - rt/src/command_batch.hpp
-    - rt/src/device_manager.cpp
-    - rt/src/device_manager.hpp
-    - rt/src/cuda_backend.cpp
-    - rt/src/cuda_driver.cpp
-    - rt/src/xdma_backend.cpp
-    - rt/src/xdma_linux.cpp
-    - rt/include/rt/cuda_backend.hpp
-    - rt/include/rt/cuda_driver.hpp
-    - rt/include/rt/xdma_backend.hpp
-    - rt/include/rt/xdma_linux.hpp
-    - rt/include/rt/plugin_api.h
-    - rt/include/rt/plugin_manager.hpp
-    - rt/src/plugin_manager.cpp
-    - tests/test_plugin_manager.cpp
-    - tests/sample_plugin.c
-    - tests/sample_plugin_bad.c
-    - include/simcore/
+    - rt/src/
+    - src/
     - core/
+    - include/simcore/
     - hal/
     - gpu/
     - configs/
     - qualification/
     - tools/qualification.py
     - tests/qualification_fixtures/
+    - rt/include/rt/plugin_api.h
+    - rt/include/rt/plugin_manager.hpp
+    - tests/test_plugin_manager.cpp
+    - tests/sample_plugin.c
+    - tests/sample_plugin_bad.c
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
@@ -172,105 +168,111 @@ scope:
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-05-2026-08-12.md
     - docs/evidence/M18-01-2026-08-12.md
+    - docs/evidence/M19-01-2026-08-12.md
     - release/rtfw-release-contract.schema.json
     - LICENSE
     - VERSION.txt
 acceptance:
-  - The implementation starts from the exact clean default-branch baseline `5eb8f101f692b2aff85f82f4a1660630db750706`, target pull request 223. Every retained M15 through M18-01 evidence record is present. M17-05 remains blocked by the native command-capability discovery mismatch, and M19-01 neither repairs or bypasses that mismatch nor marks M17, M18, CAP-M17, or CAP-M18 complete.
-  - A new installed C11-compatible `rt/extension_abi.h` defines extension ABI version 1 independently of stable C ABI v8 and device ABI v1. Every boundary record and callback table uses fixed-width C types, an exact known version-1 required prefix, `struct_size`, ABI/current-minimum compatibility fields where negotiation applies, explicit counts/capacities, and zero known reserved fields; it contains no C++ type, STL layout, compiler-native exception, ownership-ambiguous string, or persisted process pointer.
-  - Version negotiation is deterministic and fail-closed. The host supplies only the size and version range it implements; an extension declares its current and minimum compatible versions. A common version-1 prefix is selected only when both ranges overlap and every required prefix is present. Short required prefixes, unsupported versions, inconsistent minimum/current values, overflowed sizes/counts, malformed enum/boolean/name data, null required callbacks or instances, nonzero known reserved data, and partial output reject before any Runtime registration becomes visible. Known version-1 prefixes of larger forward records may be copied while unknown suffix bytes are ignored and never interpreted as capabilities.
-  - The host receives an already-resolved extension entry-function pointer and invokes it only while the Runtime is configuring. Runtime never calls `dlopen`, `dlsym`, `LoadLibrary`, `GetProcAddress`, `dlclose`, or `FreeLibrary`, never searches a path, and never owns a module handle. Symbol discovery, trust/provenance checks, and physical library unload remain host responsibilities; the documented version-1 entry symbol and direct/static entry path are covered by C and C++ fixtures without linking `rtfw_runtime` to the experimental plugin target or a platform loader library.
-  - One additive C++ configuring-time Runtime operation stages one complete extension registration transaction and returns an instance-local generation-bearing extension handle only after success. The extension entry call may stage bounded CPU phases, device-ABI-v1 backends, control-lane services, and their local relationships through copied version-1 records and provisional handles. The Runtime validates the complete staged set, existing capacities/names/ownership, and checked storage arithmetic before publishing any phase, backend, service, relationship, extension handle, identity, or inspector row; any entry error, callback exception, malformed late record, duplicate, capacity failure, or existing-runtime conflict leaves the Runtime configuring and correctable with no partial extension state.
-  - Version-1 CPU-phase registration reuses the exact stable C-ABI-v8 callback result and callback-context semantics without adding a C ABI export. Names and descriptors are copied; callback code and user data are borrowed until checked detach. Successful phases enter the ordinary compiled graph, preserve fixed scratch and nested-task semantics, execute only under existing Runtime dispatch and overload rules, and can participate in copied extension-local dependency/resource declarations. No extension registration callback executes from a frame, executor, device-submission, completion, watchdog, or other post-start lane.
-  - Version-1 backend registration carries only the existing complete `rtfw_device_backend_api` version-1 table and is translated through the existing Runtime device-ABI-v1 compatibility path. It preserves backend capacity, borrowed instance/table lifetime, initialization, buffer/submission/completion, health/reset, reverse retryable shutdown, and no-executor-vendor-call rules. It exposes no HAL-v2 memory/topology or command/timeline table, CUDA Graph, XDMA control/event, cross-backend timeline, peer-memory, or combined-path capability and therefore cannot work around the M17-05 blocker.
-  - "Version-1 service registration defines a bounded named interface/version plus nonthrowing initialize, request-stop, quiesce, shutdown, and optional status hooks. Service callbacks execute only on the single host control path: initialize runs in registration order before extension backend/lane startup and before phase callbacks are admitted; request-stop is bounded, nonblocking, and idempotent; quiesce and shutdown run in reverse registration order only after frame callbacks, nested jobs, submissions/completions, and extension backend cleanup can no longer enter extension code. A service is never scheduled as an executor phase, never creates an implicit Runtime lane, never reenters Runtime control operations, and never performs registration after finalization."
-  - Ownership and state are explicit and inspectable. Runtime copies all names, table prefixes, semantic descriptors, and relationships, borrows extension code/instances/user data until checked detach succeeds, tracks registration generation and active phase/service/backend ownership, and reports configuring, registered, running, stop-requested, quiescent, cleanup-pending, detached, or failed state without exposing addresses. Handles encode Runtime ownership, kind, slot, and generation; zero, foreign-Runtime, wrong-kind, never-issued, detached, and prior-generation handles fail deterministically without invoking extension code or mutating output.
-  - Checked stop closes extension admission first, requests service and backend stop without waiting on an executor worker, quiesces Runtime phase/job/device work, completes the existing reverse extension-backend cleanup, and only then quiesces and shuts down services in reverse registration order before retiring extension registrations. The first error is retained while independent cleanup continues; unresolved backend ownership keeps every enclosing service it may reference alive. A failure preserves the exact unresolved owner and callback/table lifetime, keeps detach/unload readiness false, and retries only unresolved work. Destruction is a best-effort fallback and cannot relabel uncertain ownership as released.
-  - Checked detach is permitted only after Runtime stop has succeeded, every extension callback/job/backend/service reference is quiescent, and all registered ownership is released. It invalidates the generation and clears copied callable pointers before reporting unload readiness. M19-01 performs no operating-system unload and no hot reload; M19-03 remains responsible for Unreal world/module lifecycle, concurrent world-instance teardown, actual host unload orchestration, and long-run reload coverage.
-  - Extension descriptors, provisional/committed handle maps, copied phase/backend/service records, lifecycle state, and cleanup bookkeeping are fixed-capacity, Runtime-instance-owned, and represented exactly once in runtime/device control bytes and the existing M15 logical ledger without adding a MemoryPlan row or provider region. Configuration may allocate only within existing pre-start rules; registration, start, phase execution, service status, stop, retry, detach inspection, and stale-handle rejection add no ordinary post-start heap allocation, hidden thread, file/network I/O, blocking mutex on an RT lane, unbounded wait/retry, spill path, or cross-instance mutable global state.
-  - Extension name/version, negotiated ABI version, phase/backend/service semantic descriptors, relationships, and service interface versions participate in explicit configuration/graph/replay identity. Callback addresses, module handles, user-data pointers, provisional handles, mutable lifecycle state, and observed counters do not. Two Runtime instances using the same entry function receive distinct owners/generations and cannot share handles, service state, callbacks, backend ownership, status rows, cleanup state, or detach readiness.
-  - The supported default package adds only the reviewed `rt/extension_abi.h` header and additive Runtime C++ source surface needed by M19-01; it adds no default target, transitive loader dependency, experimental header, or experimental target. The old `rt/plugin_api.h`, `rt/plugin_manager.hpp`, `plugin_manager.cpp`, sample plugins, and plugin tests remain byte unchanged, experimental, default-uninstalled, and explicitly not a compatibility path for extension ABI version 1.
-  - Stable C ABI v8 remains exactly 70 exports with frozen fingerprint and SONAME 8; `rt/c_api.h`, every device-ABI-v1 declaration/layout/value, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime status numeric values, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log schemas and IDs, existing installed targets and compatibility aliases, release 1.2.1, all support matrices and qualification schemas/workflows, and Apache-2.0 remain unchanged. The extension ABI is a separately versioned registration boundary, not a silent C-ABI-v8 revision or a C++ binary ABI promise.
-  - Documentation and retained evidence define the exact ABI layouts and minimum prefixes, version negotiation, registration state machine, callback/thread rules, capacities, ownership matrix, stop/quiesce/detach order, retry and stale-handle behavior, package delta, threat model, and evolution/rollback policy. They state that in-process extensions are trusted native code, M19-01 does not sandbox or authenticate them, and no fixture, shared-library smoke, hosted CI, documentation, preflight, mock backend, or successful unload-readiness check is Unreal, physical hardware, HIL, field, RT1/RT2, signing, release, deployment, or production evidence.
-  - Focused C/C++ ABI, transaction, phase, backend, service, lifecycle, stale-handle, two-Runtime, no-allocation, package, and loader-isolation tests; complete deterministic local verification; mandatory GitHub CI; and human ABI/API, concurrency/lifetime, security, package/compatibility, and claim-boundary review pass before merge. M19 and CAP-M19 remain incomplete after M19-01.
+  - The implementation starts from exact clean default-branch baseline `dbedb8ba9779b0a39676576326d689702659872f`. M19-01 is present through merged target pull request 224 at `d5224e670e3ca5ebbe3d2aec5fda7d21213499a8`; later target changes through the baseline are portfolio-harness synchronization and the bounded aggregate-test timeout repair. Every retained M15 through M19-01 evidence record is present. M17-05 remains blocked, and M19-02 does not repair or bypass it or mark M17, M18, M19, CAP-M17, CAP-M18, or CAP-M19 complete.
+  - One source-distributed opt-in Unreal plugin contains a runtime adapter module and an automation-test module using documented public Unreal headers and APIs except for the exact `LowLevelTasks::FTask` and `LowLevelTasks::TryLaunch` source surfaces approved by D-009 for licensed source tag `5.8.1-release` at commit `71fe36aac5a8df5ccd66c763ffc902b29b6a9c43`. No other internal/private engine API is permitted. The module links a separately built relocated `rtfw_runtime` from the exact target revision with a compatible compiler, C++ runtime, configuration, architecture, and exception model; it does not compile RTFW sources into the module, expose a cross-compiler C++ binary boundary, depend on the experimental plugin manager, or become a default CMake target or installed SDK header.
+  - >-
+    The runtime module is passive: loading it constructs no `rt::Runtime`, registers no world, engine, tick, or hot-reload delegate, starts no worker, and owns no process-global mutable Runtime registry. M19-02 exposes configuring-time job, allocator, clock, and frame-context adapter objects only. World-to-Runtime ownership, start/step/stop orchestration, concurrent world instances, module shutdown, extension detach, operating-system unload, hot reload, and the complete sample remain exclusively M19-03 and M19-04 work.
+  - The Unreal job adapter reserves an explicit power-of-two capacity and all adapter-owned job/task/control storage before `Runtime::start()`, exposes an exact `rt::HostExecutorAdapter` with matching worker and total-queue capacities, copies each accepted `HostExecutorJob`, and submits it through the exact version-pinned `LowLevelTasks::FTask`/`TryLaunch` facility approved by D-009. Its submit operation is bounded and nonblocking, performs no adapter-owned allocation, retry, wait, spill, inline fallback, or new thread creation, and returns `queue_full` only when the job was neither accepted nor invoked.
+  - Every accepted engine job invokes the unchanged RTFW execute pointer exactly once with the copied contexts/token/scratch and a logical worker index below the declared count. Slot state prevents concurrent reuse until both RTFW execution and the engine scheduler have released the task node. Saturation, launch rejection, stop admission closure, late engine dispatch, stale/duplicate invocation, task-node reuse, and generation wrap fail closed without executing a later job, releasing live scratch, or losing an accepted completion.
+  - The required one-job help callback attempts at most one already accepted adapter job using the approved exact-version low-level task operation and returns immediately. It never waits for arbitrary engine work, recursively drains the engine scheduler, executes an unaccepted job, or enters any internal/private Unreal task header outside the D-009 exception. Nested RTFW range/reduction work on engine task workers completes without deadlock under full declared capacity, while unrelated engine tasks and the game thread remain outside RTFW ownership.
+  - Engine worker threads, scheduler queues, internal task bookkeeping, thread IDs, affinity, priority, stacks, and any engine-internal allocation remain externally owned and verify-only. The adapter reports only its exact preallocated slots and declared logical capacity. A logical RTFW worker index is not presented as a physical Unreal worker identity or scheduling/affinity observation, and any engine-internal allocation discovered during accepted submit/help is recorded and blocks a no-allocation or RT claim rather than being hidden.
+  - The Unreal allocator adapter supplies the existing copied memory-provider version-1 table and borrows only an explicitly owned adapter context through checked Runtime stop. It allocates exactly the three existing active phase-scratch, task-scratch, and trace regions through `FMemory` with the requested checked size and alignment, returns nonoverlapping exact extents/tokens, independently verifies the allocator-reported extent before claiming observation, and releases only successfully owned tokens once in reverse Runtime order.
+  - Allocator apply, observe, rollback, and release are nonthrowing, nonreentrant, status-preserving, and retry-safe. The adapter advertises only capabilities it actually implements. It never describes `FMemory` allocation or allocator-size observation as guard pages, huge pages, prefault, residency, locking, device/DMA pinning, NUMA placement, physical commitment, or independent OS readback; strict requests for unsupported facts fail before callbacks, and best-effort reports remain explicitly unsupported, incomplete, or zero as appropriate.
+  - >-
+    The Unreal clock adapter is Runtime-instance-borrowed and returns monotonically nondecreasing nanoseconds from one documented engine monotonic clock without a process-global epoch or floating accumulation. Conversion to nanoseconds is checked for finite input, sign, precision/range, and overflow. It does not claim or implement engine-owned sleeping: `supports_absolute_sleep()` is false and `sleep_until_ns()` returns `clock_failure`, so the adapter supports host-driven `step()` only and cannot be passed off as qualified `run_periodic()` pacing.
+  - A frame-context helper maps an explicit engine frame sequence, positive finite simulation delta, and optional engine-clock deadline/nominal release into `HostFrameContext` with documented rounding and overflow behavior. It never derives simulation delta from the monotonic clock, sleeps, invents a frame counter, changes active-rate logical-time semantics, or silently mixes engine world time, real time, audio time, network time, and the Runtime clock domain.
+  - Real approved-engine automation exercises the actual runtime module, D-009 task facility, public `FMemory`, and engine monotonic clock in both an editor target and a non-editor game target. It proves exact accepted/executed job counts, capacity and launch rejection without acceptance, task-node retirement before reuse, nested helping, scratch/token preservation, allocator acquisition/rollback/release, unsupported-policy truth, monotonic/overflow/rounding behavior, Runtime host-driven start/step/checked-stop integration, and two independent adapter/Runtime objects. Portable fake seams may supplement these tests but never replace or relabel the engine run.
+  - Adapter configuration, job storage, allocator ownership, and clock state remain instance-owned and bounded. After successful Runtime start, RTFW and adapter-owned work adds no ordinary heap allocation, hidden thread, file/network I/O, blocking mutex, unbounded wait/retry, or spill path. Any allocation or synchronization internal to the approved Unreal task system is measured and reported separately as host behavior and prevents an RT1/RT2 or worst-case claim until the complete engine tuple is qualified.
+  - The approved Unreal tuple records a preselected, non-flaky functional performance-regression budget for adapter submit/help overhead, sustained bounded-capacity job completion, and allocator setup/teardown outside the steady-state frame. Results are compared only on the same retained engine/host/build tuple, never used as a portable or worst-case latency claim, and a regression blocks merge rather than changing thresholds after measurement.
+  - Stable C ABI v8 remains exactly 70 exports with frozen fingerprint and SONAME 8; device ABI v1, extension ABI v1, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime status numeric values, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log schemas and IDs, the default installed target/header inventory and aliases, release 1.2.1, support matrices, qualification schemas/workflows, and Apache-2.0 remain unchanged.
+  - Documentation and retained evidence identify the exact Unreal version/distribution and commit, UBT/UAT, compiler/SDK/runtime, host OS/architecture, RTFW library configuration and digest, plugin staging path, public engine APIs used, the exact D-009 internal headers/symbols, commands, test reports, allocation observations, and changed/preserved invariants. A plugin manifest, UBT compile, editor automation run, fixture project, mock seam, hosted CI, preflight, or documentation does not by itself establish packaged-game behavior, world lifecycle, unload/hot reload, physical hardware, HIL, field, latency, RT1/RT2, signing, release, deployment, or production readiness.
+  - Focused approved-engine automation, default target verification, relocated SDK linkage, editor and non-editor UBT builds, complete deterministic local verification, mandatory standard and Unreal CI, and human engine-API, concurrency/lifetime, allocator/accounting, time/determinism, package/compatibility, security, and claim-boundary reviews pass before merge. M19 and CAP-M19 remain incomplete after M19-02.
 validation:
   local:
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
-    - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
-    - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='ExtensionAbi.*:ExtensionRegistration.*:ExtensionLifecycle.*:MemoryPlan.*Extension*:DeterminismReplay.*Extension*:TraceNoAlloc.*Extension*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm19_extension_registration|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data'
-    - cmake -S . -B build/m19-01-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
-    - cmake --build build/m19-01-package --parallel 2
-    - cmake --install build/m19-01-package --prefix "$PWD/build/m19-01-install"
-    - cmake -S tests/package_consumer -B build/m19-01-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m19-01-install"
-    - cmake --build build/m19-01-package-consumer --parallel 2
-    - ctest --test-dir build/m19-01-package-consumer --output-on-failure
     - ./scripts/agent-verify.sh full
+    - cmake -S . -B build/m19-02-sdk -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
+    - cmake --build build/m19-02-sdk --parallel 2
+    - cmake --install build/m19-02-sdk --prefix "$PWD/build/m19-02-sdk-install"
+    - cmake -S tests/package_consumer -B build/m19-02-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m19-02-sdk-install"
+    - cmake --build build/m19-02-package-consumer --parallel 2
+    - ctest --test-dir build/m19-02-package-consumer --output-on-failure
+    - bash scripts/verify-unreal.sh --engine-root "$RTFW_UNREAL_ENGINE_ROOT" --sdk-root "$PWD/build/m19-02-sdk-install" --configuration Development
+    - bash scripts/verify-unreal.sh --engine-root "$RTFW_UNREAL_ENGINE_ROOT" --sdk-root "$PWD/build/m19-02-sdk-install" --configuration Shipping --build-only
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
-    - if nm -u build/agent-full/librtfw_runtime.a | rg '(^|[^A-Za-z])(dlopen|dlsym|dlclose|LoadLibrary|GetProcAddress|FreeLibrary)(A|W)?$'; then exit 1; fi
   focused_tests_to_add:
-    - C11 and C++20 header self-containment plus exact version-1 constants, required-prefix offsets, record sizes/alignment on LP64 and LLP64, fixed-width fields, calling conventions, zero defaults/reserved tails, and documented direct/static entry symbol
-    - negotiation overlap and exact selection with current/minimum boundaries, short and larger records, unsupported/inconsistent versions, null functions/instances, partial writes, nonzero reserved data, malformed names/enums/booleans, checked size/count overflow, and callback exception containment
-    - all-or-nothing staging and publication after every entry, phase, backend, service, relationship, duplicate-name, capacity, allocation, and existing-Runtime conflict failure, followed by corrected successful registration without leaked provisional or committed handles
-    - CPU phase callback context/scratch/task equivalence to stable C ABI v8, ordinary graph/dependency execution, callback error propagation, zero post-start allocation, and proof that registration/entry callbacks never execute on a runtime lane
-    - device-ABI-v1 backend registration through the canonical HAL-v2 compatibility adapter with success, saturation, early completion, loss/reset, failed initialization/unregister/shutdown, reverse retry, and explicit absence of native HAL-v2 command/topology capability or M17-05 bypass
-    - service initialize, request-stop, quiesce, shutdown, and status ordering across success, startup failure, active callback/job, service failure, backend cleanup failure, first-error retention, unresolved-only retry, idempotence, and zero service execution on executor/device/watchdog lanes
-    - owner/kind/slot/generation validation for zero, foreign, cross-kind, never-issued, detached, reused-slot, and prior-generation handles with transactional output and proof that stale rejection never enters extension code
-    - detach-readiness rejection before successful stop or while any callback/job/backend/service owner remains, pointer clearing and generation retirement on success, direct/static fixture unload after readiness, and no supported-runtime module-loading or path-search dependency
-    - exact extension/control/device storage accounting, overflow and capacity rejection before side effects, conditional semantic identity, unchanged identity when no extension is registered, and two-Runtime isolation of every handle/state/callback/backend/service/cleanup field
-    - default and relocated installed-package C/C++ consumers for the new header and Runtime surface, exact one-header inventory delta, unchanged target/alias inventory, frozen 70-export C ABI/SONAME, and byte-unchanged legacy experimental plugin paths
-    - ThreadSanitizer coverage of phase execution, status inspection, stop/retry/detach, stale calls, concurrent independent runtimes, and backend/service completion without weakening permanent M15/M16/M17 gates
+    - approved-engine module load with zero Runtime, delegate, worker, allocation owner, or global mutable registry side effects
+    - exact adapter capacity reservation and matching Runtime worker/queue configuration, including zero, non-power-of-two, overflow, mismatch, double-attach, freeze, and two-instance rejection cases
+    - actual version-pinned LowLevelTasks submission with exact-once execution, valid logical worker indexes, scratch/token preservation, launch rejection without acceptance, full-capacity queue rejection, engine-reference retirement before slot reuse, late and duplicate dispatch, generation wrap, and stop-admission closure
+    - one-job nonblocking helping and nested parallel-for/reduce completion at saturation without arbitrary scheduler drain, hidden threads, blocking waits, retry loops, or any internal/private engine task API beyond the exact D-009 exception
+    - adapter-owned allocation instrumentation covering construction, reservation, submit, help, execution, stop, and destruction, with separate truthful recording of any engine-internal task-system allocation
+    - actual `FMemory` allocation for each active provider row with size/alignment/extent checks, nonaliasing across rows and Runtime instances, partial-acquisition failure, apply/observe failure, reverse rollback/release, unresolved retry, and no double free
+    - exact capability-bit and observation truth tests proving allocator extent observation while rejecting or leaving unsupported guard, huge-page, prefault, residency, lock, pin, NUMA, physical commitment, and strict overclaim cases
+    - actual engine monotonic-clock nondecrease, checked nanosecond conversion, epoch isolation, precision/range/overflow boundaries, unsupported absolute sleep, and proof that large simulation delta never paces the caller
+    - frame conversion for finite positive delta, rounding boundaries, optional deadline and nominal release in one clock domain, invalid frame/delta/range rejection, and unchanged active-rate logical-time expectations
+    - approved-engine host-driven Runtime lifecycle with root and nested jobs, queue pressure, provider-backed scratch/trace, callback failure, checked stop, stale completion rejection, and two isolated adapter/Runtime pairs
+    - editor Development automation plus non-editor Development and Shipping compilation from a relocated exact-revision SDK, with no editor-only dependency in the runtime module and no default CMake package/header/target delta
+    - standard RTFW host-adapter, memory-provider, clock, no-allocation, extension-lifecycle, M15/M16/M17, ABI, package, determinism, and sanitizer regressions
   required_ci:
-    - Documentation contract workflow validating the extension ABI layout/version/state-machine tokens, release digest ledger, exact one-header package delta, frozen C ABI/device ABI/plugin boundary, and truthful M17/M18/M19 claims
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of negotiation, transactional registration, phase/backend/service execution, malformed tables, stop/retry/detach, stale handles, identity, accounting, and two-Runtime isolation
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix proving the same C ABI record prefixes/layout diagnostics, version negotiation, calling convention, DLL fixture symbol, lifecycle, stale-handle, source compatibility, and installed C/C++ consumer behavior
-    - Unified executor GCC ThreadSanitizer job running the complete ExtensionAbi, ExtensionRegistration, ExtensionLifecycle, no-allocation, mock-device compatibility, cleanup/retry, and two-Runtime suites plus every permanent M15/M16/M17 fresh-process gate without weaker filters or timeouts
-    - Determinism GCC and Clang FMA-on/FMA-off jobs and artifact exchange proving unchanged no-extension artifacts and explicit deterministic identity separation for extension semantic descriptors without hashing pointers or mutable lifecycle state
-    - C/C++ embedding, add_subdirectory, installed package, archive relocation, non-default include layout, exact SDK header self-containment/inventory, compatibility aliases, exact 70-export C ABI and SONAME, dependency review, SBOM, autotune, scaling, fuzz-smoke, and release-contract gates
-    - Existing CUDA-toolkit compile/package and node-free XDMA compile/package jobs plus all M14.1/M15/M16/M17 core/memory/command/vendor gates remain mandatory portable build or simulated evidence only; no hardware or qualification workflow is required or sufficient for M19-01
+    - Documentation contract workflow checking exact Unreal tuple/evidence tokens, the closed D-009 exception boundary, default package invariants, release digests, and truthful M17/M18/M19 claims
+    - Existing Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer plus all permanent host-adapter, provider, clock, M15, M16, M17, and M19-01 tests
+    - Existing Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix proving the exact baseline Runtime, package, C ABI, and M19-01 compatibility surfaces remain unchanged
+    - Existing unified-executor GCC ThreadSanitizer job retaining host-adapter saturation/help/stale-completion, memory-provider lifecycle, two-Runtime, no-allocation, and permanent M15/M16/M17/M19-01 gates
+    - Approved Debian 12 x86_64 Unreal runner bound to source tag `5.8.1-release`, exact engine commit `71fe36aac5a8df5ccd66c763ffc902b29b6a9c43`, and bundled `v26_clang-20.1.8-rockylinux8` Clang/libc++/lld SDK; build the relocated RTFW SDK with that compatible tuple, stage the source plugin into the fixture project, build Development Editor and Development plus Shipping game targets, and archive complete UBT manifests/logs
+    - Approved Unreal editor-commandlet automation run for every `RTFW.M19_02` job, allocator, clock, lifecycle, saturation, failure, allocation-observation, and two-instance test with machine-readable report export and exact engine/plugin/SDK identities
+    - Unreal module warnings-as-errors and available engine-supported address/undefined sanitizer or static-analysis run; any unavailable sanitizer is recorded as unperformed and cannot be replaced by standard RTFW TSan or by a fixture
+    - Approved-engine performance-regression job on the retained tuple using thresholds selected before measurement for submit/help overhead, sustained bounded-capacity completion, and allocator setup/teardown; hosted noise, a changed tuple, or a post-selected threshold cannot produce a pass
+    - Relocated default SDK and clean consumer matrix, archive relocation, non-default include layout, exact installed header/target/alias inventory, exact 70-export C ABI and SONAME, dependency/SBOM, determinism artifact exchange, fuzz smoke, autotune, scaling, and release-contract gates
   manual:
-    - Human extension-ABI and public-API review must approve every version-1 C prefix/layout/calling convention, forward-size rule, negotiation result, provisional/committed handle model, transaction boundary, additive C++ surface, evolution policy, and preservation of stable C ABI v8, device ABI v1, Runtime status, package-target, schema, release, support, and license boundaries.
-    - Human concurrency, lifetime, and security review must confirm entry reentrancy rejection, callback/thread rules, copied-versus-borrowed ownership, service/backend stop ordering, quiescence proof, first-error and retry semantics, generation retirement, pointer clearing before unload readiness, Runtime-instance isolation, bounded accounting, and no post-start allocation, hidden lane, unbounded wait, or runtime loader dependency.
-    - Human package, compatibility, and claim review must confirm the exact one-header default inventory delta, byte-unchanged experimental loader and M15-M18 evidence, no M17-05 workaround, and no implication of sandboxing, authentication, Unreal integration, physical hardware, HIL, latency, RT1/RT2, signing, release, deployment, or production readiness.
+    - A human must approve and record the exact Unreal version/distribution and license access, engine commit or build identifier, supported host platform, UBT/UAT, compiler/SDK/C++ runtime, runner custody, and commands before implementation evidence is accepted; a bare environment flag is not an engine tuple.
+    - Human engine-API and concurrency review must confirm that the exact D-009 task exception is the only internal/private surface used, all other task/time/memory/module APIs are public and version-supported, every task node is pre-reserved and safely reusable only after scheduler-reference retirement, submit/help are bounded and nonblocking, accepted work cannot outlive adapter ownership, logical worker indexes are not physical claims, and no world/module lifecycle or unload proof is implied.
+    - Human allocator/accounting and time/determinism review must confirm exact `FMemory` ownership and extent observation, truthful unsupported policy fields, reverse retryable cleanup, no false residency/pinning/NUMA claim, monotonic checked conversion, explicit delta rounding, no engine-owned sleep, and two-instance isolation.
+    - Human package, compatibility, security, and claim review must confirm exact-revision/toolchain linkage, no default SDK target/header change, no experimental loader dependency, frozen C/device/extension ABI and schemas, retained prior evidence, and no implication of packaged sample, world lifecycle, hot reload, hardware/HIL, latency, RT1/RT2, release, deployment, or production readiness.
 risk:
   class: high
   hazards:
-    - a size/version check can read beyond a short record, accept an incompatible prefix, interpret an unknown suffix as capability, or diverge between LP64 and LLP64 layouts
-    - sequential phase/backend/service registration can leak a visible prefix when a later record fails unless the complete extension transaction is staged and committed atomically
-    - a copied descriptor can still retain a borrowed string, table, callback, instance, or user-data pointer whose module or owner is released before checked detach
-    - a stale, foreign, cross-kind, or reused-slot handle can reach newly loaded code or another Runtime if owner and generation checks are incomplete
-    - service stop or backend cleanup can deadlock, run on an RT lane, clear ownership after uncertain failure, or report unload readiness while a callback, nested job, submission, completion, or status call remains active
-    - a C++ exception can cross a C callback boundary, or in-process extension code can corrupt the host despite version validation because the ABI is not a sandbox or trust boundary
-    - extension metadata, provisional handles, or callback addresses can enter graph/replay identity nondeterministically or escape exact M15 accounting and post-start allocation limits
-    - reusing the experimental loader can leak `dl`, SimCore, scheduler, feature macros, research headers, or an unsupported package target into the supported runtime
-    - exposing native HAL-v2 tables through the version-1 extension ABI can silently bypass the blocked M17-05 path or duplicate device lifecycle and validation semantics
-    - a fixture DLL/shared object, hosted CI, mock backend, successful stop, or stale-handle test can be overstated as safe arbitrary-code execution, Unreal hot reload, physical integration, RT, or production evidence
+    - the exact version-pinned low-level task surface may change on an Unreal port, retain an embedded task node after RTFW completion, or fail to expose retirement semantics compatible with the existing HostExecutorAdapter contract
+    - engine scheduling may execute a copied job after Runtime stop or adapter destruction, execute it twice through launch/help races, or reuse a slot while the scheduler still holds internal references
+    - a logical worker index may be confused with a physical Unreal worker identity, allowing unsafe assumptions about affinity, stack, priority, concurrency, or deterministic completion order
+    - FMemory allocation-size metadata may be mislabeled as committed physical memory, independent OS residency, locking, pinning, huge pages, NUMA placement, or allocator overhead exactness
+    - a partial allocator failure or failed rollback can double-free, release an overlapping token, erase ownership needed for retry, or let Runtime storage outlive the engine allocator/module
+    - floating engine delta or cycle conversion can round inconsistently, overflow, regress, mix clock domains, or make host-driven time accidentally pace or invent an epoch
+    - linking a separately built C++ static library into an Unreal module can cross incompatible compiler, CRT, iterator-debug, exception, architecture, or build-configuration boundaries
+    - plugin module startup can accidentally acquire Runtime/world/delegate ownership and make M19-02 appear unload-safe even though M19-03 lifecycle and detach orchestration are absent
+    - an editor automation fixture or UBT build can be overstated as packaged-game, hot-reload, long-run, hardware, HIL, field, timing, RT, release, deployment, or production evidence
+    - broad build/checker changes can drift the exact default SDK inventory, stable ABI, experimental-loader isolation, M17-05 blocker, support matrices, release version, or prior retained evidence
   stop_conditions:
-    - the exact baseline is unavailable, dirty, lacks M17-04 ancestry or M18-01 commit `5eb8f101f692b2aff85f82f4a1660630db750706`, lacks any retained M15/M16/M17/M18-01 evidence record, or no longer records the actual M17-05 blocker truthfully
-    - target contracts or actual code require the supported registration ABI to reuse the experimental plugin manager, introduce a loader dependency into `rtfw_runtime`, or expose a C++ binary layout across the extension boundary
-    - complete transactional registration cannot be achieved without leaving a phase, backend, service, relationship, handle, identity, accounting row, or borrowed owner visible after failure
-    - correct quiescence and detach readiness cannot be proven without unloading code while it may be executing, detaching/canceling a lane, inventing completion, clearing uncertain backend/service ownership, or adding an unbounded wait/retry
-    - implementation requires changing stable C ABI v8 exports/fingerprint/SONAME, `rt/c_api.h`, any device-ABI-v1 declaration/layout/value, HAL-v2 core or extension semantics, Runtime status numeric values, runtime-profile schema 7/25 keys, observability/rate/artifact schema or IDs, existing package targets/aliases, release version, support matrix, qualification schema/workflow, or license
-    - satisfying backend registration requires native HAL-v2 command/topology exposure, repairing or bypassing M17-05, changing CUDA/XDMA code, adding cross-backend synchronization, or claiming a combined or peer path
-    - a service needs an implicit worker, executor-lane blocking, file/network I/O on an RT lane, post-start heap allocation, shared process-global registry, or callback after generation retirement
-    - deterministic tests require Unreal Engine, physical CUDA/FPGA/XDMA hardware, device nodes, root privilege, a controlled timing host, secrets, signing, network access, release, deployment, or production access
-    - mandatory focused, contract, package, full, CI, sanitizer, or human review must be skipped, weakened, or relabeled successful
-    - a required source, test, workflow, documentation, governance, checker, digest, or evidence change falls outside allowed paths or enters a forbidden path
+    - the exact baseline is unavailable, dirty, lacks merged M19-01 commit `d5224e670e3ca5ebbe3d2aec5fda7d21213499a8`, lacks any retained M15 through M19-01 evidence record, or no longer records the actual M17-05 blocker truthfully
+    - no approved, locally or CI-resolvable Unreal Engine root and exact version/build, host platform, UBT/UAT, compiler/SDK/runtime, license/access approval, and retained command path are available; `UNREAL_ENGINE_APPROVED` without that tuple is insufficient to implement or validate this environment batch
+    - the exact D-009 `LowLevelTasks::FTask`/`TryLaunch` surface at Unreal commit `71fe36aac5a8df5ccd66c763ffc902b29b6a9c43` cannot provide pre-reserved reusable task storage, bounded nonblocking accept/reject, exact-once execution, safe scheduler-reference retirement before reuse, and at-most-one-job helping without per-submit adapter allocation, blocking wait, unbounded retry, hidden threads, arbitrary scheduler drain, or another internal/private API
+    - accepted Unreal work can outlive checked Runtime stop or adapter ownership and correcting that fact requires world/module lifecycle, forced cancellation, detach, hot reload, or unload orchestration assigned to M19-03
+    - the Unreal allocator cannot meet the existing five-callback provider validation and truthful independent extent-observation rules without claiming unobserved residency, lock, pin, NUMA, guard, huge-page, physical, or ownership facts
+    - correct engine-clock integration requires changing RuntimeClock, HostFrameContext, active-rate logical time, Runtime status values, periodic pacing, or an accepted ADR instead of adapting the existing host-driven surface
+    - implementation requires changing any `rt/include/rt` or `rt/src` file, stable C ABI v8 export/fingerprint/SONAME, device ABI v1, extension ABI v1, HAL semantics, Runtime status, runtime-profile or observability/artifact schema, default installed target/header/alias inventory, release version, support matrix, qualification schema/workflow, or license
+    - implementation requires using the experimental plugin loader, any internal/private Unreal header or symbol outside the exact D-009 exception, a cross-toolchain C++ binary contract, direct inclusion of RTFW implementation sources in the plugin, or a module-owned global Runtime registry
+    - deterministic acceptance requires physical CUDA/FPGA/XDMA hardware, device nodes, root privilege, controlled latency hardware, secrets, signing, release, deployment, production access, or relabeling a fixture/mock/preflight/document as actual engine evidence
+    - required focused engine automation, editor and non-editor UBT builds, standard full verification, package/ABI gates, mandatory CI, or human reviews must be skipped, weakened, or relabeled successful
+    - a required source, fixture, script, workflow, documentation, governance, checker, digest, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Revert the extension-ABI-v1 header and Runtime registration/inspection/detach surface, transactional registry and service lifecycle integration, accounting/identity changes, tests/fixtures/CI, one-header package inventory update, documentation/governance, release digests, and retained M19-01 evidence as one coherent batch. Before removing the feature from a running integration, require checked Runtime stop and checked extension detach to resolve every callback, job, backend, service, and borrowed owner; never unload code or release extension state while readiness is false. No repository data, host setting, support record, release, or deployment is migrated. If an external extension was built against ABI version 1, retain the matching header/runtime revision or mark that artifact explicitly unsupported rather than silently reusing version 1 for incompatible semantics.
+  strategy: Revert the Unreal plugin runtime/test modules, fixture project, verification scripts/workflow, opt-in staging or build plumbing, documentation/governance, release digests, and retained M19-02 evidence as one coherent batch. Before removing or replacing the adapter in an integration, require the host to stop every Runtime successfully and prove every accepted engine job and provider token is quiescent/released; M19-02 supplies no world/module unload path, so do not unload or destroy the plugin while any adapter owner is live. Remove staged plugin and test-build outputs from the fixture or runner only after that check. No repository data, engine project content, host setting, support record, release, or deployment migration is authorized.
   data_migration: none
-  release_action: Do not publish a release, load or unload an operator module outside tests, promote a support/qualification tuple, mark M17/M18/M19 complete, sign an artifact, deploy, or change production state from this batch.
+  release_action: Do not publish a release or engine plugin, claim packaged-game/world/unload support, promote a hardware/RT/engine support tuple, sign an artifact, deploy, change settings, or mark M17/M18/M19 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M19-01-<date>.md
-    - exact baseline and M17-04/M18-01 ancestry, initial worktree state, changed-file allowlist, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - extension ABI version/current-minimum matrix, exact version-1 record/table sizes, alignments, offsets, required prefixes, calling conventions, reserved rules, symbol contract, capacities, and every rejected negotiation/input case on Linux and Windows
-    - complete registration transaction traces for phase/backend/service/relationship success and every injected failure, provisional-to-committed handle maps, no-partial-publication proof, corrected retry, and two-Runtime owner/generation isolation
-    - phase callback context/task/scratch behavior, device-ABI-v1 compatibility traversal, service control-lane lifecycle, exact entry/callback thread identities, stop/quiesce/shutdown/detach order, first-error retention, unresolved ownership, retry, and stale-handle rejection results
-    - fixed extension/control/device storage and M15 ledger reconciliation, configuration and graph/replay identity comparisons, post-start allocation results, ThreadSanitizer results, and pointer/module-handle exclusion proof
-    - clean installed C/C++ consumer and archive-relocation results, exact one-header package inventory delta, no new target or loader dependency, byte-unchanged legacy plugin paths, frozen 70-export C ABI/fingerprint/SONAME, and device/HAL/schema/release/support/license compatibility status
-    - changed and preserved invariants, rollback result, residual risks, and every unperformed Unreal, hot-reload/long-run, physical hardware, CUDA/XDMA/combined, HIL, field, controlled latency, thermal, endurance, RT1, RT2, sandboxing, authentication, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static C ABI layout, direct/static entry negotiation, unit and shared-library fixture registration, device-v1 mock compatibility, bounded transaction/lifecycle/stale-handle behavior, sanitizer, package, no-allocation, deterministic identity, cross-instance isolation, and portable RT0 functional extension behavior only. An extension remains trusted in-process native code; a fixture library, mock backend, hosted CI, preflight, document, successful quiescence, or unload-readiness result does not establish sandboxing, provenance, authenticated code, Unreal integration, arbitrary-module hot reload, physical hardware, HIL, field performance, worst-case latency, RT1, RT2, support promotion, signing, release, deployment, or production readiness.
+    - docs/evidence/M19-02-<date>.md
+    - exact target baseline and M19-01 ancestry, initial worktree state, retained-evidence inventory, changed-file allowlist, commands, exit codes, focused test counts, required standard and Unreal CI run/job identifiers, and human review results
+    - exact Unreal distribution/version/build and source commit, host OS/architecture, UBT/UAT, compiler/SDK/CRT, RTFW library configuration/commit/digest, plugin manifest/module identities, public engine headers/APIs, exact D-009 internal headers/symbols, and relocated staging paths
+    - job adapter capacity/layout/state machine, engine task-node lifetime and reuse proof, accepted/rejected/executed/helped/stale counts, logical worker-index rules, saturation/late/duplicate/stop traces, nested-work result, and adapter-owned plus engine-internal allocation observations
+    - allocator capability table, per-region request/allocation/extent/apply/observe/rollback/release records, exact alignment/nonaliasing/call order, injected failure and unresolved-retry results, and explicit unsupported residency/lock/pin/NUMA/guard/huge-page facts
+    - clock source and epoch, integer conversion/rounding/overflow cases, nondecrease and two-instance results, unsupported absolute-sleep result, frame-context mappings, and proof that host-driven steps do not pace
+    - exact preselected adapter performance thresholds, retained engine/host/build identity, raw samples and summary, comparison result, and explicit non-portable/non-RT claim boundary
+    - editor and non-editor UBT build manifests/logs, engine automation machine-readable reports, standard sanitizer/static-analysis and package/full-verification results, exact unchanged default package/C/device/extension ABI/schema/support/version/license status, and prior-evidence preservation
+    - changed and preserved invariants, rollback result, residual risks, and every unperformed world lifecycle, module unload/hot reload, complete/packaged sample, long-run, physical CUDA/XDMA/combined, HIL, field, controlled latency, thermal, endurance, RT1, RT2, signing, release, staging, deployment, and production validation
+  claim_boundary: Evidence may establish one named approved Unreal tuple's source-integrated module build using the exact D-009 task exception, editor automation, non-editor compilation, bounded job-adapter behavior, FMemory-backed three-region provider behavior, engine-monotonic host-driven clock conversion, standard package/sanitizer compatibility, and portable RT0 functional integration only. It does not establish compatibility with another Unreal version or commit. A plugin manifest, fixture project, mock seam, UBT compile, editor commandlet, hosted or self-hosted runner, allocator-size observation, or successful checked Runtime stop does not establish packaged-game or complete-sample behavior, world lifecycle, multiple-world ownership, module unload or hot reload safety, absence of engine-internal allocation, worst-case latency, physical hardware, HIL, field performance, RT1, RT2, support promotion, signing, release, deployment, or production readiness.

@@ -2,11 +2,30 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M19-01 starts from exact target
-baseline `5eb8f101f692b2aff85f82f4a1660630db750706`. M17 remains active and
-incomplete because M17-05 is blocked. The binding M19-01 contract is
-`contracts/active-batch.yaml`, sourced from control revision
-`e2ce44f28d3d3f92d7a8bf4d4f1c4ba7b563a185`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M19-02 contract names
+baseline `dbedb8ba9779b0a39676576326d689702659872f` and control revision
+`1032a7cda347dbd9fe9e9984836ae0280be888b7`. The reviewed worktree head is
+`db8d14a523e6c79895ade4a0db003513f625312f`, whose intervening commits are
+portfolio-harness synchronization. M17-05 remains blocked, so M17 is
+incomplete because native command-capability discovery is still unavailable.
+blocked, and M19/CAP-M19 remain incomplete.
+
+## M19-02 review handoff
+
+`integrations/unreal/RTFWUnreal` is an opt-in source plugin for the exact Unreal
+5.8.1 commit and bundled Clang/libc++/lld tuple in `docs/unreal_adapter.md`.
+The module is passive. Adapter owners must outlive checked Runtime stop and
+engine task-node retirement; M19-02 proves no world, detach, unload, or hot
+reload lifecycle.
+
+The review repaired the UE 5.8 UBT architecture/build-setting surfaces, made
+the Unreal workflow build the complete install set, retained UBT/commandlet
+logs, and added observe-failure rollback/release automation. The local
+read-only engine sandbox permitted exact API and UBT-rules review but blocked
+the engine's generated-state writes before C++ automation. Do not accept or
+promote the engine tuple until the approved writable runner completes editor,
+Development game, Shipping game, automation, static-analysis, performance,
+allocation-observation, and human review gates.
 
 ## M19-01 implementation handoff
 
@@ -19,9 +38,9 @@ control-thread rule, retry order, accounting, identity, evolution, and trust
 boundary are in `docs/extension_registration.md`.
 
 Do not add a loader or release extension code until `stop()` and
-`detach_extension()` both succeed. M19-03 owns Unreal and host module unload
-orchestration. M19 and CAP-M19 remain incomplete. M17-05 remains blocked and
-M18 remains unpromoted.
+`detach_extension()` both succeed. M19-03 owns Unreal world and host module
+unload orchestration. M19 and CAP-M19 remain incomplete. M17-05 remains
+blocked and M18 remains unpromoted.
 
 ## Implemented boundary
 

@@ -1,0 +1,27 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0-m19.02",
+  "FriendlyName": "RTFW Unreal Adapter",
+  "Description": "Opt-in passive RTFW job, memory, clock, and frame adapters for the exact approved Unreal Engine 5.8.1 source tuple.",
+  "Category": "Runtime",
+  "CreatedBy": "RTFW",
+  "CanContainContent": false,
+  "EnabledByDefault": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "RTFWUnreal",
+      "Type": "Runtime",
+      "LoadingPhase": "None"
+    },
+    {
+      "Name": "RTFWUnrealTests",
+      "Type": "DeveloperTool",
+      "LoadingPhase": "PostEngineInit",
+      "TargetAllowList": [
+        "Editor"
+      ]
+    }
+  ]
+}

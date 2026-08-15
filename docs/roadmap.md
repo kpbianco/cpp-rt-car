@@ -37,7 +37,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
 | M17 | In progress | M17-01 through M17-04 are merged; M17-05 combined sample is blocked by the native command-capability discovery contract mismatch; qualification remains |
 | M18 | Planned | M18-01 offline schemas/tools implemented; named NVIDIA, XDMA, combined, RT1, and optional RT2 campaigns remain |
-| M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
+| M19 | In progress | M19-01 is merged; M19-02 Unreal adapter is an uncommitted candidate; world/module lifecycle remains |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
 
 ## M0 — Product contract and truth reset
@@ -707,8 +707,12 @@ It provides transactional fixed-capacity phase, device-v1 backend, service,
 resource, and relationship staging; generation-bearing instance-local handles;
 host-control service lifecycle; checked stop/retry; and checked detach
 readiness without an OS loader. It adds exactly one default SDK header and no
-target or C ABI export. M19-03 retains Unreal world/module integration and
-actual host unload orchestration. CAP-M19 remains incomplete.
+target or C ABI export. M19-02 is an uncommitted opt-in Unreal 5.8.1 source
+adapter candidate for the existing host-executor, three-region provider,
+host-driven clock, and frame-context surfaces. It adds no default SDK surface
+and makes no world, unload, hot-reload, packaged-game, or RT claim. M19-03
+retains Unreal world/module integration and actual host unload orchestration.
+CAP-M19 remains incomplete.
 
 Planned outcome:
 
