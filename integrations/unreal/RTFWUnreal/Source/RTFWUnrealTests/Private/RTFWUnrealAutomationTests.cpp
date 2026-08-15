@@ -40,8 +40,8 @@ struct FJobProbe
 void ExecuteProbe(
     void* Context,
     void* CompletionContext,
-    uint64 Token,
-    uint32 WorkerIndex)
+    std::uint64_t Token,
+    std::uint32_t WorkerIndex)
 {
     auto& Probe = *static_cast<FJobProbe*>(Context);
     while (!Probe.bGate.load(std::memory_order_acquire))
@@ -54,7 +54,7 @@ void ExecuteProbe(
     Probe.Calls.fetch_add(1, std::memory_order_release);
 }
 
-rt::HostExecutorJob MakeJob(FJobProbe& Probe, uint64 Token)
+rt::HostExecutorJob MakeJob(FJobProbe& Probe, std::uint64_t Token)
 {
     static std::byte Scratch[64]{};
     return {
@@ -137,8 +137,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FRTFWModulePassiveTest::RunTest(const FString&)
 {
-    TestTrue(TEXT("runtime module is loaded"),
+    TestFalse(TEXT("runtime module does not auto-load"),
         FModuleManager::Get().IsModuleLoaded(TEXT("RTFWUnreal")));
+    TestNotNull(TEXT("runtime module explicitly loads"),
+        FModuleManager::Get().LoadModule(TEXT("RTFWUnreal")));
     FRTFWUnrealJobAdapter Jobs(2, 8);
     TestTrue(TEXT("explicit construction is valid"), Jobs.IsValid());
     const auto Stats = Jobs.GetStats();
@@ -353,6 +355,10 @@ bool FRTFWMemoryFailureTest::RunTest(const FString&)
         FRTFWUnrealJobAdapter Jobs(1, 8);
         TestTrue(TEXT("apply failure configured"),
             ConfigureAdapters(Runtime, Jobs, Memory, Configuration));
+        FRuntimeProbe Probe;
+        TestEqual(TEXT("apply fixture callback registered"),
+            Runtime.register_callback({"unreal.apply.failure", &RunRoot, &Probe}),
+            rt::Status::ok);
         rt::CpuMemoryPolicy Policy;
         Policy.memory_policy_count = 1;
         Policy.memory_policies[0].region = rt::memory_region_phase_scratch;
@@ -363,9 +369,17 @@ bool FRTFWMemoryFailureTest::RunTest(const FString&)
         TestEqual(TEXT("apply fixture finalizes"), Runtime.finalize(), rt::Status::ok);
         TestEqual(TEXT("apply failure aborts start"),
             Runtime.start(), rt::Status::internal_error);
-        TestEqual(TEXT("failed start releases all tokens"),
-            Memory.GetStats().LiveAllocations, uint32{0});
+        auto Stats = Memory.GetStats();
+        TestEqual(TEXT("failed start retains all tokens for retry"),
+            Stats.LiveAllocations, uint32{3});
+        TestTrue(TEXT("failed apply is rollback eligible"),
+            Stats.RolledBack >= uint64{1});
+        Memory.FailApplyAtForTesting(-1);
+        TestEqual(TEXT("apply retry starts"), Runtime.start(), rt::Status::ok);
         Jobs.CloseAdmission();
+        TestEqual(TEXT("apply retry stops"), Runtime.stop(), rt::Status::ok);
+        TestEqual(TEXT("apply retry releases all tokens"),
+            Memory.GetStats().Released, uint64{3});
     }
 
     {
@@ -376,6 +390,10 @@ bool FRTFWMemoryFailureTest::RunTest(const FString&)
         FRTFWUnrealJobAdapter Jobs(1, 8);
         TestTrue(TEXT("observe failure configured"),
             ConfigureAdapters(Runtime, Jobs, Memory, Configuration));
+        FRuntimeProbe Probe;
+        TestEqual(TEXT("observe fixture callback registered"),
+            Runtime.register_callback({"unreal.observe.failure", &RunRoot, &Probe}),
+            rt::Status::ok);
         rt::CpuMemoryPolicy Policy;
         Policy.memory_policy_count = 1;
         Policy.memory_policies[0].region = rt::memory_region_phase_scratch;
@@ -390,9 +408,14 @@ bool FRTFWMemoryFailureTest::RunTest(const FString&)
         TestEqual(TEXT("failed observation is not counted"), Stats.Observed, uint64{0});
         TestTrue(TEXT("observe failure rolls back applied policy"),
             Stats.RolledBack >= uint64{1});
-        TestEqual(TEXT("observe failure releases all tokens"),
-            Stats.LiveAllocations, uint32{0});
+        TestEqual(TEXT("observe failure retains all tokens for retry"),
+            Stats.LiveAllocations, uint32{3});
+        Memory.FailObserveAtForTesting(-1);
+        TestEqual(TEXT("observe retry starts"), Runtime.start(), rt::Status::ok);
         Jobs.CloseAdmission();
+        TestEqual(TEXT("observe retry stops"), Runtime.stop(), rt::Status::ok);
+        TestEqual(TEXT("observe retry releases all tokens"),
+            Memory.GetStats().Released, uint64{3});
     }
 
     {
@@ -410,13 +433,11 @@ bool FRTFWMemoryFailureTest::RunTest(const FString&)
         Policy.memory_policies[0].policy.locking = rt::PolicyToggle::enabled;
         TestEqual(TEXT("unsupported strict policy accepted for validation"),
             Runtime.set_cpu_memory_policy(Policy), rt::Status::ok);
-        TestEqual(TEXT("unsupported strict policy finalizes"),
-            Runtime.finalize(), rt::Status::ok);
-        TestEqual(TEXT("unsupported lock fails truthfully"),
-            Runtime.start(), rt::Status::invalid_config);
-        TestTrue(TEXT("unsupported policy recorded"),
-            Memory.GetStats().UnsupportedPolicies >= 1);
-        TestEqual(TEXT("unsupported failure releases all"),
+        TestEqual(TEXT("unsupported lock fails during capability validation"),
+            Runtime.finalize(), rt::Status::invalid_config);
+        TestEqual(TEXT("provider callback is not entered after preflight rejection"),
+            Memory.GetStats().UnsupportedPolicies, uint64{0});
+        TestEqual(TEXT("unsupported failure acquires nothing"),
             Memory.GetStats().LiveAllocations, uint32{0});
         Jobs.CloseAdmission();
     }
@@ -437,6 +458,10 @@ bool FRTFWRollbackRetryTest::RunTest(const FString&)
     const auto Configuration = AdapterConfiguration(1, 8);
     TestTrue(TEXT("retry runtime configured"),
         ConfigureAdapters(Runtime, Jobs, Memory, Configuration));
+    FRuntimeProbe Probe;
+    TestEqual(TEXT("retry fixture callback registered"),
+        Runtime.register_callback({"unreal.rollback.retry", &RunRoot, &Probe}),
+        rt::Status::ok);
     TestEqual(TEXT("retry runtime finalizes"), Runtime.finalize(), rt::Status::ok);
     TestEqual(TEXT("retry runtime starts"), Runtime.start(), rt::Status::ok);
     Memory.FailRollbackCountForTesting(1);
@@ -626,6 +651,11 @@ bool FRTFWPerformanceBudgetTest::RunTest(const FString&)
         const auto Configuration = AdapterConfiguration(1, 8);
         TestTrue(TEXT("allocator budget configuration"),
             ConfigureAdapters(Runtime, AllocatorJobs, Memory, Configuration));
+        FRuntimeProbe AllocatorProbe;
+        TestEqual(TEXT("allocator budget callback registered"),
+            Runtime.register_callback(
+                {"unreal.performance.allocator", &RunRoot, &AllocatorProbe}),
+            rt::Status::ok);
         TestEqual(TEXT("allocator budget finalize"), Runtime.finalize(), rt::Status::ok);
         TestEqual(TEXT("allocator budget start"), Runtime.start(), rt::Status::ok);
         AllocatorJobs.CloseAdmission();

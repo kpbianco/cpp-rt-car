@@ -9,6 +9,7 @@ ENGINE_ROOT=
 SDK_ROOT=
 CONFIGURATION=
 BUILD_ONLY=0
+MAX_PARALLEL_ACTIONS=${RTFW_UNREAL_MAX_PARALLEL_ACTIONS:-4}
 while (($#)); do
     case "$1" in
         --engine-root)
@@ -40,6 +41,10 @@ done
 [[ -n "$ENGINE_ROOT" && -n "$SDK_ROOT" ]] || { usage; exit 2; }
 [[ "$CONFIGURATION" == Development || "$CONFIGURATION" == Shipping ]] || {
     usage
+    exit 2
+}
+[[ "$MAX_PARALLEL_ACTIONS" =~ ^[1-8]$ ]] || {
+    printf 'RTFW_UNREAL_MAX_PARALLEL_ACTIONS must be an integer from 1 through 8\n' >&2
     exit 2
 }
 
@@ -108,12 +113,9 @@ if [[ "$CONFIGURATION" == Development ]]; then
     "$BUILD_SCRIPT" \
         RTFWUnrealTestHostEditor Linux Development \
         -Project="$PROJECT_FILE" -WaitMutex -NoHotReloadFromIDE \
+        -DisableAdaptiveUnity -MaxParallelActions="$MAX_PARALLEL_ACTIONS" \
         2>&1 | tee "$REPORT_ROOT/ubt-editor-development.log"
 fi
-"$BUILD_SCRIPT" \
-    RTFWUnrealTestHost Linux "$CONFIGURATION" \
-    -Project="$PROJECT_FILE" -WaitMutex -NoHotReloadFromIDE \
-    2>&1 | tee "$REPORT_ROOT/ubt-game-${CONFIGURATION,,}.log"
 
 if ((BUILD_ONLY == 0)); then
     [[ "$CONFIGURATION" == Development ]] || {
@@ -125,7 +127,8 @@ if ((BUILD_ONLY == 0)); then
         exit 1
     }
     "$EDITOR_COMMAND" "$PROJECT_FILE" \
-        -unattended -nop4 -nullrhi -nosplash \
+        -unattended -nop4 -nullrhi -nosound -nosplash \
+        -DDC=NoZenLocalFallback \
         -ExecCmds='Automation RunTests RTFW.M19_02; Quit' \
         -ReportExportPath="$REPORT_ROOT" \
         -TestExit='Automation Test Queue Empty' \
@@ -140,11 +143,17 @@ import json
 import pathlib
 import sys
 
-report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8-sig"))
 if not report.get("succeeded", False):
     raise SystemExit("RTFW.M19_02 automation report did not succeed")
 PY
 fi
+
+"$BUILD_SCRIPT" \
+    RTFWUnrealTestHost Linux "$CONFIGURATION" \
+    -Project="$PROJECT_FILE" -WaitMutex -NoHotReloadFromIDE \
+    -DisableAdaptiveUnity -MaxParallelActions="$MAX_PARALLEL_ACTIONS" \
+    2>&1 | tee "$REPORT_ROOT/ubt-game-${CONFIGURATION,,}.log"
 
 sha256sum "$SDK_ROOT/lib/librtfw_runtime.a" > "$REPORT_ROOT/rtfw-runtime.sha256"
 git -C "$ENGINE_ROOT" rev-parse HEAD > "$REPORT_ROOT/unreal-commit.txt"

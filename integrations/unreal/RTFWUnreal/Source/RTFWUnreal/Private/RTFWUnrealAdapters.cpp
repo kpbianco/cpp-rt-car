@@ -806,7 +806,7 @@ bool FRTFWUnrealClock::TryCyclesToNanoseconds(
         Nanoseconds);
 }
 
-uint64 FRTFWUnrealClock::now_ns() noexcept
+std::uint64_t FRTFWUnrealClock::now_ns() noexcept
 {
     uint64 Candidate = 0;
     if (!TryCyclesToNanoseconds(FPlatformTime::Cycles64(), Candidate))
@@ -825,7 +825,7 @@ uint64 FRTFWUnrealClock::now_ns() noexcept
     return Candidate < Previous ? Previous : Candidate;
 }
 
-rt::Status FRTFWUnrealClock::sleep_until_ns(uint64) noexcept
+rt::Status FRTFWUnrealClock::sleep_until_ns(std::uint64_t) noexcept
 {
     return rt::Status::clock_failure;
 }

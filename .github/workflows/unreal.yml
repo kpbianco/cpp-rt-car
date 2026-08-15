@@ -26,7 +26,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, debian-12, unreal-5.8.1]
     timeout-minutes: 180
     env:
-      RTFW_UNREAL_ENGINE_ROOT: /nas/kbianco/unreal/UnrealEngine-5.8.1
+      RTFW_UNREAL_ENGINE_ROOT: /nas/kbianco/unreal/UnrealEngine-5.8.1-m19-02-writable
       RTFW_UNREAL_COMMIT: 71fe36aac5a8df5ccd66c763ffc902b29b6a9c43
       RTFW_UNREAL_TAG: 5.8.1-release
       RTFW_UNREAL_TOOLCHAIN: v26_clang-20.1.8-rockylinux8
@@ -78,7 +78,7 @@ jobs:
           "$RTFW_UNREAL_ENGINE_ROOT/Engine/Build/BatchFiles/Linux/Build.sh" \
             RTFWUnrealTestHostEditor Linux Development \
             -Project="$GITHUB_WORKSPACE/build/m19-02-unreal-development/project/RTFWUnrealTestHost.uproject" \
-            -StaticAnalyzer=clang -WaitMutex \
+            -StaticAnalyzer=clang -WaitMutex -UsePrecompiled -DisableAdaptiveUnity -MaxParallelActions=4 \
             2>&1 | tee "$GITHUB_WORKSPACE/build/m19-02-unreal-development/reports/ubt-static-analysis.log"
       - name: Archive complete tuple logs and machine-readable reports
         if: always()

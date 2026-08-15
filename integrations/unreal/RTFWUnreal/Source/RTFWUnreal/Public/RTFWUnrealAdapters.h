@@ -159,8 +159,9 @@ class RTFWUNREAL_API FRTFWUnrealClock final : public rt::RuntimeClock
 public:
     FRTFWUnrealClock() noexcept;
 
-    [[nodiscard]] uint64 now_ns() noexcept override;
-    [[nodiscard]] rt::Status sleep_until_ns(uint64 AbsoluteNs) noexcept override;
+    [[nodiscard]] std::uint64_t now_ns() noexcept override;
+    [[nodiscard]] rt::Status sleep_until_ns(
+        std::uint64_t AbsoluteNs) noexcept override;
     [[nodiscard]] bool supports_absolute_sleep() const noexcept override;
 
     [[nodiscard]] bool TryCyclesToNanoseconds(

@@ -7,7 +7,6 @@ public class RTFWUnrealTests : ModuleRules
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         CppStandard = CppStandardVersion.Cpp20;
         bEnableExceptions = true;
-        bUseRTTI = true;
         PrivateDependencyModuleNames.AddRange(
             new string[] { "Core", "RTFWUnreal" });
     }

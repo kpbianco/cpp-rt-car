@@ -3,6 +3,7 @@
   "EngineAssociation": "5.8",
   "Category": "Tests",
   "Description": "Relocated M19-02 Unreal adapter build and automation fixture.",
+  "DisableEnginePluginsByDefault": true,
   "Modules": [
     {
       "Name": "RTFWUnrealTestHost",
