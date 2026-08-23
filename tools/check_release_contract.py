@@ -176,6 +176,7 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/xdma_backend.cpp",
     "rt/src/xdma_linux.cpp",
     "samples/CMakeLists.txt",
+    "samples/cpu_gpu_fpga_cpu.cpp",
     "samples/embed_cpp/mini_app.cpp",
     "src/runtime_profile_demo.cpp",
     "tests/CMakeLists.txt",
@@ -201,6 +202,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/package_consumer/xdma_linux_consumer.cpp",
     "tests/determinism_artifact.cpp",
     "tests/test_cpu_memory_policy.cpp",
+    "tests/test_cpu_gpu_fpga_cpu_sample.cpp",
     "tests/test_compiled_graph.cpp",
     "tests/test_command_batch.cpp",
     "tests/test_cross_rate_data.cpp",
@@ -1125,6 +1127,61 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     for token in ("m17_cuda_graph", "m17_xdma_control", "VendorHalV2.*"):
         if token not in tests_cmake and token not in ci:
             errors.append(f"M17-04 CI integration: missing {token!r}")
+
+    # M17-06 permanently repairs the Runtime-owned discovery input prefix and
+    # adds one portable, non-installed simulated-protocol composition gate.
+    command_source = load_text(root, "rt/src/command_batch.cpp", errors)
+    if "HalV2CommandTimelineCapabilities capabilities{};" not in command_source:
+        errors.append("M17-06 discovery no longer seeds the capability record")
+    for forbidden in (
+        "capabilities.struct_size = 0",
+        "capabilities.extension_version = 0",
+    ):
+        if forbidden in command_source:
+            errors.append(f"M17-06 discovery restored poisoned input {forbidden!r}")
+    for token in (
+        "CapabilityDiscoverySeedsExactHeaderRejectsMalformedAndRetriesCleanly",
+        "NativeRuntimeRegistrationDiscoversBothCandidates",
+    ):
+        if token not in command_test and token not in vendor_test:
+            errors.append(f"M17-06 discovery tests: missing {token!r}")
+    combined_sample = load_text(
+        root, "samples/cpu_gpu_fpga_cpu.cpp", errors
+    )
+    combined_test = load_text(
+        root, "tests/test_cpu_gpu_fpga_cpu_sample.cpp", errors
+    )
+    for token in (
+        "combined.cpu.prepare",
+        "combined.cuda.batch",
+        "combined.cpu.bridge",
+        "combined.xdma.batch",
+        "combined.cpu.validate",
+        "evidence=simulated_protocol physical_hardware=false",
+        "direct_peer_dma=false",
+        "measured_allocations != 0",
+        "device_timeline_count != 2",
+    ):
+        if token not in combined_sample:
+            errors.append(f"M17-06 combined sample: missing {token!r}")
+    for token in (
+        "success_and_fixed_resources",
+        "cuda_failure_suppresses_every_downstream_stage_and_recovers",
+        "isolated_event_timeout_has_no_xdma_completion_and_other_fixture_runs",
+        "malformed_provider_outputs_fail_before_native_driver_calls",
+        "checked_stop_retries_only_unresolved_cleanup",
+    ):
+        if token not in combined_test:
+            errors.append(f"M17-06 combined tests: missing {token!r}")
+    for token in (
+        "rtfw_cpu_gpu_fpga_cpu_sample_tests",
+        "m17_cpu_gpu_fpga_cpu_sample",
+    ):
+        if token not in tests_cmake or token not in ci:
+            errors.append(f"M17-06 focused CI integration: missing {token!r}")
+    for token in ("sample_cpu_gpu_fpga_cpu", "RTFW_BUILD_EXAMPLES=ON"):
+        if token not in ci:
+            errors.append(f"M17-06 portable sample CI integration: missing {token!r}")
 
     workflow_paths = sorted(
         set((root / ".github/workflows").glob("*.yml"))

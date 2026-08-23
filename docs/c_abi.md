@@ -178,3 +178,12 @@ by the embedding host and passed directly to the additive C++ Runtime API.
 Stable C ABI v8 remains exactly 70 exports, fingerprint
 `0xd0e7a5a14bf35f97`, and SONAME 8. See
 [extension registration](extension_registration.md).
+
+## M17-06 ABI boundary
+
+The Runtime discovery repair is internal and the combined executable uses only
+existing additive C++ source contracts and targets. M17-06 adds no public
+declaration, C or extension ABI symbol, status value, installed header, target,
+or C representation. Stable C ABI v8 remains exactly 70 exports with
+fingerprint `0xd0e7a5a14bf35f97` and SONAME 8; device ABI v1 and both candidate
+`api()` behaviors remain unchanged.

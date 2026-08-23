@@ -2,11 +2,10 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M19-01 starts from exact target
-baseline `5eb8f101f692b2aff85f82f4a1660630db750706`. M17 remains active and
-incomplete because M17-05 is blocked. The binding M19-01 contract is
-`contracts/active-batch.yaml`, sourced from control revision
-`e2ce44f28d3d3f92d7a8bf4d4f1c4ba7b563a185`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-06 starts from exact target
+baseline `875c486570ed84df939b8b9e75c01e7c3d43b28b`. The binding M17-06
+contract is `contracts/active-batch.yaml`, sourced from control revision
+`acdbdc50f66fd66f9a8e48eee75923edfd759787`.
 
 ## M19-01 implementation handoff
 
@@ -20,8 +19,7 @@ boundary are in `docs/extension_registration.md`.
 
 Do not add a loader or release extension code until `stop()` and
 `detach_extension()` both succeed. M19-03 owns Unreal and host module unload
-orchestration. M19 and CAP-M19 remain incomplete. M17-05 remains blocked and
-M18 remains unpromoted.
+orchestration. M19 and CAP-M19 remain incomplete. M18 remains unpromoted.
 
 ## Implemented boundary
 
@@ -62,23 +60,37 @@ and license remain unchanged.
   submission/service lanes or fixed XDMA I/O team.
 - Never infer graph ownership, CUDA pinning/device memory/coherency, a safe FPGA
   register map, interrupt latency, driver cancellation, or direct peer DMA.
-- Keep the combined sample, cross-backend timelines, device-rate execution,
-  physical qualification, support promotion, release, and deployment deferred.
+- Keep cross-backend timelines, direct peer paths, device-rate execution,
+  physical combined qualification, support promotion, release, and deployment
+  deferred.
 
-## M17-05 blocker
+## M17-06 implementation handoff
 
-Canonical Runtime command/timeline discovery clears the capability output
-header before calling the backend, but the native CUDA and XDMA candidate
-callbacks reject an incoming zero `struct_size`. The required M17-05 use of
-the actual candidates through `hal_v2_registration()` therefore fails before
-graph configuration. The active batch forbids the needed `rt/src/` repair and
-forbids a substitute HAL implementation. Do not implement around this
-boundary; first approve a repair batch or explicitly revise M17-05 scope.
+The sole production repair is in `rt/src/command_batch.cpp`: capability
+discovery retains the value-initialized size/version prefix instead of
+overwriting it with zero. Complete output validation and existing statuses are
+unchanged. `tests/test_command_batch.cpp` observes the exact incoming header
+and zero tail and proves every malformed/error/exception attempt publishes
+nothing before a corrected retry. `tests/test_vendor_hal_v2.cpp` registers the
+actual CUDA and XDMA native candidates together through canonical Runtime and
+reaches checked stop.
 
-The failed prototype, exact commands, rollback, acceptance status, and claim
-boundary are retained in `docs/evidence/M17-05-2026-08-12.md`. The combined
-sample, focused behavioral test, mandatory CI, and human review remain
-unperformed. Do not commit, push, open a pull request, release, or deploy.
+`samples/cpu_gpu_fpga_cpu.cpp` and its standalone focused test use only the
+existing public Runtime/CUDA/XDMA targets. The five-phase graph is CPU prepare,
+simulated CUDA upload/Graph/download, disjoint host-stage bridge, simulated
+XDMA H2C/control/event/C2H, and CPU validate. Storage is fixed, timelines are
+backend-local, complete steps are measured allocation-free, and exact
+operation/thread/causality counts cover two frames plus CUDA failure, XDMA
+event timeout/cancellation, malformed declarations, correction, isolation,
+and unresolved-only cleanup retry.
+
+Retain the M17-05 failed review unchanged; M17-06 is the approved repair, not a
+rewrite of that evidence. The M17-06 retained evidence must distinguish local
+results from mandatory hosted CI and human review. No physical Graph, device
+memory, pinning, coherency, DMA, MMIO, event interrupt, timing, HIL, field,
+RT1/RT2, Unreal, signing, release, deployment, or production claim follows.
+Exact acceptance and validation results are in
+`docs/evidence/M17-06-2026-08-23.md`.
 
 ## M18-01 implementation handoff
 
@@ -93,7 +105,8 @@ The precise bounds, canonicalization, evolution, review, commands, rollback,
 and claim boundary are in `docs/qualification.md`. Existing M12 CUDA/XDMA
 `evidence_only` records remain raw inputs only. The tool does not mutate a
 support matrix and does not authenticate reviewer attribution or prove plan
-chronology. Non-synthetic combined promotion remains blocked on M17-05.
+chronology. The unchanged M18-01 tool still rejects non-synthetic combined
+promotion; a later approved qualification-policy batch owns any revision.
 
 After local verification, mandatory GitHub CI and human schema, security,
 qualification, compatibility, and claim-boundary review remain external merge

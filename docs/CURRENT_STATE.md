@@ -1,7 +1,7 @@
 # Current state
 
-Last audited: 2026-08-12
-Batch baseline: `5eb8f101f692b2aff85f82f4a1660630db750706`
+Last audited: 2026-08-23
+Batch baseline: `875c486570ed84df939b8b9e75c01e7c3d43b28b`
 
 ## Product state
 
@@ -15,10 +15,11 @@ Batch baseline: `5eb8f101f692b2aff85f82f4a1660630db750706`
   Apache-2.0 license are unchanged. The default header inventory adds exactly
   `rt/extension_abi.h`.
 - M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 are merged in
-  target history. M17 remains active and incomplete because M17-05 is blocked.
-  M18-01 offline qualification schemas and tools are implemented from the
-  completed M17-04 foundation; M18 and CAP-M18 remain incomplete. M19-01 adds
-  extension ABI v1; M19 and CAP-M19 remain incomplete.
+  target history. M17-06 repairs the retained M17-05 discovery blocker and is
+  implemented locally; M17 and CAP-M17 remain incomplete until mandatory
+  hosted CI and human gates pass. M18-01 offline qualification schemas and
+  tools remain proposal-only and unpromoted. M19-01 adds extension ABI v1;
+  M19 and CAP-M19 remain incomplete.
 
 ## M19-01 extension registration
 
@@ -37,7 +38,7 @@ pointers, retires the handle generation, and reports host unload readiness; it
 never unloads a module. See `docs/extension_registration.md`.
 
 The change adds no C ABI export, loader dependency, target, Runtime lane,
-MemoryPlan row, schema, native HAL-v2 extension capability, or M17-05 bypass.
+MemoryPlan row, schema, or native HAL-v2 extension capability.
 Extensions remain trusted in-process code, and no physical, HIL, field,
 Unreal, RT1/RT2, signing, release, deployment, or production validation is
 claimed.
@@ -47,10 +48,10 @@ claimed.
 The installed CUDA and XDMA candidate headers retain their exact device-ABI-v1
 `api()` paths and add native `hal_v2_registration(name)` paths. Each native
 registration exposes HAL core v2, memory/topology extension v1, and
-command/timeline extension v1 tables. The command/timeline tables do not
-currently pass canonical Runtime discovery because of the M17-05 blocker
-below. Each backend object admits only one chosen registration path until
-checked shutdown succeeds.
+command/timeline extension v1 tables. M17-06 makes those tables reachable
+through canonical Runtime discovery without changing either vendor callback.
+Each backend object admits only one chosen registration path until checked
+shutdown succeeds.
 
 Both injectable driver tables retain their complete version-1 positional
 prefix and version-1 default. Exact version 2 tables add only the native
@@ -86,23 +87,33 @@ Malformed commands fail before vendor entry; uncertain CUDA or XDMA work
 retains every referenced owner until physical readiness, successful drain, or
 the documented final host reclamation boundary.
 
-## M17-05 review boundary and next action
+## M17-06 Runtime repair and portable combined graph
 
-M17-04 is merged at the exact M17-05 baseline and establishes static, unit,
-malformed/failure-injected, fake CUDA Graph, fixture XDMA control/event,
-package, lifecycle, compatibility, and portable RT0 protocol evidence only.
+`discover_command_timeline_extension()` now passes a value-initialized
+`HalV2CommandTimelineCapabilities` to the callback. Its default member
+initializers supply the exact size/version input prefix while every semantic
+and reserved field starts zero. Existing callback status mapping and complete
+returned-record validation remain fail closed. Focused tests cover exact input,
+malformed/partial/error/exception output, transactional rejection, corrected
+retry, and simultaneous native CUDA/XDMA registration in one real Runtime.
 
-Independent M17-05 review found that canonical Runtime command/timeline
-discovery poisons the capability output header before invocation while both
-native CUDA and XDMA candidate callbacks require a preinitialized incoming
-size. The required `hal_v2_registration()` composition therefore fails before
-graph configuration. Repair requires a separately approved change under the
-currently forbidden `rt/src/` paths. The combined sample and its behavioral
-test are not implemented, and M17/CAP-M17 remain incomplete.
+The default, non-installed `sample_cpu_gpu_fpga_cpu` composes exactly CPU
+prepare, simulated CUDA upload/Graph/download, a disjoint bounded host bridge,
+simulated XDMA H2C/control/event/C2H, and CPU validation. Two separate
+backend-local timelines, fixed payload/device/card/control/event storage,
+finite timeouts, exact call/thread/cause assertions, post-start allocation
+instrumentation, failure suppression, cancellation, recovery, isolation, and
+checked cleanup are covered by its focused CTest executable. No timeline or
+memory object crosses backends and no direct peer DMA is represented.
 
-See `docs/evidence/M17-05-2026-08-12.md`. Physical CUDA/XDMA memory, MMIO,
-interrupts, timing, HIL, field, RT1/RT2, support promotion, signing, release,
-deployment, and production qualification remain deferred.
+This is portable RT0 simulated-protocol evidence only. Mandatory hosted
+sanitizer CI and human API, compatibility, concurrency, lifetime,
+memory-order, accounting, security, and claim-boundary review remain external
+gates. Physical CUDA/XDMA memory, Graph execution, MMIO, interrupts, timing,
+HIL, field, RT1/RT2, support promotion, signing, release, deployment, and
+production qualification remain deferred. The failed M17-05 review remains
+immutable in `docs/evidence/M17-05-2026-08-12.md`; current results are retained
+in `docs/evidence/M17-06-2026-08-23.md`.
 
 ## M18-01 offline qualification plane
 
@@ -115,9 +126,10 @@ digest chains with bounded strict JSON and filesystem handling.
 
 Synthetic fixtures cover NVIDIA, XDMA, combined, RT1, and RT2. They are labeled
 `synthetic_fixture`, generate only `proposal_only` output, and are never
-support-matrix eligible. A non-synthetic combined proposal is explicitly
-blocked until M17-05 is repaired. Reviewer names and timestamps are not
-authenticated, and external pre-run plan provenance remains a human gate.
+support-matrix eligible. M18-01's unchanged qualification tool still rejects a
+non-synthetic combined proposal; revising that promotion policy is outside
+M17-06. Reviewer names and timestamps are not authenticated, and external
+pre-run plan provenance remains a human gate.
 
 See `docs/qualification.md`. M18-01 changes no runtime, ABI, installed package,
 version, support matrix, hardware workflow/sample, or prior evidence. It

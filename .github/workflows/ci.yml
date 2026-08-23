@@ -50,14 +50,20 @@ jobs:
             -DSIM_SANITIZERS= \
             -DSIM_WERROR=ON
       - name: Build determinism tests
-        run: cmake --build build --config ${BUILD_TYPE} --target simcore_tests rtfw_determinism_artifact -- -j2
+        run: |
+          cmake --build build --config ${BUILD_TYPE} \
+            --target simcore_tests rtfw_determinism_artifact \
+                     rtfw_cpu_gpu_fpga_cpu_sample_tests \
+                     sample_cpu_gpu_fpga_cpu -- -j2
       - name: Run determinism tests
         env:
           ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           GTEST_DEATH_TEST_STYLE: threadsafe
           GTEST_FILTER: DeterminismIntegration.*:DeterminismReplay.*
-        run: ctest --test-dir build -C ${BUILD_TYPE} --output-on-failure -R simcore_all
+        run: |
+          ctest --test-dir build -C ${BUILD_TYPE} --output-on-failure \
+            -R 'simcore_all|m17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu'
       - name: Produce M7 checkpoint artifact
         run: |
           build/tests/rtfw_determinism_artifact \
@@ -223,6 +229,8 @@ jobs:
             --target simcore_tests rtfw_thread_policy_rollback_test \
                      rtfw_host_adapter_tests \
                      rtfw_xdma_backend_tests \
+                     rtfw_cpu_gpu_fpga_cpu_sample_tests \
+                     sample_cpu_gpu_fpga_cpu \
             -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
@@ -231,7 +239,7 @@ jobs:
         run: |
           ctest --test-dir build-tsan \
             --output-on-failure \
-            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_command_batch_timeline|m17_hal_v2_compatibility|m17_heterogeneous_memory_topology|m17_cuda_graph|m17_xdma_control|m19_extension_registration|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
+            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_command_batch_timeline|m17_hal_v2_compatibility|m17_heterogeneous_memory_topology|m17_cuda_graph|m17_xdma_control|m17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m19_extension_registration|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
 
   build-windows:
     runs-on: windows-2022
@@ -293,13 +301,17 @@ jobs:
             -DRTFW_BUILD_EXPERIMENTAL=OFF \
             -DSIM_WERROR=ON
       - name: Build embedding samples
-        run: cmake --build build-release --config Release --target sample_embed_c sample_embed_c_static sample_embed_cpp -- -j2
+        run: |
+          cmake --build build-release --config Release \
+            --target sample_embed_c sample_embed_c_static sample_embed_cpp \
+                     sample_cpu_gpu_fpga_cpu -- -j2
       - name: Run embedding samples
         working-directory: build-release
         run: |
           ./samples/sample_embed_c
           ./samples/sample_embed_c_static
           ./samples/sample_embed_cpp
+          ./samples/sample_cpu_gpu_fpga_cpu
       - name: Configure add_subdirectory consumer
         run: >
           cmake
@@ -319,6 +331,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DRTFW_SOURCE_DIR="${GITHUB_WORKSPACE}"
           -DRTFW_BUILD_TESTS=ON
+          -DRTFW_BUILD_EXAMPLES=ON
           -DRTFW_EXPECT_TESTS=ON
           -DSIM_DOWNLOAD_GTEST=OFF
       - name: Build and run embedded non-GTest suite
@@ -331,11 +344,13 @@ jobs:
               rtfw_host_adapter_tests \
               rtfw_runtime_profile_tests \
               rtfw_xdma_backend_tests \
+              rtfw_cpu_gpu_fpga_cpu_sample_tests \
+              sample_cpu_gpu_fpga_cpu \
             --parallel 2
           ctest \
             --test-dir build-add-subdirectory-tests/rtfw-build \
             --output-on-failure \
-            -R '^(cabi_dlopen|host_adapter|runtime_profile|xdma_backend)$'
+            -R '^(cabi_dlopen|host_adapter|runtime_profile|xdma_backend|m17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu)$'
 
   installed-package:
     name: Relocated package consumer (${{ matrix.tuple }})

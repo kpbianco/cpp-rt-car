@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -9,6 +11,7 @@
 #include <type_traits>
 
 #include <rt/cuda_backend.hpp>
+#include <rt/runtime.hpp>
 #include <rt/xdma_backend.hpp>
 
 namespace {
@@ -169,6 +172,14 @@ rt::XdmaDriverApi complete_xdma_v2_driver() {
         return rt::XdmaDriverResult::success;
     };
     return api;
+}
+
+rt::CallbackResult count_runtime_callback(
+    void* user_data,
+    const rt::CallbackContext&) {
+    static_cast<std::atomic<std::uint64_t>*>(user_data)->fetch_add(
+        1, std::memory_order_relaxed);
+    return rt::CallbackResult::ok;
 }
 
 TEST(VendorHalV2, ExistingDeviceAbiV1SurfaceRemainsExact) {
@@ -453,6 +464,72 @@ TEST(VendorHalV2, XdmaNativeRegistrationSuppliesAllFrozenHalTables) {
     const auto legacy = backend.api();
     EXPECT_EQ(legacy.abi_version, RTFW_DEVICE_ABI_VERSION);
     EXPECT_EQ(legacy.instance, registration.api.instance);
+}
+
+TEST(VendorHalV2, NativeRuntimeRegistrationDiscoversBothCandidates) {
+    auto cuda_driver = complete_cuda_v2_driver();
+    const std::array<rt::CudaStream, 1> streams{1};
+    rt::CudaBackendConfig cuda_config;
+    cuda_config.queue_capacity = 2;
+    cuda_config.buffer_capacity = 2;
+    cuda_config.kernel_capacity = 2;
+    cuda_config.context = 1;
+    cuda_config.streams = streams;
+    rt::CudaDeviceBackend cuda(cuda_driver, cuda_config);
+
+    auto xdma_driver = complete_xdma_v2_driver();
+    rt::XdmaBackendConfig xdma_config;
+    xdma_config.queue_capacity = 2;
+    xdma_config.buffer_capacity = 2;
+    xdma_config.worker_count = 1;
+    xdma_config.control_aperture_bytes = 16;
+    xdma_config.user_event_count = 1;
+    rt::XdmaDeviceBackend xdma(xdma_driver, xdma_config);
+
+    rt::RuntimeConfig config;
+    config.callback_capacity = 2;
+    config.worker_count = 1;
+    config.executor_queue_capacity = 4;
+    config.task_scratch_slots = 4;
+    config.trace_capacity = 32;
+    config.device_backend_capacity = 2;
+    config.device_buffer_capacity = 2;
+    config.device_outstanding_capacity = 2;
+    config.device_completion_batch = 2;
+    rt::Runtime runtime;
+    ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+
+    const auto cuda_registration = cuda.hal_v2_registration("native.cuda");
+    const auto xdma_registration = xdma.hal_v2_registration("native.xdma");
+    rt::DeviceBackendHandle cuda_handle;
+    rt::DeviceBackendHandle xdma_handle;
+    ASSERT_EQ(runtime.register_device_backend(cuda_registration, cuda_handle),
+              rt::Status::ok);
+    ASSERT_EQ(runtime.register_device_backend(xdma_registration, xdma_handle),
+              rt::Status::ok);
+    EXPECT_TRUE(cuda_handle.valid());
+    EXPECT_TRUE(xdma_handle.valid());
+    EXPECT_NE(cuda_handle, xdma_handle);
+    EXPECT_EQ(runtime.device_backend_count(), 2u);
+
+    std::atomic<std::uint64_t> callback_calls{0};
+    rt::PhaseHandle phase;
+    ASSERT_EQ(runtime.register_callback(
+                  {"native.runtime.cpu", &count_runtime_callback,
+                   &callback_calls},
+                  phase),
+              rt::Status::ok);
+    ASSERT_TRUE(phase.valid());
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::finalized);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::running);
+    EXPECT_EQ(runtime.step(
+                  {7, std::chrono::milliseconds(1), std::nullopt}),
+              rt::Status::ok);
+    EXPECT_EQ(callback_calls.load(), 1u);
+    ASSERT_EQ(runtime.stop(), rt::Status::ok);
+    EXPECT_EQ(runtime.state(), rt::RuntimeState::stopped);
 }
 
 } // namespace

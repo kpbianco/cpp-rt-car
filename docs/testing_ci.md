@@ -287,6 +287,17 @@ predeclared thresholds, and the measurement procedure.
   commands, copied Graph bindings, control apertures, event waits, timeout and
   stop recovery, lifecycle isolation, resource bounds, and preservation of the
   device-ABI-v1 candidates and installed consumers.
+- M17-06 discovery and portable composition:
+  `tests/test_command_batch.cpp`, `tests/test_vendor_hal_v2.cpp`,
+  `tests/test_cpu_gpu_fpga_cpu_sample.cpp`, and
+  `samples/cpu_gpu_fpga_cpu.cpp`, with CTest gates
+  `m17_cpu_gpu_fpga_cpu_sample` and `sample_cpu_gpu_fpga_cpu`. Coverage includes
+  exact capability input/whole-output rejection and retry, actual dual native
+  registration, two deterministic frames, exact CUDA/bridge/XDMA ordering,
+  separate timelines, zero measured step allocations, thread ownership,
+  malformed declarations, CUDA and XDMA failure suppression, cancellation,
+  recovery, isolation, checked-stop retry, default-off ASan/UBSan and
+  ThreadSanitizer builds, package preservation, and repeat execution.
 
 These gates authorize only static, unit, synthetic, failure-injected,
 fake-driver native-v2 protocol, sanitizer, package, and RT0 functional

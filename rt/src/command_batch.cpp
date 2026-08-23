@@ -186,9 +186,7 @@ Status discover_command_timeline_extension(
   if (!validate_command_timeline_extension(extension)) {
     return Status::invalid_argument;
   }
-  HalV2CommandTimelineCapabilities capabilities;
-  capabilities.struct_size = 0;
-  capabilities.extension_version = 0;
+  HalV2CommandTimelineCapabilities capabilities{};
   HalV2Status callback_status = HalV2Status::internal_error;
   try {
     callback_status =

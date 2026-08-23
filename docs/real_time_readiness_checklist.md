@@ -104,7 +104,8 @@ schemas plus bounded offline validation. Its synthetic fixtures pass only the
 software contract. Every unchecked deployment gate above remains unchecked;
 reviewer attribution and timestamps are unauthenticated, external pre-run plan
 chronology remains a human gate, and no matrix entry is changed. A real combined
-proposal also remains blocked on M17-05.
+proposal remains rejected by the unchanged M18-01 policy until a separately
+approved qualification update.
 
 M15 implements process-local provider/resident handling for phase scratch,
 task scratch, and trace storage only, plus logical control accounting and live
@@ -113,13 +114,13 @@ observation. None of this changes any unchecked deployment gate above.
 Provider-backed checked stop releases trace backing, so post-stop trace export
 must occur before that cleanup or be treated as unavailable.
 M16 declared-budget admission and fake-clock late/catch-up/shedding/recovery
-results are not measured WCET, latency, RT1, or RT2 evidence. M17-01/M17-02
-mock, fake-driver, synthetic-memory, compatibility-adapter, hosted CI, and
-documentation results likewise do not prove physical accelerator memory,
+results are not measured WCET, latency, RT1, or RT2 evidence. M17-01 through
+M17-06 mock, fake-driver, synthetic-memory, compatibility-adapter, hosted CI,
+and documentation results likewise do not prove physical accelerator memory,
 pinning, DMA, coherency, topology, clock accuracy, HIL, field, latency, RT1, or
-RT2 behavior. Mandatory M17-02 CI and human API, compatibility, concurrency,
-accounting, lifecycle, and claim-boundary review remain required; M17 and
-CAP-M17 remain incomplete.
+RT2 behavior. Mandatory M17-06 hosted CI and human API, compatibility,
+concurrency, accounting, lifecycle, and claim-boundary review remain required;
+M17 and CAP-M17 remain incomplete pending those external gates.
 
 See [the product contract](product_contract.md) for RT tiers and
 [the roadmap](roadmap.md) for implementation ownership. M5 behavior and its
@@ -145,12 +146,11 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
   field, worst-case timing, RT1, and RT2 remain unqualified and require named
   later evidence.
 
-## M17-04 portable vendor-control status
+## M17-04/M17-06 portable vendor-control and composition status
 
-- [ ] Native CUDA and XDMA command registrations do not yet reach the bounded
-  M17-03 submission/service paths: canonical capability discovery supplies a
-  zeroed header that both candidate callbacks reject. Backend-local tests do
-  prove that direct candidate operations stay off executor workers.
+- [x] Runtime capability discovery supplies the exact initialized input prefix,
+  retains complete-output validation, and registers both actual native CUDA
+  and XDMA candidates through the bounded M17-03 submission/service paths.
 - [x] CUDA Graph identifiers, copied bindings, one-stream ordering, one-event
   completion, malformed input, timeout, stop, and checked cleanup have
   fake-driver functional gates.
@@ -158,6 +158,13 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
   have portable fixture gates before any driver entry.
 - [x] Device-ABI-v1 behavior, stable C ABI v8, schemas, package inventory,
   MemoryPlan equation, release, and support matrices remain unchanged.
+- [x] The default portable combined graph proves two deterministic frames,
+  distinct backend-local timelines, disjoint host staging, exact call/thread
+  order, zero measured step allocations, failure suppression, cancellation,
+  correction, isolation, and checked cleanup using simulated protocol only.
+- [ ] Mandatory hosted sanitizer CI and human API, compatibility, concurrency,
+  lifetime, memory-order, accounting, security, and claim-boundary review must
+  pass before M17/CAP-M17 functional completion is recorded.
 - [ ] Physical Graph execution, pinning/device memory/coherency, design-safe
   MMIO, interrupts, hardware/HIL, field, bounded latency, RT1, and RT2 remain
   unqualified and require named later evidence.

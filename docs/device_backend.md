@@ -315,12 +315,12 @@ publication; neither Runtime nor a backend fabricates completion. New storage
 is fixed backend-private control reported through capability bytes and does
 not change Runtime device-control accounting or the MemoryPlan equation.
 
-Canonical Runtime registration of these command extensions is currently
-blocked. Command-capability discovery clears the caller-owned output header,
-but both native candidate callbacks require its incoming `struct_size` before
-writing the result. Direct candidate tests therefore establish backend-local
-protocol behavior, not successful native command/timeline registration in
-`Runtime`.
+M17-06 makes canonical Runtime registration of these command extensions
+reachable. Discovery passes a value-initialized capability record whose exact
+size/version prefix is present and whose semantic/reserved tail is zero, then
+retains complete returned-record validation. Focused coverage registers the
+actual CUDA and XDMA candidates together in one Runtime and reaches checked
+stop; malformed, partial, error, and exceptional outputs remain transactional.
 # Extension device-v1 records
 
 An ABI-v1 extension may copy one or more complete
@@ -328,5 +328,14 @@ An ABI-v1 extension may copy one or more complete
 ownership gate and routes it through the same
 `DeviceV1CompatibilityAdapter` and DeviceManager path as direct registration.
 No HAL-v2 memory/topology or command/timeline table is accepted, so this path
-cannot expose native CUDA/XDMA features or bypass M17-05. Stop retains related
-services until reverse retryable backend shutdown has released ownership.
+cannot expose native CUDA/XDMA features. Stop retains related services until
+reverse retryable backend shutdown has released ownership.
+
+## M17-06 portable combined boundary
+
+The combined sample uses two native registrations and two local timelines but
+adds no backend kind, command, lane, queue, status, or completion rule. CUDA
+and XDMA batches complete independently. A CPU dependency phase copies a fixed
+extent between disjoint host regions only after the CUDA download completes;
+no cross-backend timeline, fence, registration, coherency, or direct peer DMA
+is created. Injected protocol behavior is not physical device evidence.

@@ -35,7 +35,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
-| M17 | In progress | M17-01 through M17-04 are merged; M17-05 combined sample is blocked by the native command-capability discovery contract mismatch; qualification remains |
+| M17 | In progress | M17-01 through M17-04 are merged; M17-06 repairs native command-capability discovery and implements the portable simulated combined sample; mandatory CI/human gates and qualification remain |
 | M18 | Planned | M18-01 offline schemas/tools implemented; named NVIDIA, XDMA, combined, RT1, and optional RT2 campaigns remain |
 | M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
 | M20 | Planned | Operational, security, release, and long-duration hardening |
@@ -655,14 +655,16 @@ user-event operations. It preserves both device-ABI-v1 paths and routes work
 only through the existing isolated submission/service and backend-worker
 model.
 
-M17-05 owns the portable CPU-CUDA-host-XDMA-CPU sample. Independent review
-found that canonical Runtime discovery clears the command-capability output
-header while both native candidate callbacks require its incoming size. The
-actual `hal_v2_registration()` paths therefore fail before graph configuration.
-The M17-05 sample and behavioral test remain blocked pending an approved repair
-to paths currently forbidden by that batch. No plugin/factory, cross-backend
-timeline, direct-peer, combined-hardware, or qualification capability is
-present. M17 and CAP-M17 remain incomplete.
+M17-05 retained the exact discovery blocker: canonical Runtime cleared the
+command-capability input header while both native callbacks required its size.
+M17-06 supplies the approved Runtime-owned repair, preserves full returned-
+record validation, and proves both actual native candidates register in one
+Runtime. It also implements the portable CPU-to-simulated-CUDA-to-disjoint-
+host-stage-to-simulated-XDMA-to-CPU graph with two backend-local timelines,
+fixed storage, bounded failure/recovery, isolation, and sanitizer gates. No
+plugin/factory, cross-backend timeline, direct-peer, combined-hardware, or
+qualification capability is present. M17 and CAP-M17 remain incomplete until
+mandatory hosted CI and human gates pass.
 
 Exit gates:
 
@@ -681,9 +683,9 @@ M18-01 implements the offline foundation:
   atomic proposal-only output;
 - synthetic NVIDIA, XDMA, combined, RT1, and RT2 fixtures that are never
   support-matrix eligible;
-- a hard boundary that leaves non-synthetic combined promotion blocked on
-  M17-05 and leaves human chronology, identity, review, and matrix changes
-  outside the tool.
+- a hard boundary that continues to reject non-synthetic combined promotion
+  until a separately approved qualification-policy update, and leaves human
+  chronology, identity, review, and matrix changes outside the tool.
 
 Remaining outcome:
 

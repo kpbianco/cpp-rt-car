@@ -292,3 +292,17 @@ They exclude callback and instance addresses, module handles, provisional
 handles, owner/generation values, mutable lifecycle state, and observed status
 counters. With no extension registered, all existing identity values are
 unchanged.
+
+## M17-06 deterministic composition evidence
+
+Two consecutive sample frames derive fixed integer inputs from the frame index,
+apply fixed CUDA and XDMA transforms, and verify every final element. Exact
+operation order, call counts, Graph ID/bindings, control/event values, accepted-
+before-completed timeline values, and trace causality are asserted without
+pointer-derived identity or elapsed-time thresholds. Both timelines remain
+backend-local and monotonically increasing.
+
+M17-06 adds no checkpoint, input-log, rate-action, or compatibility schema and
+no replay action. Runtime-generated batch IDs, native handles, host pointers,
+thread IDs, failure switches, timeline progress, and simulated device state do
+not enter compatibility identity.

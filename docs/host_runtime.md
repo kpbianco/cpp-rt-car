@@ -481,6 +481,21 @@ bounded copy attempt. Concurrent host stop during a blocked submit issues the
 nonblocking stop request and returns `invalid_state`; the host retries checked
 stop after the active step quiesces. Callback-reentrant stop remains
 side-effect-free. No new status or schema is introduced.
+
+## M17-06 host graph and discovery
+
+Command-capability discovery now preserves the default size/version input
+prefix and zero semantic/reserved state; it still publishes only a complete
+valid record. The portable combined sample registers both actual native
+candidates while configuring, then freezes exactly five ordinary dependency
+phases. The CPU bridge runs only after whole CUDA completion, performs one
+fixed disjoint host copy, and precedes XDMA admission. Separate backend-local
+timelines carry no cross-backend dependency.
+
+Start, complete `step()` calls, injected failure, correction, and checked stop
+use existing lifecycle/status behavior. No Runtime configuration key, lane,
+status, schema, target, or post-start allocation path is added.
+
 # M19-01 extension lifecycle
 
 While configuring, `register_extension` stages and commits one complete ABI-v1

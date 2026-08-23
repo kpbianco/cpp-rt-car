@@ -69,9 +69,13 @@ and one isolated Runtime submission lane per opted-in backend. M17-04 adds
 source-compatible native HAL-v2 registrations to the existing CUDA and XDMA
 candidates: stable-ID dispatch of caller-instantiated CUDA Graphs with copied
 bindings, and bounded XDMA 32-bit control reads/writes and user-event waits.
-The legacy device-ABI-v1 paths, generic Runtime, schemas, support matrices, and
-release surface remain unchanged. Combined execution and physical
-qualification remain deferred; M17 and CAP-M17 remain incomplete.
+M17-06 repairs the Runtime-owned capability input header without weakening
+complete-output validation and adds one default portable five-phase simulated
+CUDA/host-stage/XDMA composition with separate backend-local timelines. The
+legacy device-ABI-v1 paths, schemas, support matrices, and release surface
+remain unchanged. Physical combined execution and qualification remain
+deferred; M17 and CAP-M17 remain incomplete pending mandatory CI and human
+gates.
 M18-01 adds a separate offline qualification plane: version-1 campaign-plan,
 qualification-record, promotion-review, and promotion-proposal schemas plus a
 bounded standard-library validator. Synthetic fixtures and generated
@@ -358,8 +362,8 @@ callback expressions.
 | Finalized memory plan | Implemented RT0 surface | Budgeted runtime/device control, queues, aligned phase/task scratch, trace, outstanding slots, and completion batches; explicit overload results |
 | CPU/memory policy and resident backing | M15 complete | Stable role/region identities, exact logical control ledger, live runtime-stack aggregation, declared-only opaque accounting, three-region provider transaction, and retryable reverse cleanup; no hardware, latency, RT1, or RT2 claim |
 | Multi-rate simulation | M16 complete in merged history | Bounded reference domains, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
-| HAL v2 vendor commands, command/timeline, memory/topology, and device ABI v1 compatibility | M17-04 backend-local controls merged; native command registration blocked | Native CUDA Graph and XDMA control/event tables and stable declarations exist, but their capability callbacks reject the zeroed header supplied by canonical Runtime discovery. Direct backend tests do not establish native command/timeline Runtime integration; the v1 adapter, C ABI, schemas, support, and qualification boundaries remain unchanged, and combined execution remains deferred. |
-| Offline qualification records and proposals | M18-01 implemented; no tuple qualified | Strict bounded plan/record/review validation and deterministic proposal-only generation for NVIDIA, XDMA, combined, RT1, and RT2 schema scopes. Synthetic fixtures are ineligible for support matrices; real combined promotion remains blocked on M17-05. |
+| HAL v2 vendor commands, command/timeline, memory/topology, and device ABI v1 compatibility | M17-06 implemented locally; external gates pending | Runtime supplies the exact initialized command-capability prefix and validates the complete result. Actual native CUDA/XDMA candidates register together through canonical Runtime; the portable combined sample uses fixed simulated storage, an explicit disjoint host bridge, and separate backend-local timelines. Device ABI v1, C ABI, schemas, support, and qualification boundaries remain unchanged. |
+| Offline qualification records and proposals | M18-01 implemented; no tuple qualified | Strict bounded plan/record/review validation and deterministic proposal-only generation for NVIDIA, XDMA, combined, RT1, and RT2 schema scopes. Synthetic fixtures are ineligible for support matrices; the unchanged tool continues to reject non-synthetic combined promotion pending a separately approved policy update. |
 | Self-paced time | Implemented RT0 surface | Finite absolute-release loop with no epoch drift, explicit deadlines, and per-frame timing results |
 | Frame watchdog/degradation | Implemented RT0 surface | One-shot event per arm; service lane never invokes host code and degradation is committed by the frame thread |
 | Strict platform preflight | Implemented RT0 surface | Disabled by default; read-only Linux prerequisite checks fail closed with a fixed-capacity report |

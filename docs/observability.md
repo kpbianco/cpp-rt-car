@@ -256,3 +256,14 @@ indexes participate in compatibility through command declarations, while
 native handles, observed values, timestamps, counters, and health do not.
 Portable fake-driver results do not establish physical Graph, MMIO, interrupt,
 latency, HIL, RT1, or RT2 behavior.
+
+## M17-06 trace and claim boundary
+
+The combined test consumes existing device submitted/completed trace records
+to prove accepted-before-complete causality and expected submission/service
+producers for four successful batches. Exact sample-local call and timeline
+records cover failures and isolation. No global event, metric, producer,
+cursor, schema field, or ID is added, and no simulated timestamp is a latency
+claim. The executable's stable line explicitly reports
+`evidence=simulated_protocol`, `physical_hardware=false`, and
+`direct_peer_dma=false`.

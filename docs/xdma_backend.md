@@ -254,3 +254,17 @@ Portable injected MMIO/event tests and node-free Linux compile/package checks
 do not execute a physical register or establish safe design-specific effects,
 DMA, interrupt latency, bounded driver calls, hardware, HIL, field, RT1, or RT2
 evidence. Any physical control-write plan requires separate maintainer review.
+
+## M17-06 portable composition use
+
+The combined sample uses the actual `XdmaDeviceBackend` native registration
+with a complete injected version-2 driver and its existing fixed two-worker
+team. Each successful frame performs exact H2C, aligned little-endian control
+write, finite user-event wait, and C2H order against fixed simulated card,
+control, and event state. Runtime timeout cancellation wakes a blocked event,
+publishes no failing-frame timeline completion, suppresses C2H/validation, and
+is followed by bounded stale-completion reaping and corrected execution.
+
+No node, BAR, PCI function, kernel driver, firmware, bitstream, DMA engine, or
+interrupt is touched. These are simulated protocol and cleanup semantics only,
+not a safe hardware register plan or XDMA qualification.

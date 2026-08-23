@@ -403,12 +403,21 @@ BAR operations, and stop-aware event waits. Both adapters retain uncertain
 ownership through drain or checked shutdown; neither adds a cross-backend
 timeline, combined execution, or hardware qualification.
 
-M17-05 review found that these native command tables are not currently
-reachable through canonical Runtime registration: Runtime command-capability
-discovery clears the output header before invocation, while both candidate
-callbacks require the incoming `struct_size`. Registration therefore fails
-before a submission lane or graph is configured. Direct candidate tests cover
-backend-local protocol behavior only and do not establish this integration.
+M17-05 review found that these native command tables were not reachable through
+canonical Runtime registration because Runtime cleared the capability input
+header. M17-06 repairs only that Runtime-owned initialization: the callback
+receives exact size/version defaults and zero semantic/reserved fields, then
+the complete returned record is still validated before publication. Both
+actual candidates now register in one canonical Runtime without a wrapper or
+vendor callback change.
+
+The M17-06 portable graph contains five ordinary dependency phases: CPU
+prepare, simulated CUDA batch, CPU host-stage bridge, simulated XDMA batch, and
+CPU validation. CUDA upload/Graph/download and XDMA H2C/control/event/C2H are
+ordered inside their own fixed batches. Each backend owns a distinct local
+timeline. The only cross-backend edge is successful CUDA download followed by
+a bounded byte copy between disjoint host regions; no memory registration,
+timeline value, fence, coherency promise, or peer path crosses the boundary.
 
 ## M18-01 offline qualification plane
 
@@ -426,9 +435,9 @@ work, and writes only one explicit new output through atomic non-overwriting
 publication. It has no support-matrix, Git, remote, signing, or production
 mutation path. See [the qualification contract](qualification.md).
 
-This plane is not a scheduler or HAL capability. The combined synthetic fixture
-does not bypass the M17-05 blocker; non-synthetic combined promotion fails
-closed until the native registration path exists.
+This plane is not a scheduler or HAL capability. M17-06's portable simulated
+composition does not itself satisfy the unchanged M18-01 non-synthetic
+promotion policy; physical combined promotion remains fail closed.
 
 ## M19-01 extension transaction and ownership
 
