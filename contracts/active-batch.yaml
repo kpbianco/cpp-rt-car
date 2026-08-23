@@ -1,48 +1,46 @@
 schema_version: 1
 batch:
-  id: M19-01
-  title: Add size-versioned extension registration ABI
-  goal: Add a supported, bounded, size-versioned C extension ABI and additive C++ Runtime registration surface that transactionally registers CPU phases, device-ABI-v1 backends, and control-lane services with explicit ownership, version negotiation, quiescent checked stop, detach readiness, and stale-handle rejection, without using the experimental plugin loader, changing stable C ABI v8, or loading a dynamic library inside the runtime.
+  id: M17-06
+  title: Repair Runtime capability discovery and complete the portable combined graph sample
+  goal: Repair the exact Runtime-owned command/timeline capability-header mismatch retained by M17-05, prove both existing native HAL-v2 CUDA and XDMA candidates register through the canonical Runtime path, and complete one bounded CPU-to-simulated-CUDA-to-host-stage-to-simulated-XDMA-to-CPU graph with backend-local timelines, fixed storage, failure propagation, sanitizer coverage, and simulated-protocol-only evidence.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
-    - products/cpp-rt-car/PRD.md#cap-m19--engine-and-extension-integration
-    - products/cpp-rt-car/acceptance.yaml#CAP-M19
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-19
-    - products/cpp-rt-car/risk-register.yaml#R-001
-    - products/cpp-rt-car/risk-register.yaml#R-007
-  milestone: products/cpp-rt-car/roadmap.yaml#M19
+    - products/cpp-rt-car/PRD.md#cap-m17--hal-v2-and-heterogeneous-memory
+    - products/cpp-rt-car/acceptance.yaml#CAP-M17
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-17
+    - products/cpp-rt-car/risk-register.yaml#R-005
+    - products/cpp-rt-car/risk-register.yaml#R-006
+  milestone: products/cpp-rt-car/roadmap.yaml#M17
   target_contracts:
     - AGENTS.md
+    - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
     - contracts/profile-requirements.yaml
     - contracts/verification.yaml
+    - contracts/verification.commands
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/devex_governance.md
-    - docs/build_tooling.md
+    - docs/hal_v2.md
+    - docs/heterogeneous_memory.md
+    - docs/device_backend.md
+    - docs/cuda_backend.md
+    - docs/xdma_backend.md
+    - docs/host_runtime.md
+    - docs/executor.md
+    - docs/cpu_memory_policy.md
+    - docs/memory_plan.md
+    - docs/determinism_replay.md
+    - docs/observability.md
     - docs/testing_ci.md
     - docs/c_abi.md
-    - docs/device_backend.md
-    - docs/hal_v2.md
     - docs/release_policy.md
+    - docs/real_time_readiness_checklist.md
     - docs/security_supply_chain.md
     - docs/threat_model.md
-    - docs/real_time_readiness_checklist.md
-    - rt/include/rt/c_api.h
-    - rt/include/rt/device_abi.h
-    - rt/include/rt/runtime.hpp
-    - rt/include/rt/plugin_api.h
-    - rt/include/rt/plugin_manager.hpp
-    - rt/src/plugin_manager.cpp
-    - tests/test_plugin_manager.cpp
-    - CMakeLists.txt
-    - tests/CMakeLists.txt
-    - .github/workflows/ci.yml
-    - release/rtfw-release-contract.json
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -57,10 +55,11 @@ sources:
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-05-2026-08-12.md
     - docs/evidence/M18-01-2026-08-12.md
-  baseline_commit: 5eb8f101f692b2aff85f82f4a1660630db750706
+    - docs/evidence/M19-01-2026-08-12.md
+  baseline_commit: 875c486570ed84df939b8b9e75c01e7c3d43b28b
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M19-01.yaml
-  control_plane_revision: e2ce44f28d3d3f92d7a8bf4d4f1c4ba7b563a185  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M17-06.yaml
+  control_plane_revision: acdbdc50f66fd66f9a8e48eee75923edfd759787  # pragma: allowlist secret
 dependencies:
   - M17-04
 scope:
@@ -69,95 +68,84 @@ scope:
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
-    - rt/include/rt/extension_abi.h
-    - rt/include/rt/runtime.hpp
-    - rt/src/extension_registration.cpp
-    - rt/src/extension_registration.hpp
-    - rt/src/host_runtime.cpp
-    - rt/src/resource_policy.cpp
-    - rt/src/resource_policy.hpp
-    - tests/test_extension_registration.cpp
-    - tests/test_host_runtime.cpp
-    - tests/test_device_runtime.cpp
-    - tests/test_memory_plan.cpp
-    - tests/test_determinism_replay.cpp
-    - tests/test_trace_noalloc.cpp
-    - tests/extension_fixture.c
-    - tests/extension_fixture_bad.c
-    - tests/package_consumer/extension_consumer.c
-    - tests/package_consumer/extension_cpp_consumer.cpp
-    - tests/package_consumer/CMakeLists.txt
-    - tests/package_consumer/package_contract.cmake
-    - tests/CMakeLists.txt
     - CMakeLists.txt
+    - rt/src/command_batch.cpp
+    - samples/CMakeLists.txt
+    - samples/cpu_gpu_fpga_cpu.cpp
+    - tests/CMakeLists.txt
+    - tests/test_command_batch.cpp
+    - tests/test_vendor_hal_v2.cpp
+    - tests/test_cpu_gpu_fpga_cpu_sample.cpp
     - .github/workflows/ci.yml
+    - README.md
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/extension_registration.md
+    - docs/hal_v2.md
+    - docs/heterogeneous_memory.md
+    - docs/device_backend.md
+    - docs/cuda_backend.md
+    - docs/xdma_backend.md
     - docs/host_runtime.md
     - docs/executor.md
-    - docs/device_backend.md
+    - docs/cpu_memory_policy.md
     - docs/memory_plan.md
     - docs/determinism_replay.md
-    - docs/c_abi.md
-    - docs/devex_governance.md
-    - docs/build_tooling.md
+    - docs/observability.md
     - docs/testing_ci.md
-    - docs/release_policy.md
-    - docs/security_supply_chain.md
-    - docs/threat_model.md
+    - docs/c_abi.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M19-01-*.md
-    - README.md
+    - docs/evidence/M17-06-*.md
     - release/rtfw-release-contract.json
     - tools/check_docs_contract.py
     - tools/check_release_contract.py
   forbidden_paths:
     - abi/rtfw_c_abi_v8.exports
     - abi/rtfw_c_abi_v8.sha256
-    - rt/include/rt/c_api.h
-    - src/c_abi.cpp
-    - rt/include/rt/device_abi.h
-    - rt/include/rt/device.hpp
+    - rt/include/rt/
     - rt/src/hal_v2.cpp
     - rt/src/hal_v2.hpp
     - rt/src/heterogeneous_memory.cpp
     - rt/src/heterogeneous_memory.hpp
-    - rt/src/command_batch.cpp
-    - rt/src/command_batch.hpp
     - rt/src/device_manager.cpp
     - rt/src/device_manager.hpp
+    - rt/src/host_runtime.cpp
+    - rt/src/compiled_graph.cpp
+    - rt/src/compiled_graph.hpp
+    - rt/src/executor.cpp
+    - rt/src/executor.hpp
+    - rt/src/thread_policy.cpp
+    - rt/src/thread_policy.hpp
+    - rt/src/resource_policy.cpp
+    - rt/src/resource_policy.hpp
+    - rt/src/memory_policy.cpp
+    - rt/src/memory_policy.hpp
     - rt/src/cuda_backend.cpp
     - rt/src/cuda_driver.cpp
     - rt/src/xdma_backend.cpp
     - rt/src/xdma_linux.cpp
-    - rt/include/rt/cuda_backend.hpp
-    - rt/include/rt/cuda_driver.hpp
-    - rt/include/rt/xdma_backend.hpp
-    - rt/include/rt/xdma_linux.hpp
-    - rt/include/rt/plugin_api.h
-    - rt/include/rt/plugin_manager.hpp
-    - rt/src/plugin_manager.cpp
-    - tests/test_plugin_manager.cpp
-    - tests/sample_plugin.c
-    - tests/sample_plugin_bad.c
+    - src/c_abi.cpp
+    - core/include/core/
     - include/simcore/
-    - core/
     - hal/
     - gpu/
     - configs/
-    - qualification/
+    - integrations/
+    - examples/
+    - schemas/qualification/
     - tools/qualification.py
-    - tests/qualification_fixtures/
+    - tools/check_hardware_evidence.py
+    - tools/release_manifest.py
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
     - .github/workflows/cuda-qualification.yml
     - .github/workflows/xdma-qualification.yml
     - .github/workflows/release.yml
+    - samples/cuda_qualification.cpp
+    - samples/xdma_qualification.cpp
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -172,105 +160,135 @@ scope:
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-05-2026-08-12.md
     - docs/evidence/M18-01-2026-08-12.md
-    - release/rtfw-release-contract.schema.json
+    - docs/evidence/M19-01-2026-08-12.md
     - LICENSE
     - VERSION.txt
 acceptance:
-  - The implementation starts from the exact clean default-branch baseline `5eb8f101f692b2aff85f82f4a1660630db750706`, target pull request 223. Every retained M15 through M18-01 evidence record is present. M17-05 remains blocked by the native command-capability discovery mismatch, and M19-01 neither repairs or bypasses that mismatch nor marks M17, M18, CAP-M17, or CAP-M18 complete.
-  - A new installed C11-compatible `rt/extension_abi.h` defines extension ABI version 1 independently of stable C ABI v8 and device ABI v1. Every boundary record and callback table uses fixed-width C types, an exact known version-1 required prefix, `struct_size`, ABI/current-minimum compatibility fields where negotiation applies, explicit counts/capacities, and zero known reserved fields; it contains no C++ type, STL layout, compiler-native exception, ownership-ambiguous string, or persisted process pointer.
-  - Version negotiation is deterministic and fail-closed. The host supplies only the size and version range it implements; an extension declares its current and minimum compatible versions. A common version-1 prefix is selected only when both ranges overlap and every required prefix is present. Short required prefixes, unsupported versions, inconsistent minimum/current values, overflowed sizes/counts, malformed enum/boolean/name data, null required callbacks or instances, nonzero known reserved data, and partial output reject before any Runtime registration becomes visible. Known version-1 prefixes of larger forward records may be copied while unknown suffix bytes are ignored and never interpreted as capabilities.
-  - The host receives an already-resolved extension entry-function pointer and invokes it only while the Runtime is configuring. Runtime never calls `dlopen`, `dlsym`, `LoadLibrary`, `GetProcAddress`, `dlclose`, or `FreeLibrary`, never searches a path, and never owns a module handle. Symbol discovery, trust/provenance checks, and physical library unload remain host responsibilities; the documented version-1 entry symbol and direct/static entry path are covered by C and C++ fixtures without linking `rtfw_runtime` to the experimental plugin target or a platform loader library.
-  - One additive C++ configuring-time Runtime operation stages one complete extension registration transaction and returns an instance-local generation-bearing extension handle only after success. The extension entry call may stage bounded CPU phases, device-ABI-v1 backends, control-lane services, and their local relationships through copied version-1 records and provisional handles. The Runtime validates the complete staged set, existing capacities/names/ownership, and checked storage arithmetic before publishing any phase, backend, service, relationship, extension handle, identity, or inspector row; any entry error, callback exception, malformed late record, duplicate, capacity failure, or existing-runtime conflict leaves the Runtime configuring and correctable with no partial extension state.
-  - Version-1 CPU-phase registration reuses the exact stable C-ABI-v8 callback result and callback-context semantics without adding a C ABI export. Names and descriptors are copied; callback code and user data are borrowed until checked detach. Successful phases enter the ordinary compiled graph, preserve fixed scratch and nested-task semantics, execute only under existing Runtime dispatch and overload rules, and can participate in copied extension-local dependency/resource declarations. No extension registration callback executes from a frame, executor, device-submission, completion, watchdog, or other post-start lane.
-  - Version-1 backend registration carries only the existing complete `rtfw_device_backend_api` version-1 table and is translated through the existing Runtime device-ABI-v1 compatibility path. It preserves backend capacity, borrowed instance/table lifetime, initialization, buffer/submission/completion, health/reset, reverse retryable shutdown, and no-executor-vendor-call rules. It exposes no HAL-v2 memory/topology or command/timeline table, CUDA Graph, XDMA control/event, cross-backend timeline, peer-memory, or combined-path capability and therefore cannot work around the M17-05 blocker.
-  - "Version-1 service registration defines a bounded named interface/version plus nonthrowing initialize, request-stop, quiesce, shutdown, and optional status hooks. Service callbacks execute only on the single host control path: initialize runs in registration order before extension backend/lane startup and before phase callbacks are admitted; request-stop is bounded, nonblocking, and idempotent; quiesce and shutdown run in reverse registration order only after frame callbacks, nested jobs, submissions/completions, and extension backend cleanup can no longer enter extension code. A service is never scheduled as an executor phase, never creates an implicit Runtime lane, never reenters Runtime control operations, and never performs registration after finalization."
-  - Ownership and state are explicit and inspectable. Runtime copies all names, table prefixes, semantic descriptors, and relationships, borrows extension code/instances/user data until checked detach succeeds, tracks registration generation and active phase/service/backend ownership, and reports configuring, registered, running, stop-requested, quiescent, cleanup-pending, detached, or failed state without exposing addresses. Handles encode Runtime ownership, kind, slot, and generation; zero, foreign-Runtime, wrong-kind, never-issued, detached, and prior-generation handles fail deterministically without invoking extension code or mutating output.
-  - Checked stop closes extension admission first, requests service and backend stop without waiting on an executor worker, quiesces Runtime phase/job/device work, completes the existing reverse extension-backend cleanup, and only then quiesces and shuts down services in reverse registration order before retiring extension registrations. The first error is retained while independent cleanup continues; unresolved backend ownership keeps every enclosing service it may reference alive. A failure preserves the exact unresolved owner and callback/table lifetime, keeps detach/unload readiness false, and retries only unresolved work. Destruction is a best-effort fallback and cannot relabel uncertain ownership as released.
-  - Checked detach is permitted only after Runtime stop has succeeded, every extension callback/job/backend/service reference is quiescent, and all registered ownership is released. It invalidates the generation and clears copied callable pointers before reporting unload readiness. M19-01 performs no operating-system unload and no hot reload; M19-03 remains responsible for Unreal world/module lifecycle, concurrent world-instance teardown, actual host unload orchestration, and long-run reload coverage.
-  - Extension descriptors, provisional/committed handle maps, copied phase/backend/service records, lifecycle state, and cleanup bookkeeping are fixed-capacity, Runtime-instance-owned, and represented exactly once in runtime/device control bytes and the existing M15 logical ledger without adding a MemoryPlan row or provider region. Configuration may allocate only within existing pre-start rules; registration, start, phase execution, service status, stop, retry, detach inspection, and stale-handle rejection add no ordinary post-start heap allocation, hidden thread, file/network I/O, blocking mutex on an RT lane, unbounded wait/retry, spill path, or cross-instance mutable global state.
-  - Extension name/version, negotiated ABI version, phase/backend/service semantic descriptors, relationships, and service interface versions participate in explicit configuration/graph/replay identity. Callback addresses, module handles, user-data pointers, provisional handles, mutable lifecycle state, and observed counters do not. Two Runtime instances using the same entry function receive distinct owners/generations and cannot share handles, service state, callbacks, backend ownership, status rows, cleanup state, or detach readiness.
-  - The supported default package adds only the reviewed `rt/extension_abi.h` header and additive Runtime C++ source surface needed by M19-01; it adds no default target, transitive loader dependency, experimental header, or experimental target. The old `rt/plugin_api.h`, `rt/plugin_manager.hpp`, `plugin_manager.cpp`, sample plugins, and plugin tests remain byte unchanged, experimental, default-uninstalled, and explicitly not a compatibility path for extension ABI version 1.
-  - Stable C ABI v8 remains exactly 70 exports with frozen fingerprint and SONAME 8; `rt/c_api.h`, every device-ABI-v1 declaration/layout/value, HAL core v2, memory/topology extension v1, command/timeline extension v1, Runtime status numeric values, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log schemas and IDs, existing installed targets and compatibility aliases, release 1.2.1, all support matrices and qualification schemas/workflows, and Apache-2.0 remain unchanged. The extension ABI is a separately versioned registration boundary, not a silent C-ABI-v8 revision or a C++ binary ABI promise.
-  - Documentation and retained evidence define the exact ABI layouts and minimum prefixes, version negotiation, registration state machine, callback/thread rules, capacities, ownership matrix, stop/quiesce/detach order, retry and stale-handle behavior, package delta, threat model, and evolution/rollback policy. They state that in-process extensions are trusted native code, M19-01 does not sandbox or authenticate them, and no fixture, shared-library smoke, hosted CI, documentation, preflight, mock backend, or successful unload-readiness check is Unreal, physical hardware, HIL, field, RT1/RT2, signing, release, deployment, or production evidence.
-  - Focused C/C++ ABI, transaction, phase, backend, service, lifecycle, stale-handle, two-Runtime, no-allocation, package, and loader-isolation tests; complete deterministic local verification; mandatory GitHub CI; and human ABI/API, concurrency/lifetime, security, package/compatibility, and claim-boundary review pass before merge. M19 and CAP-M19 remain incomplete after M19-01.
+  - The implementation starts from an initially clean target at exact default-branch commit `875c486570ed84df939b8b9e75c01e7c3d43b28b`. Target history proves M17-04 (`bdc97d0122effbad07dbf6d4981e1bf0de729437`), the retained failed M17-05 review (`e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`), M18-01 (`5eb8f101f692b2aff85f82f4a1660630db750706`), and M19-01 (`d5224e670e3ca5ebbe3d2aec5fda7d21213499a8`) are ancestors. Later default-branch changes are governance/schema synchronization and a bounded aggregate-test timeout change; they contain no combined sample and do not repair the discovery mismatch. Governance, current-state, handoff, roadmap, and traceable evidence are reconciled to those facts without rewriting retained evidence or inventing CI or review results.
+  - >-
+    The sole Runtime production repair is in `rt/src/command_batch.cpp`:
+    `discover_command_timeline_extension()` supplies a value-initialized
+    `HalV2CommandTimelineCapabilities` whose caller-owned input prefix is
+    exactly `sizeof(HalV2CommandTimelineCapabilities)` and
+    `hal_v2_command_timeline_extension_version`, whose semantic fields and
+    reserved tail begin zero, and whose complete returned record is still
+    validated before any `CommandTimelineExtensionState` is published. It no
+    longer poisons the required input header. No public declaration, table
+    layout, numeric value, callback signature, vendor callback, or other
+    Runtime path changes.
+  - Focused discovery tests observe the exact incoming size/version and zero semantic/reserved state inside a callback, prove a valid output publishes once, and prove null/throwing/error/unsupported, untouched, short-size, wrong-version, zero/excess capacity, and nonzero-reserved outputs publish nothing and return the existing fail-closed status. A corrected registration succeeds after each rejected attempt. The repair must not weaken whole-record validation merely to make the two candidates pass.
+  - A positive behavioral integration test constructs the actual `CudaDeviceBackend` and `XdmaDeviceBackend` classes with complete bounded version-2 injected driver tables and registers both native `hal_v2_registration()` results in one real `rt::Runtime`. It reaches configuring/finalize/start/step/checked-stop through the canonical Runtime discovery path; direct calls to the capability callback, the device-ABI-v1 `api()` route, a generic substitute backend, a wrapper that rewrites the record, and a disabled or expected-failure test are insufficient.
+  - A top-level default build adds exactly one non-installed `sample_cpu_gpu_fpga_cpu` executable and one focused test executable/CTest gate. They use only existing installed/public Runtime, CUDA-candidate, and XDMA-candidate C++ headers and the existing `rtfw_runtime`, `rtfw_cuda_backend`, and `rtfw_xdma_backend` targets. They configure, build, and run without `RTFW_BUILD_EXPERIMENTAL`, a CUDA toolkit, GPU, XDMA node, kernel driver, root privilege, firmware, bitstream, network access, or secrets.
+  - The compiled graph is exactly `CPU prepare -> simulated CUDA batch -> CPU host-stage bridge -> simulated XDMA batch -> CPU validate`, expressed with ordinary Runtime phase dependencies. The CUDA and XDMA phases each own one distinct backend-local timeline; no handle, wait, signal, or completion value crosses a backend. Cross-backend order is established only by valid completion of the CUDA download, the completed bounded CPU bridge, and the later XDMA upload. No hardware fence, coherent shared allocation, or direct peer path is declared or implied.
+  - CPU preparation writes a fixed deterministic input into a CUDA-owned host staging object discovered and registered through the existing heterogeneous staged-memory contract. The declared CUDA batch/provider emits, in exact order, one `copy_to_device`, one stable-ID caller-owned pre-registered CUDA Graph dispatch with exact ordered bindings, and one `copy_from_device`, plus one finite timeout and one monotonically increasing same-CUDA-timeline signal. The injected version-2 CUDA driver owns fixed opaque simulated device storage and performs a deterministic integer transform; it remains fake protocol behavior.
+  - Only after a whole successful CUDA batch completion, the CPU bridge copies the exact downloaded bytes from the CUDA-owned host region to a separate XDMA-owned borrowed-host staging region. Both spans have fixed extent, are disjoint, are never dual-registered, and have explicit access. The bridge performs no ordinary allocation, vendor call, hidden wait, pointer-derived identity, implicit coherency operation, peer-memory operation, or timeline publication.
+  - The declared XDMA batch/provider emits, in exact order, one existing H2C command, one bounded aligned 32-bit little-endian control-write trigger, one finite user-event wait, and one existing C2H command, plus one finite timeout and one monotonically increasing same-XDMA-timeline signal. Its injected version-2 driver owns fixed simulated card/control/event/output state, verifies exact opcodes/ranges/access/payloads, and applies a deterministic integer transform without opening or touching a user BAR, event node, PCI function, kernel driver, firmware, bitstream, or physical FPGA.
+  - At least two consecutive frames complete with deterministic frame-specific input/output, exact graph and injected-driver call order, one accepted-before-complete result per device phase per frame, one CUDA Graph launch and one XDMA trigger/event per frame, and strictly monotonic accepted and completed values on each backend-local timeline. The final CPU callback verifies every output element and count. The executable returns nonzero on any mismatch and prints one stable concise success line containing `evidence=simulated_protocol`, `physical_hardware=false`, `direct_peer_dma=false`, and the completed frame count.
+  - All sample payloads, graph bindings, device/card regions, control/event values, provider declarations, timeline records, call traces, failure switches, and per-frame observations use compile-time-bounded or initialization-time-fixed storage. The measured interval begins after successful `Runtime::start()` and covers complete `Runtime::step()` calls; it reports zero ordinary heap allocations. Host-independent regression evidence uses exact storage, callback, command, poll, and driver-call counts rather than elapsed-time thresholds.
+  - Thread-identity assertions prove ordinary CPU providers run only on executor workers; CUDA injected driver calls run through the matching Runtime submission/service ownership; XDMA transfer/control/event callbacks run only on its pre-existing fixed worker team; and no injected vendor callback runs on an executor worker. The sample adds no thread, lane, queue, retry loop, spill path, detached task, file/network I/O, blocking executor callback, or unbounded wait.
+  - Two independently constructed Runtime/CUDA/XDMA/sample fixtures prove isolation of Runtime handles, native registration state, Graph IDs, simulated device/card/control/event storage, host buffers, timelines, call traces, stop flags, failures, and cleanup ownership. Foreign handles are rejected and one fixture cannot advance, fail, stop, or mutate the other.
+  - Failure coverage is stage-specific and deterministic. An injected CUDA Graph failure after valid upload publishes no CUDA timeline completion, suppresses CUDA download, the CPU bridge, all XDMA submission, and CPU validation, and leaves only the existing bounded quarantine/cleanup ownership. An injected XDMA event-wait or C2H failure after successful CPU preparation, CUDA completion, bridge, and preceding XDMA operations publishes no XDMA timeline completion and suppresses the remaining XDMA work and final CPU validation. Tests assert exact first error, phase/callback/driver counts, no fabricated completion, checked-stop resolution or unresolved-only retry, and a fresh independent all-success run.
+  - Startup, success, injected failure, correction, and checked stop preserve M17-01 through M17-04 and M19-01 exception containment, accepted-before-complete causality, whole-completion publication, timeout/cancel behavior, first-error retention, reverse cleanup, uncertain-owner quarantine, unresolved-only retry, caller-owned Graph/buffer lifetime, extension readiness, and no detached work. The one discovery repair and sample add no Runtime/backend-owned storage, MemoryPlan row, provider region, status, schema, installed header/target, or support record.
+  - Stable C ABI v8 remains exactly 70 exports with fingerprint `0xd0e7a5a14bf35f97` and SONAME 8. Device ABI v1 declarations/layout/values and both candidate `api()` behaviors, HAL core v2, memory/topology v1, command/timeline v1, extension ABI v1, Runtime status values, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log/qualification schemas and IDs, installed SDK inventory and aliases, release 1.2.1, support matrices, qualification workflows, and Apache-2.0 are byte or behavior unchanged as applicable.
+  - Target governance, current state, handoff, roadmap, architecture/device/vendor/testing/readiness contracts, README, deterministic documentation/release checks, and retained `docs/evidence/M17-06-<date>.md` describe only portable RT0 simulated-protocol composition. M17/CAP-M17 may be marked functionally complete only after focused and full local validation, all mandatory CI including executable sanitizers, and required human gates pass. M18 hardware qualification and M19 Unreal work remain separate; no physical, timing, support, release, deployment, or production state changes.
 validation:
   local:
+    - git status --short --branch
+    - test "$(git rev-parse HEAD)" = "875c486570ed84df939b8b9e75c01e7c3d43b28b"
+    - git merge-base --is-ancestor bdc97d0122effbad07dbf6d4981e1bf0de729437 HEAD
+    - git merge-base --is-ancestor e5f10cc572fa9ba3d4dd488781c310dafb34dfd2 HEAD
+    - git merge-base --is-ancestor d5224e670e3ca5ebbe3d2aec5fda7d21213499a8 HEAD
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='ExtensionAbi.*:ExtensionRegistration.*:ExtensionLifecycle.*:MemoryPlan.*Extension*:DeterminismReplay.*Extension*:TraceNoAlloc.*Extension*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm19_extension_registration|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data'
-    - cmake -S . -B build/m19-01-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
-    - cmake --build build/m19-01-package --parallel 2
-    - cmake --install build/m19-01-package --prefix "$PWD/build/m19-01-install"
-    - cmake -S tests/package_consumer -B build/m19-01-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m19-01-install"
-    - cmake --build build/m19-01-package-consumer --parallel 2
-    - ctest --test-dir build/m19-01-package-consumer --output-on-failure
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='CommandBatch.*Capability*:VendorHalV2.*RuntimeRegistration*'
+    - ./build/agent-full/tests/rtfw_cpu_gpu_fpga_cpu_sample_tests
+    - ./build/agent-full/samples/sample_cpu_gpu_fpga_cpu
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m19_extension_registration|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|xdma_backend'
+    - ctest --test-dir build/agent-full --output-on-failure --repeat until-fail:20 -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu'
+    - cmake -S . -B build/m17-06-asan -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=OFF -DENABLE_RAPIDCHECK=OFF -DSIM_SANITIZERS='address;undefined' -DSIM_WERROR=ON
+    - cmake --build build/m17-06-asan --target simcore_tests rtfw_cpu_gpu_fpga_cpu_sample_tests sample_cpu_gpu_fpga_cpu rtfw_xdma_backend_tests --parallel 2
+    - ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ctest --test-dir build/m17-06-asan --output-on-failure -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|xdma_backend'
+    - cmake -S . -B build/m17-06-tsan -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=OFF -DENABLE_RAPIDCHECK=OFF -DSIM_SANITIZERS=thread -DSIM_WERROR=ON
+    - cmake --build build/m17-06-tsan --target simcore_tests rtfw_cpu_gpu_fpga_cpu_sample_tests sample_cpu_gpu_fpga_cpu rtfw_xdma_backend_tests --parallel 2
+    - TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/m17-06-tsan --output-on-failure -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|xdma_backend'
+    - cmake -S . -B build/m17-06-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
+    - cmake --build build/m17-06-package --parallel 2
+    - cmake --install build/m17-06-package --prefix "$PWD/build/m17-06-install"
+    - cmake -S tests/package_consumer -B build/m17-06-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m17-06-install"
+    - cmake --build build/m17-06-package-consumer --parallel 2
+    - ctest --test-dir build/m17-06-package-consumer --output-on-failure
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
-    - if nm -u build/agent-full/librtfw_runtime.a | rg '(^|[^A-Za-z])(dlopen|dlsym|dlclose|LoadLibrary|GetProcAddress|FreeLibrary)(A|W)?$'; then exit 1; fi
+    - git diff --check
+    - git diff --name-only 875c486570ed84df939b8b9e75c01e7c3d43b28b
   focused_tests_to_add:
-    - C11 and C++20 header self-containment plus exact version-1 constants, required-prefix offsets, record sizes/alignment on LP64 and LLP64, fixed-width fields, calling conventions, zero defaults/reserved tails, and documented direct/static entry symbol
-    - negotiation overlap and exact selection with current/minimum boundaries, short and larger records, unsupported/inconsistent versions, null functions/instances, partial writes, nonzero reserved data, malformed names/enums/booleans, checked size/count overflow, and callback exception containment
-    - all-or-nothing staging and publication after every entry, phase, backend, service, relationship, duplicate-name, capacity, allocation, and existing-Runtime conflict failure, followed by corrected successful registration without leaked provisional or committed handles
-    - CPU phase callback context/scratch/task equivalence to stable C ABI v8, ordinary graph/dependency execution, callback error propagation, zero post-start allocation, and proof that registration/entry callbacks never execute on a runtime lane
-    - device-ABI-v1 backend registration through the canonical HAL-v2 compatibility adapter with success, saturation, early completion, loss/reset, failed initialization/unregister/shutdown, reverse retry, and explicit absence of native HAL-v2 command/topology capability or M17-05 bypass
-    - service initialize, request-stop, quiesce, shutdown, and status ordering across success, startup failure, active callback/job, service failure, backend cleanup failure, first-error retention, unresolved-only retry, idempotence, and zero service execution on executor/device/watchdog lanes
-    - owner/kind/slot/generation validation for zero, foreign, cross-kind, never-issued, detached, reused-slot, and prior-generation handles with transactional output and proof that stale rejection never enters extension code
-    - detach-readiness rejection before successful stop or while any callback/job/backend/service owner remains, pointer clearing and generation retirement on success, direct/static fixture unload after readiness, and no supported-runtime module-loading or path-search dependency
-    - exact extension/control/device storage accounting, overflow and capacity rejection before side effects, conditional semantic identity, unchanged identity when no extension is registered, and two-Runtime isolation of every handle/state/callback/backend/service/cleanup field
-    - default and relocated installed-package C/C++ consumers for the new header and Runtime surface, exact one-header inventory delta, unchanged target/alias inventory, frozen 70-export C ABI/SONAME, and byte-unchanged legacy experimental plugin paths
-    - ThreadSanitizer coverage of phase execution, status inspection, stop/retry/detach, stale calls, concurrent independent runtimes, and backend/service completion without weakening permanent M15/M16/M17 gates
+    - Runtime command/timeline discovery gives callbacks the exact initialized size/version input prefix and zero semantic/reserved fields, then rejects untouched, partial-malformed, header-corrupting, over-capacity, reserved, error, and exceptional outputs transactionally before accepting a corrected complete record.
+    - Both actual native CUDA and XDMA candidates with injected version-2 drivers register together through `Runtime::register_device_backend(HalV2BackendRegistration, ...)`; the regression fails on the M17-05 implementation and passes only through the repaired canonical discovery path.
+    - Default portable build and CTest execution of the combined sample on a host with no CUDA toolkit, GPU, XDMA device node, driver, firmware, bitstream, privilege, network, or secret.
+    - Exact CPU prepare, CUDA upload/Graph/download, CPU host bridge, XDMA H2C/control-write/event-wait/C2H, and CPU validate dependency/call order with deterministic final values for at least two frames.
+    - Distinct backend-local timeline ownership, accepted/completed monotonic values, whole-completion publication, and explicit proof that no CUDA timeline handle appears in XDMA waits/signals or vice versa.
+    - Disjoint CUDA/XDMA host registrations, exact fixed bridge extent, stable Graph/control/event identifiers and opcodes, and absence of peer memory, dual registration, implicit synchronization, or pointer-derived identity.
+    - Provider/executor, Runtime submission/service, and XDMA fixed-worker thread identities proving no injected vendor callback runs on an executor worker and no new worker or lane exists.
+    - Complete-frame post-start zero-allocation coverage, exact fixed storage and operation counts, deterministic repeat execution, and no wall-clock performance threshold or latency claim.
+    - Two independent Runtime/backend/sample fixtures with isolated handles, Graph IDs, device/card/event storage, buffers, timelines, traces, failure flags, stop state, and reverse cleanup.
+    - CUDA Graph failure and XDMA event/C2H failure with stage-accurate downstream suppression, no later-backend submission after upstream failure, no timeline advancement from synthesized failure, exact error propagation, quarantine/checked-stop behavior, unresolved-only retry where applicable, and fresh-run recovery.
+    - Stable sample success text and retained evidence labels explicitly stating simulated protocol, no physical hardware, and no direct peer DMA.
+    - Permanent M14.1/M15/M16/M17-01 through M17-04/M19-01 lifecycle, ABI, compatibility, accounting, determinism, package, no-allocation, sanitizer, and claim-boundary regressions.
   required_ci:
-    - Documentation contract workflow validating the extension ABI layout/version/state-machine tokens, release digest ledger, exact one-header package delta, frozen C ABI/device ABI/plugin boundary, and truthful M17/M18/M19 claims
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of negotiation, transactional registration, phase/backend/service execution, malformed tables, stop/retry/detach, stale handles, identity, accounting, and two-Runtime isolation
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix proving the same C ABI record prefixes/layout diagnostics, version negotiation, calling convention, DLL fixture symbol, lifecycle, stale-handle, source compatibility, and installed C/C++ consumer behavior
-    - Unified executor GCC ThreadSanitizer job running the complete ExtensionAbi, ExtensionRegistration, ExtensionLifecycle, no-allocation, mock-device compatibility, cleanup/retry, and two-Runtime suites plus every permanent M15/M16/M17 fresh-process gate without weaker filters or timeouts
-    - Determinism GCC and Clang FMA-on/FMA-off jobs and artifact exchange proving unchanged no-extension artifacts and explicit deterministic identity separation for extension semantic descriptors without hashing pointers or mutable lifecycle state
-    - C/C++ embedding, add_subdirectory, installed package, archive relocation, non-default include layout, exact SDK header self-containment/inventory, compatibility aliases, exact 70-export C ABI and SONAME, dependency review, SBOM, autotune, scaling, fuzz-smoke, and release-contract gates
-    - Existing CUDA-toolkit compile/package and node-free XDMA compile/package jobs plus all M14.1/M15/M16/M17 core/memory/command/vendor gates remain mandatory portable build or simulated evidence only; no hardware or qualification workflow is required or sufficient for M19-01
+    - Documentation contract workflow validates the repaired in/out discovery rule, exact graph/staging/timeline topology, simulated-evidence labels, current state/handoff/roadmap, release digests, frozen C/device/extension ABIs, exact SDK inventory, and all permanent M15/M16/M17/M19 gates.
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA-on/off matrix builds and runs the new discovery integration, sample success/failure/isolation tests, and executable with AddressSanitizer and UndefinedBehaviorSanitizer enabled on Debug tuples and no sanitizer finding.
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix builds and runs the same portable tests/executable with exact graph order, opcodes, fixed outputs, evidence labels, source compatibility, and no Linux, CUDA-toolkit, or device-node dependency.
+    - Unified executor GCC 11 ThreadSanitizer job executes the discovery, sample success/failure/isolation, complete VendorHalV2, CUDA Graph, XDMA control/event, CommandBatch, HeterogeneousMemory, HAL-v2/v1-adapter, blocked-stop, and permanent M15/M16/M19 selections without a report, weaker filter, disabled test, or relaxed timeout.
+    - Determinism GCC/Clang FMA-on/FMA-off jobs and artifact exchange remain byte exact for existing fixtures; the sample produces the same integer outputs, frame counts, and normalized stage trace on every portable tuple without being relabeled as hardware or controlled-timing evidence.
+    - Host-independent performance-regression gate proves compile-time/finalization-time fixed storage, zero ordinary allocations across complete post-start frames, exact bounded command/callback/poll/driver counts, and no capacity growth; it uses no elapsed-time threshold or RT1/RT2 claim.
+    - C/C++ embedding and add_subdirectory jobs build and run the default non-installed sample beside existing examples on GCC and Clang without a toolkit or device node, while installed-package, archive relocation, non-default include, header self-containment, aliases, and exact 70-export C ABI gates prove no installed-surface change.
+    - Existing CUDA-toolkit compile/install/consumer and node-free XDMA compile/install/consumer jobs remain mandatory compile/package evidence only; neither job executes hardware or upgrades a support/qualification claim.
+    - Existing warnings-as-errors/static contract checks, bounded fuzz smoke, dependency review, SBOM, autotune, scaling, observability schema, no-allocation, M14.1 recovery, M15 rollback, M16 multi-rate, all M17 core/memory/command/vendor, M19 extension, release-contract, package, CUDA fake-driver, and XDMA portable gates remain green.
   manual:
-    - Human extension-ABI and public-API review must approve every version-1 C prefix/layout/calling convention, forward-size rule, negotiation result, provisional/committed handle model, transaction boundary, additive C++ surface, evolution policy, and preservation of stable C ABI v8, device ABI v1, Runtime status, package-target, schema, release, support, and license boundaries.
-    - Human concurrency, lifetime, and security review must confirm entry reentrancy rejection, callback/thread rules, copied-versus-borrowed ownership, service/backend stop ordering, quiescence proof, first-error and retry semantics, generation retirement, pointer clearing before unload readiness, Runtime-instance isolation, bounded accounting, and no post-start allocation, hidden lane, unbounded wait, or runtime loader dependency.
-    - Human package, compatibility, and claim review must confirm the exact one-header default inventory delta, byte-unchanged experimental loader and M15-M18 evidence, no M17-05 workaround, and no implication of sandboxing, authentication, Unreal integration, physical hardware, HIL, latency, RT1/RT2, signing, release, deployment, or production readiness.
+    - Human API, architecture, and compatibility review confirms the repair is the exact caller-seeded command-capability protocol already used by the surrounding versioned HAL records, preserves fail-closed output validation, changes only `rt/src/command_batch.cpp`, and adds no public/vendor/ABI/schema/status/package/support capability.
+    - Human concurrency, lifetime, and safety review confirms exact dependency order, disjoint host ownership, bounded bridge, backend-local timelines, thread ownership, accepted-before-complete and whole-completion rules, fixed storage, failure suppression, quarantine, reverse retryable cleanup, no detached work, and no allocation in measured frames.
+    - Human test and claim review confirms the behavioral regression traverses both actual native candidate registrations, failure tests would catch bypasses, and GPU/FPGA/Graph/DMA/MMIO/event wording denotes injected simulated protocol roles only.
+    - A maintainer must explicitly approve any protected-branch merge after every required CI check and review passes. M17-06 does not authorize an agent to commit, push, open or merge a pull request, release, deploy, change settings, or waive a gate.
+    - Physical combined execution is neither required nor authorized. Any later physical run requires a separately approved M18 plan with exact GPU/FPGA/driver/firmware/bitstream/BDF/topology/workload identity, pre-retained thresholds where timing is measured, raw evidence, and human promotion review.
 risk:
   class: high
   hazards:
-    - a size/version check can read beyond a short record, accept an incompatible prefix, interpret an unknown suffix as capability, or diverge between LP64 and LLP64 layouts
-    - sequential phase/backend/service registration can leak a visible prefix when a later record fails unless the complete extension transaction is staged and committed atomically
-    - a copied descriptor can still retain a borrowed string, table, callback, instance, or user-data pointer whose module or owner is released before checked detach
-    - a stale, foreign, cross-kind, or reused-slot handle can reach newly loaded code or another Runtime if owner and generation checks are incomplete
-    - service stop or backend cleanup can deadlock, run on an RT lane, clear ownership after uncertain failure, or report unload readiness while a callback, nested job, submission, completion, or status call remains active
-    - a C++ exception can cross a C callback boundary, or in-process extension code can corrupt the host despite version validation because the ABI is not a sandbox or trust boundary
-    - extension metadata, provisional handles, or callback addresses can enter graph/replay identity nondeterministically or escape exact M15 accounting and post-start allocation limits
-    - reusing the experimental loader can leak `dl`, SimCore, scheduler, feature macros, research headers, or an unsupported package target into the supported runtime
-    - exposing native HAL-v2 tables through the version-1 extension ABI can silently bypass the blocked M17-05 path or duplicate device lifecycle and validation semantics
-    - a fixture DLL/shared object, hosted CI, mock backend, successful stop, or stale-handle test can be overstated as safe arbitrary-code execution, Unreal hot reload, physical integration, RT, or production evidence
+    - Initializing the input header can accidentally make an untouched or partially malformed callback look valid if zero-capacity and reserved-tail validation is weakened.
+    - Repairing a vendor callback or public record instead of the canonical Runtime discovery site would preserve the mismatch for other conforming backends or change an already published source contract.
+    - An ordinary graph dependency can be mistaken for a cross-backend hardware fence even though correctness depends on completed CUDA download, CPU bridge completion, and later XDMA upload.
+    - Overlapping or dual-registered host storage can obscure ownership, race two backends, or falsely imply peer access or coherent shared memory.
+    - Fake CUDA Graph and XDMA control/event callbacks can mutate data synchronously or on the wrong thread and hide accepted-before-complete, staging, timeout, quarantine, or lane-ownership defects.
+    - Sample state can allocate after start, use dynamic logs, race submission/service/XDMA workers, share globals across Runtime instances, or outlive checked cleanup.
+    - A Runtime-generated failure can still advance a timeline or release downstream graph work if assertions observe only the final output instead of every phase and driver call.
+    - Default sample wiring can leak toolkit, Linux-driver, feature-macro, warning, dependency, installed-target, or package requirements into portable builds.
+    - Success wording, GPU/FPGA names, sanitizer results, hosted CI, or deterministic counts can be overstated as physical execution, peer DMA, bounded latency, hardware qualification, RT1, or RT2.
   stop_conditions:
-    - the exact baseline is unavailable, dirty, lacks M17-04 ancestry or M18-01 commit `5eb8f101f692b2aff85f82f4a1660630db750706`, lacks any retained M15/M16/M17/M18-01 evidence record, or no longer records the actual M17-05 blocker truthfully
-    - target contracts or actual code require the supported registration ABI to reuse the experimental plugin manager, introduce a loader dependency into `rtfw_runtime`, or expose a C++ binary layout across the extension boundary
-    - complete transactional registration cannot be achieved without leaving a phase, backend, service, relationship, handle, identity, accounting row, or borrowed owner visible after failure
-    - correct quiescence and detach readiness cannot be proven without unloading code while it may be executing, detaching/canceling a lane, inventing completion, clearing uncertain backend/service ownership, or adding an unbounded wait/retry
-    - implementation requires changing stable C ABI v8 exports/fingerprint/SONAME, `rt/c_api.h`, any device-ABI-v1 declaration/layout/value, HAL-v2 core or extension semantics, Runtime status numeric values, runtime-profile schema 7/25 keys, observability/rate/artifact schema or IDs, existing package targets/aliases, release version, support matrix, qualification schema/workflow, or license
-    - satisfying backend registration requires native HAL-v2 command/topology exposure, repairing or bypassing M17-05, changing CUDA/XDMA code, adding cross-backend synchronization, or claiming a combined or peer path
-    - a service needs an implicit worker, executor-lane blocking, file/network I/O on an RT lane, post-start heap allocation, shared process-global registry, or callback after generation retirement
-    - deterministic tests require Unreal Engine, physical CUDA/FPGA/XDMA hardware, device nodes, root privilege, a controlled timing host, secrets, signing, network access, release, deployment, or production access
-    - mandatory focused, contract, package, full, CI, sanitizer, or human review must be skipped, weakened, or relabeled successful
-    - a required source, test, workflow, documentation, governance, checker, digest, or evidence change falls outside allowed paths or enters a forbidden path
+    - The target is not initially clean at exact commit `875c486570ed84df939b8b9e75c01e7c3d43b28b`, required M17-04/M17-05/M18-01/M19-01 ancestry or retained evidence is absent, or unrelated target changes cannot be preserved.
+    - Source inspection or a reproducing test contradicts the retained M17-05 finding, or the exact mismatch cannot be repaired solely in `rt/src/command_batch.cpp` while preserving complete fail-closed discovery validation.
+    - The repair requires a public header/table/version/callback change, a CUDA/XDMA backend or driver change, a stable ABI/status/schema/package/support change, or a second Runtime implementation path.
+    - After the scoped repair, either actual native candidate still cannot register through one Runtime, or the combined graph cannot be expressed with existing public APIs, disjoint host staging, ordinary dependencies, and backend-local timelines.
+    - Correctness requires a substitute backend, device-ABI-v1 fallback, wrapper that rewrites capabilities, overlapping or dual registration, a cross-backend timeline/fence, direct peer DMA, hidden synchronization, device-rate dispatch, a new lane, unbounded retry, detached work, or measured-frame allocation.
+    - Stage-accurate tests cannot prove that CUDA failure suppresses the bridge/XDMA/validator, XDMA failure suppresses its remaining work/validator, invalid completion never advances a timeline, and checked cleanup preserves uncertain ownership.
+    - A portable deterministic test requires sleeps or timing tolerances, a CUDA toolkit, physical GPU/FPGA, XDMA node, root privilege, fixed PCI/IRQ/IOMMU topology, destructive MMIO, firmware/bitstream, Unreal, secrets, signing, release, deployment, or production access.
+    - Any required Linux/Windows build, focused/full test, ASan/UBSan/TSan, determinism, no-allocation, package/ABI, static, or human gate genuinely fails on the proposed revision and cannot be repaired within allowed paths without weakening the gate.
+    - A required source, test, sample, build, workflow, documentation, governance, or evidence edit falls outside the allowlist or touches a forbidden/retained artifact.
 rollback:
-  strategy: Revert the extension-ABI-v1 header and Runtime registration/inspection/detach surface, transactional registry and service lifecycle integration, accounting/identity changes, tests/fixtures/CI, one-header package inventory update, documentation/governance, release digests, and retained M19-01 evidence as one coherent batch. Before removing the feature from a running integration, require checked Runtime stop and checked extension detach to resolve every callback, job, backend, service, and borrowed owner; never unload code or release extension state while readiness is false. No repository data, host setting, support record, release, or deployment is migrated. If an external extension was built against ABI version 1, retain the matching header/runtime revision or mark that artifact explicitly unsupported rather than silently reusing version 1 for incompatible semantics.
+  strategy: Close frame admission and use checked Runtime stop before reverting an executing integration. Retain every accepted or quarantined CUDA/XDMA batch, Runtime submission/service lane, XDMA worker, caller-owned Graph, host/device/card buffer, event/control record, and backend object until existing reverse cleanup succeeds; retry only unresolved ownership and never invent completion or force-clear it. Then revert the `rt/src/command_batch.cpp` discovery repair, focused tests, portable sample/build/CI wiring, documentation/governance, release digest changes, and M17-06 evidence as one coherent batch. The exact `875c486570ed84df939b8b9e75c01e7c3d43b28b` baseline with retained blocked M17-05 behavior is the fallback; no data migration, hardware reset, host-setting, support, qualification, release, or deployment rollback is authorized.
   data_migration: none
-  release_action: Do not publish a release, load or unload an operator module outside tests, promote a support/qualification tuple, mark M17/M18/M19 complete, sign an artifact, deploy, or change production state from this batch.
+  release_action: Do not publish a release, promote CUDA/XDMA/combined/peer/RT support, change a qualification record, execute physical MMIO or hardware, or mark M17/CAP-M17 complete unless the implemented revision passes every focused, full local, mandatory CI, sanitizer, and human gate and its retained evidence supports only the approved portable claim.
 evidence:
   output:
-    - docs/evidence/M19-01-<date>.md
-    - exact baseline and M17-04/M18-01 ancestry, initial worktree state, changed-file allowlist, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - extension ABI version/current-minimum matrix, exact version-1 record/table sizes, alignments, offsets, required prefixes, calling conventions, reserved rules, symbol contract, capacities, and every rejected negotiation/input case on Linux and Windows
-    - complete registration transaction traces for phase/backend/service/relationship success and every injected failure, provisional-to-committed handle maps, no-partial-publication proof, corrected retry, and two-Runtime owner/generation isolation
-    - phase callback context/task/scratch behavior, device-ABI-v1 compatibility traversal, service control-lane lifecycle, exact entry/callback thread identities, stop/quiesce/shutdown/detach order, first-error retention, unresolved ownership, retry, and stale-handle rejection results
-    - fixed extension/control/device storage and M15 ledger reconciliation, configuration and graph/replay identity comparisons, post-start allocation results, ThreadSanitizer results, and pointer/module-handle exclusion proof
-    - clean installed C/C++ consumer and archive-relocation results, exact one-header package inventory delta, no new target or loader dependency, byte-unchanged legacy plugin paths, frozen 70-export C ABI/fingerprint/SONAME, and device/HAL/schema/release/support/license compatibility status
-    - changed and preserved invariants, rollback result, residual risks, and every unperformed Unreal, hot-reload/long-run, physical hardware, CUDA/XDMA/combined, HIL, field, controlled latency, thermal, endurance, RT1, RT2, sandboxing, authentication, signing, release, staging, deployment, and production validation
-  claim_boundary: Evidence may establish static C ABI layout, direct/static entry negotiation, unit and shared-library fixture registration, device-v1 mock compatibility, bounded transaction/lifecycle/stale-handle behavior, sanitizer, package, no-allocation, deterministic identity, cross-instance isolation, and portable RT0 functional extension behavior only. An extension remains trusted in-process native code; a fixture library, mock backend, hosted CI, preflight, document, successful quiescence, or unload-readiness result does not establish sandboxing, provenance, authenticated code, Unreal integration, arbitrary-module hot reload, physical hardware, HIL, field performance, worst-case latency, RT1, RT2, support promotion, signing, release, deployment, or production readiness.
+    - docs/evidence/M17-06-<date>.md
+    - Exact baseline and ancestry, clean initial state, retained-evidence inventory, changed-file allowlist/forbidden-path audit, commands, exit codes, focused/repeat/package/full counts, sanitizer results, required CI run/check identifiers, and human review outcomes without inferring absent results.
+    - Before/after command-capability discovery input/output records, exact callback-observed size/version/zero state, rejected malformed matrix, transactional publication/correction result, and positive canonical Runtime registration of both actual native candidates.
+    - Complete graph declaration and compiled order for CPU prepare, CUDA batch, CPU host bridge, XDMA batch, and CPU validate, including every dependency and each timeline's backend owner, accepted values, and completed values for every frame.
+    - Fixed input and expected output, CUDA staged-domain registration, Graph ID/bindings and upload/Graph/download commands, disjoint bridge spans/byte count, XDMA H2C/control/event/C2H opcodes and payloads, and normalized phase/provider/poll/injected-driver trace.
+    - Proof of fixed sample/backend storage, no capacity growth, zero measured post-start allocations, exact command/callback/poll/driver counts, thread identities, accepted-before-complete/whole-completion behavior, deterministic repetitions, and two-Runtime isolation.
+    - Stage-specific CUDA and XDMA injected failures with exact first status, timeline non-publication, downstream suppression, quarantine/ownership state, checked-stop/unresolved-only retry, and successful fresh-run recovery.
+    - Stable sample output containing the simulated-protocol/no-physical-hardware/no-direct-peer labels and proof of no toolkit, device node, user BAR, event node, PCI, firmware, bitstream, network, secret, Unreal, or hardware access.
+    - Proof that C ABI/device ABI/HAL/extension versions, Runtime statuses, schemas/IDs, installed headers/targets/aliases, release version, support matrices, qualification workflows, license, M17-04 candidate behavior, and M18/M19 artifacts remain unchanged.
+    - Changed and preserved invariants, rollback readiness/result, residual risks, and every unperformed physical CUDA Graph/device-memory/pinning/coherency/topology/timestamp, XDMA DMA/MMIO/interrupt/firmware/bitstream/BDF, combined-hardware, HIL, field, controlled-performance, latency, thermal, endurance, RT1, RT2, Unreal, signing, release, staging, deployment, production, and support-promotion validation.
+  claim_boundary: Evidence may establish the Runtime capability-discovery repair and static, unit, malformed/failure-injected, fake CUDA Graph, simulated XDMA transfer/control/event, sanitizer, package, fixed-storage/no-allocation, lifecycle/recovery, concurrency, cross-instance, deterministic, and portable RT0 functional-composition behavior only. The graph is an explicit CPU-host-staged software protocol. It is not physical GPU or FPGA execution, a hardware fence, direct peer DMA, device coherence, safe MMIO, interrupt or cancellation behavior on a device, bounded vendor or end-to-end latency, controlled performance, HIL, field, RT1, RT2, Unreal, support promotion, signing, release, deployment, or production readiness. Those claims require separately approved and retained M18-or-later tuple evidence and human approval.

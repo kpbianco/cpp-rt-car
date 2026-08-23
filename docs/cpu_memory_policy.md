@@ -294,3 +294,13 @@ thread role, implicit worker, executor-worker callback, stack category, or
 ordinary heap allocation after successful start. Backend-private registries,
 queues, events, descriptors, and stop controls remain backend declarations,
 not Runtime-owned control or stack bytes.
+
+## M17-06 role and allocation evidence
+
+The combined sample's finalized report contains exactly two executor workers,
+two `thread.device-submission` instances, and one Runtime device-service
+instance; XDMA's fixed external worker team remains backend-private. Global
+ordinary/aligned allocation instrumentation begins only after successful
+`Runtime::start()` and covers complete `step()` calls for success and injected
+failure scenarios. The observed count is zero. This is portable functional
+evidence, not stack-size, residency, scheduling, or latency qualification.

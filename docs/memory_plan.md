@@ -391,3 +391,14 @@ row or provider region exists. Registration may allocate only while
 configuring; start, phase dispatch, service status, checked stop/retry,
 inspection, detach, and stale-handle rejection do not allocate ordinary heap
 memory.
+
+## M17-06 plan preservation
+
+The portable combined fixture finalizes with two device backends, two
+heterogeneous buffers, two command-batch backends, and two timelines using the
+existing six-row equation. Fixed simulated CUDA device storage, XDMA card and
+control/event state, Graph bindings, call traces, and failure switches are
+backend/sample-owned and create no Runtime storage row or provider region.
+`device_control_bytes`, runtime-control accounting, twelve memory identities,
+three provider-capable regions, and runtime-stack reconciliation retain their
+existing formulas.

@@ -328,6 +328,24 @@ if (SIM_GTEST_AVAILABLE)
     endif()
 endif()
 
+# Portable M17-06 combined-protocol tests use the actual native candidate
+# classes with injected driver tables and do not depend on GoogleTest,
+# vendor toolkits, device nodes, or physical hardware.
+add_executable(
+    rtfw_cpu_gpu_fpga_cpu_sample_tests
+    test_cpu_gpu_fpga_cpu_sample.cpp)
+target_link_libraries(
+    rtfw_cpu_gpu_fpga_cpu_sample_tests
+    PRIVATE
+        rtfw_runtime
+        rtfw_cuda_backend
+        rtfw_xdma_backend)
+rtfw_enable_project_warnings(rtfw_cpu_gpu_fpga_cpu_sample_tests)
+add_test(
+    NAME m17_cpu_gpu_fpga_cpu_sample
+    COMMAND rtfw_cpu_gpu_fpga_cpu_sample_tests)
+set_tests_properties(m17_cpu_gpu_fpga_cpu_sample PROPERTIES TIMEOUT 30)
+
 add_executable(rtfw_determinism_artifact determinism_artifact.cpp)
 target_link_libraries(rtfw_determinism_artifact PRIVATE rtfw_runtime)
 

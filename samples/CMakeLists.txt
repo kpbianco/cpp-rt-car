@@ -38,11 +38,21 @@ target_link_libraries(sample_embed_cpp PRIVATE rtfw_runtime)
 add_executable(sample_device_mock device_mock.cpp)
 target_link_libraries(sample_device_mock PRIVATE rtfw_runtime)
 
+add_executable(sample_cpu_gpu_fpga_cpu cpu_gpu_fpga_cpu.cpp)
+target_link_libraries(
+    sample_cpu_gpu_fpga_cpu
+    PRIVATE
+        rtfw_runtime
+        rtfw_cuda_backend
+        rtfw_xdma_backend)
+rtfw_enable_project_warnings(sample_cpu_gpu_fpga_cpu)
+
 list(APPEND RTFW_SAMPLE_TEST_TARGETS
     sample_embed_c
     sample_embed_c_static
     sample_embed_cpp
-    sample_device_mock)
+    sample_device_mock
+    sample_cpu_gpu_fpga_cpu)
 
 if (RTFW_ENABLE_CUDA)
     add_executable(sample_cuda_qualification cuda_qualification.cpp)

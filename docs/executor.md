@@ -234,6 +234,17 @@ hidden worker creation, or partially accepted timeline state.
 Potentially blocking submit is isolated to one precreated lane per opted-in
 backend. That lane cannot invoke application callbacks and is reported as
 `thread.device-submission`, role 6.
+
+## M17-06 combined executor boundary
+
+CPU prepare, bridge, and validation remain ordinary providers on the configured
+two-worker executor. CUDA injected upload/Graph/download calls remain on its
+Runtime submission owner and event queries on the service owner. XDMA
+transfer/control/event callbacks remain on its fixed candidate worker team.
+Focused identity assertions reject the host control thread, mixed vendor/CPU
+ownership, or a vendor callback on an executor worker. The sample creates no
+thread, retry loop, spill path, or blocking executor callback.
+
 # Extension phases
 
 ABI-v1 extension CPU phases are ordinary compiled-graph phases. They receive

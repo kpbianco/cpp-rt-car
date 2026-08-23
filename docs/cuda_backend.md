@@ -296,3 +296,17 @@ storage reported through existing capability bytes. Portable fake Graph tests,
 sanitizers, or a compile-only CUDA toolkit package establish protocol behavior
 only. They do not qualify a GPU, graph execution, bounded vendor latency,
 hardware, HIL, field, RT1, or RT2 behavior.
+
+## M17-06 portable composition use
+
+The combined sample uses the actual `CudaDeviceBackend` native registration
+with a complete injected version-2 driver. Its fixed simulated device storage
+executes one upload, caller-owned stable-ID Graph transform, download, and
+completion event per frame on the existing Runtime submission/service owners.
+Graph failure after upload suppresses download, timeline completion, the host
+bridge, all XDMA work, and validation; checked reset drains quarantined CUDA
+ownership before stop.
+
+This proves canonical Runtime integration and protocol failure propagation,
+not CUDA toolkit presence, physical device memory, Graph execution, pinning,
+coherency, timing, or GPU qualification.

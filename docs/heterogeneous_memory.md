@@ -221,9 +221,9 @@ physical pinning, CUDA-device memory, imported interoperability, DMA map, peer
 access, real topology, timestamp accuracy, HIL, hardware, field, latency,
 thermal, endurance, RT1, RT2, signing, release, deployment, or production
 evidence. M17-03 adds portable synthetic batch/timeline and explicit
-memory-order validation only. M17 and CAP-M17 remain incomplete; native
-vendor-v2 adapters, vendor controls, combined execution, and qualification
-belong to later M17/M18 batches.
+memory-order validation only. M17-04 adds native vendor-v2 controls and M17-06
+adds portable simulated composition. M17 and CAP-M17 remain incomplete pending
+external gates; physical combined execution and qualification belong to M18.
 
 ## M17-04 vendor staged domains
 
@@ -246,3 +246,17 @@ declarations enter the existing conditional identity. Host pointers, CUDA
 addresses, graph handles, Linux descriptors, and runtime-private tokens do not.
 Portable fake callbacks establish record and ordering behavior only, not
 physical pinning, allocation, DMA, coherency, topology, or timestamp accuracy.
+
+## M17-06 combined host-stage boundary
+
+The portable combined sample discovers the CUDA staged domain and XDMA
+borrowed-host coherent domain, then registers two separate fixed host objects.
+They have equal explicit extents but disjoint addresses and are never
+dual-registered. CUDA copy-to/copy-from commands discharge only the staged
+CUDA object's declared synchronization. After successful CUDA completion, an
+ordinary CPU phase copies the exact bytes into the XDMA-owned host object.
+
+No memory token, object, opaque handle, timeline, fence, or coherency promise
+crosses the backend boundary. The bridge issues no vendor call or implicit
+synchronization and does not represent pinned memory, DMA mapping, peer memory,
+direct peer DMA, or physical topology.

@@ -377,6 +377,8 @@ def check_runtime_contract() -> None:
     device_sample = read("samples/device_mock.cpp")
     cuda_sample = read("samples/cuda_qualification.cpp")
     xdma_sample = read("samples/xdma_qualification.cpp")
+    combined_sample = read("samples/cpu_gpu_fpga_cpu.cpp")
+    combined_sample_test = read("tests/test_cpu_gpu_fpga_cpu_sample.cpp")
     cuda_workflow = read(".github/workflows/cuda-qualification.yml")
     xdma_workflow = read(".github/workflows/xdma-qualification.yml")
     release_workflow = read(".github/workflows/release.yml")
@@ -1922,6 +1924,55 @@ def check_runtime_contract() -> None:
         if phrase not in normalized_vendor_docs:
             fail(f"M17-04 component contracts are missing phrase {phrase!r}")
 
+    # M17-06 facts are permanent; none of these assertions says that M17-06
+    # remains active, latest, or that later batches remain pending.
+    if "HalV2CommandTimelineCapabilities capabilities{};" not in command_source:
+        fail("M17-06 Runtime discovery does not seed the capability record")
+    for forbidden in (
+        "capabilities.struct_size = 0",
+        "capabilities.extension_version = 0",
+    ):
+        if forbidden in command_source:
+            fail(f"M17-06 Runtime discovery contains {forbidden!r}")
+    for token in (
+        "CapabilityDiscoverySeedsExactHeaderRejectsMalformedAndRetriesCleanly",
+        "NativeRuntimeRegistrationDiscoversBothCandidates",
+    ):
+        if token not in command_test and token not in vendor_hal_v2_test:
+            fail(f"M17-06 permanent tests are missing {token!r}")
+    for token in (
+        "combined.cpu.prepare",
+        "combined.cuda.batch",
+        "combined.cpu.bridge",
+        "combined.xdma.batch",
+        "combined.cpu.validate",
+        "hal_v2_registration",
+        "evidence=simulated_protocol physical_hardware=false",
+        "direct_peer_dma=false",
+        "threads_are_bounded_and_separated",
+        "device_timeline_count != 2",
+    ):
+        if token not in combined_sample:
+            fail(f"M17-06 combined sample is missing {token!r}")
+    for token in (
+        "success_and_fixed_resources",
+        "cuda_failure_suppresses_every_downstream_stage_and_recovers",
+        "isolated_event_timeout_has_no_xdma_completion_and_other_fixture_runs",
+        "malformed_provider_outputs_fail_before_native_driver_calls",
+        "checked_stop_retries_only_unresolved_cleanup",
+    ):
+        if token not in combined_sample_test:
+            fail(f"M17-06 combined tests are missing {token!r}")
+    for token in (
+        "rtfw_cpu_gpu_fpga_cpu_sample_tests",
+        "m17_cpu_gpu_fpga_cpu_sample",
+    ):
+        if token not in tests_cmake or token not in ci_workflow:
+            fail(f"M17-06 focused CI integration is missing {token!r}")
+    if "sample_cpu_gpu_fpga_cpu" not in samples_cmake or \
+            "sample_cpu_gpu_fpga_cpu" not in ci_workflow:
+        fail("M17-06 portable sample is not integrated into CMake and CI")
+
     for token in (
         "Runtime::run_periodic(",
         "clock_sleep_until(",
@@ -2840,10 +2891,20 @@ def check_runtime_contract() -> None:
     ):
         if phrase.lower() not in extension_doc.lower():
             fail(f"M19-01 extension documentation is missing {phrase!r}")
-    if "M19 and CAP-M19 remain incomplete" not in read("docs/CURRENT_STATE.md"):
-        fail("current state overstates M19 completion")
-    if "M17-05 remains blocked" not in read("docs/HANDOFF.md"):
-        fail("handoff no longer preserves the M17-05 blocker")
+    active_batch = read("contracts/active-batch.yaml")
+    active_match = re.search(r"(?m)^  id: ([A-Z][A-Z0-9.-]+)$", active_batch)
+    if not active_match:
+        fail("active batch contract has no parseable batch id")
+    elif active_match.group(1) == "M17-06":
+        current_state = read("docs/CURRENT_STATE.md")
+        handoff = read("docs/HANDOFF.md")
+        if "M17-06" not in current_state or "M17-06" not in handoff:
+            fail("active M17-06 frontier is not reflected in state and handoff")
+        revision = re.search(
+            r"(?m)^  control_plane_revision: ([0-9a-f]{40})", active_batch
+        )
+        if revision and revision.group(1) not in handoff:
+            fail("handoff control revision differs from active M17-06")
 
 
 def check_qualification_contract() -> None:
@@ -2916,7 +2977,6 @@ def check_qualification_contract() -> None:
         "never support-matrix eligible",
         "tool proves neither chronology nor identity",
         "no matrix path or mutation command",
-        "M17-05 remains blocked",
     ):
         if phrase.lower() not in documentation.lower():
             fail(f"docs/qualification.md: missing claim boundary {phrase!r}")
@@ -3025,6 +3085,7 @@ def main() -> int:
             "samples/device_mock.cpp",
             "samples/cuda_qualification.cpp",
             "samples/xdma_qualification.cpp",
+            "samples/cpu_gpu_fpga_cpu.cpp",
             "tests/test_host_runtime.cpp",
             "tests/test_extension_registration.cpp",
             "tests/test_rate_dispatch.cpp",
@@ -3033,6 +3094,7 @@ def main() -> int:
             "tests/test_executor.cpp",
             "tests/test_memory_plan.cpp",
             "tests/test_cpu_memory_policy.cpp",
+            "tests/test_cpu_gpu_fpga_cpu_sample.cpp",
             "tests/test_memory_policy.cpp",
             "tests/test_periodic_runtime.cpp",
             "tests/test_platform_preflight.cpp",

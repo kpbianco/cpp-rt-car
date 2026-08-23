@@ -163,8 +163,13 @@ struct BatchBackend {
   }();
   rt::HalV2MemoryTopologySnapshot snapshot = batch_snapshot();
   std::atomic<SubmitMode> mode{SubmitMode::complete};
+  std::atomic<rt::HalV2Status> capabilities_status{rt::HalV2Status::ok};
   std::atomic<bool> leave_capabilities_untouched{false};
+  std::atomic<bool> partially_write_capabilities{false};
   std::atomic<bool> throw_capabilities{false};
+  std::atomic<std::size_t> capabilities_calls{0};
+  std::atomic<bool> incoming_capabilities_header_exact{false};
+  std::atomic<bool> incoming_capabilities_semantics_zero{false};
   std::atomic<bool> submit_entered{false};
   std::atomic<bool> release_submit{false};
   std::atomic<std::uint32_t> completion_ready{0};
@@ -290,8 +295,32 @@ struct BatchBackend {
       return rt::HalV2Status::invalid_argument;
     }
     auto &backend = *self(instance);
+    backend.capabilities_calls.fetch_add(1, std::memory_order_relaxed);
+    backend.incoming_capabilities_header_exact.store(
+        output->struct_size == sizeof(*output) &&
+            output->extension_version ==
+                rt::hal_v2_command_timeline_extension_version,
+        std::memory_order_relaxed);
+    backend.incoming_capabilities_semantics_zero.store(
+        output->max_in_flight_batches == 0 &&
+            output->max_commands_per_batch == 0 &&
+            output->max_wait_points == 0 &&
+            output->max_signal_points == 0 && output->max_timelines == 0 &&
+            output->completion_batch_capacity == 0 &&
+            output->backend_control_storage_bytes == 0 &&
+            all_zero(output->reserved),
+        std::memory_order_relaxed);
     if (backend.throw_capabilities.load()) {
       throw std::runtime_error("command capabilities");
+    }
+    const auto status = backend.capabilities_status.load();
+    if (status != rt::HalV2Status::ok) {
+      return status;
+    }
+    if (backend.partially_write_capabilities.load()) {
+      output->max_in_flight_batches =
+          backend.command_capabilities.max_in_flight_batches;
+      return rt::HalV2Status::ok;
     }
     if (!backend.leave_capabilities_untouched.load()) {
       *output = backend.command_capabilities;
@@ -562,6 +591,167 @@ TEST(CommandBatch, ExtensionDiscoveryRejectsMalformedAndPartialResults) {
   backend.throw_capabilities.store(true);
   EXPECT_EQ(register_with(backend.command_extension()),
             rt::Status::device_error);
+}
+
+TEST(CommandBatch,
+     CapabilityDiscoverySeedsExactHeaderRejectsMalformedAndRetriesCleanly) {
+  const auto reject_then_correct = [](auto mutate, rt::Status expected,
+                                      std::size_t rejected_callback_calls) {
+    BatchBackend backend;
+    const auto valid_capabilities = backend.command_capabilities;
+    rt::Runtime runtime;
+    ASSERT_EQ(runtime.configure(batch_config()), rt::Status::ok);
+    auto memory = backend.memory_extension();
+    auto command = backend.command_extension();
+    mutate(command, backend);
+
+    rt::DeviceBackendHandle rejected;
+    EXPECT_EQ(runtime.register_device_backend(
+                  {"capability.retry", backend.core_api(), &memory, &command},
+                  rejected),
+              expected);
+    EXPECT_FALSE(rejected.valid());
+    EXPECT_EQ(runtime.device_backend_count(), 0u);
+    EXPECT_EQ(backend.capabilities_calls.load(), rejected_callback_calls);
+    if (rejected_callback_calls != 0) {
+      EXPECT_TRUE(backend.incoming_capabilities_header_exact.load());
+      EXPECT_TRUE(backend.incoming_capabilities_semantics_zero.load());
+    }
+
+    backend.command_capabilities = valid_capabilities;
+    backend.capabilities_status.store(rt::HalV2Status::ok);
+    backend.leave_capabilities_untouched.store(false);
+    backend.partially_write_capabilities.store(false);
+    backend.throw_capabilities.store(false);
+    command = backend.command_extension();
+    rt::DeviceBackendHandle accepted;
+    ASSERT_EQ(runtime.register_device_backend(
+                  {"capability.retry", backend.core_api(), &memory, &command},
+                  accepted),
+              rt::Status::ok);
+    EXPECT_TRUE(accepted.valid());
+    EXPECT_EQ(runtime.device_backend_count(), 1u);
+    EXPECT_EQ(backend.capabilities_calls.load(), rejected_callback_calls + 1);
+    EXPECT_TRUE(backend.incoming_capabilities_header_exact.load());
+    EXPECT_TRUE(backend.incoming_capabilities_semantics_zero.load());
+  };
+
+  reject_then_correct(
+      [](auto &command, auto &) { command.instance = nullptr; },
+      rt::Status::invalid_argument, 0);
+  reject_then_correct(
+      [](auto &command, auto &) { command.get_capabilities = nullptr; },
+      rt::Status::invalid_argument, 0);
+  reject_then_correct(
+      [](auto &, auto &backend) { backend.throw_capabilities.store(true); },
+      rt::Status::device_error, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.capabilities_status.store(rt::HalV2Status::error);
+      },
+      rt::Status::device_error, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.capabilities_status.store(rt::HalV2Status::unsupported);
+      },
+      rt::Status::device_error, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.capabilities_status.store(
+            rt::HalV2Status::resource_exhausted);
+      },
+      rt::Status::resource_exhausted, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.leave_capabilities_untouched.store(true);
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.partially_write_capabilities.store(true);
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.struct_size =
+            sizeof(rt::HalV2CommandTimelineCapabilities) - 1;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.extension_version =
+            rt::hal_v2_command_timeline_extension_version + 1;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_in_flight_batches = 0;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_commands_per_batch = 0;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_wait_points = 0;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_signal_points = 0;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_timelines = 0;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.completion_batch_capacity = 0;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_commands_per_batch =
+            rt::hal_v2_command_capacity + 1;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_wait_points =
+            rt::hal_v2_timeline_wait_capacity + 1;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_signal_points =
+            rt::hal_v2_timeline_signal_capacity + 1;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_timelines =
+            rt::hal_v2_timeline_capacity + 1;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.reserved[3] = 1;
+      },
+      rt::Status::invalid_argument, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.max_in_flight_batches = 1;
+      },
+      rt::Status::capacity_exceeded, 1);
+  reject_then_correct(
+      [](auto &, auto &backend) {
+        backend.command_capabilities.completion_batch_capacity = 1;
+      },
+      rt::Status::capacity_exceeded, 1);
 }
 
 TEST(CommandBatch, TimelineRegistrationIsBoundedFrozenAndInstanceIsolated) {

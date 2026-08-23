@@ -13,10 +13,12 @@ correlation contracts; it does not change HAL API version 2 or any M17-01 core
 record/table behavior. Both batches establish portable RT0 functional behavior
 only. M17-03 appends the optional command/timeline extension version 1 and its
 isolated Runtime submission lanes. M17-04 supplies native-v2 registrations for
-the existing CUDA and XDMA candidates through those unchanged tables. M17 and
-CAP-M17 remain incomplete; physical peer DMA, plugin or factory loading,
-device-rate execution, combined CPU/GPU/FPGA execution, and every hardware or
-RT qualification remain deferred.
+the existing CUDA and XDMA candidates through those unchanged tables. M17-06
+repairs Runtime capability discovery and composes both in one portable
+simulated-protocol graph. M17 and CAP-M17 remain incomplete pending mandatory
+CI and human gates; physical peer DMA, plugin or factory loading, device-rate
+execution, combined hardware execution, and every hardware or RT qualification
+remain deferred.
 
 ## Public core shape
 
@@ -309,3 +311,18 @@ hashing native handles, pointers, file descriptors, addresses, mutable state,
 or observed timestamps. Backend-private registries, events, queues,
 descriptors, and workers remain outside Runtime-owned device control and are
 reported through existing capability bytes.
+
+## M17-06 discovery and composition
+
+Runtime supplies `HalV2CommandTimelineCapabilities` using its frozen default
+member initializers: exact structure size and extension version on input, with
+all semantic and reserved fields zero. A callback must still return a complete,
+valid record. Null callbacks, exceptions, non-success statuses, untouched or
+partial records, header changes, zero/excess capacities, insufficient Runtime
+capacity, and nonzero reserved fields publish nothing.
+
+The portable combined sample registers the actual native CUDA and XDMA table
+sets through this path. Each batch signals only its own backend timeline; the
+ordinary CPU bridge is the sole cross-backend ordering mechanism. The sample
+adds no HAL table, version, status, storage, lane, cross-backend completion, or
+installed surface and represents simulated protocol only.
