@@ -81,6 +81,23 @@
             "items": {"type": "string", "minLength": 1},
             "uniqueItems": true
           },
+          "required_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            },
+            "uniqueItems": true
+          },
+          "supervisor_authorization": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reference", "scope"],
+            "properties": {
+              "reference": {"type": "string", "minLength": 1},
+              "scope": {"type": "string", "minLength": 1}
+            }
+          },
           "gate_only": {"type": "boolean"},
           "gate_command": {"type": "string", "minLength": 1},
           "selected_ids": {

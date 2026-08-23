@@ -1,6 +1,6 @@
 {
   "control_repository": "kpbianco/portfolio-control",
-  "control_revision": "git:58545d46-037bbc18-7ecda001-422beab2-76515dfd",
+  "control_revision": "git:4434b282-cfb47997-d791bd29-33faf980-453d199a",
   "harness_version": 2,
   "managed_paths": {
     ".agents/skills/ci-diagnose/SKILL.md": "sha256:93a7ce82-51786852-39d6f3f1-24e5670f-648b7f6a-242be771-6e86fd8b-10f653b0",
@@ -17,7 +17,7 @@
     ".github/codex/pr-risk-review.md": "sha256:aff8587d-dab8509c-9f6581ca-34f39100-9cbdc925-ce2afc15-7764089e-4d0973b5",
     ".github/codex/prompts/repo-onboarding.md": "sha256:e7333173-d8dce663-4c5829bd-bb8e9410-5da895e4-3b27e2f6-97c840b2-cd06df23",
     ".github/codex/release-readiness.md": "sha256:98f2986a-62f263d2-7a2fce01-74604896-c47881de-a78ae013-aca10f63-7be21e3e",
-    ".github/codex/schemas/automation.schema.json": "sha256:929ccf24-10f05c89-71c61ade-670d3047-eb978dcf-7906fd69-b6d63a04-3ca96f9e",
+    ".github/codex/schemas/automation.schema.json": "sha256:8faaeefa-ef413cf8-4754a2ce-0898b83a-07241eb6-727ac923-d2bf8a21-9dbc58b7",
     ".github/codex/schemas/batch.schema.json": "sha256:17c26c1c-c131a575-0db82647-595fae47-5ed28600-43c9dc1f-26d66b0e-746b12a0",
     ".github/codex/schemas/ci-diagnosis.schema.json": "sha256:8bdbc8fe-5aa85dd5-98b42d67-b48d7c03-56a4aa56-55cc19e6-d25f437e-c364722c",
     ".github/codex/schemas/evidence.schema.json": "sha256:d4118332-9197af90-9e2e4005-22960153-eb1474de-47486388-049f056a-34719442",
@@ -26,9 +26,9 @@
     ".github/codex/schemas/planner-review.schema.json": "sha256:0b6e73da-860c4c6d-9024f6e2-c2889162-f4d49813-e4c50691-87f68ef7-9183eba9",
     ".github/codex/schemas/product.schema.json": "sha256:18d0bd3f-439c1050-33309579-43c6daa8-b28aaccb-d8f7613f-0901b3aa-35535cfe",
     ".gitignore": "sha256:a55b5990-61dfcc0c-7a818cf5-3ef865ee-1d68dd9b-e83bffab-f72143c1-8254dfa3",
-    "AGENTS.md": "sha256:e37853a0-d94c6752-01a9a474-3f0e2c34-20c45837-473b4d59-35c8d842-d8019fbf",
+    "AGENTS.md": "sha256:9192c2ce-0d0e3d50-42711578-2d127f24-1505f613-5fdfd167-6598d760-6080899b",
     "contracts/profile-requirements.yaml": "sha256:36a421b8-53f07496-95b773da-201489f7-b17e0d49-3baa4787-482d9f49-715d8bc1",
-    "contracts/repo-profile.yaml": "sha256:d045dd7a-5a300119-ac4439eb-ee60e151-204060b1-5a70b5fb-61639841-5a3ba9bc"
+    "contracts/repo-profile.yaml": "sha256:4b7d352b-f492a8fa-53084787-adfc8a1b-5974f49c-c2d0ffe7-fdfbb6bb-790552d2"
   },
   "product": "cpp-rt-car",
   "profile": "assurance",
