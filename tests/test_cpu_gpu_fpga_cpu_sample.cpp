@@ -110,7 +110,7 @@ bool isolated_event_timeout_has_no_xdma_completion_and_other_fixture_runs() {
     CHECK_TRUE(failed.xdma_backend_handle != independent.xdma_backend_handle);
     CHECK_TRUE(failed.cuda_timeline != independent.cuda_timeline);
     CHECK_TRUE(failed.cuda_driver.graph != independent.cuda_driver.graph);
-    CHECK_TRUE(rtfw_combined_sample::graph_id == 7);
+    static_assert(rtfw_combined_sample::graph_id == 7);
     CHECK_TRUE(failed.cuda_stage.data() != independent.cuda_stage.data());
     CHECK_TRUE(failed.xdma_stage.data() != independent.xdma_stage.data());
     rt::DeviceTimelineHandle foreign_timeline;

@@ -267,7 +267,7 @@
     "tests/runtime_profile_tests.cpp": "6a81d25172de67b60d676bfc5abefbaac333a26b485a6d4d2c324b68e6c39669",
     "tests/test_command_batch.cpp": "869a67c0bb984ffd61b7e209d976a993f220779715c1c796212cda2f2aa826b5",
     "tests/test_compiled_graph.cpp": "24d4ef45dcecf6318192d8b447331626543d85e3b0c901c6c6e92d8700a92c57",
-    "tests/test_cpu_gpu_fpga_cpu_sample.cpp": "801436fe0015e4907525fe02f742b317afc69e5558426b8b413085d40c7abe67",
+    "tests/test_cpu_gpu_fpga_cpu_sample.cpp": "b7da00b3e7f778c4dc488f239212979330503d7c27d5bf5c123c42c69e9c1c1f",
     "tests/test_cpu_memory_policy.cpp": "44e42be6c04c37b6329fc66b0ef85f3d3c1319a8f4091b3580e43ee448cb52ea",
     "tests/test_cross_rate_data.cpp": "924a48e4130b9ec85ec7e7594b26c729af9687dbeadf9c755a5c6399dedaaf66",
     "tests/test_cuda_backend.cpp": "3f0d0b723c982853e1dee0de6daf15344ddf34e28a6fb76efe57fd4d018d624c",
