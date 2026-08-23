@@ -271,10 +271,19 @@ struct CudaDriver {
         std::atomic<bool> ready{false};
     };
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// This fixed simulated-device slot is deliberately over-aligned. MSVC reports
+// the resulting layout padding as C4324 under /W4.
+#pragma warning(disable : 4324)
+#endif
     struct Allocation {
         bool allocated = false;
         alignas(64) std::array<std::byte, payload_bytes> bytes{};
     };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
     OperationTrace* operations = nullptr;
     rt::CudaGraphExec graph = 0;
@@ -870,6 +879,12 @@ struct TimelineObservation {
     std::uint64_t xdma_completed = 0;
 };
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// The two disjoint staging objects deliberately retain cache-line alignment.
+// MSVC reports Scenario's resulting layout padding as C4324 under /W4.
+#pragma warning(disable : 4324)
+#endif
 struct Scenario {
     FailureMode failure = FailureMode::none;
     std::thread::id control_thread = std::this_thread::get_id();
@@ -1472,6 +1487,9 @@ struct Scenario {
                    xdma_timeline.value;
     }
 };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 } // namespace rtfw_combined_sample
 

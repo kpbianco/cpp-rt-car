@@ -239,7 +239,7 @@
     "rt/src/xdma_backend.cpp": "97232f9f2de5d3f52d58bd602329131abfc32fed9f71a467940351ec02c963c5",
     "rt/src/xdma_linux.cpp": "d0aa0cc6ae6d535b59c2a50021767445e1c85bb0448140e54a09bce3bc9cad22",
     "samples/CMakeLists.txt": "781cc1f79fc50dc4c55d7e92513809974bdbf41771ac2d7a308582ad237f294e",
-    "samples/cpu_gpu_fpga_cpu.cpp": "5951a3e1ad27d89ff7982c9fdd7555bd8389e5b4973b66bdfe9a4c1e11024b62",
+    "samples/cpu_gpu_fpga_cpu.cpp": "3403cbf61e56522dfe91a61daa611d9d4cc7a1c53f0c6464459b029f46728ae0",
     "samples/embed_cpp/mini_app.cpp": "5ce18e5af708434b02b918cf821e3401ff16179163cb132065cbdd087aa25e08",
     "src/runtime_profile_demo.cpp": "d8b7d00ea3bca701deac84a4ced1b72cd9c9cd3bfc9a33bf72e39fb2d50a02a1",
     "tests/CMakeLists.txt": "a283a714e0a95b57b13c1ef31feb2ec90b5e71b4865d410588412bf45d6eaa87",
