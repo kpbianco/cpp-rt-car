@@ -383,6 +383,7 @@ callback expressions.
 | Legacy snapshot helpers | Experimental compatibility surface | Bounds checks prevent truncated reads and attacker-sized vector allocation, but native-layout `SimCore` snapshots are outside checkpoint schema v1 |
 | C ABI and distribution | Stable ABI v8 / M11 complete | Exact symbol allowlist, header/library fingerprint handshake, ABI-numbered SONAME, C/C++ host adapter, package components, and relocated Linux/Windows consumers |
 | Portable release contract | Supported RT0 / M12 complete | Named support tuples, same-major CMake compatibility, cross-instance device isolation, CPack archives, and content-addressed release manifests |
+| Portable assurance | M20-PRE-01 in progress | Deterministic dependency identity, exact Clang 14 static coverage, bounded sanitizer-backed fuzz smoke, canonical SPDX 2.3 candidate SBOM, unsigned in-toto candidate statement, strict expected-source manifest, offline public-fixture signature verification, and relocated package consumption; no target signing or publication |
 | JSON profiles/runtime autotune | Implemented RT0 host tooling | Complete resolved schema, bounded allocation-free transactional C++ parser, explicit runtime/schema compatibility, real target-runtime demo, and generated-profile CI round trip; no portable tuning or latency claim |
 | Product SDK boundary | Supported / M14 complete | Preferred `rtfw::runtime`, exact public-header inventory, isolated optional adapters, compatibility target names, and no exported project warning/feature policy |
 | GPU | CUDA candidate; no qualified tuple | Real Driver API adapter exists behind `RTFW_ENABLE_CUDA`; deterministic mock remains the portable gate and the legacy detached-thread stub is excluded |
@@ -427,8 +428,16 @@ The portable 1.2 contract is complete because the following gates are required:
     state.
 14. Named support tuples, stable surfaces, package archives, and every archive
     digest are machine-checked by the release contract.
+15. The M20-PRE-01 host-independent assurance lane fails closed on dependency,
+    source-manifest, analyzer, fuzzer, candidate-SBOM/provenance/manifest,
+    public-fixture, extraction, relocation, C ABI, or SONAME drift.
 
 RT2, CUDA, and XDMA qualification gates are separate from portable 1.2.
 The exact supported tuples and change rules are in the
 [portable support matrix](portable_support_matrix.json) and
 [release policy](release_policy.md).
+
+The fifteenth gate produces candidate verification evidence only. It does not
+change the 1.2.1 product, authenticate an RTFW artifact, publish a release, or
+qualify latency, hardware, RT1/RT2, or Unreal integration. See
+[portable assurance](portable_assurance.md).

@@ -49,6 +49,7 @@ PINNED_ACTIONS = {
 }
 
 HASHED_CONTRACT_PATHS = {
+    ".clang-tidy",
     ".gitattributes",
     ".gitignore",
     ".github/workflows/autotune-mapping.yml",
@@ -94,6 +95,7 @@ HASHED_CONTRACT_PATHS = {
     "docs/limp_mode.md",
     "docs/memory_plan.md",
     "docs/observability.md",
+    "docs/portable_assurance.md",
     "docs/rate_telemetry.md",
     "docs/portable_support_matrix.json",
     "docs/product_contract.md",
@@ -118,6 +120,8 @@ HASHED_CONTRACT_PATHS = {
     "qualification/schemas/promotion-proposal.schema.json",
     "qualification/schemas/promotion-review.schema.json",
     "qualification/schemas/qualification-record.schema.json",
+    "release/portable-assurance-policy.json",
+    "release/schemas/spdx-schema-2.3.json",
     "rt/include/rt/c_api.h",
     "rt/include/rt/canonical_bytes.hpp",
     "rt/include/rt/config.hpp",
@@ -178,6 +182,7 @@ HASHED_CONTRACT_PATHS = {
     "samples/CMakeLists.txt",
     "samples/cpu_gpu_fpga_cpu.cpp",
     "samples/embed_cpp/mini_app.cpp",
+    "scripts/verify-portable-assurance.sh",
     "src/runtime_profile_demo.cpp",
     "tests/CMakeLists.txt",
     "tests/extension_fixture.c",
@@ -201,6 +206,19 @@ HASHED_CONTRACT_PATHS = {
     "tests/package_consumer/xdma_consumer.cpp",
     "tests/package_consumer/xdma_linux_consumer.cpp",
     "tests/determinism_artifact.cpp",
+    "tests/fuzz/jobqueue/jobqueue.dict",
+    "tests/fuzz/jobqueue/seeds.json",
+    "tests/fuzz/runtime_profile/runtime_profile.dict",
+    "tests/fuzz/runtime_profile/seeds.json",
+    "tests/fuzz/snapshot/seeds.json",
+    "tests/fuzz/snapshot/snapshot.dict",
+    "tests/jobqueue_fuzz.cpp",
+    "tests/provenance_fixtures/public/README.md",
+    "tests/provenance_fixtures/public/dsse-envelope.json",
+    "tests/provenance_fixtures/public/example-artifact.txt",
+    "tests/provenance_fixtures/public/public-trust.json",
+    "tests/runtime_profile_fuzz.cpp",
+    "tests/snapshot_fuzz.cpp",
     "tests/test_cpu_memory_policy.cpp",
     "tests/test_cpu_gpu_fpga_cpu_sample.cpp",
     "tests/test_compiled_graph.cpp",
@@ -240,10 +258,17 @@ HASHED_CONTRACT_PATHS = {
     "tools/check_docs_contract.py",
     "tools/check_hardware_evidence.py",
     "tools/check_release_contract.py",
+    "tools/check_static_analysis.py",
     "tools/qualification.py",
     "tools/extract_release_archive.py",
+    "tools/portable_assurance_toolchain.json",
+    "tools/provenance.py",
     "tools/release_manifest.py",
+    "tools/run_fuzz_smoke.py",
+    "tools/sbom.py",
+    "tools/sbom_expected.json",
     "tools/stage_release_artifacts.py",
+    "tools/static_analysis_sources.txt",
     "vcpkg.json",
 }
 
@@ -640,6 +665,28 @@ def validate_release_contract(
     }:
         errors.append("release contract: extension ABI v1 boundary mismatch")
 
+    if contract.get("portable_assurance") != {
+        "schema_version": 1,
+        "entrypoint": "scripts/verify-portable-assurance.sh",
+        "modes": [
+            "dependencies",
+            "static",
+            "fuzz",
+            "artifacts",
+            "all",
+        ],
+        "toolchain_policy": "tools/portable_assurance_toolchain.json",
+        "dependency_policy": "tools/sbom_expected.json",
+        "artifact_policy": "release/portable-assurance-policy.json",
+        "spdx_schema": "release/schemas/spdx-schema-2.3.json",
+        "source_manifest": "tools/static_analysis_sources.txt",
+        "candidate_signed": False,
+        "candidate_authenticated": False,
+        "release_publication": False,
+        "fixture_authenticates_candidate": False,
+    }:
+        errors.append("release contract: portable assurance boundary mismatch")
+
     hashes = contract.get("contract_sha256")
     if not isinstance(hashes, dict):
         errors.append("release contract: contract_sha256 must be an object")
@@ -718,6 +765,201 @@ def validate_qualification_contract(
             errors.append(f"docs/qualification.md: missing claim boundary {phrase!r}")
 
 
+def validate_portable_assurance_contract(
+    root: pathlib.Path,
+    errors: list[str],
+) -> None:
+    dependency_policy = load_json(root, "tools/sbom_expected.json", errors)
+    actions = dependency_policy.get("workflow_actions")
+    if actions != PINNED_ACTIONS:
+        errors.append("portable assurance: workflow-action policy mismatch")
+    dependencies = dependency_policy.get("dependencies")
+    if not isinstance(dependencies, dict) or set(dependencies) != {
+        "googletest",
+        "rapidcheck",
+        "vcpkg",
+    }:
+        errors.append("portable assurance: dependency inventory mismatch")
+    else:
+        googletest = dependencies["googletest"]
+        rapidcheck = dependencies["rapidcheck"]
+        vcpkg = dependencies["vcpkg"]
+        if (
+            googletest.get("submodule_commit")
+            != "7e17b15f1547bb8dd9c2fed91043b7af3437387f"
+            or googletest.get("fallback_sha256")
+            != "1f357c27ca988c3f7c6b4bf68a9395005ac6761f034046e9dde0896e3aba00e4"
+            or re.fullmatch(r"[0-9a-f]{40}", str(rapidcheck.get("commit", "")))
+            is None
+            or vcpkg.get("builtin_baseline")
+            != "3f7e1436a0b11806abbddce274164a491091223e"
+        ):
+            errors.append("portable assurance: immutable dependency identity mismatch")
+
+    toolchain = load_json(
+        root,
+        "tools/portable_assurance_toolchain.json",
+        errors,
+    )
+    if toolchain.get("clang") != {
+        "c": "clang-14",
+        "cxx": "clang++-14",
+        "tidy": "clang-tidy-14",
+        "required_major": 14,
+    }:
+        errors.append("portable assurance: Clang 14 policy mismatch")
+    static_policy = toolchain.get("static_analysis")
+    if (
+        not isinstance(static_policy, dict)
+        or static_policy.get("policy") != ".clang-tidy"
+        or static_policy.get("source_manifest")
+        != "tools/static_analysis_sources.txt"
+        or static_policy.get("warnings_as_errors") is not True
+        or set(static_policy.get("checks", []))
+        != {
+            "clang-analyzer-core.*",
+            "clang-analyzer-cplusplus.*",
+            "clang-analyzer-deadcode.*",
+            "clang-analyzer-security.*",
+            "clang-analyzer-unix.*",
+            "clang-analyzer-valist.*",
+        }
+        or static_policy.get("excluded_diagnostic", {}).get("name")
+        != "clang-analyzer-optin.performance.Padding"
+    ):
+        errors.append("portable assurance: static-analysis policy mismatch")
+    if toolchain.get("fuzzing") != {
+        "engine": "Clang 14 libFuzzer",
+        "instrumentation": [
+            "AddressSanitizer",
+            "UndefinedBehaviorSanitizer",
+        ],
+        "fixed_seed": 424242,
+        "supported_runs": 20000,
+        "experimental_runs": 10000,
+        "supported_max_bytes": 65536,
+        "experimental_max_bytes": 4096,
+    }:
+        errors.append("portable assurance: bounded fuzz policy mismatch")
+
+    artifact_policy = load_json(
+        root,
+        "release/portable-assurance-policy.json",
+        errors,
+    )
+    spdx = artifact_policy.get("spdx")
+    schema_path = root / "release/schemas/spdx-schema-2.3.json"
+    if (
+        artifact_policy.get("project") != "rtfw"
+        or artifact_policy.get("version") != "1.2.1"
+        or artifact_policy.get("predicate_type")
+        != "https://rtfw.dev/provenance/portable-assurance/v1"
+        or artifact_policy.get("build", {}).get("signing") is not False
+        or artifact_policy.get("build", {}).get("publication") is not False
+        or not isinstance(spdx, dict)
+        or spdx.get("version") != "SPDX-2.3"
+        or spdx.get("schema_path")
+        != "release/schemas/spdx-schema-2.3.json"
+        or spdx.get("schema_sha256")
+        != "44f0abdeb5d5dc296a713103ba40416dd3d68925ba4bcbad9d1f2862ed11f287"
+        or not schema_path.is_file()
+        or sha256(schema_path) != spdx.get("schema_sha256")
+    ):
+        errors.append("portable assurance: artifact/SPDX policy mismatch")
+
+    cmake = load_text(root, "CMakeLists.txt", errors)
+    tests_cmake = load_text(root, "tests/CMakeLists.txt", errors)
+    for token in (
+        "URL_HASH SHA256=1f357c27ca988c3f7c6b4bf68a9395005ac6761f034046e9dde0896e3aba00e4",
+        "GIT_TAG 6e8dadfdafa3a74eabb52ead87f8787f72eccd0b",
+    ):
+        if token not in cmake:
+            errors.append(f"portable assurance CMake pin missing: {token!r}")
+    for token in (
+        "snapshot_fuzz",
+        "runtime_profile_fuzz",
+        "jobqueue_fuzz",
+        "-fsanitize=fuzzer,address,undefined",
+    ):
+        if token not in tests_cmake:
+            errors.append(f"portable assurance fuzz wiring missing: {token!r}")
+
+    script_path = root / "scripts/verify-portable-assurance.sh"
+    script = load_text(root, "scripts/verify-portable-assurance.sh", errors)
+    if not script_path.is_file() or script_path.stat().st_mode & 0o111 == 0:
+        errors.append("portable assurance entry point must be executable")
+    for token in (
+        "dependencies|static|fuzz|artifacts|all",
+        "--build-dir",
+        "--source-commit",
+        "tools/check_static_analysis.py",
+        "tools/run_fuzz_smoke.py",
+        "tools/sbom.py",
+        "tools/provenance.py",
+        "--expected-source-commit",
+        "authenticated_provenance\":False",
+    ):
+        if token not in script:
+            errors.append(f"portable assurance entry point missing {token!r}")
+
+    fixture_root = root / "tests/provenance_fixtures"
+    fixture_files = {
+        path.relative_to(root).as_posix()
+        for path in fixture_root.rglob("*")
+        if path.is_file()
+    }
+    if fixture_files != {
+        "tests/provenance_fixtures/public/README.md",
+        "tests/provenance_fixtures/public/dsse-envelope.json",
+        "tests/provenance_fixtures/public/example-artifact.txt",
+        "tests/provenance_fixtures/public/public-trust.json",
+    }:
+        errors.append("portable assurance: public fixture inventory mismatch")
+    for path in fixture_root.rglob("*"):
+        lowered = path.name.lower()
+        if path.is_symlink() or lowered.endswith(".key") or "private" in lowered:
+            errors.append(f"portable assurance: forbidden fixture material {path}")
+
+    ci = load_text(root, ".github/workflows/ci.yml", errors)
+    if "continue-on-error: true" in ci:
+        errors.append("CI: portable dependency/security gates may not be advisory")
+    for forbidden in (
+        "id-token: write",
+        "attestations: write",
+        "packages: write",
+    ):
+        if forbidden in ci:
+            errors.append(f"CI: forbidden portable-assurance permission {forbidden}")
+    for token in (
+        "contents: read",
+        "Blocking dependency review",
+        "fail-on-severity: high",
+        "Portable assurance (Clang 14)",
+        "scripts/verify-portable-assurance.sh all",
+        "portable-assurance-${{ github.sha }}",
+    ):
+        if token not in ci:
+            errors.append(f"CI: missing portable-assurance gate {token!r}")
+
+    documentation = load_text(root, "docs/portable_assurance.md", errors)
+    architecture = load_text(root, "docs/architecture.md", errors)
+    normalized_documentation = re.sub(
+        r"\s+",
+        " ",
+        (documentation + architecture).lower(),
+    )
+    for phrase in (
+        "not continuous fuzzing",
+        "unsigned in-toto Statement v1",
+        "does not authenticate the unsigned RTFW candidate",
+        "contents: read",
+        "no private key",
+        "no scheduler, lane, runtime callback",
+    ):
+        if phrase.lower() not in normalized_documentation:
+            errors.append(f"portable assurance docs missing boundary {phrase!r}")
+
+
 def validate_repository(root: pathlib.Path) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
@@ -748,6 +990,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
 
     validate_release_contract(root, contract, version, errors)
     validate_qualification_contract(root, errors)
+    validate_portable_assurance_contract(root, errors)
     validate_support_matrix(matrix, version, errors)
     validate_hardware_matrix(
         "docs/cuda_support_matrix.json",

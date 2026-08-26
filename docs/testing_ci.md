@@ -3,6 +3,15 @@
 CI is regression evidence for selected builds and behaviors. It is not a
 latency qualification and does not prove the complete product contract.
 
+M20-PRE-01 adds a required Ubuntu 22.04 Clang 14 `Portable assurance` job. It
+runs exact dependency reconciliation, complete-manifest clang-tidy, three
+fixed-seed ASan/UBSan fuzz smokes, deterministic candidate SPDX/provenance and
+expected-source manifest verification, offline signature verification of a
+public non-target fixture, safe archive extraction, relocated consumption, C
+ABI v8, and SONAME 8. Machine reports are retained as candidate CI evidence.
+The workflow remains `contents: read`; the job cannot sign, attest, publish,
+release, deploy, or qualify hardware/RT behavior.
+
 ## Current coverage
 
 - GoogleTest unit and integration tests cover phase execution, queues, arenas,
@@ -237,8 +246,14 @@ predeclared thresholds, and the measurement procedure.
 - Differential test: `tests/test_differential_output.cpp`
 - Fault injection: `tests/test_fault_injection.cpp`
 - Determinism integration: `tests/integration/test_determinism.cpp`
-- Optional fuzz harnesses: `tests/jobqueue_fuzz.cpp`,
-  `tests/snapshot_fuzz.cpp`
+- M20-PRE-01 fuzz harnesses: `tests/snapshot_fuzz.cpp` and
+  `tests/runtime_profile_fuzz.cpp` are supported-parser smoke surfaces;
+  `tests/jobqueue_fuzz.cpp` remains explicitly experimental
+- Portable assurance policies and tools: `.clang-tidy`,
+  `tools/static_analysis_sources.txt`, `tools/check_static_analysis.py`,
+  `tools/run_fuzz_smoke.py`, `tools/sbom_expected.json`, `tools/sbom.py`,
+  `tools/provenance.py`, `release/portable-assurance-policy.json`, and
+  `scripts/verify-portable-assurance.sh`
 - Cross-build artifact producer: `tests/determinism_artifact.cpp`
 - M1–M12 lifecycle, graph, executor/host adapter, memory, time, platform,
   observability, replay, and device

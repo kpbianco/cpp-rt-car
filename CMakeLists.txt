@@ -485,6 +485,7 @@ if (RTFW_BUILD_TESTS)
             FetchContent_Declare(
                 googletest
                 URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+                URL_HASH SHA256=1f357c27ca988c3f7c6b4bf68a9395005ac6761f034046e9dde0896e3aba00e4
                 DOWNLOAD_EXTRACT_TIMESTAMP TRUE
             )
             # For Windows: Prevent overriding the parent project's compiler/linker
@@ -512,7 +513,7 @@ if (RTFW_BUILD_TESTS)
         FetchContent_Declare(
             rapidcheck
             GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-            GIT_TAG master
+            GIT_TAG 6e8dadfdafa3a74eabb52ead87f8787f72eccd0b
         )
         FetchContent_MakeAvailable(rapidcheck)
     endif()

@@ -2,10 +2,32 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M17-06 starts from exact target
-baseline `875c486570ed84df939b8b9e75c01e7c3d43b28b`. The binding M17-06
-contract is `contracts/active-batch.yaml`, sourced from control revision
-`acdbdc50f66fd66f9a8e48eee75923edfd759787`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M20-PRE-01 starts from exact target
+baseline `c846cc427c93018175a69c7372c130f00c0b713b`, the merged M17-06 result.
+The binding M20-PRE-01 contract is `contracts/active-batch.yaml`, sourced from
+control revision `acdbdc50f66fd66f9a8e48eee75923edfd759787`.
+
+## M20-PRE-01 implementation handoff
+
+Use `scripts/verify-portable-assurance.sh` with an explicit build directory and
+complete source commit. The five modes are `dependencies`, `static`, `fuzz`,
+`artifacts`, and cumulative `all`. Source manifests, seed manifests,
+dictionaries, dependency/action pins, the Clang 14 policy, SPDX schema, public
+fixture trust snapshot, and artifact policy are checked-in inputs. Generated
+reports and candidates must stay below the explicit build/CI evidence root.
+
+The package candidate is staged twice to prove byte-stable SBOM generation,
+then bound to an unsigned in-toto statement and a strict expected-source final
+manifest before extraction and relocated consumption. The signed fixture is
+fictional non-target material used only to prove offline cryptographic positive
+and mutation rejection. No RTFW candidate is signed or authenticated.
+
+Do not broaden this batch into production source, ABI or schema changes,
+support/qualification promotion, a release workflow, target signing,
+continuous-service fuzzing, controlled performance, soak, hardware, RT, or
+Unreal work. Missing Clang 14/CMake/libFuzzer tooling is an unperformed gate,
+not a pass. Hosted CI and separate human supply-chain, fuzz/analyzer,
+compatibility, and claim review remain mandatory before merge.
 
 ## M19-01 implementation handoff
 

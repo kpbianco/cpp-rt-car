@@ -6,10 +6,43 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import re
 import sys
 from typing import Any
+
+
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+MAX_ARTIFACTS = 256
+MAX_ARTIFACT_BYTES = 8 * 1024 * 1024 * 1024
+
+
+class DuplicateKeyError(ValueError):
+    pass
+
+
+def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise DuplicateKeyError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+
+def strict_json(path: pathlib.Path) -> Any:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("manifest must be a regular non-symlink file")
+    if path.stat().st_size > MAX_MANIFEST_BYTES:
+        raise ValueError("manifest exceeds the 4 MiB limit")
+    try:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicates,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"manifest cannot be read: {exc}") from exc
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -48,9 +81,16 @@ def relative_artifact_paths(
             raise ValueError(f"release artifact must not be a symlink: {path}")
         if path.is_file():
             paths.append(path.relative_to(artifact_dir))
+            if len(paths) > MAX_ARTIFACTS:
+                raise ValueError(
+                    f"artifact directory exceeds {MAX_ARTIFACTS} files"
+                )
     paths.sort(key=lambda value: value.as_posix())
     if not paths:
         raise ValueError("artifact directory contains no release artifacts")
+    total = sum((artifact_dir / path).stat().st_size for path in paths)
+    if total > MAX_ARTIFACT_BYTES:
+        raise ValueError("artifact directory exceeds the 8 GiB byte limit")
     return paths
 
 
@@ -104,14 +144,29 @@ def verify_manifest(
     manifest_path: pathlib.Path,
     artifact_dir: pathlib.Path,
     version_file: pathlib.Path,
+    expected_source_commit: str | None = None,
 ) -> list[str]:
     errors: list[str] = []
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        return [f"manifest cannot be read: {exc}"]
+        manifest = strict_json(manifest_path)
+    except ValueError as exc:
+        return [str(exc)]
     if not isinstance(manifest, dict):
         return ["manifest top-level value must be an object"]
+    expected_top_level = [
+        "schema_version",
+        "project",
+        "version",
+        "source_commit",
+        "artifacts",
+    ]
+    if list(manifest) != expected_top_level:
+        errors.append("manifest top-level inventory differs from schema version 1")
+    expected_encoding = (
+        json.dumps(manifest, indent=2, sort_keys=False) + "\n"
+    ).encode("utf-8")
+    if manifest_path.read_bytes() != expected_encoding:
+        errors.append("manifest JSON is not in canonical schema order/encoding")
 
     try:
         expected_version = version_from(version_file)
@@ -126,13 +181,24 @@ def verify_manifest(
     if manifest.get("version") != expected_version:
         errors.append("manifest version does not match VERSION.txt")
     try:
-        validated_commit(str(manifest.get("source_commit", "")))
+        manifest_commit = validated_commit(str(manifest.get("source_commit", "")))
     except ValueError as exc:
         errors.append(str(exc))
+        manifest_commit = ""
+    try:
+        expected_commit = validated_commit(expected_source_commit or "")
+    except ValueError:
+        errors.append("an explicit expected source commit is required")
+        expected_commit = ""
+    if manifest_commit and expected_commit and manifest_commit != expected_commit:
+        errors.append("manifest source commit does not match expected source commit")
 
     entries = manifest.get("artifacts")
     if not isinstance(entries, list) or not entries:
         errors.append("artifacts must be a non-empty array")
+        return errors
+    if len(entries) > MAX_ARTIFACTS:
+        errors.append(f"artifacts exceed the {MAX_ARTIFACTS}-entry limit")
         return errors
 
     artifact_dir = artifact_dir.resolve()
@@ -144,6 +210,8 @@ def verify_manifest(
         if not isinstance(entry, dict):
             errors.append(f"artifact {index} must be an object")
             continue
+        if list(entry) != ["path", "size_bytes", "sha256"]:
+            errors.append(f"artifact {index} has unknown or missing fields")
         relative = safe_relative_path(entry.get("path"))
         if relative is None:
             errors.append(f"artifact {index} has an unsafe path")
@@ -206,13 +274,20 @@ def verify_manifest(
 
 
 def write_manifest(path: pathlib.Path, manifest: dict[str, Any]) -> None:
+    if path.exists() or path.is_symlink():
+        raise ValueError(f"manifest output already exists: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(
-        json.dumps(manifest, indent=2, sort_keys=False) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+    try:
+        temporary.write_text(
+            json.dumps(manifest, indent=2, sort_keys=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except Exception:
+        if temporary.exists() and not temporary.is_symlink():
+            temporary.unlink()
+        raise
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -229,6 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--artifact-dir", type=pathlib.Path, required=True)
     verify.add_argument("--manifest", type=pathlib.Path, required=True)
     verify.add_argument("--version-file", type=pathlib.Path, required=True)
+    verify.add_argument("--expected-source-commit")
     return parser
 
 
@@ -252,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
             args.manifest,
             args.artifact_dir,
             args.version_file,
+            args.expected_source_commit or os.environ.get("GITHUB_SHA"),
         )
     except (OSError, UnicodeError, ValueError) as exc:
         print(f"Release manifest failed: {exc}", file=sys.stderr)

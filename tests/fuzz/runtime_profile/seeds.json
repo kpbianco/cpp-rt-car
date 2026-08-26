@@ -1,0 +1,10 @@
+{
+  "duplicate-key.json": {"utf8": "{\"schema_version\":1,\"schema_version\":1}"},
+  "empty.json": {"base64": ""},
+  "excessive-nesting.json": {"utf8": "{\"params\":{\"a\":{\"b\":{\"c\":{\"d\":{\"e\":{\"f\":{\"g\":{\"h\":{\"i\":{\"j\":{\"k\":{\"l\":{\"m\":{\"n\":{\"o\":{\"p\":{\"q\":0}}}}}}}}}}}}}}}}}"},
+  "incompatible-version.json": {"utf8": "{\"schema_version\":99}"},
+  "invalid-utf8.json": {"base64": "/w=="},
+  "trailing-data.json": {"utf8": "{} trailing"},
+  "unknown-key.json": {"utf8": "{\"unknown\":1}"},
+  "valid-profile.json": {"utf8": "{\"params\":{},\"profile_id\":\"fuzz.valid\",\"runtime\":{\"callback_capacity\":8,\"determinism_tier\":\"d0\",\"device_backend_capacity\":1,\"device_buffer_capacity\":8,\"device_completion_batch\":8,\"device_outstanding_capacity\":8,\"executor_policy\":\"static_deterministic\",\"executor_queue_capacity\":128,\"input_log_max_bytes\":1048576,\"memory_budget_bytes\":268435456,\"numerical_mode\":\"precise\",\"overload_policy\":\"fail_frame\",\"platform_preflight_mode\":\"disabled\",\"replay_input_capacity\":64,\"scratch_alignment\":64,\"scratch_bytes\":4096,\"snapshot_max_bytes\":1048576,\"state_capacity\":8,\"task_scratch_bytes\":256,\"task_scratch_slots\":128,\"trace_capacity\":4096,\"watchdog_max_degradation_level\":0,\"watchdog_timeout_ns\":0,\"worker_count\":1,\"workload_id\":\"fuzz.runtime\"},\"runtime_compatibility\":{\"major\":1,\"minimum_minor\":1},\"runtime_config_schema\":7,\"schema_version\":1}"}
+}

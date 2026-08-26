@@ -457,3 +457,20 @@ generation. Fixed records are accounted in existing runtime-control bytes,
 with canonical DeviceManager bytes remaining in device-control. There is no
 loader, module registry, global extension registry, provider region, or native
 HAL-v2 capability path.
+
+## M20-PRE-01 portable assurance plane
+
+The portable assurance plane is outside Runtime and the installed SDK. One
+shell entry point orchestrates five fail-closed host-tool modes below an
+explicit build root: dependency reconciliation, compilation-manifest static
+analysis, bounded sanitizer-backed fuzz smoke, candidate artifact verification,
+and their cumulative sequence. Checked-in policies identify every admitted
+dependency/action, translation unit, seed/dictionary, tool/schema, candidate
+artifact, and public fixture input.
+
+The artifact flow is package bytes to deterministic SPDX candidate, then an
+unsigned in-toto statement, then an exact expected-source manifest, followed by
+offline verification, safe extraction, and relocated consumption. The signed
+DSSE fixture is a separate non-target verifier test and never becomes a subject
+of the RTFW statement. This plane has no scheduler, lane, runtime callback,
+public API, signing, publication, support-promotion, hardware, or Unreal path.

@@ -1,7 +1,7 @@
 # Current state
 
-Last audited: 2026-08-23
-Batch baseline: `875c486570ed84df939b8b9e75c01e7c3d43b28b`
+Last audited: 2026-08-26
+Batch baseline: `c846cc427c93018175a69c7372c130f00c0b713b`
 
 ## Product state
 
@@ -14,12 +14,33 @@ Batch baseline: `875c486570ed84df939b8b9e75c01e7c3d43b28b`
 - The installed target inventory, 1.x aliases, support matrices, and
   Apache-2.0 license are unchanged. The default header inventory adds exactly
   `rt/extension_abi.h`.
-- M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 are merged in
-  target history. M17-06 repairs the retained M17-05 discovery blocker and is
-  implemented locally; M17 and CAP-M17 remain incomplete until mandatory
-  hosted CI and human gates pass. M18-01 offline qualification schemas and
-  tools remain proposal-only and unpromoted. M19-01 adds extension ABI v1;
-  M19 and CAP-M19 remain incomplete.
+- M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 and the
+  M17-06 portable discovery/composition repair are merged. M17 and CAP-M17
+  remain incomplete because named physical CUDA/XDMA, combined-hardware, RT,
+  and manual qualification records do not exist. M18-01 offline qualification
+  schemas and tools remain proposal-only and unpromoted. M19-01 adds extension
+  ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
+  current Linux-host batch. M20-PRE-01 is the active approved batch.
+
+## M20-PRE-01 portable assurance
+
+The active batch adds one host-independent `scripts/verify-portable-assurance.sh`
+entry point with independently runnable `dependencies`, `static`, `fuzz`,
+`artifacts`, and cumulative `all` modes. It reconciles exact build/action pins,
+the complete default first-party Clang 14 compilation manifest, two supported
+64 KiB parser fuzzers and one explicitly experimental 4 KiB queue fuzzer, a
+canonical SPDX 2.3 candidate SBOM, an unsigned in-toto Statement v1 candidate,
+an expected-source final manifest, offline RSA/DSSE verification of a retained
+public non-target fixture, and extraction/relocated consumption of the default
+package.
+
+The lane has repository-read-only GitHub permissions and no private-key,
+signing, OIDC, attestation-creation, publication, release, hardware, privileged
+host, controlled-timing, or Unreal path. Its machine reports are candidate CI
+evidence only. They do not establish continuous fuzzing, vulnerability or
+license clearance, reproducible builds, authenticated RTFW provenance, a SLSA
+level, support promotion, hardware/RT qualification, or production readiness.
+See `docs/portable_assurance.md`.
 
 ## M19-01 extension registration
 
@@ -106,10 +127,9 @@ instrumentation, failure suppression, cancellation, recovery, isolation, and
 checked cleanup are covered by its focused CTest executable. No timeline or
 memory object crosses backends and no direct peer DMA is represented.
 
-This is portable RT0 simulated-protocol evidence only. Mandatory hosted
-sanitizer CI and human API, compatibility, concurrency, lifetime,
-memory-order, accounting, security, and claim-boundary review remain external
-gates. Physical CUDA/XDMA memory, Graph execution, MMIO, interrupts, timing,
+This is portable RT0 simulated-protocol evidence only. The portable M17-06
+software path is merged, but physical CUDA/XDMA memory, Graph execution, MMIO,
+interrupts, timing,
 HIL, field, RT1/RT2, support promotion, signing, release, deployment, and
 production qualification remain deferred. The failed M17-05 review remains
 immutable in `docs/evidence/M17-05-2026-08-12.md`; current results are retained

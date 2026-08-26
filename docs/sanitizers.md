@@ -32,10 +32,19 @@ requires an instrumented C++ runtime; CFI requires compatible LTO and visibility
 settings. A successful configure does not imply every requested combination is
 supported.
 
-The optional `SIM_BUILD_FUZZERS=ON` target uses Clang libFuzzer with
-address/undefined instrumentation for `tests/jobqueue_fuzz.cpp`.
+The optional `SIM_BUILD_FUZZERS=ON` targets use Clang libFuzzer with
+address/undefined instrumentation. M20-PRE-01 runs the supported
+checkpoint/input-log and runtime-profile harnesses with 64 KiB input ceilings
+and 20,000 fixed-seed mutations each. The experimental job-queue harness has a
+4 KiB ceiling and 10,000 mutations. Every named immutable seed is replayed
+first, and failure artifacts stay below the explicit build output. These are
+bounded deterministic smoke tests, not continuous fuzzing or proof of
+vulnerability absence.
 
 ## Code anchors
 
 - Global sanitizer flags: `CMakeLists.txt`
-- Optional fuzz target: `tests/CMakeLists.txt`
+- Optional fuzz targets and runner: `tests/CMakeLists.txt`,
+  `tests/snapshot_fuzz.cpp`, `tests/runtime_profile_fuzz.cpp`,
+  `tests/jobqueue_fuzz.cpp`, `tests/fuzz/`, and
+  `tools/run_fuzz_smoke.py`

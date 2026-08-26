@@ -2,8 +2,9 @@
 
 RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
-ABI v1, and Apache-2.0. M14, M14.1, M15, and M16 are complete; M17 is
-active.
+ABI v1, and Apache-2.0. M14, M14.1, M15, and M16 are complete. The portable
+M17 software path through M17-06 is merged, while hardware/RT qualification
+remains incomplete. M20-PRE-01 is the active approved batch.
 M16-01 supplies the exact reference timeline, M16-02 adds deterministic
 CPU-only cross-rate channel selection and bounded SPSC stores, and M16-03 adds
 opt-in mandatory admission, dispatch, transfer, and late actions. M16-04 adds
@@ -24,6 +25,14 @@ CPU sample with backend-local timelines. It is simulated-protocol evidence
 only. M18-01 adds bounded offline qualification schemas and proposal tooling
 only; it promotes no tuple. Physical combined execution and hardware or RT
 qualification remain deferred.
+
+M20-PRE-01 is a host-independent assurance batch. It may change only the
+contracted verification, build/test wiring, dependency pins, CI,
+documentation, and candidate-evidence surfaces. It must not change production
+runtime source, a public header, ABI/schema/version, support or qualification
+state, the release workflow, or any prior evidence. Its generated SBOM,
+unsigned provenance statement, manifest, analyzer report, and fuzz report are
+candidate verification outputs only, never a signed or published release.
 
 ## Read before nontrivial work
 

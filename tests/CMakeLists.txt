@@ -414,6 +414,13 @@ if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             ${RTFW_PROJECT_SOURCE_DIR}/include)
     target_compile_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(snapshot_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+
+    add_executable(runtime_profile_fuzz runtime_profile_fuzz.cpp)
+    target_link_libraries(runtime_profile_fuzz PRIVATE rtfw_runtime)
+    target_compile_options(
+        runtime_profile_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_options(
+        runtime_profile_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
 # Portable M10 XDMA state-machine tests do not require GoogleTest, vendor

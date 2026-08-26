@@ -388,6 +388,15 @@ def check_runtime_contract() -> None:
     release_stager = read("tools/stage_release_artifacts.py")
     release_extractor = read("tools/extract_release_archive.py")
     hardware_checker = read("tools/check_hardware_evidence.py")
+    portable_assurance_doc = read("docs/portable_assurance.md")
+    portable_assurance_script = read("scripts/verify-portable-assurance.sh")
+    portable_toolchain = read("tools/portable_assurance_toolchain.json")
+    portable_dependency_policy = read("tools/sbom_expected.json")
+    portable_artifact_policy = read("release/portable-assurance-policy.json")
+    static_analysis_policy = read(".clang-tidy")
+    static_analysis_sources = read("tools/static_analysis_sources.txt")
+    fuzz_runner = read("tools/run_fuzz_smoke.py")
+    runtime_profile_fuzz = read("tests/runtime_profile_fuzz.cpp")
     release_test = read("tests/test_release_tools.py")
     portable_matrix = read("docs/portable_support_matrix.json")
     release_policy = read("docs/release_policy.md")
@@ -2501,12 +2510,16 @@ def check_runtime_contract() -> None:
             fail(f"tests/snapshot_fuzz.cpp: missing M7 fuzz evidence {token!r}")
     for token in (
         "rtfw_determinism_artifact",
-        "snapshot_fuzz",
         "DeterminismReplay.*",
         'cmp "$baseline" "$artifact"',
     ):
         if token not in ci_workflow:
             fail(f".github/workflows/ci.yml: missing M7 evidence {token!r}")
+    if (
+        "snapshot_fuzz" not in ci_workflow
+        and "verify-portable-assurance.sh all" not in ci_workflow
+    ):
+        fail(".github/workflows/ci.yml: missing M7 snapshot fuzz evidence")
     for token in (
         "rt/src/snapshot_codec.cpp",
         "test_determinism_replay.cpp",
@@ -2905,6 +2918,108 @@ def check_runtime_contract() -> None:
         )
         if revision and revision.group(1) not in handoff:
             fail("handoff control revision differs from active M17-06")
+    elif active_match.group(1) == "M20-PRE-01":
+        current_state = read("docs/CURRENT_STATE.md")
+        handoff = read("docs/HANDOFF.md")
+        roadmap = read("docs/roadmap.md")
+        for surface_name, surface in (
+            ("docs/CURRENT_STATE.md", current_state),
+            ("docs/HANDOFF.md", handoff),
+            ("docs/roadmap.md", roadmap),
+            ("docs/portable_assurance.md", portable_assurance_doc),
+        ):
+            if "M20-PRE-01" not in surface:
+                fail(f"{surface_name}: active M20-PRE-01 frontier is missing")
+        for token in (
+            "dependencies|static|fuzz|artifacts|all",
+            "--build-dir",
+            "--source-commit",
+            "tools/check_static_analysis.py",
+            "tools/run_fuzz_smoke.py",
+            "tools/sbom.py",
+            "tools/provenance.py",
+            "--expected-source-commit",
+        ):
+            if token not in portable_assurance_script:
+                fail(f"portable assurance entry point is missing {token!r}")
+        for token in (
+            "clang-14",
+            "clang-tidy-14",
+            "20000",
+            "10000",
+            "65536",
+            "4096",
+        ):
+            if token not in portable_toolchain:
+                fail(f"portable toolchain policy is missing {token!r}")
+        for token in (
+            "googletest",
+            "rapidcheck",
+            "vcpkg",
+            "workflow_actions",
+        ):
+            if token not in portable_dependency_policy:
+                fail(f"portable dependency policy is missing {token!r}")
+        for token in (
+            '"signing": false',
+            '"publication": false',
+            "SPDX-2.3",
+            "signed_fixture",
+        ):
+            if token not in portable_artifact_policy:
+                fail(f"portable artifact policy is missing {token!r}")
+        for token in (
+            "clang-analyzer-core.*",
+            "clang-analyzer-cplusplus.*",
+            "clang-analyzer-security.*",
+            "WarningsAsErrors: '*'",
+        ):
+            if token not in static_analysis_policy:
+                fail(f"static-analysis policy is missing {token!r}")
+        if len([line for line in static_analysis_sources.splitlines() if line]) < 25:
+            fail("static-analysis source manifest is unexpectedly incomplete")
+        for token in (
+            '"runs": 20_000',
+            '"runs": 10_000',
+            '"max_len": 65_536',
+            '"max_len": 4_096',
+        ):
+            if token not in fuzz_runner:
+                fail(f"fuzz runner is missing bounded policy {token!r}")
+        for token in (
+            "runtime_profile_max_bytes",
+            "parse_runtime_profile",
+            "__builtin_trap",
+        ):
+            if token not in runtime_profile_fuzz:
+                fail(f"runtime profile fuzzer is missing {token!r}")
+        for token in (
+            "Portable assurance (Clang 14)",
+            "Blocking dependency review",
+            "fail-on-severity: high",
+            "contents: read",
+        ):
+            if token not in ci_workflow:
+                fail(f"M20-PRE-01 CI is missing {token!r}")
+        for forbidden in (
+            "id-token: write",
+            "attestations: write",
+            "packages: write",
+            "continue-on-error: true",
+        ):
+            if forbidden in ci_workflow:
+                fail(f"M20-PRE-01 CI contains forbidden token {forbidden!r}")
+        for phrase in (
+            "not continuous fuzzing",
+            "unsigned in-toto Statement v1",
+            "does not authenticate the unsigned RTFW candidate",
+            "no private key",
+            "no C++ binary ABI",
+        ):
+            surfaces = portable_assurance_doc + read("README.md")
+            normalized = re.sub(r"\s+", " ", surfaces.lower())
+            if phrase.lower() not in normalized:
+                fail(f"portable assurance claim boundary is missing {phrase!r}")
 
 
 def check_qualification_contract() -> None:

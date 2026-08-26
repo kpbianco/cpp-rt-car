@@ -25,10 +25,26 @@ local_profiles:
       - warnings-as-errors
       - RapidCheck-enabled test build
       - complete local CTest suite
+  portable_assurance:
+    runner: scripts/verify-portable-assurance.sh
+    purpose: Deterministic host-independent dependency, static, fuzz, candidate-artifact, and relocated-package verification.
+    modes:
+      - dependencies
+      - static
+      - fuzz
+      - artifacts
+      - all
+    inputs:
+      - explicit build/output directory
+      - complete expected source commit
+    limitations:
+      - Candidate SBOM and provenance outputs are not signed or published.
+      - The signed public fixture does not authenticate an RTFW candidate.
+      - Missing or mismatched tools fail rather than becoming a skipped pass.
 validation_levels:
   static:
     status: automated
-    evidence: contract profile and repository CI
+    evidence: contract profile, exact Clang 14 source-manifest analysis, and repository CI
   unit:
     status: automated
     evidence: CTest and focused test executables
@@ -43,7 +59,16 @@ validation_levels:
     evidence:
       - AddressSanitizer and UndefinedBehaviorSanitizer
       - ThreadSanitizer
-      - bounded fuzz smoke
+      - bounded fixed-seed snapshot and runtime-profile fuzz smoke
+      - bounded experimental job-queue fuzz smoke
+  supply_chain:
+    status: automated_ci_and_local
+    evidence:
+      - exact dependency and workflow-action identity reconciliation
+      - blocking high-severity pull-request dependency review
+      - canonical SPDX 2.3 candidate SBOM verification
+      - strict expected-source manifest and unsigned in-toto candidate verification
+      - offline cryptographic verification of retained public non-target fixture material
   hardware_cuda:
     status: manual_qualification
     evidence: named NVIDIA tuple record required
@@ -65,6 +90,7 @@ mandatory_github_ci:
   - determinism artifact exchange
   - ThreadSanitizer
   - package, archive, relocation, ABI, documentation, and release contracts
+  - Clang 14 portable assurance and blocking dependency review
 manual_gates:
   - public API and compatibility review
   - hardware/RT support-matrix promotion
@@ -74,3 +100,6 @@ known_limitations:
   - Local verification covers only the available host compiler, OS, dependencies, and privileges.
   - Hosted CI cannot prove CUDA, XDMA, combined hardware, RT1, RT2, thermal, or long-duration behavior.
   - A successful strict preflight or requested policy is not proof that a deployment meets deadlines.
+  - A bounded fuzz smoke is not continuous fuzzing or proof of vulnerability absence.
+  - Dependency pins and candidate SBOMs are not vulnerability, legal, or license clearance.
+  - The unsigned RTFW statement is not authenticated provenance; fixture signature verification applies only to the retained fixture.
