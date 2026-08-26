@@ -2867,13 +2867,13 @@ struct Runtime::Impl {
                     endpoint->host_storage.size() - payload_offset) {
                 return Status::internal_error;
             }
-            auto& state = active_channel_states[channel_index];
+            auto& channel_state = active_channel_states[channel_index];
             auto& store = compiled_cross_rate_plan.stores[channel_index];
-            if (!store.can_publish(state.next_generation)) {
+            if (!store.can_publish(channel_state.next_generation)) {
                 const auto slots = static_cast<std::uint64_t>(
                     store.slot_count());
-                if (state.next_generation <= slots ||
-                    store.retire(state.next_generation - slots) !=
+                if (channel_state.next_generation <= slots ||
+                    store.retire(channel_state.next_generation - slots) !=
                         detail::SnapshotStoreResult::ok) {
                     return Status::internal_error;
                 }
@@ -2881,32 +2881,32 @@ struct Runtime::Impl {
             const auto source = std::span<const std::byte>(
                 endpoint->host_storage.data() + payload_offset,
                 cross_rate_channels[channel_index].payload_size);
-            if (store.publish(state.next_generation, source) !=
+            if (store.publish(channel_state.next_generation, source) !=
                 detail::SnapshotStoreResult::ok) {
                 return Status::internal_error;
             }
             std::copy(
                 source.begin(), source.end(),
                 active_committed_payloads.begin() +
-                    static_cast<std::ptrdiff_t>(state.payload_offset));
+                    static_cast<std::ptrdiff_t>(channel_state.payload_offset));
             std::copy(
                 source.begin(), source.end(),
                 active_staging_payloads.begin() +
-                    static_cast<std::ptrdiff_t>(state.payload_offset));
-            state.generation = state.next_generation;
-            state.next_generation = store.next_generation();
-            state.source_logical_release_ns =
+                    static_cast<std::ptrdiff_t>(channel_state.payload_offset));
+            channel_state.generation = channel_state.next_generation;
+            channel_state.next_generation = store.next_generation();
+            channel_state.source_logical_release_ns =
                 ticket.identity.logical_release_ns;
-            state.provenance = CrossRateSampleProvenance::produced;
-            state.held = false;
-            state.producer_release_sequence =
+            channel_state.provenance = CrossRateSampleProvenance::produced;
+            channel_state.held = false;
+            channel_state.producer_release_sequence =
                 ticket.identity.domain_release_sequence;
-            state.producer_substep_ordinal =
+            channel_state.producer_substep_ordinal =
                 ticket.identity.substep_ordinal;
-            state.producer_completion_status = completion.status;
-            state.producer_timestamp_domain_identity =
+            channel_state.producer_completion_status = completion.status;
+            channel_state.producer_timestamp_domain_identity =
                 completion.timestamp_domain_identity;
-            state.producer_timestamp = completion.timestamp;
+            channel_state.producer_timestamp = completion.timestamp;
         }
         return Status::ok;
     }
