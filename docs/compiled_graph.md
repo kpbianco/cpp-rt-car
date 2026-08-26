@@ -14,6 +14,16 @@ adds a distinct instance-owned cross-rate channel kind and immutable selection
 records. M16-03 can opt into selected CPU record execution without changing the
 stable C ABI or reference-only graph execution.
 
+M21-01 lets a HAL-v2 command-batch phase use a separate device-rate binding.
+The generic reference order still sorts equal releases by domain registration,
+compiled phase, and substep. Device inspection and admission derive from that
+order and the copied M17 declaration; no second graph, command list, buffer
+list, or timeline list is introduced. Device completion intervals are
+half-open, remove completions before equal-time releases, and include prior-
+cycle carry. Active mixed execution remains rejected until M21-02.
+Failed admission publishes no partial plan; a fixed-size diagnostic retains the
+status, rejected phase, and first reference index for configuring-time repair.
+
 ## Graph vocabulary
 
 Each registered callback is one **phase**. Registration can return a

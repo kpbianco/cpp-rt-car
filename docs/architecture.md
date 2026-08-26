@@ -17,6 +17,21 @@ one runtime-owned or borrowed host CPU executor, optional
 watchdog/degradation state, and a
 fixed-capacity platform-preflight report.
 
+M21-01 adds one finalization-only device-rate compiler beside the M16 timeline
+and dispatch compilers. Configuration stores a phase/domain association,
+positive completion budget, positive per-phase in-flight bound, and one role
+per flattened M17 buffer reference. Finalization reads the already copied
+command batch and backend capability/topology snapshots, publishes immutable
+inspection records, and simulates one exact repeating supercycle with
+half-open completion intervals. CPU admission remains one conservative lane;
+device demand is checked independently per phase, backend, Runtime, and poll
+boundary, including previous-cycle carry.
+
+The compiler introduces no execution lane. Reference-only `step()` retains
+ordinary graph behavior, while an active mixed `start()` fails before
+preflight or any provider/backend callback. M21-02 is the first batch allowed
+to route rate releases to existing submission/completion lanes.
+
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval
 windows, exact trace-sequence loss reporting, and immutable

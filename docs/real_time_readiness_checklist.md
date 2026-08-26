@@ -195,3 +195,21 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - [ ] Continuous fuzzing, target signing/authenticated provenance,
   reproducible release, controlled performance, soak, hardware/HIL/field,
   RT1/RT2, Unreal, release, deployment, and production evidence remain absent.
+
+## M21-01 device-rate model/admission checklist
+
+- [x] HAL-v2 command-batch phases can copy positive completion/in-flight
+  policy and access-matched roles without duplicating command or buffer
+  declarations.
+- [x] Finalization performs checked cyclic half-open admission across phase,
+  backend, Runtime outstanding, poll-boundary, substep, and previous-cycle
+  carry constraints and publishes immutable logical inspection records.
+- [x] New storage and semantics are included in existing rate-plan/control
+  accounting and conditional graph/replay identity; stable C/device/extension
+  ABIs, schemas, support state, and release remain unchanged.
+- [x] Active mixed start fails before provider/backend/vendor callbacks. No
+  device submit/poll/cancel, completion payload, sampled I/O, telemetry schema,
+  or lane/thread is added by M21-01.
+- [ ] M21-02 through M21-05 dispatch/completion, CPU/device payload, sampled-
+  I/O, overload/replay, and conformance evidence remains outstanding. Physical
+  CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain separate named gates.

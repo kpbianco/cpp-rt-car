@@ -851,6 +851,144 @@ struct RatePhaseBinding {
     RateDomainHandle domain{};
 };
 
+// M21-01 device-rate metadata names only roles for references that already
+// exist in the copied M17 command-batch declaration. The role must agree with
+// that reference's declared access; no command, buffer range, or address is
+// declared a second time here.
+enum class DeviceRatePayloadRole : std::uint8_t {
+    input = 1,
+    output = 2,
+    input_output = 3,
+};
+
+struct DeviceRatePhaseBinding {
+    PhaseHandle phase{};
+    RateDomainHandle domain{};
+    std::uint64_t completion_budget_ns = 0;
+    std::uint32_t maximum_in_flight = 0;
+    std::span<const DeviceRatePayloadRole> payload_roles{};
+};
+
+enum class DeviceRateReferenceKind : std::uint8_t {
+    dispatch_buffer = 1,
+    copy_source = 2,
+    copy_destination = 3,
+    synchronization_target = 4,
+};
+
+enum class DeviceRateTimelineRole : std::uint8_t {
+    wait = 1,
+    signal = 2,
+};
+
+struct CompiledDeviceRatePhase {
+    PhaseHandle phase{};
+    RateDomainHandle domain{};
+    DeviceBackendHandle backend{};
+    std::size_t compiled_phase_index = 0;
+    std::uint64_t completion_budget_ns = 0;
+    std::uint32_t maximum_in_flight = 0;
+    std::uint32_t command_count = 0;
+    std::uint32_t wait_count = 0;
+    std::uint32_t signal_count = 0;
+    std::size_t first_command_index = 0;
+    std::size_t first_payload_reference_index = 0;
+    std::size_t payload_reference_count = 0;
+    std::size_t first_timeline_reference_index = 0;
+    std::size_t timeline_reference_count = 0;
+    std::uint64_t completion_timestamp_domain_identity = 0;
+};
+
+struct CompiledDeviceRateCommand {
+    PhaseHandle phase{};
+    std::uint32_t command_index = 0;
+    HalV2CommandKind kind = HalV2CommandKind::invalid;
+    HalV2MemoryOperation operation = HalV2MemoryOperation::invalid;
+    std::uint32_t opcode = 0;
+    std::uint32_t flags = 0;
+    std::size_t first_payload_reference_index = 0;
+    std::size_t payload_reference_count = 0;
+};
+
+struct CompiledDeviceRatePayloadReference {
+    PhaseHandle phase{};
+    DeviceBackendHandle backend{};
+    DeviceBufferHandle buffer{};
+    std::uint32_t command_index = 0;
+    std::uint32_t command_reference_index = 0;
+    DeviceRateReferenceKind kind =
+        DeviceRateReferenceKind::dispatch_buffer;
+    DeviceRatePayloadRole role = DeviceRatePayloadRole::input;
+    std::uint32_t access = 0;
+    std::uint64_t offset = 0;
+    std::uint64_t bytes = 0;
+};
+
+struct CompiledDeviceRateTimelineReference {
+    PhaseHandle phase{};
+    DeviceBackendHandle backend{};
+    DeviceTimelineHandle timeline{};
+    DeviceRateTimelineRole role = DeviceRateTimelineRole::wait;
+    std::uint32_t declaration_index = 0;
+};
+
+enum class DeviceRateAdmissionConstraint : std::uint8_t {
+    phase_in_flight = 1,
+    backend_in_flight = 2,
+    runtime_outstanding = 3,
+    completion_batch = 4,
+};
+
+struct DeviceRateAdmissionBackend {
+    DeviceBackendHandle backend{};
+    std::uint32_t maximum_in_flight = 0;
+    std::uint32_t completion_batch_capacity = 0;
+    std::uint32_t peak_in_flight = 0;
+    std::uint32_t peak_completions = 0;
+};
+
+struct DeviceRateAdmissionPhase {
+    PhaseHandle phase{};
+    DeviceBackendHandle backend{};
+    std::uint64_t completion_budget_ns = 0;
+    std::uint32_t maximum_in_flight = 0;
+    std::uint32_t peak_in_flight = 0;
+};
+
+struct DeviceRateAdmissionInterval {
+    std::size_t reference_index =
+        std::numeric_limits<std::size_t>::max();
+    PhaseHandle phase{};
+    RateDomainHandle domain{};
+    DeviceBackendHandle backend{};
+    std::uint64_t release_time_ns = 0;
+    std::uint64_t completion_deadline_ns = 0;
+    std::uint32_t substep_ordinal = 0;
+    bool optional = false;
+    bool carries_across_supercycle = false;
+    DeviceRateAdmissionConstraint constraining_capacity =
+        DeviceRateAdmissionConstraint::phase_in_flight;
+    std::uint32_t constraining_limit = 0;
+    std::uint32_t demand_at_release = 0;
+};
+
+struct DeviceRateAdmissionReport {
+    std::uint64_t supercycle_ns = 0;
+    std::uint32_t runtime_outstanding_capacity = 0;
+    std::uint32_t runtime_completion_batch_capacity = 0;
+    std::uint32_t peak_global_in_flight = 0;
+    std::size_t backend_count = 0;
+    std::size_t phase_count = 0;
+    std::size_t interval_count = 0;
+};
+
+struct DeviceRateAdmissionDiagnostic {
+    Status status = Status::ok;
+    std::size_t reference_index =
+        std::numeric_limits<std::size_t>::max();
+    PhaseHandle phase{};
+};
+
 struct CompiledRateDomain {
     RateDomainHandle domain{};
     std::array<char, rate_domain_name_capacity> name{};
@@ -1041,6 +1179,15 @@ struct MemoryPlan {
     std::size_t rate_telemetry_slot_bytes = 0;
     std::size_t rate_telemetry_storage_bytes = 0;
     std::size_t rate_telemetry_counter_bytes = 0;
+    // M21-01 device-rate model/admission storage is included exactly once in
+    // rate_plan_bytes and the existing runtime_control_bytes row.
+    std::size_t device_rate_phase_count = 0;
+    std::size_t device_rate_command_count = 0;
+    std::size_t device_rate_payload_reference_count = 0;
+    std::size_t device_rate_timeline_reference_count = 0;
+    std::size_t device_rate_admission_backend_count = 0;
+    std::size_t device_rate_admission_interval_count = 0;
+    std::size_t device_rate_plan_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
@@ -1454,6 +1601,13 @@ public:
         RateDomainHandle domain) noexcept;
     [[nodiscard]] Status bind_phase_to_rate_domain(
         const RatePhaseBinding& binding) noexcept;
+    // Copies only the role span. Backend, commands, buffer slices,
+    // synchronization, and timelines are derived from the phase's copied M17
+    // declaration during finalization.
+    [[nodiscard]] Status bind_device_phase_to_rate_domain(
+        const DeviceRatePhaseBinding& binding) noexcept;
+    [[nodiscard]] Status replace_device_rate_binding(
+        const DeviceRatePhaseBinding& binding) noexcept;
     [[nodiscard]] Status register_cross_rate_channel(
         const CrossRateChannelRegistration& registration,
         CrossRateChannelHandle& out_channel) noexcept;
@@ -1591,6 +1745,38 @@ public:
     [[nodiscard]] bool reference_release_at(
         std::size_t release_index,
         ReferenceRelease& release) const noexcept;
+    [[nodiscard]] bool device_rate_model_enabled() const noexcept;
+    [[nodiscard]] std::size_t device_rate_phase_count() const noexcept;
+    [[nodiscard]] std::size_t device_rate_command_count() const noexcept;
+    [[nodiscard]] std::size_t
+    device_rate_payload_reference_count() const noexcept;
+    [[nodiscard]] std::size_t
+    device_rate_timeline_reference_count() const noexcept;
+    [[nodiscard]] bool compiled_device_rate_phase_at(
+        std::size_t phase_index,
+        CompiledDeviceRatePhase& phase) const noexcept;
+    [[nodiscard]] bool compiled_device_rate_command_at(
+        std::size_t command_index,
+        CompiledDeviceRateCommand& command) const noexcept;
+    [[nodiscard]] bool compiled_device_rate_payload_reference_at(
+        std::size_t reference_index,
+        CompiledDeviceRatePayloadReference& reference) const noexcept;
+    [[nodiscard]] bool compiled_device_rate_timeline_reference_at(
+        std::size_t reference_index,
+        CompiledDeviceRateTimelineReference& reference) const noexcept;
+    [[nodiscard]] bool device_rate_admission_report(
+        DeviceRateAdmissionReport& report) const noexcept;
+    [[nodiscard]] bool device_rate_admission_diagnostic(
+        DeviceRateAdmissionDiagnostic& diagnostic) const noexcept;
+    [[nodiscard]] bool device_rate_admission_backend_at(
+        std::size_t backend_index,
+        DeviceRateAdmissionBackend& backend) const noexcept;
+    [[nodiscard]] bool device_rate_admission_phase_at(
+        std::size_t phase_index,
+        DeviceRateAdmissionPhase& phase) const noexcept;
+    [[nodiscard]] bool device_rate_admission_interval_at(
+        std::size_t interval_index,
+        DeviceRateAdmissionInterval& interval) const noexcept;
     [[nodiscard]] bool cross_rate_model_enabled() const noexcept;
     [[nodiscard]] std::size_t cross_rate_channel_count() const noexcept;
     [[nodiscard]] std::size_t cross_rate_selection_count() const noexcept;

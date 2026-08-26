@@ -247,6 +247,15 @@ leave all registered bytes unchanged.
 
 ## Running-state boundary
 
+M21-01 counts the copied device-rate binding/role storage and every compiled
+phase, command, payload reference, timeline reference, backend/phase admission
+row, and interval exactly once in `device_rate_plan_bytes`. That value is a
+subcomponent of `rate_plan_bytes` and the existing `runtime_control_bytes`
+logical extent. The six-row equation and provider regions do not change.
+Temporary compiler inventories are discarded before publication; successful
+finalization freezes all retained vectors. Active mixed start is rejected
+before lanes, so M21-01 adds no post-start allocation or mutable report path.
+
 M16-03 active state is allocated only during finalization. Admission records,
 domain-release groups, channel aliases/generations, staged and committed
 payload bytes, publication claims, and the canonical checkpoint-state buffer

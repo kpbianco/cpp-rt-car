@@ -1301,6 +1301,25 @@ struct Runtime::Impl {
                         channel.initial_sample.size()));
             }
         }
+        if (!compiled_device_rate_plan.phases.empty()) {
+            hash_u64(hash, 0x4d32312d64726174ull);
+            hash_u64(hash, compiled_device_rate_plan.phases.size());
+            for (const auto& phase : compiled_device_rate_plan.phases) {
+                hash_u64(hash, phase.phase.index());
+                hash_u64(hash, phase.domain.index());
+                hash_u64(hash, phase.completion_budget_ns);
+                hash_u64(hash, phase.maximum_in_flight);
+                hash_u64(hash, phase.payload_reference_count);
+                const auto end = phase.first_payload_reference_index +
+                    phase.payload_reference_count;
+                for (auto index = phase.first_payload_reference_index;
+                     index < end; ++index) {
+                    hash_u64(hash, static_cast<std::uint64_t>(
+                        compiled_device_rate_plan
+                            .payload_references[index].role));
+                }
+            }
+        }
         if (rate_execution_policy_set) {
             // Conditional marker preserves exact M16-01/M16-02 identities for
             // reference-only plans.
@@ -3583,8 +3602,11 @@ struct Runtime::Impl {
     std::vector<PhaseHandle> compiled_order;
     std::vector<detail::RateDomainSpec> rate_domains;
     std::vector<detail::RateBindingSpec> rate_bindings;
+    std::vector<detail::DeviceRateBindingSpec> device_rate_bindings;
     detail::CompiledRatePlan compiled_rate_plan;
     detail::CompiledRateDispatchPlan compiled_rate_dispatch_plan;
+    detail::CompiledDeviceRatePlan compiled_device_rate_plan;
+    DeviceRateAdmissionDiagnostic device_rate_diagnostic{};
     std::vector<detail::CrossRateChannelSpec> cross_rate_channels;
     detail::CompiledCrossRatePlan compiled_cross_rate_plan;
     std::vector<ActiveChannelState> active_channel_states;
@@ -5206,6 +5228,163 @@ Status Runtime::bind_phase_to_rate_domain(
     return bind_phase_to_rate_domain(binding.phase, binding.domain);
 }
 
+Status Runtime::bind_device_phase_to_rate_domain(
+    const DeviceRatePhaseBinding& binding) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state,
+                           "device-rate bindings are frozen");
+    }
+    if (!impl_->valid_phase(binding.phase) ||
+        !impl_->valid_rate_domain(binding.domain)) {
+        return impl_->fail(Status::invalid_handle,
+                           "device-rate binding contains an invalid or foreign handle");
+    }
+    const auto& callback = impl_->callbacks[binding.phase.index()];
+    if (callback.kind != Impl::PhaseKind::device_batch) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "active device-rate admission requires a HAL-v2 command-batch phase");
+    }
+    if (binding.completion_budget_ns == 0 ||
+        binding.maximum_in_flight == 0) {
+        return impl_->fail(Status::invalid_argument,
+                           "device-rate completion budget and in-flight demand must be positive");
+    }
+    std::size_t reference_count = 0;
+    for (std::size_t index = 0;
+         index < callback.batch_declaration.command_count; ++index) {
+        const auto& command = callback.batch_declaration.commands[index];
+        const auto kind = static_cast<HalV2CommandKind>(command.kind);
+        reference_count += kind == HalV2CommandKind::dispatch
+            ? command.buffer_count
+            : kind == HalV2CommandKind::copy ? 2u : 1u;
+    }
+    if (binding.payload_roles.size() != reference_count ||
+        std::any_of(
+            binding.payload_roles.begin(), binding.payload_roles.end(),
+            [](DeviceRatePayloadRole role) {
+                return role != DeviceRatePayloadRole::input &&
+                    role != DeviceRatePayloadRole::output &&
+                    role != DeviceRatePayloadRole::input_output;
+            })) {
+        return impl_->fail(Status::invalid_argument,
+                           "device-rate payload roles must exactly cover the copied batch references");
+    }
+    if (std::any_of(
+            impl_->rate_bindings.begin(), impl_->rate_bindings.end(),
+            [&](const auto& existing) {
+                return existing.phase == binding.phase;
+            })) {
+        return impl_->fail(Status::invalid_argument,
+                           "phase already has a rate-domain owner");
+    }
+    try {
+        auto rate_bindings = impl_->rate_bindings;
+        auto device_bindings = impl_->device_rate_bindings;
+        rate_bindings.push_back({
+            binding.phase, binding.domain, RatePhaseKind::device});
+        device_bindings.push_back({
+            binding.phase,
+            binding.domain,
+            binding.completion_budget_ns,
+            binding.maximum_in_flight,
+            std::vector<DeviceRatePayloadRole>(
+                binding.payload_roles.begin(), binding.payload_roles.end()),
+        });
+        impl_->rate_bindings.swap(rate_bindings);
+        impl_->device_rate_bindings.swap(device_bindings);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::replace_device_rate_binding(
+    const DeviceRatePhaseBinding& binding) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(Status::invalid_state,
+                           "device-rate binding replacement is frozen");
+    }
+    if (!impl_->valid_phase(binding.phase) ||
+        !impl_->valid_rate_domain(binding.domain) ||
+        impl_->callbacks[binding.phase.index()].kind !=
+            Impl::PhaseKind::device_batch ||
+        binding.completion_budget_ns == 0 ||
+        binding.maximum_in_flight == 0) {
+        return impl_->fail(Status::invalid_argument,
+                           "replacement device-rate binding is malformed");
+    }
+    const auto existing = std::find_if(
+        impl_->device_rate_bindings.begin(),
+        impl_->device_rate_bindings.end(), [&](const auto& candidate) {
+            return candidate.phase == binding.phase;
+        });
+    const auto rate_existing = std::find_if(
+        impl_->rate_bindings.begin(), impl_->rate_bindings.end(),
+        [&](const auto& candidate) { return candidate.phase == binding.phase; });
+    if (existing == impl_->device_rate_bindings.end() ||
+        rate_existing == impl_->rate_bindings.end()) {
+        return impl_->fail(Status::invalid_handle,
+                           "device-rate binding does not exist");
+    }
+    std::size_t reference_count = 0;
+    for (std::size_t index = 0;
+         index < impl_->callbacks[binding.phase.index()]
+             .batch_declaration.command_count; ++index) {
+        const auto& command = impl_->callbacks[binding.phase.index()]
+            .batch_declaration.commands[index];
+        const auto kind = static_cast<HalV2CommandKind>(command.kind);
+        reference_count += kind == HalV2CommandKind::dispatch
+            ? command.buffer_count
+            : kind == HalV2CommandKind::copy ? 2u : 1u;
+    }
+    if (binding.payload_roles.size() != reference_count) {
+        return impl_->fail(Status::invalid_argument,
+                           "replacement payload roles do not cover the copied declaration");
+    }
+    try {
+        detail::DeviceRateBindingSpec replacement{
+            binding.phase,
+            binding.domain,
+            binding.completion_budget_ns,
+            binding.maximum_in_flight,
+            std::vector<DeviceRatePayloadRole>(
+                binding.payload_roles.begin(), binding.payload_roles.end()),
+        };
+        auto rate_bindings = impl_->rate_bindings;
+        auto device_bindings = impl_->device_rate_bindings;
+        rate_bindings[static_cast<std::size_t>(
+            rate_existing - impl_->rate_bindings.begin())].domain =
+            binding.domain;
+        device_bindings[static_cast<std::size_t>(
+            existing - impl_->device_rate_bindings.begin())] =
+            std::move(replacement);
+        impl_->rate_bindings.swap(rate_bindings);
+        impl_->device_rate_bindings.swap(device_bindings);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
 Status Runtime::register_cross_rate_channel(
     const CrossRateChannelRegistration& registration,
     CrossRateChannelHandle& out_channel) noexcept {
@@ -5608,6 +5787,7 @@ Status Runtime::finalize() noexcept {
     if (impl_->state != RuntimeState::configuring) {
         return impl_->fail(Status::invalid_state, "finalize requires configuring state");
     }
+    impl_->device_rate_diagnostic = {};
     if (validate_config(impl_->config) != Status::ok ||
         impl_->callbacks.size() > impl_->config.callback_capacity ||
         impl_->states.size() > impl_->config.state_capacity ||
@@ -5710,6 +5890,121 @@ Status Runtime::finalize() noexcept {
         return impl_->fail(rate_status, rate_diagnostic.message);
     }
 
+    detail::CompiledDeviceRatePlan compiled_device_rate_plan;
+    if (!impl_->device_rate_bindings.empty()) {
+        if (impl_->config.device_outstanding_capacity >
+                std::numeric_limits<std::uint32_t>::max() ||
+            impl_->config.device_completion_batch >
+                std::numeric_limits<std::uint32_t>::max()) {
+            impl_->device_rate_diagnostic.status = Status::invalid_config;
+            return impl_->fail(
+                Status::invalid_config,
+                "device-rate Runtime capacities exceed the compiled model");
+        }
+        try {
+            std::vector<detail::DeviceRateBackendSource> backend_sources;
+            std::vector<detail::DeviceRateBufferSource> buffer_sources;
+            std::vector<detail::DeviceRateTimelineSource> timeline_sources;
+            std::vector<detail::DeviceRatePhaseSource> phase_sources;
+            backend_sources.reserve(impl_->device_backends.size());
+            buffer_sources.reserve(impl_->device_buffers.size());
+            timeline_sources.reserve(impl_->device_timelines.size());
+            phase_sources.reserve(impl_->device_rate_bindings.size());
+            for (std::size_t index = 0;
+                 index < impl_->device_backends.size(); ++index) {
+                const auto& backend = impl_->device_backends[index];
+                detail::DeviceRateBackendSource source;
+                source.backend = DeviceBackendHandle{
+                    impl_->graph_owner, static_cast<std::uint32_t>(index)};
+                if (backend.command_state) {
+                    source.capabilities =
+                        backend.command_state->capabilities;
+                }
+                if (backend.memory_state) {
+                    const auto identity = backend.memory_state->snapshot
+                        .completion_timestamp_domain_identity;
+                    const auto* domain = detail::find_timestamp_domain(
+                        *backend.memory_state, identity);
+                    source.completion_timestamp_domain_identity = identity;
+                    source.completion_timestamp_domain_valid =
+                        domain && domain->monotonic != 0;
+                }
+                backend_sources.push_back(source);
+            }
+            for (std::size_t index = 0;
+                 index < impl_->device_buffers.size(); ++index) {
+                const auto& buffer = impl_->device_buffers[index];
+                const auto& backend =
+                    impl_->device_backends[buffer.backend_index];
+                const auto* domain = backend.memory_state
+                    ? detail::find_memory_domain(
+                          *backend.memory_state, buffer.domain_identity)
+                    : nullptr;
+                buffer_sources.push_back({
+                    DeviceBufferHandle{
+                        impl_->graph_owner, static_cast<std::uint32_t>(index)},
+                    DeviceBackendHandle{
+                        impl_->graph_owner, buffer.backend_index},
+                    buffer.bytes,
+                    buffer.flags,
+                    domain ? domain->byte_granularity : 1u,
+                    domain ? domain->offset_granularity : 1u,
+                });
+            }
+            for (std::size_t index = 0;
+                 index < impl_->device_timelines.size(); ++index) {
+                const auto& timeline = impl_->device_timelines[index];
+                timeline_sources.push_back({
+                    DeviceTimelineHandle{
+                        impl_->graph_owner, static_cast<std::uint32_t>(index)},
+                    DeviceBackendHandle{
+                        impl_->graph_owner, timeline.backend_index},
+                    timeline.initial_value,
+                });
+            }
+            for (const auto& binding : impl_->device_rate_bindings) {
+                const auto& callback = impl_->callbacks[binding.phase.index()];
+                phase_sources.push_back({
+                    binding.phase,
+                    DeviceBackendHandle{
+                        impl_->graph_owner, callback.device_backend_index},
+                    &callback.batch_declaration,
+                });
+            }
+            detail::DeviceRateDiagnostic device_rate_diagnostic;
+            const auto device_rate_status = detail::compile_device_rate_plan(
+                impl_->graph_owner,
+                static_cast<std::uint32_t>(
+                    impl_->config.device_outstanding_capacity),
+                static_cast<std::uint32_t>(
+                    impl_->config.device_completion_batch),
+                compiled_rate_plan,
+                impl_->device_rate_bindings,
+                backend_sources,
+                buffer_sources,
+                timeline_sources,
+                phase_sources,
+                compiled_device_rate_plan,
+                device_rate_diagnostic);
+            if (device_rate_status != Status::ok) {
+                impl_->device_rate_diagnostic = {
+                    device_rate_status,
+                    device_rate_diagnostic.reference_index,
+                    device_rate_diagnostic.phase,
+                };
+                return impl_->fail(
+                    device_rate_status, device_rate_diagnostic.message);
+            }
+        } catch (const std::bad_alloc&) {
+            impl_->device_rate_diagnostic.status =
+                Status::resource_exhausted;
+            return impl_->fail(Status::resource_exhausted, nullptr);
+        } catch (...) {
+            impl_->device_rate_diagnostic.status = Status::internal_error;
+            return impl_->fail(Status::internal_error, nullptr);
+        }
+    }
+
     detail::CompiledRateDispatchPlan compiled_rate_dispatch_plan;
     if (impl_->rate_execution_policy_set) {
         detail::RateDispatchDiagnostic dispatch_diagnostic;
@@ -5720,6 +6015,9 @@ Status Runtime::finalize() noexcept {
             impl_->dependencies,
             compiled_rate_plan,
             impl_->cross_rate_channels,
+            impl_->device_rate_bindings.empty()
+                ? nullptr
+                : &compiled_device_rate_plan,
             compiled_rate_dispatch_plan,
             dispatch_diagnostic);
         if (dispatch_status != Status::ok) {
@@ -5995,6 +6293,18 @@ Status Runtime::finalize() noexcept {
     memory_plan.rate_domain_count = compiled_rate_plan.domains.size();
     memory_plan.rate_binding_count = compiled_rate_plan.bindings.size();
     memory_plan.reference_release_count = compiled_rate_plan.releases.size();
+    memory_plan.device_rate_phase_count =
+        compiled_device_rate_plan.phases.size();
+    memory_plan.device_rate_command_count =
+        compiled_device_rate_plan.commands.size();
+    memory_plan.device_rate_payload_reference_count =
+        compiled_device_rate_plan.payload_references.size();
+    memory_plan.device_rate_timeline_reference_count =
+        compiled_device_rate_plan.timeline_references.size();
+    memory_plan.device_rate_admission_backend_count =
+        compiled_device_rate_plan.admission_backends.size();
+    memory_plan.device_rate_admission_interval_count =
+        compiled_device_rate_plan.admission_intervals.size();
     memory_plan.cross_rate_channel_count =
         compiled_cross_rate_plan.channels.size();
     memory_plan.cross_rate_selection_count =
@@ -6243,6 +6553,38 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_rate_plan_array(
         impl_->rate_bindings.capacity(),
         sizeof(detail::RateBindingSpec));
+    const auto device_rate_bytes_begin = memory_plan.rate_plan_bytes;
+    plan_valid = plan_valid && add_rate_plan_array(
+        impl_->device_rate_bindings.capacity(),
+        sizeof(detail::DeviceRateBindingSpec));
+    for (const auto& binding : impl_->device_rate_bindings) {
+        plan_valid = plan_valid && add_rate_plan_array(
+            binding.payload_roles.capacity(),
+            sizeof(DeviceRatePayloadRole));
+    }
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_device_rate_plan.phases.capacity(),
+        sizeof(CompiledDeviceRatePhase));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_device_rate_plan.commands.capacity(),
+        sizeof(CompiledDeviceRateCommand));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_device_rate_plan.payload_references.capacity(),
+        sizeof(CompiledDeviceRatePayloadReference));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_device_rate_plan.timeline_references.capacity(),
+        sizeof(CompiledDeviceRateTimelineReference));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_device_rate_plan.admission_backends.capacity(),
+        sizeof(DeviceRateAdmissionBackend));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_device_rate_plan.admission_phases.capacity(),
+        sizeof(DeviceRateAdmissionPhase));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_device_rate_plan.admission_intervals.capacity(),
+        sizeof(DeviceRateAdmissionInterval));
+    memory_plan.device_rate_plan_bytes =
+        memory_plan.rate_plan_bytes - device_rate_bytes_begin;
     plan_valid = plan_valid && add_rate_plan_array(
         compiled_rate_plan.domains.capacity(),
         sizeof(CompiledRateDomain));
@@ -6555,6 +6897,44 @@ Status Runtime::finalize() noexcept {
             impl_->rate_bindings.capacity(),
             sizeof(detail::RateBindingSpec));
         add_runtime_extent(
+            impl_->device_rate_bindings.data(),
+            impl_->device_rate_bindings.capacity(),
+            sizeof(detail::DeviceRateBindingSpec));
+        for (const auto& binding : impl_->device_rate_bindings) {
+            add_runtime_extent(
+                binding.payload_roles.data(),
+                binding.payload_roles.capacity(),
+                sizeof(DeviceRatePayloadRole));
+        }
+        add_runtime_extent(
+            compiled_device_rate_plan.phases.data(),
+            compiled_device_rate_plan.phases.capacity(),
+            sizeof(CompiledDeviceRatePhase));
+        add_runtime_extent(
+            compiled_device_rate_plan.commands.data(),
+            compiled_device_rate_plan.commands.capacity(),
+            sizeof(CompiledDeviceRateCommand));
+        add_runtime_extent(
+            compiled_device_rate_plan.payload_references.data(),
+            compiled_device_rate_plan.payload_references.capacity(),
+            sizeof(CompiledDeviceRatePayloadReference));
+        add_runtime_extent(
+            compiled_device_rate_plan.timeline_references.data(),
+            compiled_device_rate_plan.timeline_references.capacity(),
+            sizeof(CompiledDeviceRateTimelineReference));
+        add_runtime_extent(
+            compiled_device_rate_plan.admission_backends.data(),
+            compiled_device_rate_plan.admission_backends.capacity(),
+            sizeof(DeviceRateAdmissionBackend));
+        add_runtime_extent(
+            compiled_device_rate_plan.admission_phases.data(),
+            compiled_device_rate_plan.admission_phases.capacity(),
+            sizeof(DeviceRateAdmissionPhase));
+        add_runtime_extent(
+            compiled_device_rate_plan.admission_intervals.data(),
+            compiled_device_rate_plan.admission_intervals.capacity(),
+            sizeof(DeviceRateAdmissionInterval));
+        add_runtime_extent(
             compiled_rate_plan.domains.data(),
             compiled_rate_plan.domains.capacity(),
             sizeof(CompiledRateDomain));
@@ -6720,6 +7100,8 @@ Status Runtime::finalize() noexcept {
     impl_->compiled_rate_plan = std::move(compiled_rate_plan);
     impl_->compiled_rate_dispatch_plan =
         std::move(compiled_rate_dispatch_plan);
+    impl_->compiled_device_rate_plan =
+        std::move(compiled_device_rate_plan);
     impl_->compiled_cross_rate_plan = std::move(compiled_cross_rate_plan);
     impl_->active_channel_states = std::move(active_channel_states);
     impl_->active_committed_payloads =
@@ -6784,6 +7166,12 @@ Status Runtime::start() noexcept {
     }
     if (impl_->state != RuntimeState::finalized) {
         return impl_->fail(Status::invalid_state, "start requires finalized state");
+    }
+    if (impl_->rate_execution_policy_set &&
+        !impl_->compiled_device_rate_plan.phases.empty()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "active mixed CPU/device execution is deferred until M21-02");
     }
     if (impl_->lane_cleanup_pending) {
         return impl_->fail(
@@ -8542,6 +8930,143 @@ bool Runtime::reference_release_at(
         return false;
     }
     release = impl_->compiled_rate_plan.releases[release_index];
+    return true;
+}
+
+bool Runtime::device_rate_model_enabled() const noexcept {
+    return impl_ && !impl_->provider_callback_active() &&
+        impl_->state != RuntimeState::configuring &&
+        !impl_->compiled_device_rate_plan.phases.empty();
+}
+
+std::size_t Runtime::device_rate_phase_count() const noexcept {
+    return device_rate_model_enabled()
+        ? impl_->compiled_device_rate_plan.phases.size() : 0;
+}
+
+std::size_t Runtime::device_rate_command_count() const noexcept {
+    return device_rate_model_enabled()
+        ? impl_->compiled_device_rate_plan.commands.size() : 0;
+}
+
+std::size_t Runtime::device_rate_payload_reference_count() const noexcept {
+    return device_rate_model_enabled()
+        ? impl_->compiled_device_rate_plan.payload_references.size() : 0;
+}
+
+std::size_t Runtime::device_rate_timeline_reference_count() const noexcept {
+    return device_rate_model_enabled()
+        ? impl_->compiled_device_rate_plan.timeline_references.size() : 0;
+}
+
+bool Runtime::compiled_device_rate_phase_at(
+    std::size_t phase_index,
+    CompiledDeviceRatePhase& phase) const noexcept {
+    phase = {};
+    if (!device_rate_model_enabled() ||
+        phase_index >= impl_->compiled_device_rate_plan.phases.size()) {
+        return false;
+    }
+    phase = impl_->compiled_device_rate_plan.phases[phase_index];
+    return true;
+}
+
+bool Runtime::compiled_device_rate_command_at(
+    std::size_t command_index,
+    CompiledDeviceRateCommand& command) const noexcept {
+    command = {};
+    if (!device_rate_model_enabled() ||
+        command_index >= impl_->compiled_device_rate_plan.commands.size()) {
+        return false;
+    }
+    command = impl_->compiled_device_rate_plan.commands[command_index];
+    return true;
+}
+
+bool Runtime::compiled_device_rate_payload_reference_at(
+    std::size_t reference_index,
+    CompiledDeviceRatePayloadReference& reference) const noexcept {
+    reference = {};
+    if (!device_rate_model_enabled() ||
+        reference_index >=
+            impl_->compiled_device_rate_plan.payload_references.size()) {
+        return false;
+    }
+    reference =
+        impl_->compiled_device_rate_plan.payload_references[reference_index];
+    return true;
+}
+
+bool Runtime::compiled_device_rate_timeline_reference_at(
+    std::size_t reference_index,
+    CompiledDeviceRateTimelineReference& reference) const noexcept {
+    reference = {};
+    if (!device_rate_model_enabled() ||
+        reference_index >=
+            impl_->compiled_device_rate_plan.timeline_references.size()) {
+        return false;
+    }
+    reference =
+        impl_->compiled_device_rate_plan.timeline_references[reference_index];
+    return true;
+}
+
+bool Runtime::device_rate_admission_report(
+    DeviceRateAdmissionReport& report) const noexcept {
+    report = {};
+    if (!device_rate_model_enabled()) {
+        return false;
+    }
+    report = impl_->compiled_device_rate_plan.report;
+    return true;
+}
+
+bool Runtime::device_rate_admission_diagnostic(
+    DeviceRateAdmissionDiagnostic& diagnostic) const noexcept {
+    diagnostic = {};
+    if (!impl_ || impl_->provider_callback_active() ||
+        impl_->device_rate_diagnostic.status == Status::ok) {
+        return false;
+    }
+    diagnostic = impl_->device_rate_diagnostic;
+    return true;
+}
+
+bool Runtime::device_rate_admission_backend_at(
+    std::size_t backend_index,
+    DeviceRateAdmissionBackend& backend) const noexcept {
+    backend = {};
+    if (!device_rate_model_enabled() || backend_index >=
+        impl_->compiled_device_rate_plan.admission_backends.size()) {
+        return false;
+    }
+    backend =
+        impl_->compiled_device_rate_plan.admission_backends[backend_index];
+    return true;
+}
+
+bool Runtime::device_rate_admission_phase_at(
+    std::size_t phase_index,
+    DeviceRateAdmissionPhase& phase) const noexcept {
+    phase = {};
+    if (!device_rate_model_enabled() || phase_index >=
+        impl_->compiled_device_rate_plan.admission_phases.size()) {
+        return false;
+    }
+    phase = impl_->compiled_device_rate_plan.admission_phases[phase_index];
+    return true;
+}
+
+bool Runtime::device_rate_admission_interval_at(
+    std::size_t interval_index,
+    DeviceRateAdmissionInterval& interval) const noexcept {
+    interval = {};
+    if (!device_rate_model_enabled() || interval_index >=
+        impl_->compiled_device_rate_plan.admission_intervals.size()) {
+        return false;
+    }
+    interval =
+        impl_->compiled_device_rate_plan.admission_intervals[interval_index];
     return true;
 }
 

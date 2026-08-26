@@ -2,10 +2,26 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M20-PRE-01 starts from exact target
-baseline `c846cc427c93018175a69c7372c130f00c0b713b`, the merged M17-06 result.
-The binding M20-PRE-01 contract is `contracts/active-batch.yaml`, sourced from
-control revision `acdbdc50f66fd66f9a8e48eee75923edfd759787`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M21-01 starts from exact target
+baseline `d463c3a6896e54d10814f1d4ed3b05d355550900`, the merged M20-PRE-01
+result. The binding M21-01 contract is `contracts/active-batch.yaml`, sourced
+from control revision `022786c74e853ed9a81c17c145814543d742b4e0`.
+
+## M21-01 implementation handoff
+
+Use `bind_device_phase_to_rate_domain()` only for an already registered
+HAL-v2 command-batch phase. The role span is copied and must exactly match the
+declaration's flattened reference order; it never repeats a buffer handle,
+offset, length, command, or timeline. `replace_device_rate_binding()` supports
+transactional correction after a failed finalization.
+
+The compiled device-rate queries expose phase, backend, command skeleton,
+payload slice identity/role, timeline identity, declared completion budget,
+in-flight bounds, cyclic intervals, and backend/phase peaks. Admission bounds
+are declarations, not measurements. Active mixed `start()` is intentionally
+rejected before callbacks until M21-02. Do not add completion payloads,
+sampled I/O, device telemetry, rate-triggered backend calls, or new lanes in
+this batch.
 
 ## M20-PRE-01 implementation handoff
 

@@ -28,6 +28,14 @@ struct RateBindingSpec {
     RatePhaseKind phase_kind = RatePhaseKind::cpu;
 };
 
+struct DeviceRateBindingSpec {
+    PhaseHandle phase{};
+    RateDomainHandle domain{};
+    std::uint64_t completion_budget_ns = 0;
+    std::uint32_t maximum_in_flight = 0;
+    std::vector<DeviceRatePayloadRole> payload_roles;
+};
+
 struct CompiledRatePlan {
     std::uint64_t supercycle_ns = 0;
     std::vector<CompiledRateDomain> domains;

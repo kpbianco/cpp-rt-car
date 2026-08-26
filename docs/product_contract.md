@@ -88,7 +88,13 @@ backends reuse only device ABI v1 through the canonical adapter, and services
 remain on the serialized host control path. Checked stop and detach preserve
 borrowed code/instance lifetime. Runtime performs no discovery or unload, and
 the experimental plugin manager is not a compatibility path. M19 and CAP-M19
-remain incomplete.
+remain incomplete. M20-PRE-01 is merged as host-independent candidate
+assurance. M21-01 adds an additive C++ device-rate binding and immutable
+mixed-plan admission surface for HAL-v2 command-batch phases. It copies only
+completion/in-flight policy and payload roles, derives all command/buffer/
+timeline identity from the M17 declaration, and rejects active mixed start
+before callbacks. No stable ABI, schema, support, qualification, or release
+claim changes; M21 and CAP-M21 remain incomplete.
 
 ## Claim policy
 

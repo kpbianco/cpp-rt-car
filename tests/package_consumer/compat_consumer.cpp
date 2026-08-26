@@ -53,6 +53,9 @@ int main() {
     const rt::CpuMemoryPolicyReport pre_m15_04_report{
         rt::cpu_memory_policy_schema_version, 1, {pre_m15_04_thread}, 0, {}};
     const rt::MemoryPlan pre_m16_plan{1024, 512};
+    const rt::DeviceRatePhaseBinding additive_device_rate{};
+    const rt::DeviceRateAdmissionReport additive_device_admission{};
+    const rt::DeviceRateAdmissionDiagnostic additive_device_diagnostic{};
     const rt::CrossRateChannelRegistration additive_cross_rate{};
     const rt::RateExecutionPolicy additive_rate_execution{};
     const rt::RateExecutionPolicy pre_m16_04_rate_execution{17};
@@ -79,6 +82,11 @@ int main() {
         pre_m15_04_report.threads[0].role != rt::thread_role_frame ||
         pre_m15_04_report.accounting_complete ||
         pre_m16_plan.rate_plan_bytes != 0 ||
+        pre_m16_plan.device_rate_plan_bytes != 0 ||
+        additive_device_rate.maximum_in_flight != 0 ||
+        !additive_device_rate.payload_roles.empty() ||
+        additive_device_admission.interval_count != 0 ||
+        additive_device_diagnostic.status != rt::Status::ok ||
         additive_cross_rate.payload_size != 0 ||
         additive_rate_execution.maximum_dispatch_records_per_step != 0 ||
         pre_m16_04_rate_execution.maximum_dispatch_records_per_step != 17 ||

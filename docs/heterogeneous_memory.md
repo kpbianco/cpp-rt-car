@@ -1,5 +1,13 @@
 # Heterogeneous Memory and Topology Contract
 
+M21-01 reuses the copied memory-domain and timestamp-domain snapshot when
+validating device-rate declarations. Every retained payload reference names an
+existing same-backend logical buffer slice with checked bounds, access, byte
+granularity, and offset granularity. The compiled report retains only logical
+handles and integral descriptors; it never retains host addresses, opaque
+native handles, or payload bytes. No transfer or coherency operation is added
+by this batch.
+
 M17-02 adds the optional HAL-v2 memory/topology extension version 1 beside the
 unchanged HAL-v2 core API version 2. The extension is a C++ source contract in
 the already installed `<rt/device.hpp>` header. It adds no installed header,

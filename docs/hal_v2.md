@@ -16,9 +16,16 @@ isolated Runtime submission lanes. M17-04 supplies native-v2 registrations for
 the existing CUDA and XDMA candidates through those unchanged tables. M17-06
 repairs Runtime capability discovery and composes both in one portable
 simulated-protocol graph. M17 and CAP-M17 remain incomplete pending mandatory
-CI and human gates; physical peer DMA, plugin or factory loading, device-rate
-execution, combined hardware execution, and every hardware or RT qualification
+CI and human gates; physical peer DMA, plugin or factory loading, active
+device-rate execution, combined hardware execution, and every hardware or RT qualification
 remain deferred.
+
+M21-01 consumes the already copied command/timeline capability record and
+memory/topology timestamp snapshot as immutable admission inputs. It validates
+command/wait/signal/timeline limits, registered buffer ranges/access/
+granularity, completion timestamp identity, per-backend in-flight demand, and
+per-poll completion count. It invokes no extension operation because of a rate
+release and does not promote a HAL or hardware support claim.
 
 ## Public core shape
 

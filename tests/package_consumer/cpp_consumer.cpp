@@ -294,6 +294,10 @@ int main() {
     const rt::HalV2BatchCompletion batch_completion{};
     const rt::DeviceTimelineRegistration timeline_registration{};
     const rt::DeviceBatchPhaseRegistration batch_phase_registration{};
+    const rt::DeviceRatePhaseBinding device_rate_binding{};
+    const rt::CompiledDeviceRatePhase compiled_device_rate{};
+    const rt::DeviceRateAdmissionReport device_rate_admission{};
+    const rt::DeviceRateAdmissionDiagnostic device_rate_diagnostic{};
     if (pre_m15_04_policy.accounting_declaration_count != 0 ||
         pre_m15_04_report.accounting_complete ||
         pre_m16_plan.rate_plan_bytes != 0 ||
@@ -303,6 +307,11 @@ int main() {
         batch_completion.batch_id != 0 ||
         timeline_registration.initial_value != 0 ||
         batch_phase_registration.callback != nullptr ||
+        device_rate_binding.completion_budget_ns != 0 ||
+        !device_rate_binding.payload_roles.empty() ||
+        compiled_device_rate.maximum_in_flight != 0 ||
+        device_rate_admission.interval_count != 0 ||
+        device_rate_diagnostic.status != rt::Status::ok ||
         rt::hal_v2_command_capacity != 16 ||
         rt::hal_v2_timeline_capacity != 16) {
         return 3;

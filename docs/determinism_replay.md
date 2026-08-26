@@ -114,6 +114,15 @@ mandatory-only state bytes remain exact. The separate rate-action telemetry
 history, counters, and caller cursors are process-local and not checkpointed.
 Action-aware replay remains unsupported rather than being inferred as D1.
 
+M21-01 conditionally appends the device-rate phase/domain indexes, completion
+budget, per-phase in-flight bound, and ordered payload roles to `graph_id` only
+when a device-rate binding exists. Backend, batch, buffer, and timeline
+identity already come from the copied M17 graph semantics and remain the sole
+source. No-device and CPU-only conditional hash paths are unchanged. A mixed
+metadata change therefore changes graph/replay compatibility without changing
+checkpoint or input-log schema 1. Active mixed replay remains unavailable
+because active mixed start itself is deferred to M21-02.
+
 M17-01 preserves the exact pre-M17 device identity path for every adapted
 device-ABI-v1 registration. Its backend name and copied backend identifier are
 hashed at the same positions as before; the adapter kind, HAL table, context,

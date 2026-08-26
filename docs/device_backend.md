@@ -153,6 +153,17 @@ translates it to the backend's private token before submission.
 
 ## Execution semantics
 
+M21-01 does not alter ordinary frame semantics. It admits only phases
+registered through `register_device_batch_phase()` on a backend with copied
+command/timeline capabilities and a valid monotonic completion timestamp
+domain. Legacy device-command and device-ABI-v1 phases remain usable in the
+ordinary graph but cannot opt into active device-rate admission. This is an
+additive support boundary, not a device-ABI-v1 incompatibility.
+
+Declared device-rate completion budgets are planning inputs, not measured
+latency or backend qualification. M21-01 invokes no submit, poll, cancel, or
+vendor function because of a rate release.
+
 A device phase has two distinct moments:
 
 - the command provider is a normal bounded CPU phase and ends when submission
