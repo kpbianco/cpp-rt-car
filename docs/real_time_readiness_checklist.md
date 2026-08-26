@@ -207,9 +207,10 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - [x] New storage and semantics are included in existing rate-plan/control
   accounting and conditional graph/replay identity; stable C/device/extension
   ABIs, schemas, support state, and release remain unchanged.
-- [x] Active mixed start fails before provider/backend/vendor callbacks. No
-  device submit/poll/cancel, completion payload, sampled I/O, telemetry schema,
-  or lane/thread is added by M21-01.
-- [ ] M21-02 through M21-05 dispatch/completion, CPU/device payload, sampled-
+- [x] M21-02 admits only immutable M21-01 command-batch records, uses existing
+  submission/service lanes, permits independent in-flight overlap, preserves
+  precomputed dependency/group barriers, and quarantines vendor-owned timeout
+  slots without adding a lane or schema.
+- [ ] M21-03 through M21-05 CPU/device payload, sampled-
   I/O, overload/replay, and conformance evidence remains outstanding. Physical
   CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain separate named gates.

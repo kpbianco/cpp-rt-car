@@ -6,11 +6,11 @@ trace IDs 1-14 and metric IDs 0-31. Rate telemetry is bounded RT0 functional
 evidence, not an authenticated replay log, measured WCET, deadline proof, or
 hardware/RT qualification record.
 
-M21-01 does not add a rate-action ID, counter, record field, or global
-observability event. Its admission report is immutable configuration evidence,
-not runtime telemetry or measured timing. Active mixed start is rejected
-before callbacks, so no device release, completion, timeout, late, shed, or
-payload event is emitted by this batch.
+M21-01 and M21-02 add no rate-action ID, counter, record field, or global
+observability event. Admission remains immutable configuration evidence.
+M21-02 reuses the existing device submitted/completed metrics and trace events
+plus existing active-rate failure/action accounting; it emits no completion
+payload and changes no telemetry schema.
 
 ## Policy and bounds
 

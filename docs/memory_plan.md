@@ -253,8 +253,13 @@ row, and interval exactly once in `device_rate_plan_bytes`. That value is a
 subcomponent of `rate_plan_bytes` and the existing `runtime_control_bytes`
 logical extent. The six-row equation and provider regions do not change.
 Temporary compiler inventories are discarded before publication; successful
-finalization freezes all retained vectors. Active mixed start is rejected
-before lanes, so M21-01 adds no post-start allocation or mutable report path.
+finalization freezes all retained vectors. M21-02 additionally counts immutable
+reference-to-device indexes, dependency offsets/entries, and preallocated
+generation-tagged completion tickets once in `device_rate_execution_bytes`,
+`rate_dispatch_state_bytes`, `rate_plan_bytes`, and the existing Runtime
+control extent. The six-row equation and provider regions remain unchanged;
+active provider, dispatch, completion, timeout, quarantine, and ticket reuse
+perform no ordinary allocation.
 
 M16-03 active state is allocated only during finalization. Admission records,
 domain-release groups, channel aliases/generations, staged and committed

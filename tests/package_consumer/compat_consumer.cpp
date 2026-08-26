@@ -83,6 +83,10 @@ int main() {
         pre_m15_04_report.accounting_complete ||
         pre_m16_plan.rate_plan_bytes != 0 ||
         pre_m16_plan.device_rate_plan_bytes != 0 ||
+        pre_m16_plan.device_rate_dispatch_record_count != 0 ||
+        pre_m16_plan.device_rate_dependency_count != 0 ||
+        pre_m16_plan.device_rate_execution_slot_count != 0 ||
+        pre_m16_plan.device_rate_execution_bytes != 0 ||
         additive_device_rate.maximum_in_flight != 0 ||
         !additive_device_rate.payload_roles.empty() ||
         additive_device_admission.interval_count != 0 ||

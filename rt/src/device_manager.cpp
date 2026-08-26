@@ -7,6 +7,7 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <thread>
 #include <utility>
 
 #include <rt/arch.hpp>
@@ -26,6 +27,9 @@ constexpr std::uint32_t kBatchSubmitted = 4;
 constexpr std::uint32_t kBatchEarlyReady = 5;
 constexpr std::uint32_t kBatchOwned = 6;
 constexpr std::uint32_t kBatchCompletionReady = 7;
+constexpr std::uint32_t kBatchRateTerminal = 8;
+constexpr std::uint32_t kBatchRateQuarantineOwned = 9;
+constexpr std::uint32_t kBatchRateQuarantined = 10;
 
 constexpr std::uint8_t kBackendOwnershipNone = 0;
 constexpr std::uint8_t kBackendOwnershipInitialized = 1;
@@ -596,10 +600,17 @@ Status DeviceManager::request_batch_stop() noexcept {
             if (slot_state == kBatchFree || slot_state == kBatchReserved) {
                 continue;
             }
-            try {
-                (void)state->extension.cancel(
-                    state->extension.instance, slot.batch.batch_id);
-            } catch (...) {
+            if (slot_state != kBatchQueued &&
+                slot_state != kBatchRateTerminal &&
+                slot_state != kBatchRateQuarantineOwned &&
+                slot_state != kBatchRateQuarantined &&
+                !slot.cancellation_requested.exchange(
+                    true, std::memory_order_acq_rel)) {
+                try {
+                    (void)state->extension.cancel(
+                        state->extension.instance, slot.batch.batch_id);
+                } catch (...) {
+                }
             }
             if (slot_state == kBatchQueued) {
                 auto expected = kBatchQueued;
@@ -608,7 +619,8 @@ Status DeviceManager::request_batch_stop() noexcept {
                         std::memory_order_relaxed)) {
                     finish_batch_slot(slot, Status::device_canceled, false);
                 }
-            } else if (!slot.graph_released.exchange(
+            } else if (!slot.rate_owned &&
+                       !slot.graph_released.exchange(
                            true, std::memory_order_acq_rel) && executor_) {
                 (void)executor_->complete_external(
                     slot.phase_index, Status::device_canceled);
@@ -701,6 +713,9 @@ Status DeviceManager::stop() noexcept {
     }
     const auto quiesce_status = quiesce_lane();
     const auto backend_status = shutdown_backends();
+    if (backend_status == Status::ok) {
+        release_rate_slots_after_shutdown();
+    }
     const auto cleanup_status = cleanup_lane();
     if (request_status != Status::ok) {
         return request_status;
@@ -715,6 +730,26 @@ Status DeviceManager::stop() noexcept {
         return backend_status;
     }
     return cleanup_status;
+}
+
+void DeviceManager::release_rate_slots_after_shutdown() noexcept {
+    for (std::size_t index = 0; index < batch_slot_count_; ++index) {
+        auto& slot = batch_slots_[index];
+        if (!slot.rate_owned) {
+            continue;
+        }
+        const auto previous = slot.state.exchange(
+            kBatchFree, std::memory_order_acq_rel);
+        if (previous != kBatchFree && previous != kBatchReserved) {
+            auto count = outstanding_count_.load(std::memory_order_relaxed);
+            while (count != 0 &&
+                   !outstanding_count_.compare_exchange_weak(
+                       count, count - 1, std::memory_order_release,
+                       std::memory_order_relaxed)) {
+            }
+        }
+        slot.rate_owned = false;
+    }
 }
 
 DeviceManager::Outstanding* DeviceManager::acquire_outstanding() noexcept {
@@ -969,14 +1004,25 @@ Status DeviceManager::submit_batch(
     std::uint64_t frame_index,
     const DeviceCommandBatch& requested,
     const DeviceCommandBatch& declaration,
-    std::uint64_t& out_batch_id) noexcept {
+    std::uint64_t& out_batch_id,
+    const DeviceRateReleaseIdentity* rate_identity,
+    DeviceRateTicket* rate_ticket) noexcept {
     out_batch_id = 0;
+    if (rate_ticket) {
+        *rate_ticket = {};
+    }
     if (!started_.load(std::memory_order_acquire) ||
         !batch_admission_open_.load(std::memory_order_acquire) ||
         backend_index >= backends_.size() ||
         !backends_[backend_index].command_state ||
         !validate_batch_shape(requested) ||
-        !batch_matches_declaration(requested, declaration)) {
+        !batch_matches_declaration(requested, declaration) ||
+        ((rate_identity == nullptr) != (rate_ticket == nullptr)) ||
+        (rate_identity &&
+         (rate_identity->reference_index ==
+              std::numeric_limits<std::size_t>::max() ||
+          !rate_identity->domain.valid() || !rate_identity->phase.valid() ||
+          rate_identity->phase.index() != phase_index))) {
         return Status::invalid_argument;
     }
     const auto& capabilities =
@@ -1257,6 +1303,12 @@ Status DeviceManager::submit_batch(
     slot->deadline_ns = monotonic_now_ns() + requested.timeout_ns;
     slot->early_completion = {};
     slot->early_completion_valid = false;
+    slot->cancellation_requested.store(false, std::memory_order_relaxed);
+    slot->rate_owned = rate_identity != nullptr;
+    slot->terminal_status = Status::ok;
+    slot->rate_identity = rate_identity
+        ? *rate_identity
+        : DeviceRateReleaseIdentity{};
     slot->graph_released.store(false, std::memory_order_relaxed);
     for (std::size_t index = 0; index < requested.signal_count; ++index) {
         const auto handle = DeviceTimelineHandle{
@@ -1269,6 +1321,12 @@ Status DeviceManager::submit_batch(
     release_admission();
     submissions_.fetch_add(1, std::memory_order_relaxed);
     out_batch_id = batch_id;
+    if (rate_ticket) {
+        rate_ticket->slot_index = static_cast<std::size_t>(
+            slot - batch_slots_.get());
+        rate_ticket->batch_id = batch_id;
+        rate_ticket->identity = *rate_identity;
+    }
     auto event = DeviceEvent{DeviceEventKind::submitted, Status::ok,
                              backend_index, phase_index, frame_index, batch_id,
                              0};
@@ -1482,6 +1540,13 @@ void DeviceManager::finish_batch_slot(
     emit(DeviceEvent{DeviceEventKind::completed, status, slot.backend_index,
                      slot.phase_index, slot.frame_index, slot.batch.batch_id,
                      0});
+    if (slot.rate_owned) {
+        slot.graph_released.store(true, std::memory_order_release);
+        slot.terminal_status = status;
+        slot.state.store(kBatchRateTerminal, std::memory_order_release);
+        slot.state.notify_all();
+        return;
+    }
     if (!slot.graph_released.exchange(true, std::memory_order_acq_rel) &&
         executor_) {
         (void)executor_->complete_external(slot.phase_index, status);
@@ -1493,6 +1558,89 @@ void DeviceManager::finish_batch_slot(
         batch_backends_[backend_index].wake_sequence.fetch_add(
             1, std::memory_order_release);
         batch_backends_[backend_index].wake_sequence.notify_all();
+    }
+}
+
+void DeviceManager::finish_rate_quarantine(
+    BatchSlot& slot,
+    Status status) noexcept {
+    completions_.fetch_add(1, std::memory_order_relaxed);
+    if (status != Status::ok) {
+        record_failure(status);
+    }
+    emit(DeviceEvent{DeviceEventKind::completed, status, slot.backend_index,
+                     slot.phase_index, slot.frame_index, slot.batch.batch_id,
+                     0});
+    slot.graph_released.store(true, std::memory_order_release);
+    slot.terminal_status = status;
+    slot.state.store(kBatchRateQuarantined, std::memory_order_release);
+    slot.state.notify_all();
+}
+
+Status DeviceManager::wait_rate_batch(
+    const DeviceRateTicket& ticket) noexcept {
+    if (!ticket.valid() || ticket.slot_index >= batch_slot_count_) {
+        return Status::invalid_argument;
+    }
+    auto& slot = batch_slots_[ticket.slot_index];
+    const auto identity_matches = [&] {
+        return slot.rate_owned && slot.batch.batch_id == ticket.batch_id &&
+               slot.rate_identity.reference_index ==
+                   ticket.identity.reference_index &&
+               slot.rate_identity.domain == ticket.identity.domain &&
+               slot.rate_identity.phase == ticket.identity.phase &&
+               slot.rate_identity.supercycle_cycle ==
+                   ticket.identity.supercycle_cycle &&
+               slot.rate_identity.domain_release_sequence ==
+                   ticket.identity.domain_release_sequence &&
+               slot.rate_identity.substep_ordinal ==
+                   ticket.identity.substep_ordinal &&
+               slot.rate_identity.logical_release_ns ==
+                   ticket.identity.logical_release_ns &&
+               slot.rate_identity.nominal_release_ns ==
+                   ticket.identity.nominal_release_ns &&
+               slot.rate_identity.absolute_deadline_ns ==
+                   ticket.identity.absolute_deadline_ns &&
+               slot.rate_identity.completion_budget_ns ==
+                   ticket.identity.completion_budget_ns;
+    };
+    auto state = slot.state.load(std::memory_order_acquire);
+    if (state == kBatchFree || state == kBatchReserved ||
+        !identity_matches()) {
+        return Status::invalid_handle;
+    }
+    for (;;) {
+        state = slot.state.load(std::memory_order_acquire);
+        if (!identity_matches()) {
+            return Status::invalid_handle;
+        }
+        if (state == kBatchRateTerminal) {
+            auto expected = kBatchRateTerminal;
+            if (!slot.state.compare_exchange_strong(
+                    expected, kBatchOwned, std::memory_order_acq_rel,
+                    std::memory_order_relaxed)) {
+                continue;
+            }
+            const auto result = slot.terminal_status;
+            outstanding_count_.fetch_sub(1, std::memory_order_release);
+            const auto backend_index =
+                static_cast<std::size_t>(slot.backend_index);
+            slot.rate_owned = false;
+            slot.state.store(kBatchFree, std::memory_order_release);
+            if (backend_index < backends_.size()) {
+                batch_backends_[backend_index].wake_sequence.fetch_add(
+                    1, std::memory_order_release);
+                batch_backends_[backend_index].wake_sequence.notify_all();
+            }
+            return result;
+        }
+        if (state == kBatchRateQuarantined) {
+            return slot.terminal_status;
+        }
+        if (state == kBatchFree || state == kBatchReserved) {
+            return Status::invalid_handle;
+        }
+        std::this_thread::yield();
     }
 }
 
@@ -1619,12 +1767,16 @@ void DeviceManager::submission_loop(std::size_t backend_index) noexcept {
         }
         const auto status = hal_v2_status_to_runtime(callback_status);
         if (status != Status::ok) {
-            const auto prior = selected->state.exchange(
-                kBatchOwned, std::memory_order_acq_rel);
-            if (prior == kBatchEarlyReady) {
-                finish_batch_slot(*selected, Status::device_error, false);
-            } else {
+            auto prior = kBatchSubmitting;
+            if (selected->state.compare_exchange_strong(
+                    prior, kBatchOwned, std::memory_order_acq_rel,
+                    std::memory_order_relaxed)) {
                 finish_batch_slot(*selected, status, false);
+            } else if (prior == kBatchEarlyReady &&
+                       selected->state.compare_exchange_strong(
+                           prior, kBatchOwned, std::memory_order_acq_rel,
+                           std::memory_order_relaxed)) {
+                finish_batch_slot(*selected, Status::device_error, false);
             }
             continue;
         }
@@ -1658,6 +1810,11 @@ void DeviceManager::process_batch_completion(
     for (std::size_t offset = 0; offset < control.slot_count; ++offset) {
         auto& slot = batch_slots_[control.slot_offset + offset];
         auto state = slot.state.load(std::memory_order_acquire);
+        if (slot.batch.batch_id == completion.batch_id &&
+            (state == kBatchRateQuarantineOwned ||
+             state == kBatchRateQuarantined)) {
+            return;
+        }
         if (slot.batch.batch_id != completion.batch_id ||
             (state != kBatchSubmitting && state != kBatchSubmitted)) {
             continue;
@@ -1745,7 +1902,9 @@ void DeviceManager::poll_batch_completions(
             auto& slot = batch_slots_[control.slot_offset + offset];
             const auto state = slot.state.load(std::memory_order_acquire);
             if (slot.batch.batch_id == completion.batch_id &&
-                (state == kBatchSubmitting || state == kBatchSubmitted)) {
+                (state == kBatchSubmitting || state == kBatchSubmitted ||
+                 state == kBatchRateQuarantineOwned ||
+                 state == kBatchRateQuarantined)) {
                 matched = &slot;
                 break;
             }
@@ -1908,22 +2067,36 @@ void DeviceManager::service_loop() noexcept {
             auto& control = batch_backends_[backend_index];
             for (std::size_t offset = 0; offset < control.slot_count; ++offset) {
                 auto& slot = batch_slots_[control.slot_offset + offset];
-                if (slot.state.load(std::memory_order_acquire) ==
-                        kBatchSubmitted &&
+                const auto state = slot.state.load(std::memory_order_acquire);
+                if ((state == kBatchSubmitted ||
+                     (state == kBatchSubmitting && slot.rate_owned)) &&
                     monotonic_now_ns() >= slot.deadline_ns) {
-                    try {
-                        (void)backends_[backend_index]
-                            .command_state->extension.cancel(
-                                backends_[backend_index]
-                                    .command_state->extension.instance,
-                                slot.batch.batch_id);
-                    } catch (...) {
-                    }
-                    auto expected = kBatchSubmitted;
-                    if (slot.state.compare_exchange_strong(
-                            expected, kBatchOwned, std::memory_order_acq_rel,
+                    auto expected = state;
+                    const auto target = slot.rate_owned
+                        ? kBatchRateQuarantineOwned
+                        : kBatchOwned;
+                    if (!slot.state.compare_exchange_strong(
+                            expected, target, std::memory_order_acq_rel,
                             std::memory_order_relaxed)) {
-                        finish_batch_slot(slot, Status::device_timeout, false);
+                        continue;
+                    }
+                    if (!slot.cancellation_requested.exchange(
+                            true, std::memory_order_acq_rel)) {
+                        try {
+                            (void)backends_[backend_index]
+                                .command_state->extension.cancel(
+                                    backends_[backend_index]
+                                        .command_state->extension.instance,
+                                    slot.batch.batch_id);
+                        } catch (...) {
+                        }
+                    }
+                    if (slot.rate_owned) {
+                        finish_rate_quarantine(
+                            slot, Status::device_timeout);
+                    } else {
+                        finish_batch_slot(
+                            slot, Status::device_timeout, false);
                     }
                 }
             }

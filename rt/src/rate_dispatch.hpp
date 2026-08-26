@@ -41,6 +41,18 @@ struct CompiledRateDispatchPlan {
     // Lower criticality first, then later registration. Recovery traverses
     // this immutable list in reverse.
     std::vector<std::size_t> optional_shed_order;
+    // Producer-channel slices by phase index avoid a channel-registry scan for
+    // every active reference release.
+    std::vector<std::size_t> producer_channel_offsets;
+    std::vector<std::size_t> producer_channel_indices;
+    // One entry per reference release. Non-device records contain the invalid
+    // sentinel. Device dependency slices contain only admitted device
+    // prerequisites from the same release group, so runtime dispatch never
+    // scans the graph or resource registry.
+    std::vector<std::size_t> device_phase_by_reference;
+    std::vector<std::size_t> device_dependency_offsets;
+    std::vector<std::size_t> device_dependencies;
+    std::size_t maximum_device_records_per_group = 0;
 };
 
 struct RateDispatchDiagnostic {

@@ -90,11 +90,13 @@ borrowed code/instance lifetime. Runtime performs no discovery or unload, and
 the experimental plugin manager is not a compatibility path. M19 and CAP-M19
 remain incomplete. M20-PRE-01 is merged as host-independent candidate
 assurance. M21-01 adds an additive C++ device-rate binding and immutable
-mixed-plan admission surface for HAL-v2 command-batch phases. It copies only
-completion/in-flight policy and payload roles, derives all command/buffer/
-timeline identity from the M17 declaration, and rejects active mixed start
-before callbacks. No stable ABI, schema, support, qualification, or release
-claim changes; M21 and CAP-M21 remain incomplete.
+mixed-plan admission surface for HAL-v2 command-batch phases. M21-02 routes
+only those admitted references through precomputed dependency slices and the
+existing submission/service lanes, permits independent in-flight overlap,
+waits on exact generation-tagged completion tickets, and quarantines vendor-
+owned timeout slots through checked shutdown. It adds no payload or sampled-
+I/O semantics. No stable ABI, schema, support, qualification, or release claim
+changes; M21 and CAP-M21 remain incomplete.
 
 ## Claim policy
 

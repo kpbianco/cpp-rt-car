@@ -28,9 +28,15 @@ device demand is checked independently per phase, backend, Runtime, and poll
 boundary, including previous-cycle carry.
 
 The compiler introduces no execution lane. Reference-only `step()` retains
-ordinary graph behavior, while an active mixed `start()` fails before
-preflight or any provider/backend callback. M21-02 is the first batch allowed
-to route rate releases to existing submission/completion lanes.
+ordinary graph behavior. M21-02 extends the immutable active plan with direct
+device-reference and dependency slices plus preallocated completion tickets.
+An active provider runs once through the existing executor, copies its batch
+and exact release identity into an existing device slot, and releases the
+executor phase after enqueue. Existing per-backend submission and service
+lanes own vendor submit/poll/timeout cancellation. Independent records in one
+release group may overlap; dependency and group barriers consume exact tickets
+before advancing. Vendor-owned timeouts are quarantined from reuse until
+checked backend shutdown.
 
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval

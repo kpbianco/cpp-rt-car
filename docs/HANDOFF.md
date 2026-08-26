@@ -2,26 +2,33 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M21-01 starts from exact target
-baseline `d463c3a6896e54d10814f1d4ed3b05d355550900`, the merged M20-PRE-01
-result. The binding M21-01 contract is `contracts/active-batch.yaml`, sourced
-from control revision `022786c74e853ed9a81c17c145814543d742b4e0`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M21-02 starts from exact target
+baseline `2c7ab323cfe5f00b68a71467889ca1dc5507365a`, the merged M21-01 result.
+The binding M21-02 contract is `contracts/active-batch.yaml`, sourced from
+control revision `cfd4d34cc402e248e00082fcbed6d72d2bfb5382`.
 
-## M21-01 implementation handoff
+## M21-02 implementation handoff
 
-Use `bind_device_phase_to_rate_domain()` only for an already registered
-HAL-v2 command-batch phase. The role span is copied and must exactly match the
-declaration's flattened reference order; it never repeats a buffer handle,
-offset, length, command, or timeline. `replace_device_rate_binding()` supports
-transactional correction after a failed finalization.
+M21-01's admitted model remains the only source of backend, command, buffer,
+timeline, completion-budget, and capacity identity. M21-02 adds immutable
+reference-to-device and dependency slices plus preallocated completion tickets.
+Do not derive execution identity from provider output or rescan configuring
+registries after start.
 
-The compiled device-rate queries expose phase, backend, command skeleton,
-payload slice identity/role, timeline identity, declared completion budget,
-in-flight bounds, cyclic intervals, and backend/phase peaks. Admission bounds
-are declarations, not measurements. Active mixed `start()` is intentionally
-rejected before callbacks until M21-02. Do not add completion payloads,
-sampled I/O, device telemetry, rate-triggered backend calls, or new lanes in
-this batch.
+An active device provider receives `DeviceCallbackContext::rate_release`, runs
+once on the selected executor path, and enqueues a complete copied batch into
+the existing per-backend submission lane. It does not call a vendor entry or
+wait for completion. Independent records in one release group may overlap;
+precomputed device dependencies and the group terminal barrier prevent a
+dependent CPU/device record or successful step from advancing early.
+
+Submitted timeouts are settled once by the existing service lane and retain
+their slot in quarantine through checked backend shutdown. The exact batch and
+release identity prevents a late completion from settling a reused slot.
+Ordinary M17 batches retain executor-token completion behavior. M21-02 adds no
+completion payload, sampled I/O, new telemetry schema, replay encoding, lane,
+or hardware/RT qualification. Continue with M21-03 only after this batch is
+merged and its hosted CI and human ownership review are complete.
 
 ## M20-PRE-01 implementation handoff
 
@@ -98,9 +105,9 @@ and license remain unchanged.
   submission/service lanes or fixed XDMA I/O team.
 - Never infer graph ownership, CUDA pinning/device memory/coherency, a safe FPGA
   register map, interrupt latency, driver cancellation, or direct peer DMA.
-- Keep cross-backend timelines, direct peer paths, device-rate execution,
-  physical combined qualification, support promotion, release, and deployment
-  deferred.
+- Keep cross-backend timelines, direct peer paths, device-rate payloads and
+  sampled I/O, physical combined qualification, support promotion, release,
+  and deployment deferred.
 
 ## M17-06 implementation handoff
 

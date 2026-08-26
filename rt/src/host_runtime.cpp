@@ -2658,6 +2658,24 @@ struct Runtime::Impl {
         std::uint64_t absolute_deadline_ns,
         StepResult::RateSummary& summary,
         std::size_t& failed_phase) noexcept {
+        const auto wait_for_reference = [&](std::size_t reference_index) {
+            auto& ticket = active_device_tickets[reference_index];
+            if (!ticket.valid()) {
+                return Status::ok;
+            }
+            const auto status = devices
+                ? devices->wait_rate_batch(ticket)
+                : Status::invalid_state;
+            ticket = {};
+            if (status != Status::ok) {
+                const auto& failed = compiled_rate_plan.releases[
+                    reference_index];
+                failed_phase = failed.phase.index();
+                record_active_failure(
+                    summary, failed, domain_release_sequence);
+            }
+            return status;
+        };
         for (std::size_t record_offset = 0;
              record_offset < group.reference_count;
              ++record_offset) {
@@ -2665,13 +2683,32 @@ struct Runtime::Impl {
                 group.first_reference_index + record_offset;
             const auto& release =
                 compiled_rate_plan.releases[reference_index];
-            for (std::size_t channel_index = 0;
-                 channel_index < cross_rate_channels.size();
-                 ++channel_index) {
-                if (cross_rate_channels[channel_index].producer !=
-                    release.phase) {
-                    continue;
+            const auto channel_begin = compiled_rate_dispatch_plan
+                .producer_channel_offsets[release.phase.index()];
+            const auto channel_end = compiled_rate_dispatch_plan
+                .producer_channel_offsets[release.phase.index() + 1];
+            const auto dependency_begin =
+                compiled_rate_dispatch_plan
+                    .device_dependency_offsets[reference_index];
+            const auto dependency_end =
+                compiled_rate_dispatch_plan
+                    .device_dependency_offsets[reference_index + 1];
+            for (std::size_t cursor = dependency_begin;
+                 cursor < dependency_end; ++cursor) {
+                const auto dependency = compiled_rate_dispatch_plan
+                    .device_dependencies[cursor];
+                const auto dependency_status =
+                    wait_for_reference(dependency);
+                if (dependency_status != Status::ok) {
+                    active_reference_index =
+                        invalid_reference_release_index;
+                    return dependency_status;
                 }
+            }
+            for (std::size_t channel_cursor = channel_begin;
+                 channel_cursor < channel_end; ++channel_cursor) {
+                const auto channel_index = compiled_rate_dispatch_plan
+                    .producer_channel_indices[channel_cursor];
                 if (active_channel_states[channel_index].next_generation ==
                     0) {
                     active_rate_summary = &summary;
@@ -2707,6 +2744,7 @@ struct Runtime::Impl {
                 &Impl::publish_active_channel,
                 &Impl::copy_active_channel,
             };
+            active_device_ticket = {};
             const auto status = executor->run_selected(
                 release.phase.index(),
                 &Impl::run_phase,
@@ -2721,13 +2759,22 @@ struct Runtime::Impl {
                 active_reference_index = invalid_reference_release_index;
                 return status;
             }
-            for (std::size_t channel_index = 0;
-                 channel_index < cross_rate_channels.size();
-                 ++channel_index) {
-                if (cross_rate_channels[channel_index].producer !=
-                    release.phase) {
-                    continue;
+            if (release.phase_kind == RatePhaseKind::device) {
+                if (!active_device_ticket.valid()) {
+                    failed_phase = release.phase.index();
+                    record_active_failure(
+                        summary, release, domain_release_sequence);
+                    active_reference_index =
+                        invalid_reference_release_index;
+                    return Status::internal_error;
                 }
+                active_device_tickets[reference_index] =
+                    active_device_ticket;
+            }
+            for (std::size_t channel_cursor = channel_begin;
+                 channel_cursor < channel_end; ++channel_cursor) {
+                const auto channel_index = compiled_rate_dispatch_plan
+                    .producer_channel_indices[channel_cursor];
                 if (active_publication_claims[channel_index].load(
                         std::memory_order_acquire) != 2) {
                     failed_phase = release.phase.index();
@@ -2740,13 +2787,10 @@ struct Runtime::Impl {
                     return Status::callback_failed;
                 }
             }
-            for (std::size_t channel_index = 0;
-                 channel_index < cross_rate_channels.size();
-                 ++channel_index) {
-                if (cross_rate_channels[channel_index].producer !=
-                    release.phase) {
-                    continue;
-                }
+            for (std::size_t channel_cursor = channel_begin;
+                 channel_cursor < channel_end; ++channel_cursor) {
+                const auto channel_index = compiled_rate_dispatch_plan
+                    .producer_channel_indices[channel_cursor];
                 auto& channel_state = active_channel_states[channel_index];
                 auto& store = compiled_cross_rate_plan.stores[channel_index];
                 if (!store.can_publish(channel_state.next_generation)) {
@@ -2796,6 +2840,17 @@ struct Runtime::Impl {
                 channel_state.provenance =
                     CrossRateSampleProvenance::produced;
                 channel_state.held = false;
+            }
+        }
+
+        const auto group_end =
+            group.first_reference_index + group.reference_count;
+        for (std::size_t reference_index = group.first_reference_index;
+             reference_index < group_end; ++reference_index) {
+            const auto status = wait_for_reference(reference_index);
+            if (status != Status::ok) {
+                active_reference_index = invalid_reference_release_index;
+                return status;
             }
         }
 
@@ -3500,6 +3555,10 @@ struct Runtime::Impl {
                 self.numerics,
                 task_context,
                 self.degradation_level.load(std::memory_order_acquire),
+                self.active_reference_index !=
+                        invalid_reference_release_index
+                    ? &self.active_rate_view
+                    : nullptr,
             };
             auto submission = make_device_submission();
             try {
@@ -3528,6 +3587,10 @@ struct Runtime::Impl {
                 self.numerics,
                 task_context,
                 self.degradation_level.load(std::memory_order_acquire),
+                self.active_reference_index !=
+                        invalid_reference_release_index
+                    ? &self.active_rate_view
+                    : nullptr,
             };
             DeviceCommandBatch batch;
             try {
@@ -3538,12 +3601,78 @@ struct Runtime::Impl {
             }
             if (result == CallbackResult::ok && self.devices) {
                 std::uint64_t batch_id = 0;
-                status = self.devices->submit_batch(
-                    callback.device_backend_index, index,
-                    task_context.worker_index(),
-                    self.active_frame->frame_index, batch,
-                    callback.batch_declaration, batch_id);
-                pending = status == Status::ok;
+                const auto active_rate = self.active_reference_index !=
+                    invalid_reference_release_index;
+                detail::DeviceRateReleaseIdentity identity;
+                bool dispatch_ready = true;
+                if (active_rate) {
+                    const auto device_phase_index = self
+                        .compiled_rate_dispatch_plan
+                        .device_phase_by_reference[
+                            self.active_reference_index];
+                    if (device_phase_index >=
+                        self.compiled_device_rate_plan.phases.size()) {
+                        status = Status::internal_error;
+                        dispatch_ready = false;
+                    } else {
+                        const auto completion_budget = self
+                            .compiled_device_rate_plan
+                            .phases[device_phase_index]
+                            .completion_budget_ns;
+                        if (completion_budget == 0 ||
+                            completion_budget >
+                                std::numeric_limits<std::uint64_t>::max() -
+                                    self.active_nominal_release_ns) {
+                            status = Status::capacity_exceeded;
+                            dispatch_ready = false;
+                        } else {
+                            const auto budget_deadline =
+                                self.active_nominal_release_ns +
+                                completion_budget;
+                            const auto completion_deadline = std::min(
+                                budget_deadline,
+                                self.active_absolute_deadline_ns);
+                            const auto now = self.clock_now();
+                            if (batch.timeout_ns == 0) {
+                                status = Status::invalid_argument;
+                                dispatch_ready = false;
+                            } else if (now >= completion_deadline) {
+                                status = Status::device_timeout;
+                                dispatch_ready = false;
+                            } else {
+                                batch.timeout_ns = std::min(
+                                    batch.timeout_ns,
+                                    completion_deadline - now);
+                                const auto& release = self
+                                    .compiled_rate_plan.releases[
+                                        self.active_reference_index];
+                                identity = {
+                                    self.active_reference_index,
+                                    release.domain,
+                                    release.phase,
+                                    self.active_supercycle_cycle,
+                                    self.active_rate_view
+                                        .domain_release_sequence,
+                                    release.substep_ordinal,
+                                    self.active_logical_release_ns,
+                                    self.active_nominal_release_ns,
+                                    self.active_absolute_deadline_ns,
+                                    completion_budget,
+                                };
+                            }
+                        }
+                    }
+                }
+                if (dispatch_ready) {
+                    status = self.devices->submit_batch(
+                        callback.device_backend_index, index,
+                        task_context.worker_index(),
+                        self.active_frame->frame_index, batch,
+                        callback.batch_declaration, batch_id,
+                        active_rate ? &identity : nullptr,
+                        active_rate ? &self.active_device_ticket : nullptr);
+                    pending = status == Status::ok && !active_rate;
+                }
             }
         }
 
@@ -3614,6 +3743,8 @@ struct Runtime::Impl {
     std::vector<std::byte> active_staging_payloads;
     std::vector<std::byte> active_checkpoint_state;
     std::unique_ptr<std::atomic<std::uint8_t>[]> active_publication_claims;
+    std::vector<detail::DeviceRateTicket> active_device_tickets;
+    detail::DeviceRateTicket active_device_ticket{};
     std::unique_ptr<ActiveSheddingState> active_shedding_state;
     std::uint64_t active_logical_cursor_ns = 0;
     std::uint64_t active_nominal_epoch_ns = 0;
@@ -6048,6 +6179,7 @@ Status Runtime::finalize() noexcept {
     std::vector<std::byte> active_checkpoint_state;
     std::unique_ptr<std::atomic<std::uint8_t>[]>
         active_publication_claims;
+    std::vector<detail::DeviceRateTicket> active_device_tickets;
     std::unique_ptr<Impl::ActiveSheddingState> active_shedding_state;
     std::unique_ptr<detail::RateTelemetryRing> rate_telemetry;
     std::unique_ptr<detail::RateCounters> rate_counters;
@@ -6058,6 +6190,8 @@ Status Runtime::finalize() noexcept {
             rate_counters = std::make_unique<detail::RateCounters>();
             rate_counters->reset(
                 impl_->rate_execution_policy.host_policy_version);
+            active_device_tickets.resize(
+                compiled_rate_plan.releases.size());
             if (!compiled_rate_dispatch_plan.optional_shed_order.empty()) {
                 active_shedding_state =
                     std::make_unique<Impl::ActiveSheddingState>();
@@ -6305,6 +6439,12 @@ Status Runtime::finalize() noexcept {
         compiled_device_rate_plan.admission_backends.size();
     memory_plan.device_rate_admission_interval_count =
         compiled_device_rate_plan.admission_intervals.size();
+    memory_plan.device_rate_dispatch_record_count =
+        compiled_rate_dispatch_plan.device_phase_by_reference.size();
+    memory_plan.device_rate_dependency_count =
+        compiled_rate_dispatch_plan.device_dependencies.size();
+    memory_plan.device_rate_execution_slot_count =
+        active_device_tickets.size();
     memory_plan.cross_rate_channel_count =
         compiled_cross_rate_plan.channels.size();
     memory_plan.cross_rate_selection_count =
@@ -6639,6 +6779,27 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_rate_plan_array(
         compiled_rate_dispatch_plan.optional_shed_order.capacity(),
         sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.producer_channel_offsets.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.producer_channel_indices.capacity(),
+        sizeof(std::size_t));
+    const auto device_execution_bytes_begin = memory_plan.rate_plan_bytes;
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.device_phase_by_reference.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.device_dependency_offsets.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.device_dependencies.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        active_device_tickets.capacity(),
+        sizeof(detail::DeviceRateTicket));
+    memory_plan.device_rate_execution_bytes =
+        memory_plan.rate_plan_bytes - device_execution_bytes_begin;
     plan_valid = plan_valid && add_rate_plan_array(
         active_channel_states.capacity(),
         sizeof(Impl::ActiveChannelState));
@@ -6996,6 +7157,30 @@ Status Runtime::finalize() noexcept {
             compiled_rate_dispatch_plan.optional_shed_order.capacity(),
             sizeof(std::size_t));
         add_runtime_extent(
+            compiled_rate_dispatch_plan.producer_channel_offsets.data(),
+            compiled_rate_dispatch_plan.producer_channel_offsets.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.producer_channel_indices.data(),
+            compiled_rate_dispatch_plan.producer_channel_indices.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.device_phase_by_reference.data(),
+            compiled_rate_dispatch_plan.device_phase_by_reference.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.device_dependency_offsets.data(),
+            compiled_rate_dispatch_plan.device_dependency_offsets.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.device_dependencies.data(),
+            compiled_rate_dispatch_plan.device_dependencies.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            active_device_tickets.data(),
+            active_device_tickets.capacity(),
+            sizeof(detail::DeviceRateTicket));
+        add_runtime_extent(
             active_channel_states.data(),
             active_channel_states.capacity(),
             sizeof(Impl::ActiveChannelState));
@@ -7110,6 +7295,8 @@ Status Runtime::finalize() noexcept {
     impl_->active_checkpoint_state = std::move(active_checkpoint_state);
     impl_->active_publication_claims =
         std::move(active_publication_claims);
+    impl_->active_device_tickets =
+        std::move(active_device_tickets);
     impl_->active_shedding_state = std::move(active_shedding_state);
     impl_->rate_telemetry = std::move(rate_telemetry);
     impl_->rate_counters = std::move(rate_counters);
@@ -7166,12 +7353,6 @@ Status Runtime::start() noexcept {
     }
     if (impl_->state != RuntimeState::finalized) {
         return impl_->fail(Status::invalid_state, "start requires finalized state");
-    }
-    if (impl_->rate_execution_policy_set &&
-        !impl_->compiled_device_rate_plan.phases.empty()) {
-        return impl_->fail(
-            Status::invalid_state,
-            "active mixed CPU/device execution is deferred until M21-02");
     }
     if (impl_->lane_cleanup_pending) {
         return impl_->fail(

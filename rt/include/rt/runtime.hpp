@@ -535,6 +535,9 @@ struct DeviceCallbackContext {
     const NumericalPolicy& numerics;
     const TaskContext& tasks;
     std::uint32_t degradation_level = 0;
+    // Non-null only for an active admitted device-rate command provider.
+    // Appended for source compatibility with the pre-M21-02 aggregate prefix.
+    const RateReleaseView* rate_release = nullptr;
 };
 
 using DeviceCommandCallback = CallbackResult (*)(
@@ -1188,6 +1191,12 @@ struct MemoryPlan {
     std::size_t device_rate_admission_backend_count = 0;
     std::size_t device_rate_admission_interval_count = 0;
     std::size_t device_rate_plan_bytes = 0;
+    // M21-02 immutable dispatch indexes and preallocated completion tickets
+    // remain inside rate_plan_bytes/runtime_control_bytes.
+    std::size_t device_rate_dispatch_record_count = 0;
+    std::size_t device_rate_dependency_count = 0;
+    std::size_t device_rate_execution_slot_count = 0;
+    std::size_t device_rate_execution_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;

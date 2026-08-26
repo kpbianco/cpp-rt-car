@@ -20,7 +20,11 @@ compiled phase, and substep. Device inspection and admission derive from that
 order and the copied M17 declaration; no second graph, command list, buffer
 list, or timeline list is introduced. Device completion intervals are
 half-open, remove completions before equal-time releases, and include prior-
-cycle carry. Active mixed execution remains rejected until M21-02.
+cycle carry. M21-02 maps each device reference directly to that admitted record
+and precomputes same-group device-prerequisite slices. Independent admitted
+records may remain outstanding together, but a dependent CPU/device record
+consumes the exact prerequisite ticket first and a release group cannot settle
+successfully until every remaining device ticket is terminal.
 Failed admission publishes no partial plan; a fixed-size diagnostic retains the
 status, rejected phase, and first reference index for configuring-time repair.
 

@@ -120,8 +120,9 @@ when a device-rate binding exists. Backend, batch, buffer, and timeline
 identity already come from the copied M17 graph semantics and remain the sole
 source. No-device and CPU-only conditional hash paths are unchanged. A mixed
 metadata change therefore changes graph/replay compatibility without changing
-checkpoint or input-log schema 1. Active mixed replay remains unavailable
-because active mixed start itself is deferred to M21-02.
+checkpoint or input-log schema 1. M21-02 active mixed execution remains D0
+only and does not encode device terminal order, timeout decisions, or payload
+in schema-1 artifacts, so active mixed replay remains unavailable.
 
 M17-01 preserves the exact pre-M17 device identity path for every adapted
 device-ABI-v1 registration. Its backend name and copied backend identifier are

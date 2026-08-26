@@ -161,10 +161,14 @@ ordinary graph but cannot opt into active device-rate admission. This is an
 additive support boundary, not a device-ABI-v1 incompatibility.
 
 Declared device-rate completion budgets are planning inputs, not measured
-latency or backend qualification. M21-01 invokes no submit, poll, cancel, or
-vendor function because of a rate release.
+latency or backend qualification. M21-02 clamps a materialized finite timeout
+to the earlier checked completion-budget or release-deadline remainder, then
+queues the copied batch and exact release identity. Existing backend lanes own
+submit, poll, and timeout cancellation. A vendor-owned timeout becomes one
+terminal quarantined slot; late completion cannot publish timeline progress or
+convert it to success, and checked shutdown is the reuse boundary.
 
-A device phase has two distinct moments:
+A device phase has two distinct moments in ordinary graph execution:
 
 - the command provider is a normal bounded CPU phase and ends when submission
   is accepted or rejected;
@@ -181,6 +185,26 @@ The device service lane uses preallocated outstanding slots and a preallocated
 completion batch. It sleeps on an atomic notification when there is no device
 work and polls only while submissions are outstanding. Backend polling
 frequency and hardware completion bounds remain backend/deployment concerns.
+
+Active rate batches reuse that storage with one finite ownership extension:
+
+| State | Atomic owner and permitted successor |
+| --- | --- |
+| reserved | provider-dispatch owner copies identity/batch, then `queued` |
+| queued | submission lane claims `submitting`; an expired unsent wait claims ordinary terminal timeout |
+| submitting | submission lane publishes `submitted` or existing early-ready state; service timeout may claim `rate-quarantine-owned` |
+| submitted | service completion claims existing owned state; service timeout claims `rate-quarantine-owned` |
+| early/completion ready | existing submission/service handshake claims owned completion |
+| rate terminal | host consumes only the exact slot/batch/release ticket, then `free` |
+| rate-quarantine-owned | service lane records one timeout/cancel outcome, then `rate quarantined` |
+| rate quarantined | never reused during execution; a late exact completion is ignored without timeline publication |
+| free | available only after normal ticket consumption or successful checked backend shutdown |
+
+Every ticket contains slot index, nonzero batch generation, reference index,
+domain, phase, supercycle cycle, domain release sequence, substep,
+logical/nominal release, absolute deadline, and completion budget. Slot reuse
+changes the batch generation, so a duplicate, unknown, stale, malformed,
+wrong-domain, or wrong-signal completion cannot settle a newer release.
 
 ## Status and recovery
 
