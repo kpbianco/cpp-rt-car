@@ -1604,11 +1604,13 @@ Status DeviceManager::wait_rate_batch(
                slot.rate_identity.completion_budget_ns ==
                    ticket.identity.completion_budget_ns;
     };
-    if (!identity_matches()) {
+    auto state = slot.state.load(std::memory_order_acquire);
+    if (state == kBatchFree || state == kBatchReserved ||
+        !identity_matches()) {
         return Status::invalid_handle;
     }
     for (;;) {
-        auto state = slot.state.load(std::memory_order_acquire);
+        state = slot.state.load(std::memory_order_acquire);
         if (!identity_matches()) {
             return Status::invalid_handle;
         }
@@ -2067,7 +2069,7 @@ void DeviceManager::service_loop() noexcept {
                 auto& slot = batch_slots_[control.slot_offset + offset];
                 const auto state = slot.state.load(std::memory_order_acquire);
                 if ((state == kBatchSubmitted ||
-                     (slot.rate_owned && state == kBatchSubmitting)) &&
+                     (state == kBatchSubmitting && slot.rate_owned)) &&
                     monotonic_now_ns() >= slot.deadline_ns) {
                     auto expected = state;
                     const auto target = slot.rate_owned
