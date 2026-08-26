@@ -45,6 +45,10 @@ struct CompiledRateDispatchPlan {
     // every active reference release.
     std::vector<std::size_t> producer_channel_offsets;
     std::vector<std::size_t> producer_channel_indices;
+    // Consumer-channel slices are required for pre-provider CPU-to-device
+    // materialization without a registry scan.
+    std::vector<std::size_t> consumer_channel_offsets;
+    std::vector<std::size_t> consumer_channel_indices;
     // One entry per reference release. Non-device records contain the invalid
     // sentinel. Device dependency slices contain only admitted device
     // prerequisites from the same release group, so runtime dispatch never

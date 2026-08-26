@@ -22,6 +22,40 @@ struct CrossRateChannelSpec {
     CrossRateMode mode = CrossRateMode::sample_and_hold;
     std::uint64_t maximum_age_ns =
         std::numeric_limits<std::uint64_t>::max();
+    CrossRateDeviceEndpointSelector producer_device{};
+    CrossRateDeviceEndpointSelector consumer_device{};
+};
+
+struct CompiledDeviceRatePlan;
+
+struct CrossRateDeviceBufferSource {
+    DeviceBufferHandle buffer{};
+    DeviceBackendHandle backend{};
+    std::span<std::byte> storage{};
+    std::uint64_t bytes = 0;
+    std::uint32_t access = 0;
+    std::uint32_t coherency = 0;
+    std::uint32_t synchronization = 0;
+    std::uint64_t byte_granularity = 1;
+    std::uint64_t offset_granularity = 1;
+};
+
+struct CompiledCrossRateDeviceEndpoint {
+    std::size_t channel_index = 0;
+    bool producer = false;
+    PhaseHandle phase{};
+    DeviceBackendHandle backend{};
+    DeviceBufferHandle buffer{};
+    DeviceRateReferenceKind reference_kind =
+        DeviceRateReferenceKind::dispatch_buffer;
+    std::uint32_t command_index = 0;
+    std::uint32_t command_reference_index = 0;
+    std::uint64_t envelope_offset = 0;
+    std::uint64_t envelope_bytes = 0;
+    std::uint64_t slot_stride_bytes = 0;
+    std::uint32_t slot_count = 0;
+    std::uint64_t timestamp_domain_identity = 0;
+    std::span<std::byte> host_storage{};
 };
 
 enum class SnapshotStoreResult : std::uint8_t {
@@ -118,6 +152,8 @@ struct CompiledCrossRatePlan {
     std::vector<CompiledCrossRateChannel> channels;
     std::vector<CompiledCrossRateSelection> selections;
     std::vector<SnapshotStore> stores;
+    std::vector<CompiledCrossRateDeviceEndpoint> device_endpoints;
+    std::vector<std::size_t> device_endpoint_index_by_channel;
 };
 
 struct CrossRateCompileDiagnostic {
@@ -133,6 +169,8 @@ struct CrossRateCompileDiagnostic {
     std::size_t phase_count,
     const CompiledRatePlan& rate_plan,
     std::span<const CrossRateChannelSpec> channels,
+    const CompiledDeviceRatePlan* device_rate_plan,
+    std::span<const CrossRateDeviceBufferSource> device_buffers,
     CompiledCrossRatePlan& output,
     CrossRateCompileDiagnostic& diagnostic) noexcept;
 

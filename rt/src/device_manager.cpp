@@ -1507,7 +1507,8 @@ void DeviceManager::record_failure(Status status) noexcept {
 void DeviceManager::finish_batch_slot(
     BatchSlot& slot,
     Status status,
-    bool publish_timeline) noexcept {
+    bool publish_timeline,
+    const HalV2BatchCompletion* completion) noexcept {
     if (publish_timeline) {
         for (std::size_t index = 0; index < slot.batch.signal_count; ++index) {
             const auto handle = DeviceTimelineHandle{
@@ -1543,6 +1544,10 @@ void DeviceManager::finish_batch_slot(
     if (slot.rate_owned) {
         slot.graph_released.store(true, std::memory_order_release);
         slot.terminal_status = status;
+        if (status == Status::ok && completion) {
+            slot.early_completion = *completion;
+            slot.early_completion_valid = true;
+        }
         slot.state.store(kBatchRateTerminal, std::memory_order_release);
         slot.state.notify_all();
         return;
@@ -1573,12 +1578,15 @@ void DeviceManager::finish_rate_quarantine(
                      0});
     slot.graph_released.store(true, std::memory_order_release);
     slot.terminal_status = status;
+    slot.early_completion_valid = false;
     slot.state.store(kBatchRateQuarantined, std::memory_order_release);
     slot.state.notify_all();
 }
 
 Status DeviceManager::wait_rate_batch(
-    const DeviceRateTicket& ticket) noexcept {
+    const DeviceRateTicket& ticket,
+    DeviceRateCompletion& completion) noexcept {
+    completion = {};
     if (!ticket.valid() || ticket.slot_index >= batch_slot_count_) {
         return Status::invalid_argument;
     }
@@ -1622,19 +1630,19 @@ Status DeviceManager::wait_rate_batch(
                 continue;
             }
             const auto result = slot.terminal_status;
-            outstanding_count_.fetch_sub(1, std::memory_order_release);
-            const auto backend_index =
-                static_cast<std::size_t>(slot.backend_index);
-            slot.rate_owned = false;
-            slot.state.store(kBatchFree, std::memory_order_release);
-            if (backend_index < backends_.size()) {
-                batch_backends_[backend_index].wake_sequence.fetch_add(
-                    1, std::memory_order_release);
-                batch_backends_[backend_index].wake_sequence.notify_all();
-            }
+            completion.status = result;
+            completion.timestamp_domain_identity =
+                slot.early_completion_valid
+                ? slot.early_completion.timestamp_domain_identity
+                : 0;
+            completion.timestamp = slot.early_completion_valid
+                ? slot.early_completion.device_timestamp
+                : 0;
+            completion.terminal_slot_owned = true;
             return result;
         }
         if (state == kBatchRateQuarantined) {
+            completion.status = slot.terminal_status;
             return slot.terminal_status;
         }
         if (state == kBatchFree || state == kBatchReserved) {
@@ -1642,6 +1650,37 @@ Status DeviceManager::wait_rate_batch(
         }
         std::this_thread::yield();
     }
+}
+
+Status DeviceManager::release_rate_batch(
+    const DeviceRateTicket& ticket) noexcept {
+    if (!ticket.valid() || ticket.slot_index >= batch_slot_count_) {
+        return Status::invalid_argument;
+    }
+    auto& slot = batch_slots_[ticket.slot_index];
+    if (slot.state.load(std::memory_order_acquire) != kBatchOwned ||
+        !slot.rate_owned || slot.batch.batch_id != ticket.batch_id ||
+        slot.rate_identity.reference_index != ticket.identity.reference_index ||
+        slot.rate_identity.domain != ticket.identity.domain ||
+        slot.rate_identity.phase != ticket.identity.phase ||
+        slot.rate_identity.supercycle_cycle !=
+            ticket.identity.supercycle_cycle ||
+        slot.rate_identity.domain_release_sequence !=
+            ticket.identity.domain_release_sequence ||
+        slot.rate_identity.substep_ordinal != ticket.identity.substep_ordinal) {
+        return Status::invalid_handle;
+    }
+    outstanding_count_.fetch_sub(1, std::memory_order_release);
+    const auto backend_index = static_cast<std::size_t>(slot.backend_index);
+    slot.rate_owned = false;
+    slot.early_completion_valid = false;
+    slot.state.store(kBatchFree, std::memory_order_release);
+    if (backend_index < backends_.size()) {
+        batch_backends_[backend_index].wake_sequence.fetch_add(
+            1, std::memory_order_release);
+        batch_backends_[backend_index].wake_sequence.notify_all();
+    }
+    return Status::ok;
 }
 
 void DeviceManager::fail_backend_batches(
@@ -1696,7 +1735,10 @@ void DeviceManager::fail_backend_batches(
                     slot,
                     hal_v2_status_to_runtime(static_cast<HalV2Status>(
                         slot.early_completion.status)),
-                    slot.early_completion_valid);
+                    slot.early_completion_valid,
+                    slot.early_completion_valid
+                        ? &slot.early_completion
+                        : nullptr);
             }
         }
     }
@@ -1839,7 +1881,8 @@ void DeviceManager::process_batch_completion(
                     slot,
                     hal_v2_status_to_runtime(
                         static_cast<HalV2Status>(completion.status)),
-                    true);
+                    true,
+                    &completion);
             }
         }
         return;
@@ -1972,7 +2015,10 @@ void DeviceManager::service_loop() noexcept {
                         slot,
                         hal_v2_status_to_runtime(static_cast<HalV2Status>(
                             slot.early_completion.status)),
-                        slot.early_completion_valid);
+                        slot.early_completion_valid,
+                        slot.early_completion_valid
+                            ? &slot.early_completion
+                            : nullptr);
                 }
             }
             std::fill_n(

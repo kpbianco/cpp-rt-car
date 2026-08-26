@@ -450,6 +450,12 @@ struct CrossRateReadResult {
     std::uint64_t generation = 0;
     std::uint64_t age_ns = 0;
     bool held = false;
+    // M21-03 producer identity. Initial samples leave these fields zeroed.
+    std::uint64_t producer_release_sequence = 0;
+    std::uint32_t producer_substep_ordinal = 0;
+    Status producer_completion_status = Status::ok;
+    std::uint64_t producer_timestamp_domain_identity = 0;
+    std::uint64_t producer_timestamp = 0;
 };
 
 class RateReleaseView {
@@ -1043,6 +1049,10 @@ inline constexpr std::uint64_t invalid_cross_rate_sequence =
     std::numeric_limits<std::uint64_t>::max();
 inline constexpr std::uint32_t invalid_cross_rate_substep =
     std::numeric_limits<std::uint32_t>::max();
+inline constexpr std::size_t invalid_device_rate_payload_reference_ordinal =
+    std::numeric_limits<std::size_t>::max();
+inline constexpr std::uint64_t
+    cross_rate_runtime_logical_timestamp_domain_identity = 1;
 
 enum class CrossRateMode : std::uint8_t {
     sample_and_hold,
@@ -1053,9 +1063,24 @@ enum class CrossRateSelectionHorizon : std::uint8_t {
     repeating_supercycle,
 };
 
-// M16-02 channels are copied while configuring. Initial bytes must exactly
-// match payload_size. Device endpoints remain unsupported until a completion-
-// payload contract exists beyond device ABI v1.
+struct CrossRateDeviceEndpointSelector {
+    // Phase-local ordinal in the ordered M21-01 payload-reference slice.
+    std::size_t payload_reference_ordinal =
+        invalid_device_rate_payload_reference_ordinal;
+    // Positive only for a device endpoint. One exact payload-sized subrange
+    // begins at envelope.offset + execution_slot * slot_stride_bytes.
+    std::uint64_t slot_stride_bytes = 0;
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return payload_reference_ordinal !=
+                   invalid_device_rate_payload_reference_ordinal &&
+               slot_stride_bytes != 0;
+    }
+};
+
+// Channels are copied while configuring. Initial bytes must exactly match
+// payload_size. CPU endpoints retain invalid/default selectors; each device
+// endpoint names one copied M21-01 payload-reference envelope explicitly.
 struct CrossRateChannelRegistration {
     std::string_view name{};
     PhaseHandle producer{};
@@ -1067,6 +1092,8 @@ struct CrossRateChannelRegistration {
     // unbounded; all other values are inclusive integral-nanosecond limits.
     std::uint64_t maximum_age_ns =
         std::numeric_limits<std::uint64_t>::max();
+    CrossRateDeviceEndpointSelector producer_device{};
+    CrossRateDeviceEndpointSelector consumer_device{};
 };
 
 struct CompiledCrossRateChannel {
@@ -1087,6 +1114,18 @@ struct CompiledCrossRateChannel {
     std::size_t selection_count = 0;
     std::size_t snapshot_slot_count = 0;
     std::size_t snapshot_bytes = 0;
+    CrossRateDeviceEndpointSelector producer_device{};
+    CrossRateDeviceEndpointSelector consumer_device{};
+    DeviceBackendHandle producer_device_backend{};
+    DeviceBackendHandle consumer_device_backend{};
+    DeviceBufferHandle producer_device_buffer{};
+    DeviceBufferHandle consumer_device_buffer{};
+    std::uint64_t producer_device_base_offset = 0;
+    std::uint64_t consumer_device_base_offset = 0;
+    std::uint32_t producer_device_slot_count = 0;
+    std::uint32_t consumer_device_slot_count = 0;
+    std::uint64_t producer_timestamp_domain_identity =
+        cross_rate_runtime_logical_timestamp_domain_identity;
 };
 
 // Two records are emitted for each consumer reference release: one for the
@@ -1171,6 +1210,10 @@ struct MemoryPlan {
     std::size_t cross_rate_initial_sample_bytes = 0;
     std::size_t cross_rate_snapshot_slot_count = 0;
     std::size_t cross_rate_snapshot_bytes = 0;
+    // M21-03 endpoint metadata is Runtime-owned; registered device-buffer
+    // payload bytes remain borrowed and are excluded from planned_bytes.
+    std::size_t cross_rate_device_endpoint_count = 0;
+    std::size_t cross_rate_device_staging_bytes = 0;
     // Active dispatcher/control/canonical checkpoint bytes remain a
     // subcomponent of rate_plan_bytes and runtime_control_bytes.
     std::size_t rate_dispatch_state_bytes = 0;

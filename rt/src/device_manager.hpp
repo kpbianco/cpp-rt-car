@@ -113,6 +113,13 @@ struct DeviceRateTicket {
     }
 };
 
+struct DeviceRateCompletion {
+    Status status = Status::invalid_state;
+    std::uint64_t timestamp_domain_identity = 0;
+    std::uint64_t timestamp = 0;
+    bool terminal_slot_owned = false;
+};
+
 class DeviceManager final {
 public:
     DeviceManager(
@@ -164,6 +171,9 @@ public:
         const DeviceRateReleaseIdentity* rate_identity = nullptr,
         DeviceRateTicket* rate_ticket = nullptr) noexcept;
     [[nodiscard]] Status wait_rate_batch(
+        const DeviceRateTicket& ticket,
+        DeviceRateCompletion& completion) noexcept;
+    [[nodiscard]] Status release_rate_batch(
         const DeviceRateTicket& ticket) noexcept;
     [[nodiscard]] Status request_batch_stop() noexcept;
     [[nodiscard]] Status health(
@@ -291,7 +301,8 @@ private:
     void finish_batch_slot(
         BatchSlot& slot,
         Status status,
-        bool publish_timeline) noexcept;
+        bool publish_timeline,
+        const HalV2BatchCompletion* completion = nullptr) noexcept;
     void finish_rate_quarantine(
         BatchSlot& slot,
         Status status) noexcept;

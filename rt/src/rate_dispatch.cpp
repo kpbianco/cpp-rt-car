@@ -964,22 +964,56 @@ Status compile_rate_dispatch(
             std::numeric_limits<std::size_t>::max());
         candidate.producer_channel_offsets.assign(
             rate_plan.bindings.size() + 1, 0);
+        const auto has_device_consumer = std::any_of(
+            channels.begin(), channels.end(),
+            [](const CrossRateChannelSpec& channel) {
+                return channel.consumer_device.valid();
+            });
+        if (has_device_consumer) {
+            candidate.consumer_channel_offsets.assign(
+                rate_plan.bindings.size() + 1, 0);
+        }
         for (const auto& channel : channels) {
             ++candidate.producer_channel_offsets[
                 channel.producer.index() + 1];
+            if (has_device_consumer && channel.consumer_device.valid()) {
+                ++candidate.consumer_channel_offsets[
+                    channel.consumer.index() + 1];
+            }
         }
         for (std::size_t index = 1;
              index < candidate.producer_channel_offsets.size(); ++index) {
             candidate.producer_channel_offsets[index] +=
                 candidate.producer_channel_offsets[index - 1];
+            if (has_device_consumer) {
+                candidate.consumer_channel_offsets[index] +=
+                    candidate.consumer_channel_offsets[index - 1];
+            }
         }
         candidate.producer_channel_indices.resize(channels.size());
+        if (has_device_consumer) {
+            candidate.consumer_channel_indices.resize(
+                static_cast<std::size_t>(std::count_if(
+                    channels.begin(), channels.end(),
+                    [](const CrossRateChannelSpec& channel) {
+                        return channel.consumer_device.valid();
+                    })));
+        }
         auto next_producer_channel = candidate.producer_channel_offsets;
+        auto next_consumer_channel = candidate.consumer_channel_offsets;
         for (std::size_t channel_index = 0;
              channel_index < channels.size(); ++channel_index) {
             const auto phase_index = channels[channel_index].producer.index();
             candidate.producer_channel_indices[
                 next_producer_channel[phase_index]++] = channel_index;
+            if (has_device_consumer &&
+                channels[channel_index].consumer_device.valid()) {
+                const auto consumer_phase_index =
+                    channels[channel_index].consumer.index();
+                candidate.consumer_channel_indices[
+                    next_consumer_channel[consumer_phase_index]++] =
+                        channel_index;
+            }
         }
         for (std::size_t index = 0; index < rate_plan.domains.size(); ++index) {
             if (rate_plan.domains[index].optional) {

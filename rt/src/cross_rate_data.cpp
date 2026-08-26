@@ -1,4 +1,5 @@
 #include "cross_rate_data.hpp"
+#include "rate_dispatch.hpp"
 
 #include <algorithm>
 #include <array>
@@ -46,6 +47,29 @@ bool checked_multiply(
     std::size_t& output) noexcept {
     if (left != 0 &&
         right > std::numeric_limits<std::size_t>::max() / left) {
+        return false;
+    }
+    output = left * right;
+    return true;
+}
+
+bool checked_add_u64(
+    std::uint64_t left,
+    std::uint64_t right,
+    std::uint64_t& output) noexcept {
+    if (left > std::numeric_limits<std::uint64_t>::max() - right) {
+        return false;
+    }
+    output = left + right;
+    return true;
+}
+
+bool checked_multiply_u64(
+    std::uint64_t left,
+    std::uint64_t right,
+    std::uint64_t& output) noexcept {
+    if (left != 0 &&
+        right > std::numeric_limits<std::uint64_t>::max() / left) {
         return false;
     }
     output = left * right;
@@ -291,6 +315,8 @@ Status compile_cross_rate_data(
     std::size_t phase_count,
     const CompiledRatePlan& rate_plan,
     std::span<const CrossRateChannelSpec> channels,
+    const CompiledDeviceRatePlan* device_rate_plan,
+    std::span<const CrossRateDeviceBufferSource> device_buffers,
     CompiledCrossRatePlan& output,
     CrossRateCompileDiagnostic& diagnostic) noexcept {
     diagnostic = {};
@@ -313,6 +339,106 @@ Status compile_cross_rate_data(
     }
 
     try {
+        const auto compile_device_endpoint = [&](const CrossRateChannelSpec& channel,
+                                                 bool producer,
+                                                 CompiledCrossRateDeviceEndpoint& endpoint)
+            -> Status {
+            const auto phase = producer ? channel.producer : channel.consumer;
+            const auto& selector = producer
+                ? channel.producer_device
+                : channel.consumer_device;
+            if (!device_rate_plan || !selector.valid()) {
+                return Status::invalid_config;
+            }
+            const auto phase_record = std::find_if(
+                device_rate_plan->phases.begin(),
+                device_rate_plan->phases.end(),
+                [&](const CompiledDeviceRatePhase& candidate) {
+                    return candidate.phase == phase;
+                });
+            if (phase_record == device_rate_plan->phases.end() ||
+                selector.payload_reference_ordinal >=
+                    phase_record->payload_reference_count ||
+                phase_record->maximum_in_flight == 0) {
+                return Status::invalid_config;
+            }
+            const auto reference_index =
+                phase_record->first_payload_reference_index +
+                selector.payload_reference_ordinal;
+            if (reference_index >= device_rate_plan->payload_references.size()) {
+                return Status::invalid_config;
+            }
+            const auto& reference =
+                device_rate_plan->payload_references[reference_index];
+            const auto role_ok = producer
+                ? reference.role == DeviceRatePayloadRole::output ||
+                      reference.role == DeviceRatePayloadRole::input_output
+                : reference.role == DeviceRatePayloadRole::input ||
+                      reference.role == DeviceRatePayloadRole::input_output;
+            const auto access_ok = producer
+                ? reference.access == RTFW_DEVICE_ACCESS_WRITE ||
+                      reference.access == RTFW_DEVICE_ACCESS_READ_WRITE
+                : reference.access == RTFW_DEVICE_ACCESS_READ ||
+                      reference.access == RTFW_DEVICE_ACCESS_READ_WRITE;
+            const auto buffer = std::find_if(
+                device_buffers.begin(),
+                device_buffers.end(),
+                [&](const CrossRateDeviceBufferSource& candidate) {
+                    return candidate.buffer == reference.buffer &&
+                           candidate.backend == reference.backend;
+                });
+            const auto host_access = producer
+                ? RTFW_DEVICE_BUFFER_HOST_READ
+                : RTFW_DEVICE_BUFFER_HOST_WRITE;
+            if (!role_ok || !access_ok || buffer == device_buffers.end() ||
+                buffer->storage.empty() ||
+                (buffer->access & host_access) == 0 ||
+                buffer->coherency != static_cast<std::uint32_t>(
+                    HalV2MemoryCoherency::host_coherent) ||
+                buffer->byte_granularity == 0 ||
+                buffer->offset_granularity == 0 ||
+                channel.payload_size % buffer->byte_granularity != 0 ||
+                selector.slot_stride_bytes < channel.payload_size ||
+                selector.slot_stride_bytes % buffer->offset_granularity != 0 ||
+                reference.offset % buffer->offset_granularity != 0) {
+                return Status::invalid_config;
+            }
+            std::uint64_t slot_delta = 0;
+            std::uint64_t final_offset = 0;
+            std::uint64_t final_end = 0;
+            std::uint64_t envelope_end = 0;
+            if (!checked_multiply_u64(
+                    phase_record->maximum_in_flight - 1u,
+                    selector.slot_stride_bytes,
+                    slot_delta) ||
+                !checked_add_u64(reference.offset, slot_delta, final_offset) ||
+                !checked_add_u64(
+                    final_offset, channel.payload_size, final_end) ||
+                !checked_add_u64(
+                    reference.offset, reference.bytes, envelope_end) ||
+                final_end > envelope_end || final_end > buffer->bytes ||
+                final_end > buffer->storage.size()) {
+                return Status::invalid_config;
+            }
+            endpoint.producer = producer;
+            endpoint.phase = phase;
+            endpoint.backend = reference.backend;
+            endpoint.buffer = reference.buffer;
+            endpoint.reference_kind = reference.kind;
+            endpoint.command_index = reference.command_index;
+            endpoint.command_reference_index =
+                reference.command_reference_index;
+            endpoint.envelope_offset = reference.offset;
+            endpoint.envelope_bytes = reference.bytes;
+            endpoint.slot_stride_bytes = selector.slot_stride_bytes;
+            endpoint.slot_count = phase_record->maximum_in_flight;
+            endpoint.timestamp_domain_identity = producer
+                ? phase_record->completion_timestamp_domain_identity
+                : cross_rate_runtime_logical_timestamp_domain_identity;
+            endpoint.host_storage = buffer->storage;
+            return Status::ok;
+        };
+
         std::vector<std::size_t> binding_by_phase(
             phase_count,
             std::numeric_limits<std::size_t>::max());
@@ -385,12 +511,38 @@ Status compile_cross_rate_data(
                 rate_plan.bindings[producer_binding_index];
             const auto& consumer_binding =
                 rate_plan.bindings[consumer_binding_index];
-            if (producer_binding.phase_kind != RatePhaseKind::cpu ||
-                consumer_binding.phase_kind != RatePhaseKind::cpu) {
+            const auto producer_device =
+                producer_binding.phase_kind == RatePhaseKind::device;
+            const auto consumer_device =
+                consumer_binding.phase_kind == RatePhaseKind::device;
+            const auto producer_selector_partial =
+                channel.producer_device.payload_reference_ordinal !=
+                    invalid_device_rate_payload_reference_ordinal ||
+                channel.producer_device.slot_stride_bytes != 0;
+            const auto consumer_selector_partial =
+                channel.consumer_device.payload_reference_ordinal !=
+                    invalid_device_rate_payload_reference_ordinal ||
+                channel.consumer_device.slot_stride_bytes != 0;
+            if ((producer_device && consumer_device) ||
+                (producer_device != channel.producer_device.valid()) ||
+                (consumer_device != channel.consumer_device.valid()) ||
+                (producer_selector_partial != producer_device) ||
+                (consumer_selector_partial != consumer_device)) {
                 diagnostic = {
                     Status::invalid_config,
-                    "cross-rate device endpoints are unsupported in M16-02"};
+                    "cross-rate device endpoint selector is missing, malformed, or device-to-device"};
                 return diagnostic.status;
+            }
+            if (producer_device || consumer_device) {
+                CompiledCrossRateDeviceEndpoint endpoint;
+                const auto endpoint_status = compile_device_endpoint(
+                    channel, producer_device, endpoint);
+                if (endpoint_status != Status::ok) {
+                    diagnostic = {
+                        endpoint_status,
+                        "cross-rate device endpoint is inaccessible or conflicts with its admitted payload envelope"};
+                    return diagnostic.status;
+                }
             }
             if (producer_binding.domain == consumer_binding.domain) {
                 diagnostic = {
@@ -456,6 +608,16 @@ Status compile_cross_rate_data(
         candidate.channels.reserve(channels.size());
         candidate.selections.reserve(selection_count);
         candidate.stores.reserve(channels.size());
+        candidate.device_endpoints.reserve(channels.size());
+        if (std::any_of(
+                channels.begin(), channels.end(),
+                [](const CrossRateChannelSpec& channel) {
+                    return channel.producer_device.valid() ||
+                           channel.consumer_device.valid();
+                })) {
+            candidate.device_endpoint_index_by_channel.assign(
+                channels.size(), invalid_reference_release_index);
+        }
 
         for (std::size_t channel_index = 0;
              channel_index < channels.size();
@@ -465,6 +627,51 @@ Status compile_cross_rate_data(
                 binding_by_phase[channel.producer.index()]];
             const auto& consumer_binding = rate_plan.bindings[
                 binding_by_phase[channel.consumer.index()]];
+
+            CompiledCrossRateDeviceEndpoint device_endpoint;
+            const bool has_device_endpoint =
+                producer_binding.phase_kind == RatePhaseKind::device ||
+                consumer_binding.phase_kind == RatePhaseKind::device;
+            if (has_device_endpoint) {
+                const auto endpoint_status = compile_device_endpoint(
+                    channel,
+                    producer_binding.phase_kind == RatePhaseKind::device,
+                    device_endpoint);
+                if (endpoint_status != Status::ok) {
+                    diagnostic = {
+                        endpoint_status,
+                        "cross-rate device endpoint compilation failed"};
+                    return diagnostic.status;
+                }
+                device_endpoint.channel_index = channel_index;
+                std::uint64_t endpoint_end = 0;
+                if (!checked_add_u64(
+                        device_endpoint.envelope_offset,
+                        device_endpoint.envelope_bytes,
+                        endpoint_end)) {
+                    diagnostic = {
+                        Status::capacity_exceeded,
+                        "cross-rate device endpoint envelope overflowed"};
+                    return diagnostic.status;
+                }
+                for (const auto& prior : candidate.device_endpoints) {
+                    if (prior.buffer != device_endpoint.buffer) {
+                        continue;
+                    }
+                    std::uint64_t prior_end = 0;
+                    if (!checked_add_u64(
+                            prior.envelope_offset,
+                            prior.envelope_bytes,
+                            prior_end) ||
+                        (device_endpoint.envelope_offset < prior_end &&
+                         prior.envelope_offset < endpoint_end)) {
+                        diagnostic = {
+                            Status::invalid_config,
+                            "cross-rate device endpoint envelopes overlap"};
+                        return diagnostic.status;
+                    }
+                }
+            }
 
             std::vector<std::size_t> producer_releases;
             std::vector<std::size_t> consumer_releases;
@@ -611,6 +818,29 @@ Status compile_cross_rate_data(
             descriptor.first_selection_index = candidate.selections.size();
             descriptor.selection_count = first.size() * 2;
             descriptor.snapshot_slot_count = cross_rate_snapshot_slot_count;
+            descriptor.producer_device = channel.producer_device;
+            descriptor.consumer_device = channel.consumer_device;
+            if (has_device_endpoint) {
+                if (device_endpoint.producer) {
+                    descriptor.producer_device_backend =
+                        device_endpoint.backend;
+                    descriptor.producer_device_buffer = device_endpoint.buffer;
+                    descriptor.producer_device_base_offset =
+                        device_endpoint.envelope_offset;
+                    descriptor.producer_device_slot_count =
+                        device_endpoint.slot_count;
+                    descriptor.producer_timestamp_domain_identity =
+                        device_endpoint.timestamp_domain_identity;
+                } else {
+                    descriptor.consumer_device_backend =
+                        device_endpoint.backend;
+                    descriptor.consumer_device_buffer = device_endpoint.buffer;
+                    descriptor.consumer_device_base_offset =
+                        device_endpoint.envelope_offset;
+                    descriptor.consumer_device_slot_count =
+                        device_endpoint.slot_count;
+                }
+            }
             if (!checked_multiply(
                     channel.payload_size,
                     descriptor.snapshot_slot_count,
@@ -637,6 +867,11 @@ Status compile_cross_rate_data(
                 return diagnostic.status;
             }
             candidate.stores.push_back(std::move(store));
+            if (has_device_endpoint) {
+                candidate.device_endpoint_index_by_channel[channel_index] =
+                    candidate.device_endpoints.size();
+                candidate.device_endpoints.push_back(device_endpoint);
+            }
         }
 
         output = std::move(candidate);

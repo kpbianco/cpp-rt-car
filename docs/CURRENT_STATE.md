@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-26
-Batch baseline: `2c7ab323cfe5f00b68a71467889ca1dc5507365a`
+Batch baseline: `ff143eede097885c1535ed7b335b709e1cec44bd`
 
 ## Product state
 
@@ -20,8 +20,31 @@ Batch baseline: `2c7ab323cfe5f00b68a71467889ca1dc5507365a`
   and manual qualification records do not exist. M18-01 offline qualification
   schemas and tools remain proposal-only and unpromoted. M19-01 adds extension
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
-  current Linux-host batch. M20-PRE-01 and M21-01 are merged. M21-02 is the
-  active approved dispatch/completion-only batch.
+  current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
+  is the active approved CPU/device cross-rate-payload batch.
+
+## M21-03 CPU/device cross-rate payloads
+
+M21-02's admitted dispatch/completion path remains unchanged for channel-free
+plans. M21-03 appends explicit producer/consumer device selectors to the C++
+cross-rate registration. Each selector names one ordered copied M21-01 payload
+reference and a positive slot stride. Finalization accepts CPU→device or
+device→CPU only, proves host-coherent access and role/direction agreement, and
+derives one disjoint exact payload subrange for every admitted in-flight slot.
+
+Before a device consumer provider runs, Runtime selects and copies the exact
+CPU-produced generation into its derived input subrange. The provider must
+still match the complete frozen declaration; only Runtime then substitutes the
+selected offset/byte count in its owned materialization. Device output remains
+unpublished until M21-02 correlates terminal success. Runtime retains terminal
+slot ownership, copies the exact output subrange into the SPSC store, records
+release/completion timestamp metadata, publishes one generation, and only then
+releases dependent work and recycles the device slot.
+
+This is portable RT0 fake-driver payload evidence. It adds no sampled-clock,
+trigger, calibration, safe-output, overrun/underrun, replay, physical CUDA/
+XDMA/DAC/DAQ, HIL, RT1, or RT2 claim. M21-04, M21-05, and CAP-M21 remain
+incomplete.
 
 ## M21-02 device-rate dispatch and completion
 
@@ -50,10 +73,9 @@ cannot become success when a late completion arrives. Checked backend shutdown
 is the reclamation boundary. Existing device metrics/traces and active-rate
 failure/action accounting are reused without schema changes.
 
-This is portable RT0 fake-driver dispatch/completion evidence only. M21-02 adds
-no payload publication, sampled I/O, replay encoding, device shedding model,
-lane/thread, physical CUDA/XDMA/DAC/DAQ behavior, HIL, RT1, or RT2 claim.
-M21-03 through M21-05 and CAP-M21 remain incomplete.
+This remains the merged portable RT0 dispatch/completion foundation. Its
+channel-free behavior, schemas, lane count, and qualification boundary are
+unchanged by M21-03.
 
 ## M20-PRE-01 portable assurance
 

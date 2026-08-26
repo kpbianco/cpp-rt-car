@@ -94,8 +94,11 @@ mixed-plan admission surface for HAL-v2 command-batch phases. M21-02 routes
 only those admitted references through precomputed dependency slices and the
 existing submission/service lanes, permits independent in-flight overlap,
 waits on exact generation-tagged completion tickets, and quarantines vendor-
-owned timeout slots through checked shutdown. It adds no payload or sampled-
-I/O semantics. No stable ABI, schema, support, qualification, or release claim
+owned timeout slots through checked shutdown. M21-03 adds explicit C++
+CPU/device cross-rate endpoint selectors, host-coherent execution-slot
+subranges, pre-provider CPU input copies, and terminal-success-only device
+output publication. It adds no sampled-I/O, replay, physical-device, or HIL
+semantics. No stable ABI, schema, support, qualification, or release claim
 changes; M21 and CAP-M21 remain incomplete.
 
 ## Claim policy

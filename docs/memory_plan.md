@@ -261,6 +261,14 @@ control extent. The six-row equation and provider regions remain unchanged;
 active provider, dispatch, completion, timeout, quarantine, and ticket reuse
 perform no ordinary allocation.
 
+M21-03 counts compiled device-endpoint descriptors, channel-to-endpoint
+indexes, consumer slices, and the enlarged fixed channel/ticket state exactly
+once in `rate_plan_bytes` and `runtime_control_bytes`. The
+`cross_rate_device_endpoint_count` and `cross_rate_device_staging_bytes` fields
+reconcile endpoint metadata and the existing Runtime-owned staging subset.
+Pre-registered device-buffer envelope bytes are borrowed and are never added
+to `planned_bytes`.
+
 M16-03 active state is allocated only during finalization. Admission records,
 domain-release groups, channel aliases/generations, staged and committed
 payload bytes, publication claims, and the canonical checkpoint-state buffer
