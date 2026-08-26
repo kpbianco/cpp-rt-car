@@ -136,7 +136,7 @@
     ".gitattributes": "d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c",
     ".github/workflows/autotune-mapping.yml": "c40fe556317878319816edd1716d189b90a86e1a11ac8d46250fa46664bbbe4f",
     ".github/workflows/autotune-smoke.yml": "aba2383c10d5df50c042b46ff46550dc70433a035044ad28caadc712b67a2b8f",
-    ".github/workflows/ci.yml": "05e709e8757fc7e37856a83f11298acac74aee0bf64332672dfc8fa08cf78046",
+    ".github/workflows/ci.yml": "eb9f0b82a25edd4e2deb56dc564fb17f60a144205903e8567e1d981e327b213a",
     ".github/workflows/cuda-qualification.yml": "94a9ccca5a494281be903fa9043574a39e68110d11affa3630b0c4a95fd911b7",
     ".github/workflows/docs-contract.yml": "64607fa0435f54e0def564d48ab9e3e5d3f255f2e5b06b2ea51fd8626101e623",
     ".github/workflows/release.yml": "d87521c601fbccbc29ccddace0487d15b6d45a223df62c45f31913f683e6d407",

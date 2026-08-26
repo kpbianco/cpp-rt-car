@@ -442,6 +442,16 @@ jobs:
           --output release-artifacts/rtfw-release-manifest.json
           --version-file VERSION.txt
           --source-commit "${{ github.sha }}"
+      - name: Normalize Windows manifest encoding
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $path = "release-artifacts/rtfw-release-manifest.json"
+          $text = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
+          [IO.File]::WriteAllText(
+            $path,
+            $text,
+            [Text.UTF8Encoding]::new($false))
       - name: Verify release manifest
         run: >
           python tools/release_manifest.py verify
