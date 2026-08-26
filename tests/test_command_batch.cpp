@@ -97,6 +97,7 @@ struct BatchBackend {
     throwing,
     blocked,
     malformed_completion,
+    manual_completion,
   };
 
   BatchBackend() {
@@ -181,6 +182,10 @@ struct BatchBackend {
   std::atomic<std::size_t> memory_registration_calls{0};
   rt::DeviceCommandBatch last_batch{};
   rt::HalV2BatchCompletion pending_completion{};
+  std::array<rt::HalV2BatchCompletion, 2> manual_completions{};
+  std::atomic<std::size_t> manual_submitted{0};
+  std::atomic<std::size_t> manual_release_count{0};
+  std::size_t manual_polled = 0;
 
   static BatchBackend *self(void *instance) {
     return static_cast<BatchBackend *>(instance);
@@ -354,6 +359,25 @@ struct BatchBackend {
     if (behavior == SubmitMode::no_completion) {
       return rt::HalV2Status::ok;
     }
+    if (behavior == SubmitMode::manual_completion) {
+      const auto index = backend.manual_submitted.load(
+          std::memory_order_relaxed);
+      if (index >= backend.manual_completions.size()) {
+        return rt::HalV2Status::queue_full;
+      }
+      auto &completion = backend.manual_completions[index];
+      completion = {};
+      completion.batch_id = batch->batch_id;
+      completion.signal_count = batch->signal_count;
+      completion.device_timestamp = 77 + index;
+      completion.timestamp_domain_identity = 201;
+      for (std::size_t signal = 0; signal < batch->signal_count; ++signal) {
+        completion.signals[signal] = batch->signals[signal];
+      }
+      backend.manual_submitted.fetch_add(1, std::memory_order_release);
+      backend.manual_submitted.notify_all();
+      return rt::HalV2Status::ok;
+    }
     backend.pending_completion = {};
     backend.pending_completion.batch_id = batch->batch_id;
     backend.pending_completion.signal_count = batch->signal_count;
@@ -378,6 +402,17 @@ struct BatchBackend {
     }
     auto &backend = *self(instance);
     backend.batch_poll_calls.fetch_add(1);
+    if (backend.mode.load() == SubmitMode::manual_completion) {
+      const auto released = backend.manual_release_count.load(
+          std::memory_order_acquire);
+      if (capacity != 0 && backend.manual_polled < released) {
+        completions[0] = backend.manual_completions[backend.manual_polled++];
+        *count = 1;
+      } else {
+        *count = 0;
+      }
+      return rt::HalV2Status::ok;
+    }
     if (capacity != 0 &&
         backend.completion_ready.exchange(0, std::memory_order_acq_rel) != 0) {
       completions[0] = backend.pending_completion;
@@ -443,6 +478,21 @@ rt::DeviceCommandBatch dispatch_declaration(rt::DeviceBufferHandle buffer,
   return declaration;
 }
 
+struct DeviceRateContextSnapshot {
+  rt::RateDomainHandle domain{};
+  rt::PhaseHandle phase{};
+  std::uint64_t supercycle_cycle = 0;
+  std::uint64_t domain_release_sequence = 0;
+  std::uint32_t substep_ordinal = 0;
+  std::uint64_t logical_release_ns = 0;
+  std::uint64_t nominal_release_ns = 0;
+  std::uint64_t absolute_deadline_ns = 0;
+  std::uint64_t declared_budget_ns = 0;
+  rt::RateLateAction late_action = rt::RateLateAction::fail;
+  std::uint32_t degradation_level = 0;
+  bool seen = false;
+};
+
 struct BatchProvider {
   rt::DeviceCommandBatch declaration{};
   std::uint64_t wait_value = 0;
@@ -450,15 +500,38 @@ struct BatchProvider {
   std::uint64_t timeout_ns = 100'000'000;
   bool malformed_timeout = false;
   std::atomic<std::size_t> *callback_count = nullptr;
+  std::atomic<bool> *rate_context_seen = nullptr;
+  DeviceRateContextSnapshot *rate_context = nullptr;
 };
 
 rt::CallbackResult provide_batch(void *user_data,
-                                 const rt::DeviceCallbackContext &,
+                                 const rt::DeviceCallbackContext &context,
                                  rt::DeviceCommandBatch &batch) {
   auto &provider = *static_cast<BatchProvider *>(user_data);
   if (provider.callback_count) {
     provider.callback_count->fetch_add(1, std::memory_order_release);
     provider.callback_count->notify_all();
+  }
+  if (provider.rate_context_seen) {
+    provider.rate_context_seen->store(
+        context.rate_release != nullptr, std::memory_order_release);
+  }
+  if (provider.rate_context && context.rate_release) {
+    const auto &release = *context.rate_release;
+    *provider.rate_context = {
+        release.domain,
+        release.phase,
+        release.supercycle_cycle,
+        release.domain_release_sequence,
+        release.substep_ordinal,
+        release.logical_release_ns,
+        release.nominal_release_ns,
+        release.absolute_deadline_ns,
+        release.declared_budget_ns,
+        release.late_action,
+        release.degradation_level,
+        true,
+    };
   }
   batch = provider.declaration;
   batch.timeout_ns = provider.malformed_timeout ? 0 : provider.timeout_ns;
@@ -601,6 +674,7 @@ TEST(CommandBatch, PublicConstantsLayoutsDefaultsAndAggregatePrefixAreExact) {
   static_assert(std::is_standard_layout_v<rt::DeviceCommand>);
   static_assert(std::is_standard_layout_v<rt::DeviceCommandBatch>);
   static_assert(std::is_standard_layout_v<rt::HalV2BatchCompletion>);
+  static_assert(std::is_aggregate_v<rt::DeviceCallbackContext>);
 
   const rt::DeviceCommand command;
   const rt::DeviceCommandBatch batch;
@@ -635,7 +709,7 @@ TEST(CommandBatch, PublicConstantsLayoutsDefaultsAndAggregatePrefixAreExact) {
   EXPECT_EQ(old_prefix.command_timeline, nullptr);
 }
 
-TEST(CommandBatch, DeviceRateModelCompilesInspectsAccountsAndRejectsStart) {
+TEST(CommandBatch, DeviceRateModelCompilesInspectsAccountsAndStarts) {
   ConfiguredBatchRuntime fixture;
   fixture.configure();
   ASSERT_EQ(fixture.runtime.set_rate_execution_policy({4}), rt::Status::ok);
@@ -707,14 +781,241 @@ TEST(CommandBatch, DeviceRateModelCompilesInspectsAccountsAndRejectsStart) {
   EXPECT_EQ(memory.device_rate_timeline_reference_count, 1u);
   EXPECT_EQ(memory.device_rate_admission_interval_count, 1u);
   EXPECT_GT(memory.device_rate_plan_bytes, 0u);
+  EXPECT_EQ(memory.device_rate_dispatch_record_count, 1u);
+  EXPECT_EQ(memory.device_rate_dependency_count, 0u);
+  EXPECT_EQ(memory.device_rate_execution_slot_count, 1u);
+  EXPECT_GT(memory.device_rate_execution_bytes, 0u);
 
-  EXPECT_EQ(fixture.runtime.start(), rt::Status::invalid_state);
-  EXPECT_EQ(fixture.runtime.last_error(),
-            "active mixed CPU/device execution is deferred until M21-02");
+  EXPECT_EQ(fixture.runtime.start(), rt::Status::ok);
   EXPECT_EQ(fixture.backend.batch_submit_calls.load(), 0u);
   EXPECT_EQ(fixture.backend.batch_poll_calls.load(), 0u);
   EXPECT_EQ(fixture.backend.single_submit_calls.load(), 0u);
   EXPECT_EQ(fixture.runtime.stop(), rt::Status::ok);
+}
+
+TEST(CommandBatch, ActiveRateDispatchOverlapsIndependentDeviceReleases) {
+  struct ManualClock final : rt::RuntimeClock {
+    std::uint64_t now_ns() noexcept override { return 1'000; }
+    rt::Status sleep_until_ns(std::uint64_t) noexcept override {
+      return rt::Status::ok;
+    }
+  } clock;
+
+  BatchBackend backend;
+  backend.mode.store(BatchBackend::SubmitMode::manual_completion);
+  rt::Runtime runtime(clock);
+  auto config = batch_config();
+  config.callback_capacity = 3;
+  ASSERT_EQ(runtime.configure(config), rt::Status::ok);
+  ASSERT_EQ(runtime.set_rate_execution_policy({3}), rt::Status::ok);
+  rt::DeviceBackendHandle backend_handle;
+  ASSERT_EQ(register_backend(runtime, backend, "rate.concurrent",
+                             backend_handle),
+            rt::Status::ok);
+  std::array<std::byte, 64> storage{};
+  rt::DeviceBufferHandle buffer;
+  ASSERT_EQ(runtime.register_device_buffer(
+                {"rate.concurrent.buffer", backend_handle, storage}, buffer),
+            rt::Status::ok);
+  rt::DeviceTimelineHandle first_timeline;
+  rt::DeviceTimelineHandle second_timeline;
+  ASSERT_EQ(runtime.register_device_timeline(
+                {"rate.concurrent.first", backend_handle, 0},
+                first_timeline),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.register_device_timeline(
+                {"rate.concurrent.second", backend_handle, 0},
+                second_timeline),
+            rt::Status::ok);
+
+  std::atomic<bool> first_context{false};
+  std::atomic<bool> second_context{false};
+  DeviceRateContextSnapshot first_release;
+  DeviceRateContextSnapshot second_release;
+  BatchProvider first;
+  BatchProvider second;
+  first.declaration = dispatch_declaration(buffer, first_timeline);
+  second.declaration = dispatch_declaration(buffer, second_timeline);
+  first.timeout_ns = 500'000'000;
+  second.timeout_ns = 500'000'000;
+  first.rate_context_seen = &first_context;
+  second.rate_context_seen = &second_context;
+  first.rate_context = &first_release;
+  second.rate_context = &second_release;
+  rt::PhaseHandle cpu_phase;
+  rt::PhaseHandle first_phase;
+  rt::PhaseHandle second_phase;
+  std::atomic<bool> cpu_context{false};
+  ASSERT_EQ(runtime.register_callback(
+                {"rate.concurrent.cpu",
+                 [](void *data, const rt::CallbackContext &context) {
+                   static_cast<std::atomic<bool> *>(data)->store(
+                       context.rate_release != nullptr,
+                       std::memory_order_release);
+                   return rt::CallbackResult::ok;
+                 },
+                 &cpu_context},
+                cpu_phase),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.register_device_batch_phase(
+                {"rate.concurrent.device.first", backend_handle,
+                 &provide_batch, &first, first.declaration},
+                first_phase),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.register_device_batch_phase(
+                {"rate.concurrent.device.second", backend_handle,
+                 &provide_batch, &second, second.declaration},
+                second_phase),
+            rt::Status::ok);
+  rt::RateDomainHandle domain;
+  ASSERT_EQ(runtime.register_rate_domain(
+                {"rate.concurrent.domain", 1'000'000'000, 1,
+                 900'000'000, 10, rt::RateCriticality::critical, false,
+                 rt::RateLateAction::fail, 0},
+                domain),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.bind_phase_to_rate_domain(cpu_phase, domain),
+            rt::Status::ok);
+  const std::array roles{rt::DeviceRatePayloadRole::input};
+  ASSERT_EQ(runtime.bind_device_phase_to_rate_domain(
+                {first_phase, domain, 800'000'000, 1, roles}),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.bind_device_phase_to_rate_domain(
+                {second_phase, domain, 800'000'000, 1, roles}),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.add_dependency(first_phase, cpu_phase), rt::Status::ok);
+  ASSERT_EQ(runtime.add_dependency(second_phase, cpu_phase), rt::Status::ok);
+  ASSERT_EQ(runtime.finalize(), rt::Status::ok) << runtime.last_error();
+  rt::MemoryPlan memory;
+  ASSERT_TRUE(runtime.memory_plan(memory));
+  EXPECT_EQ(memory.device_rate_dispatch_record_count, 3u);
+  EXPECT_EQ(memory.device_rate_dependency_count, 2u);
+  EXPECT_EQ(memory.device_rate_execution_slot_count, 3u);
+  ASSERT_EQ(runtime.start(), rt::Status::ok) << runtime.last_error();
+
+  std::atomic<rt::Status> step_status{rt::Status::internal_error};
+  std::thread step_thread([&] {
+    rt::StepResult result;
+    step_status.store(
+        runtime.step({0, std::chrono::nanoseconds(1), std::nullopt, 1'000},
+                     &result),
+        std::memory_order_release);
+  });
+  const auto wait_until = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(2);
+  while (backend.manual_submitted.load(std::memory_order_acquire) != 2 &&
+         std::chrono::steady_clock::now() < wait_until) {
+    std::this_thread::yield();
+  }
+  const auto submitted_before_completion =
+      backend.manual_submitted.load(std::memory_order_acquire);
+  const auto cpu_ran_before_completion =
+      cpu_context.load(std::memory_order_acquire);
+  backend.manual_release_count.store(2, std::memory_order_release);
+  step_thread.join();
+
+  EXPECT_EQ(submitted_before_completion, 2u);
+  EXPECT_FALSE(cpu_ran_before_completion);
+  EXPECT_EQ(step_status.load(std::memory_order_acquire), rt::Status::ok);
+  EXPECT_TRUE(cpu_context.load(std::memory_order_acquire));
+  EXPECT_TRUE(first_context.load(std::memory_order_acquire));
+  EXPECT_TRUE(second_context.load(std::memory_order_acquire));
+  EXPECT_TRUE(first_release.seen);
+  EXPECT_EQ(first_release.domain, domain);
+  EXPECT_EQ(first_release.phase, first_phase);
+  EXPECT_EQ(first_release.supercycle_cycle, 0u);
+  EXPECT_EQ(first_release.domain_release_sequence, 0u);
+  EXPECT_EQ(first_release.substep_ordinal, 0u);
+  EXPECT_EQ(first_release.logical_release_ns, 0u);
+  EXPECT_EQ(first_release.nominal_release_ns, 1'000u);
+  EXPECT_EQ(first_release.absolute_deadline_ns, 900'001'000u);
+  EXPECT_EQ(first_release.declared_budget_ns, 10u);
+  EXPECT_EQ(first_release.late_action, rt::RateLateAction::fail);
+  EXPECT_EQ(first_release.degradation_level, 0u);
+  EXPECT_TRUE(second_release.seen);
+  EXPECT_EQ(second_release.phase, second_phase);
+  EXPECT_EQ(backend.batch_submit_calls.load(), 2u);
+  EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(CommandBatch, ActiveRateTimeoutIsCanceledOnceAndLateCompletionIsQuarantined) {
+  struct ManualClock final : rt::RuntimeClock {
+    std::uint64_t now_ns() noexcept override { return 1'000; }
+    rt::Status sleep_until_ns(std::uint64_t) noexcept override {
+      return rt::Status::ok;
+    }
+  } clock;
+
+  BatchBackend backend;
+  backend.mode.store(BatchBackend::SubmitMode::no_completion);
+  rt::Runtime runtime(clock);
+  ASSERT_EQ(runtime.configure(batch_config()), rt::Status::ok);
+  ASSERT_EQ(runtime.set_rate_execution_policy({1}), rt::Status::ok);
+  rt::DeviceBackendHandle backend_handle;
+  ASSERT_EQ(register_backend(runtime, backend, "rate.timeout", backend_handle),
+            rt::Status::ok);
+  std::array<std::byte, 64> storage{};
+  rt::DeviceBufferHandle buffer;
+  rt::DeviceTimelineHandle timeline;
+  ASSERT_EQ(runtime.register_device_buffer(
+                {"rate.timeout.buffer", backend_handle, storage}, buffer),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.register_device_timeline(
+                {"rate.timeout.timeline", backend_handle, 0}, timeline),
+            rt::Status::ok);
+  BatchProvider provider;
+  provider.declaration = dispatch_declaration(buffer, timeline);
+  provider.timeout_ns = 100'000'000;
+  rt::PhaseHandle phase;
+  ASSERT_EQ(runtime.register_device_batch_phase(
+                {"rate.timeout.phase", backend_handle, &provide_batch,
+                 &provider, provider.declaration},
+                phase),
+            rt::Status::ok);
+  rt::RateDomainHandle domain;
+  ASSERT_EQ(runtime.register_rate_domain(
+                {"rate.timeout.domain", 100'000'000, 1, 50'000'000, 0,
+                 rt::RateCriticality::critical, false,
+                 rt::RateLateAction::fail, 0},
+                domain),
+            rt::Status::ok);
+  const std::array roles{rt::DeviceRatePayloadRole::input};
+  ASSERT_EQ(runtime.bind_device_phase_to_rate_domain(
+                {phase, domain, 5'000'000, 1, roles}),
+            rt::Status::ok);
+  ASSERT_EQ(runtime.finalize(), rt::Status::ok) << runtime.last_error();
+  ASSERT_EQ(runtime.start(), rt::Status::ok);
+
+  rt::StepResult result;
+  EXPECT_EQ(runtime.step(
+                {0, std::chrono::nanoseconds(1), std::nullopt, 1'000},
+                &result),
+            rt::Status::device_timeout);
+  EXPECT_EQ(result.rate.executed_reference_records, 1u);
+  EXPECT_EQ(result.rate.failed_domain_releases, 1u);
+  EXPECT_EQ(backend.batch_cancel_calls.load(), 1u);
+  EXPECT_EQ(backend.last_batch.timeout_ns, 5'000'000u);
+
+  backend.pending_completion = {};
+  backend.pending_completion.batch_id = backend.last_batch.batch_id;
+  backend.pending_completion.signal_count = backend.last_batch.signal_count;
+  backend.pending_completion.timestamp_domain_identity = 201;
+  for (std::size_t index = 0;
+       index < backend.last_batch.signal_count; ++index) {
+    backend.pending_completion.signals[index] =
+        backend.last_batch.signals[index];
+  }
+  backend.completion_ready.store(1, std::memory_order_release);
+  const auto wait_until = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(2);
+  while (backend.completion_ready.load(std::memory_order_acquire) != 0 &&
+         std::chrono::steady_clock::now() < wait_until) {
+    std::this_thread::yield();
+  }
+  EXPECT_EQ(backend.completion_ready.load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(backend.batch_cancel_calls.load(), 1u);
+  EXPECT_EQ(runtime.stop(), rt::Status::ok);
+  EXPECT_EQ(backend.batch_cancel_calls.load(), 1u);
 }
 
 TEST(CommandBatch, DeviceRateBindingRejectsLegacyAndSupportsCorrection) {

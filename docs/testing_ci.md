@@ -60,8 +60,14 @@ release, deploy, or qualify hardware/RT behavior.
   harmonic and wraparound half-open intervals, per-phase/backend/Runtime
   in-flight limits, exact completion-batch boundaries, deterministic
   inspection, transactional correction, identity/accounting, and pre-callback
-  active-mixed start rejection. The focused CTest target is
-  `m21_device_rate_model`; it performs no rate-triggered backend operation.
+  active-mixed pre-dispatch validation. The focused CTest target is
+  `m21_device_rate_model`.
+- M21-02 tests cover the accepted mixed start transition, appended exact
+  provider context, direct dispatch/ticket accounting, more than one admitted
+  independent release outstanding before completion, completion-budget
+  timeout, one-shot cancellation, terminal quarantine, late-completion
+  suppression, and unchanged ordinary command-batch behavior. These are
+  portable fake-driver RT0 tests, not timing or hardware qualification.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent

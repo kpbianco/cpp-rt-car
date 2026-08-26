@@ -959,6 +959,28 @@ Status compile_rate_dispatch(
         candidate.admission.reserve(rate_plan.releases.size());
         candidate.groups.reserve(rate_plan.releases.size());
         candidate.optional_shed_order.reserve(rate_plan.domains.size());
+        candidate.device_phase_by_reference.assign(
+            rate_plan.releases.size(),
+            std::numeric_limits<std::size_t>::max());
+        candidate.producer_channel_offsets.assign(
+            rate_plan.bindings.size() + 1, 0);
+        for (const auto& channel : channels) {
+            ++candidate.producer_channel_offsets[
+                channel.producer.index() + 1];
+        }
+        for (std::size_t index = 1;
+             index < candidate.producer_channel_offsets.size(); ++index) {
+            candidate.producer_channel_offsets[index] +=
+                candidate.producer_channel_offsets[index - 1];
+        }
+        candidate.producer_channel_indices.resize(channels.size());
+        auto next_producer_channel = candidate.producer_channel_offsets;
+        for (std::size_t channel_index = 0;
+             channel_index < channels.size(); ++channel_index) {
+            const auto phase_index = channels[channel_index].producer.index();
+            candidate.producer_channel_indices[
+                next_producer_channel[phase_index]++] = channel_index;
+        }
         for (std::size_t index = 0; index < rate_plan.domains.size(); ++index) {
             if (rate_plan.domains[index].optional) {
                 candidate.optional_shed_order.push_back(index);
@@ -1000,6 +1022,25 @@ Status compile_rate_dispatch(
                     "active CPU reference record requires a declared budget",
                     index};
                 return diagnostic.status;
+            }
+            if (release.phase_kind == RatePhaseKind::device) {
+                const auto admitted = std::find_if(
+                    device_rate_plan->phases.begin(),
+                    device_rate_plan->phases.end(),
+                    [&](const CompiledDeviceRatePhase& phase) {
+                        return phase.phase == release.phase &&
+                               phase.domain == release.domain;
+                    });
+                if (admitted == device_rate_plan->phases.end()) {
+                    diagnostic = {
+                        Status::invalid_config,
+                        "active device reference has no admitted execution record",
+                        index};
+                    return diagnostic.status;
+                }
+                candidate.device_phase_by_reference[index] =
+                    static_cast<std::size_t>(std::distance(
+                        device_rate_plan->phases.begin(), admitted));
             }
             if (!release.optional &&
                 release.phase_kind == RatePhaseKind::cpu) {
@@ -1067,6 +1108,45 @@ Status compile_rate_dispatch(
                     group.first_reference_index};
                 return diagnostic.status;
             }
+        }
+        candidate.device_dependency_offsets.resize(
+            rate_plan.releases.size() + 1, 0);
+        for (const auto& group : candidate.groups) {
+            std::size_t device_records = 0;
+            const auto group_end =
+                group.first_reference_index + group.reference_count;
+            for (std::size_t reference_index = group.first_reference_index;
+                 reference_index < group_end; ++reference_index) {
+                if (candidate.device_phase_by_reference[reference_index] !=
+                    std::numeric_limits<std::size_t>::max()) {
+                    ++device_records;
+                }
+                const auto& dependent = rate_plan.releases[reference_index];
+                for (const auto& dependency : dependencies) {
+                    if (dependency.dependent != dependent.phase) {
+                        continue;
+                    }
+                    for (std::size_t prerequisite_index =
+                             group.first_reference_index;
+                         prerequisite_index < reference_index;
+                         ++prerequisite_index) {
+                        if (rate_plan.releases[prerequisite_index].phase ==
+                                dependency.prerequisite &&
+                            candidate.device_phase_by_reference[
+                                prerequisite_index] !=
+                                std::numeric_limits<std::size_t>::max()) {
+                            candidate.device_dependencies.push_back(
+                                prerequisite_index);
+                            break;
+                        }
+                    }
+                }
+                candidate.device_dependency_offsets[reference_index + 1] =
+                    candidate.device_dependencies.size();
+            }
+            candidate.maximum_device_records_per_group = std::max(
+                candidate.maximum_device_records_per_group,
+                device_records);
         }
         for (const auto& group : candidate.groups) {
             ++candidate.domain_group_offsets[

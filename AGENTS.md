@@ -4,7 +4,8 @@ RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
 ABI v1, and Apache-2.0. M14, M14.1, M15, M16, and the portable M17 software
 path through M17-06 are complete, while hardware/RT qualification remains
-incomplete. M20-PRE-01 is merged. M21-01 is the active approved batch.
+incomplete. M20-PRE-01 and M21-01 are merged. M21-02 is the active approved
+batch.
 M16-01 supplies the exact reference timeline, M16-02 adds deterministic
 CPU-only cross-rate channel selection and bounded SPSC stores, and M16-03 adds
 opt-in mandatory admission, dispatch, transfer, and late actions. M16-04 adds
@@ -26,14 +27,15 @@ only. M18-01 adds bounded offline qualification schemas and proposal tooling
 only; it promotes no tuple. Physical combined execution and hardware or RT
 qualification remain deferred.
 
-M21-01 adds only the bounded C++ device-rate model, immutable mixed reference
-plan, deterministic cyclic admission/reporting, and exact identity/accounting
-integration for opted-in HAL-v2 command-batch phases. It does not dispatch or
-poll a rate-triggered device batch, publish payload data, add sampled I/O,
-change telemetry schemas, create a lane/thread, promote support, or establish
-physical CUDA, XDMA, DAC/DAQ, HIL, RT1, or RT2 evidence. Ordinary device phases
-retain their pre-M21 behavior, and active mixed execution remains rejected
-before any provider callback until M21-02.
+M21-01 adds the bounded C++ device-rate model, immutable mixed reference plan,
+deterministic cyclic admission/reporting, and exact identity/accounting
+integration for opted-in HAL-v2 command-batch phases. M21-02 activates only
+their bounded release dispatch and completion on existing Runtime backend
+lanes, with precomputed release/frontier/slot state, concurrent admitted work,
+exact dependency barriers, and deterministic timeout/cancel/stop ownership.
+It does not publish device payload data, add sampled I/O, change telemetry
+schemas, create a lane/thread, promote support, or establish physical CUDA,
+XDMA, DAC/DAQ, HIL, RT1, or RT2 evidence.
 
 ## Read before nontrivial work
 
@@ -105,7 +107,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `022786c74e853ed9a81c17c145814543d742b4e0`; harness version: `2`.
+- Control revision: `cfd4d34cc402e248e00082fcbed6d72d2bfb5382`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.

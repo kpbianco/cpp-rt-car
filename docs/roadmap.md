@@ -39,7 +39,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M18 | Planned | M18-01 offline schemas/tools implemented; named NVIDIA, XDMA, combined, RT1, and optional RT2 campaigns remain |
 | M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
 | M20 | In progress | M20-PRE-01 is merged with deterministic host-independent fuzz, static, dependency, candidate-SBOM/provenance, strict-manifest, offline-fixture, and relocated-package assurance without signing or release; CAP-M20 remains open |
-| M21 | In progress | M21-01 adds the HAL-v2 command-batch device-rate model, immutable mixed reference plan, checked cyclic admission, inspection, identity, and accounting; dispatch, payloads, sampled I/O, replay, and conformance remain M21-02 through M21-05 |
+| M21 | In progress | M21-01 adds the admitted HAL-v2 command-batch model; M21-02 adds existing-lane active dispatch/completion, independent overlap, dependency barriers, and timeout quarantine; payloads, sampled I/O, replay, and conformance remain M21-03 through M21-05 |
 
 ## M0 — Product contract and truth reset
 
@@ -759,14 +759,16 @@ Exit gates:
 
 ## M21 — Active device rates and sampled I/O
 
-M21-01 is the active software batch. It models and conservatively admits
+M21-01 is merged. It models and conservatively admits
 HAL-v2 command-batch device releases using copied completion budgets, in-flight
 bounds, payload-reference roles, backend-local timelines, Runtime/backend
 capacities, and exact cyclic completion intervals. It is deliberately static:
-active mixed start is rejected before callbacks and ordinary device-frame
-execution remains unchanged.
+ordinary device-frame execution remains unchanged.
 
-M21-02 adds bounded dispatch/completion on existing backend lanes; M21-03 adds
+M21-02 is the active software batch. It adds bounded dispatch/completion on
+existing backend lanes, direct dependency slices, independent in-flight
+overlap, exact release tickets, deadline/budget timeout clamping, and late-
+completion quarantine. M21-03 adds
 CPU/device cross-rate payload identity; M21-04 adds the generic sampled-I/O and
 safe-state loopback contract; M21-05 closes overload, replay, and conformance.
 Portable evidence does not qualify physical CUDA, XDMA, DAC/DAQ, HIL, RT1, or

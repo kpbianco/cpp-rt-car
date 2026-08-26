@@ -409,9 +409,13 @@ text. A corrected successful finalization clears that diagnostic and publishes
 only the complete immutable plan.
 
 Reference-only mixed plans retain ordinary graph execution. If the M16 active
-policy is also selected, `start()` returns `invalid_state` before platform
-preflight, thread startup, backend initialization, provider invocation, or
-vendor entry. M21-02 owns active device release dispatch and completion.
+policy is selected, M21-02 accepts the mixed plan only when every device
+reference maps directly to an admitted M21-01 command-batch record. The
+provider receives an appended nullable release view and returns after copying
+one validated batch into an existing backend queue slot; it invokes no vendor
+entry. Existing submission/service lanes own submit, poll, and submitted
+timeout cancellation. Exact tickets preserve device prerequisites and the
+release-group terminal barrier while independent records may overlap.
 
 M4 finalizes aligned phase/task scratch, queue/control, and trace storage under
 a configured memory budget. M15 supplies exactly the phase/task/trace backing

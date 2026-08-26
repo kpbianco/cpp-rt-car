@@ -89,6 +89,30 @@ struct DeviceManagerStats {
     std::uint64_t service_starts = 0;
 };
 
+struct DeviceRateReleaseIdentity {
+    std::size_t reference_index = std::numeric_limits<std::size_t>::max();
+    RateDomainHandle domain{};
+    PhaseHandle phase{};
+    std::uint64_t supercycle_cycle = 0;
+    std::uint64_t domain_release_sequence = 0;
+    std::uint32_t substep_ordinal = 0;
+    std::uint64_t logical_release_ns = 0;
+    std::uint64_t nominal_release_ns = 0;
+    std::uint64_t absolute_deadline_ns = 0;
+    std::uint64_t completion_budget_ns = 0;
+};
+
+struct DeviceRateTicket {
+    std::size_t slot_index = std::numeric_limits<std::size_t>::max();
+    std::uint64_t batch_id = 0;
+    DeviceRateReleaseIdentity identity{};
+
+    [[nodiscard]] bool valid() const noexcept {
+        return slot_index != std::numeric_limits<std::size_t>::max() &&
+               batch_id != 0;
+    }
+};
+
 class DeviceManager final {
 public:
     DeviceManager(
@@ -136,7 +160,11 @@ public:
         std::uint64_t frame_index,
         const DeviceCommandBatch& batch,
         const DeviceCommandBatch& declaration,
-        std::uint64_t& out_batch_id) noexcept;
+        std::uint64_t& out_batch_id,
+        const DeviceRateReleaseIdentity* rate_identity = nullptr,
+        DeviceRateTicket* rate_ticket = nullptr) noexcept;
+    [[nodiscard]] Status wait_rate_batch(
+        const DeviceRateTicket& ticket) noexcept;
     [[nodiscard]] Status request_batch_stop() noexcept;
     [[nodiscard]] Status health(
         std::size_t backend_index,
@@ -209,6 +237,7 @@ private:
     struct BatchSlot {
         std::atomic<std::uint32_t> state{0};
         std::atomic<bool> graph_released{false};
+        std::atomic<bool> cancellation_requested{false};
         std::uint64_t sequence = 0;
         std::uint64_t deadline_ns = 0;
         std::uint32_t backend_index = 0;
@@ -217,6 +246,9 @@ private:
         DeviceCommandBatch batch{};
         HalV2BatchCompletion early_completion{};
         bool early_completion_valid = false;
+        bool rate_owned = false;
+        Status terminal_status = Status::ok;
+        DeviceRateReleaseIdentity rate_identity{};
     };
 
     struct BatchBackendState {
@@ -260,6 +292,10 @@ private:
         BatchSlot& slot,
         Status status,
         bool publish_timeline) noexcept;
+    void finish_rate_quarantine(
+        BatchSlot& slot,
+        Status status) noexcept;
+    void release_rate_slots_after_shutdown() noexcept;
     void fail_backend_batches(std::size_t backend_index, Status status) noexcept;
     void record_failure(Status status) noexcept;
     [[nodiscard]] Outstanding* acquire_outstanding() noexcept;

@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-26
-Batch baseline: `d463c3a6896e54d10814f1d4ed3b05d355550900`
+Batch baseline: `2c7ab323cfe5f00b68a71467889ca1dc5507365a`
 
 ## Product state
 
@@ -20,32 +20,40 @@ Batch baseline: `d463c3a6896e54d10814f1d4ed3b05d355550900`
   and manual qualification records do not exist. M18-01 offline qualification
   schemas and tools remain proposal-only and unpromoted. M19-01 adds extension
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
-  current Linux-host batch. M20-PRE-01 is merged. M21-01 is the active
-  approved model/admission-only batch.
+  current Linux-host batch. M20-PRE-01 and M21-01 are merged. M21-02 is the
+  active approved dispatch/completion-only batch.
 
-## M21-01 device-rate model and admission
+## M21-02 device-rate dispatch and completion
 
-The additive C++ `DeviceRatePhaseBinding` attaches one copied completion
-budget, per-phase in-flight limit, and access-matched payload-role sequence to
-an already registered HAL-v2 command-batch phase and rate domain. Runtime
-continues to derive backend, commands, buffer slices, synchronization, and
-backend-local wait/signal handles solely from the copied M17 declaration.
+M21-01's additive device-rate model and conservative cyclic admission are now
+merged. M21-02 activates only admitted HAL-v2 command-batch references in an
+M16 active plan. Finalization precomputes reference-to-device indexes and
+same-group device dependency slices, and allocates one exact generation-tagged
+completion ticket per reference record. The provider receives the appended
+nullable `DeviceCallbackContext::rate_release` view and still materializes only
+values permitted by the copied M17 declaration.
 
-Finalization now retains command, payload-reference, timeline, phase, backend,
-and per-reference interval inspection. Checked integer cyclic admission uses
-half-open intervals, completion-before-release ties, previous-supercycle carry,
-per-phase/backend/global in-flight bounds, and exact per-backend completion-
-batch boundaries. New storage is included in `rate_plan_bytes`,
-`runtime_control_bytes`, and the control ledger; mixed metadata participates in
-graph/replay identity while no-device and CPU-only paths retain their prior
-conditional hash path.
+Each due provider runs exactly once through the existing executor, copies its
+fixed-capacity batch and exact domain/phase/cycle/sequence/substep identity into
+an existing backend slot, and returns without holding the executor phase open.
+The existing per-backend submission lane performs vendor submit; the existing
+service lane polls completion and owns submitted timeout cancellation.
+Independent same-group device references can therefore remain outstanding at
+the same time. Precomputed graph dependencies consume prerequisite tickets
+before a dependent CPU/device callback, and the release-group barrier consumes
+all remaining tickets before a successful active step advances.
 
-This batch performs no rate-triggered submit, poll, cancel, payload
-publication, sampled I/O, telemetry-schema change, or lane/thread creation.
-Starting an active mixed plan returns `invalid_state` before preflight,
-provider, backend, or vendor callbacks. Reference-only mixed plans retain the
-ordinary frame behavior; M21-02 owns active dispatch and completion. M21 and
-CAP-M21 remain incomplete.
+Provider timeouts are finite and clamped to the earlier checked completion-
+budget or release-deadline remainder. A timeout after vendor ownership enters a
+non-reusable terminal quarantine, issues at most one cancellation request, and
+cannot become success when a late completion arrives. Checked backend shutdown
+is the reclamation boundary. Existing device metrics/traces and active-rate
+failure/action accounting are reused without schema changes.
+
+This is portable RT0 fake-driver dispatch/completion evidence only. M21-02 adds
+no payload publication, sampled I/O, replay encoding, device shedding model,
+lane/thread, physical CUDA/XDMA/DAC/DAQ behavior, HIL, RT1, or RT2 claim.
+M21-03 through M21-05 and CAP-M21 remain incomplete.
 
 ## M20-PRE-01 portable assurance
 
