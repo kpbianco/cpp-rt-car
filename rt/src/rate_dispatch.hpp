@@ -54,6 +54,68 @@ struct RateDueCounts {
     std::uint64_t reference_records = 0;
 };
 
+struct DeviceRateBackendSource {
+    DeviceBackendHandle backend{};
+    HalV2CommandTimelineCapabilities capabilities{};
+    std::uint64_t completion_timestamp_domain_identity = 0;
+    bool completion_timestamp_domain_valid = false;
+};
+
+struct DeviceRateBufferSource {
+    DeviceBufferHandle buffer{};
+    DeviceBackendHandle backend{};
+    std::uint64_t bytes = 0;
+    std::uint32_t access = 0;
+    std::uint64_t byte_granularity = 1;
+    std::uint64_t offset_granularity = 1;
+};
+
+struct DeviceRateTimelineSource {
+    DeviceTimelineHandle timeline{};
+    DeviceBackendHandle backend{};
+    std::uint64_t initial_value = 0;
+};
+
+struct DeviceRatePhaseSource {
+    PhaseHandle phase{};
+    DeviceBackendHandle backend{};
+    const DeviceCommandBatch* declaration = nullptr;
+};
+
+struct CompiledDeviceRatePlan {
+    std::vector<CompiledDeviceRatePhase> phases;
+    std::vector<CompiledDeviceRateCommand> commands;
+    std::vector<CompiledDeviceRatePayloadReference> payload_references;
+    std::vector<CompiledDeviceRateTimelineReference> timeline_references;
+    DeviceRateAdmissionReport report{};
+    std::vector<DeviceRateAdmissionBackend> admission_backends;
+    std::vector<DeviceRateAdmissionPhase> admission_phases;
+    std::vector<DeviceRateAdmissionInterval> admission_intervals;
+};
+
+struct DeviceRateDiagnostic {
+    Status status = Status::ok;
+    const char* message = nullptr;
+    std::size_t reference_index = invalid_reference_release_index;
+    PhaseHandle phase{};
+};
+
+// Compiles copied-declaration inspection and conservative cyclic admission.
+// Input pointers are used only during this call; output owns no caller span or
+// provider/vendor pointer and is published only on complete success.
+[[nodiscard]] Status compile_device_rate_plan(
+    std::uint32_t graph_owner,
+    std::uint32_t runtime_outstanding_capacity,
+    std::uint32_t runtime_completion_batch_capacity,
+    const CompiledRatePlan& rate_plan,
+    std::span<const DeviceRateBindingSpec> bindings,
+    std::span<const DeviceRateBackendSource> backends,
+    std::span<const DeviceRateBufferSource> buffers,
+    std::span<const DeviceRateTimelineSource> timelines,
+    std::span<const DeviceRatePhaseSource> phases,
+    CompiledDeviceRatePlan& output,
+    DeviceRateDiagnostic& diagnostic) noexcept;
+
 // Active-only validation and conservative single-lane declared-budget
 // admission. Output is published only after the complete simulation succeeds.
 [[nodiscard]] Status compile_rate_dispatch(
@@ -63,6 +125,7 @@ struct RateDueCounts {
     std::span<const GraphDependency> dependencies,
     const CompiledRatePlan& rate_plan,
     std::span<const CrossRateChannelSpec> channels,
+    const CompiledDeviceRatePlan* device_rate_plan,
     CompiledRateDispatchPlan& output,
     RateDispatchDiagnostic& diagnostic) noexcept;
 

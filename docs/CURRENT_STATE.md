@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-26
-Batch baseline: `c846cc427c93018175a69c7372c130f00c0b713b`
+Batch baseline: `d463c3a6896e54d10814f1d4ed3b05d355550900`
 
 ## Product state
 
@@ -20,7 +20,32 @@ Batch baseline: `c846cc427c93018175a69c7372c130f00c0b713b`
   and manual qualification records do not exist. M18-01 offline qualification
   schemas and tools remain proposal-only and unpromoted. M19-01 adds extension
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
-  current Linux-host batch. M20-PRE-01 is the active approved batch.
+  current Linux-host batch. M20-PRE-01 is merged. M21-01 is the active
+  approved model/admission-only batch.
+
+## M21-01 device-rate model and admission
+
+The additive C++ `DeviceRatePhaseBinding` attaches one copied completion
+budget, per-phase in-flight limit, and access-matched payload-role sequence to
+an already registered HAL-v2 command-batch phase and rate domain. Runtime
+continues to derive backend, commands, buffer slices, synchronization, and
+backend-local wait/signal handles solely from the copied M17 declaration.
+
+Finalization now retains command, payload-reference, timeline, phase, backend,
+and per-reference interval inspection. Checked integer cyclic admission uses
+half-open intervals, completion-before-release ties, previous-supercycle carry,
+per-phase/backend/global in-flight bounds, and exact per-backend completion-
+batch boundaries. New storage is included in `rate_plan_bytes`,
+`runtime_control_bytes`, and the control ledger; mixed metadata participates in
+graph/replay identity while no-device and CPU-only paths retain their prior
+conditional hash path.
+
+This batch performs no rate-triggered submit, poll, cancel, payload
+publication, sampled I/O, telemetry-schema change, or lane/thread creation.
+Starting an active mixed plan returns `invalid_state` before preflight,
+provider, backend, or vendor callbacks. Reference-only mixed plans retain the
+ordinary frame behavior; M21-02 owns active dispatch and completion. M21 and
+CAP-M21 remain incomplete.
 
 ## M20-PRE-01 portable assurance
 

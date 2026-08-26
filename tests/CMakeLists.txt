@@ -70,7 +70,6 @@ if (SIM_GTEST_AVAILABLE)
         test_config_hot_reload.cpp
         test_plugin_manager.cpp
         test_sandbox.cpp
-        test_sbom.cpp
         test_minidump_symbols.cpp
         test_perf_artifacts.cpp
         test_scheduler.cpp
@@ -253,6 +252,12 @@ if (SIM_GTEST_AVAILABLE)
     set_tests_properties(m16_rate_timeline PROPERTIES TIMEOUT 60)
 
     add_test(
+        NAME m21_device_rate_model
+        COMMAND simcore_tests
+            --gtest_filter=RateDispatch.DeviceRate*:CommandBatch.DeviceRate*:RateTimeline.*Device*:CompiledGraph.*DeviceRate*:HostRuntime.*DeviceRate*:DeviceRuntime.*Rate*:VendorHalV2.*Rate*:MemoryPlan.*DeviceRate*:DeterminismReplay.*DeviceRate*:PeriodicRuntime.*DeviceRate*:TraceNoAlloc.*DeviceRate*)
+    set_tests_properties(m21_device_rate_model PROPERTIES TIMEOUT 60)
+
+    add_test(
         NAME m16_rate_dispatch
         COMMAND simcore_tests
             --gtest_filter=RateDispatch.*:RateTimeline.*Admission*:CrossRateData.*Active*:HostRuntime.*RateDispatch*:PeriodicRuntime.*RateDispatch*:UnifiedExecutor.*RateDispatch*:MemoryPlan.*RateDispatch*:DeterminismReplay.*RateDispatch*:TraceNoAlloc.*RateDispatch*)
@@ -327,6 +332,16 @@ if (SIM_GTEST_AVAILABLE)
         endif()
     endif()
 endif()
+
+find_program(RTFW_PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
+add_test(
+    NAME sbom_dependencies
+    COMMAND
+        ${RTFW_PYTHON_EXECUTABLE}
+        ${RTFW_PROJECT_SOURCE_DIR}/tools/sbom.py
+        verify-dependencies
+        --policy ${RTFW_PROJECT_SOURCE_DIR}/tools/sbom_expected.json)
+set_tests_properties(sbom_dependencies PROPERTIES TIMEOUT 30)
 
 # Portable M17-06 combined-protocol tests use the actual native candidate
 # classes with injected driver tables and do not depend on GoogleTest,

@@ -494,6 +494,78 @@ struct ConfiguredBatchRuntime {
   }
 };
 
+std::uint64_t device_rate_graph_id(
+    bool reverse_binding_order,
+    std::uint64_t second_completion_budget = 4) {
+  ConfiguredBatchRuntime fixture;
+  fixture.configure();
+  if (fixture.runtime.set_rate_execution_policy({4}) != rt::Status::ok) {
+    ADD_FAILURE() << fixture.runtime.last_error();
+    return 0;
+  }
+  BatchProvider first;
+  BatchProvider second;
+  rt::DeviceTimelineHandle second_timeline;
+  if (fixture.runtime.register_device_timeline(
+          {"command.timeline.second", fixture.backend_handle, 0},
+          second_timeline) != rt::Status::ok) {
+    ADD_FAILURE() << fixture.runtime.last_error();
+    return 0;
+  }
+  first.declaration = dispatch_declaration(fixture.buffer, fixture.timeline);
+  second.declaration = dispatch_declaration(fixture.buffer, second_timeline);
+  rt::PhaseHandle first_phase;
+  rt::PhaseHandle second_phase;
+  if (fixture.runtime.register_device_batch_phase(
+          {"rate.first", fixture.backend_handle, &provide_batch,
+           &first, first.declaration}, first_phase) != rt::Status::ok ||
+      fixture.runtime.register_device_batch_phase(
+          {"rate.second", fixture.backend_handle, &provide_batch,
+           &second, second.declaration}, second_phase) != rt::Status::ok) {
+    ADD_FAILURE() << fixture.runtime.last_error();
+    return 0;
+  }
+  rt::RateDomainHandle domain;
+  if (fixture.runtime.register_rate_domain(
+          {"device.rate.identity", 10, 1, 6, 0,
+           rt::RateCriticality::critical, false,
+           rt::RateLateAction::fail, 0}, domain) != rt::Status::ok) {
+    ADD_FAILURE() << fixture.runtime.last_error();
+    return 0;
+  }
+  const std::array roles{rt::DeviceRatePayloadRole::input};
+  const rt::DeviceRatePhaseBinding first_binding{
+      first_phase, domain, 4, 1, roles};
+  const rt::DeviceRatePhaseBinding second_binding{
+      second_phase, domain, second_completion_budget, 1, roles};
+  const auto first_status = reverse_binding_order
+      ? fixture.runtime.bind_device_phase_to_rate_domain(second_binding)
+      : fixture.runtime.bind_device_phase_to_rate_domain(first_binding);
+  const auto second_status = reverse_binding_order
+      ? fixture.runtime.bind_device_phase_to_rate_domain(first_binding)
+      : fixture.runtime.bind_device_phase_to_rate_domain(second_binding);
+  if (first_status != rt::Status::ok || second_status != rt::Status::ok ||
+      fixture.runtime.finalize() != rt::Status::ok) {
+    ADD_FAILURE() << fixture.runtime.last_error();
+    return 0;
+  }
+  std::size_t required = 0;
+  if (fixture.runtime.checkpoint_size(required) != rt::Status::ok) {
+    ADD_FAILURE() << fixture.runtime.last_error();
+    return 0;
+  }
+  std::vector<std::byte> checkpoint(required);
+  rt::ArtifactWriteResult result;
+  rt::CheckpointMetadata metadata;
+  if (fixture.runtime.write_checkpoint(0, checkpoint, result) !=
+          rt::Status::ok ||
+      rt::inspect_checkpoint_artifact(checkpoint, metadata) != rt::Status::ok) {
+    ADD_FAILURE() << fixture.runtime.last_error();
+    return 0;
+  }
+  return metadata.graph_id;
+}
+
 const rt::ThreadPolicyReport *
 find_thread(const rt::CpuMemoryPolicyReport &report, rt::ThreadRoleId role) {
   const auto end =
@@ -546,9 +618,169 @@ TEST(CommandBatch, PublicConstantsLayoutsDefaultsAndAggregatePrefixAreExact) {
   EXPECT_TRUE(all_zero(capabilities.reserved));
   EXPECT_TRUE(all_zero(extension.reserved));
 
+  const rt::DeviceRatePhaseBinding device_rate{};
+  const rt::CompiledDeviceRatePhase compiled_device_rate{};
+  const rt::DeviceRateAdmissionReport admission{};
+  const rt::DeviceRateAdmissionDiagnostic admission_diagnostic{};
+  EXPECT_FALSE(device_rate.phase.valid());
+  EXPECT_EQ(device_rate.completion_budget_ns, 0u);
+  EXPECT_EQ(device_rate.maximum_in_flight, 0u);
+  EXPECT_TRUE(device_rate.payload_roles.empty());
+  EXPECT_FALSE(compiled_device_rate.phase.valid());
+  EXPECT_EQ(admission.interval_count, 0u);
+  EXPECT_EQ(admission_diagnostic.status, rt::Status::ok);
+
   const rt::HalV2BackendRegistration old_prefix{"old", {}};
   EXPECT_EQ(old_prefix.memory_topology, nullptr);
   EXPECT_EQ(old_prefix.command_timeline, nullptr);
+}
+
+TEST(CommandBatch, DeviceRateModelCompilesInspectsAccountsAndRejectsStart) {
+  ConfiguredBatchRuntime fixture;
+  fixture.configure();
+  ASSERT_EQ(fixture.runtime.set_rate_execution_policy({4}), rt::Status::ok);
+  BatchProvider provider;
+  provider.declaration = dispatch_declaration(fixture.buffer, fixture.timeline);
+  rt::PhaseHandle phase;
+  ASSERT_EQ(fixture.runtime.register_device_batch_phase(
+                {"rate.batch", fixture.backend_handle, &provide_batch,
+                 &provider, provider.declaration},
+                phase),
+            rt::Status::ok);
+  rt::RateDomainHandle domain;
+  ASSERT_EQ(fixture.runtime.register_rate_domain(
+                {"device.rate", 10, 1, 6, 0,
+                 rt::RateCriticality::critical, false,
+                 rt::RateLateAction::fail, 0},
+                domain),
+            rt::Status::ok);
+  const std::array roles{rt::DeviceRatePayloadRole::input};
+  ASSERT_EQ(fixture.runtime.bind_device_phase_to_rate_domain(
+                {phase, domain, 4, 1, roles}),
+            rt::Status::ok);
+  ASSERT_EQ(fixture.runtime.finalize(), rt::Status::ok)
+      << fixture.runtime.last_error();
+
+  EXPECT_TRUE(fixture.runtime.device_rate_model_enabled());
+  EXPECT_EQ(fixture.runtime.device_rate_phase_count(), 1u);
+  EXPECT_EQ(fixture.runtime.device_rate_command_count(), 1u);
+  EXPECT_EQ(fixture.runtime.device_rate_payload_reference_count(), 1u);
+  EXPECT_EQ(fixture.runtime.device_rate_timeline_reference_count(), 1u);
+  rt::CompiledDeviceRatePhase compiled;
+  ASSERT_TRUE(fixture.runtime.compiled_device_rate_phase_at(0, compiled));
+  EXPECT_EQ(compiled.phase, phase);
+  EXPECT_EQ(compiled.domain, domain);
+  EXPECT_EQ(compiled.backend, fixture.backend_handle);
+  EXPECT_EQ(compiled.completion_budget_ns, 4u);
+  EXPECT_EQ(compiled.maximum_in_flight, 1u);
+  EXPECT_EQ(compiled.completion_timestamp_domain_identity, 201u);
+  rt::CompiledDeviceRateCommand command;
+  ASSERT_TRUE(fixture.runtime.compiled_device_rate_command_at(0, command));
+  EXPECT_EQ(command.kind, rt::HalV2CommandKind::dispatch);
+  EXPECT_EQ(command.opcode, 7u);
+  rt::CompiledDeviceRatePayloadReference payload;
+  ASSERT_TRUE(fixture.runtime.compiled_device_rate_payload_reference_at(
+      0, payload));
+  EXPECT_EQ(payload.buffer, fixture.buffer);
+  EXPECT_EQ(payload.role, rt::DeviceRatePayloadRole::input);
+  EXPECT_EQ(payload.bytes, 16u);
+  rt::CompiledDeviceRateTimelineReference timeline;
+  ASSERT_TRUE(fixture.runtime.compiled_device_rate_timeline_reference_at(
+      0, timeline));
+  EXPECT_EQ(timeline.timeline, fixture.timeline);
+  EXPECT_EQ(timeline.role, rt::DeviceRateTimelineRole::signal);
+  rt::DeviceRateAdmissionReport admission;
+  ASSERT_TRUE(fixture.runtime.device_rate_admission_report(admission));
+  EXPECT_EQ(admission.supercycle_ns, 10u);
+  EXPECT_EQ(admission.peak_global_in_flight, 1u);
+  EXPECT_EQ(admission.interval_count, 1u);
+  rt::DeviceRateAdmissionInterval interval;
+  ASSERT_TRUE(fixture.runtime.device_rate_admission_interval_at(0, interval));
+  EXPECT_EQ(interval.release_time_ns, 0u);
+  EXPECT_EQ(interval.completion_deadline_ns, 4u);
+
+  rt::MemoryPlan memory;
+  ASSERT_TRUE(fixture.runtime.memory_plan(memory));
+  EXPECT_EQ(memory.device_rate_phase_count, 1u);
+  EXPECT_EQ(memory.device_rate_command_count, 1u);
+  EXPECT_EQ(memory.device_rate_payload_reference_count, 1u);
+  EXPECT_EQ(memory.device_rate_timeline_reference_count, 1u);
+  EXPECT_EQ(memory.device_rate_admission_interval_count, 1u);
+  EXPECT_GT(memory.device_rate_plan_bytes, 0u);
+
+  EXPECT_EQ(fixture.runtime.start(), rt::Status::invalid_state);
+  EXPECT_EQ(fixture.runtime.last_error(),
+            "active mixed CPU/device execution is deferred until M21-02");
+  EXPECT_EQ(fixture.backend.batch_submit_calls.load(), 0u);
+  EXPECT_EQ(fixture.backend.batch_poll_calls.load(), 0u);
+  EXPECT_EQ(fixture.backend.single_submit_calls.load(), 0u);
+  EXPECT_EQ(fixture.runtime.stop(), rt::Status::ok);
+}
+
+TEST(CommandBatch, DeviceRateBindingRejectsLegacyAndSupportsCorrection) {
+  ConfiguredBatchRuntime fixture;
+  fixture.configure();
+  BatchProvider provider;
+  provider.declaration = dispatch_declaration(fixture.buffer, fixture.timeline);
+  rt::PhaseHandle phase;
+  ASSERT_EQ(fixture.runtime.register_device_batch_phase(
+                {"rate.retry", fixture.backend_handle, &provide_batch,
+                 &provider, provider.declaration},
+                phase),
+            rt::Status::ok);
+  rt::RateDomainHandle domain;
+  ASSERT_EQ(fixture.runtime.register_rate_domain(
+                {"rate.retry.domain", 10, 1, 6, 0,
+                 rt::RateCriticality::normal, false},
+                domain),
+            rt::Status::ok);
+  const std::array wrong{rt::DeviceRatePayloadRole::output};
+  ASSERT_EQ(fixture.runtime.bind_device_phase_to_rate_domain(
+                {phase, domain, 4, 1, wrong}),
+            rt::Status::ok);
+  EXPECT_EQ(fixture.runtime.finalize(), rt::Status::invalid_config);
+  rt::DeviceRateAdmissionDiagnostic diagnostic;
+  ASSERT_TRUE(fixture.runtime.device_rate_admission_diagnostic(diagnostic));
+  EXPECT_EQ(diagnostic.status, rt::Status::invalid_config);
+  EXPECT_EQ(diagnostic.phase, phase);
+  EXPECT_EQ(diagnostic.reference_index,
+            std::numeric_limits<std::size_t>::max());
+  const std::array corrected{rt::DeviceRatePayloadRole::input};
+  ASSERT_EQ(fixture.runtime.replace_device_rate_binding(
+                {phase, domain, 4, 1, corrected}),
+            rt::Status::ok);
+  ASSERT_EQ(fixture.runtime.finalize(), rt::Status::ok)
+      << fixture.runtime.last_error();
+  EXPECT_FALSE(fixture.runtime.device_rate_admission_diagnostic(diagnostic));
+  EXPECT_EQ(fixture.runtime.stop(), rt::Status::ok);
+
+  rt::Runtime legacy;
+  ASSERT_EQ(legacy.configure(batch_config()), rt::Status::ok);
+  rt::PhaseHandle cpu;
+  std::size_t calls = 0;
+  ASSERT_EQ(legacy.register_callback({"cpu", [](void* data, const auto&) {
+                    ++*static_cast<std::size_t*>(data);
+                    return rt::CallbackResult::ok;
+                  }, &calls}, cpu),
+            rt::Status::ok);
+  rt::RateDomainHandle legacy_domain;
+  ASSERT_EQ(legacy.register_rate_domain(
+                {"legacy.rate", 10, 1, 10, 1,
+                 rt::RateCriticality::normal, false},
+                legacy_domain),
+            rt::Status::ok);
+  EXPECT_EQ(legacy.bind_device_phase_to_rate_domain(
+                {cpu, legacy_domain, 1, 1, {}}),
+            rt::Status::invalid_argument);
+}
+
+TEST(CommandBatch, DeviceRateIdentityIsCanonicalAndIncludesAdmissionPolicy) {
+  const auto forward = device_rate_graph_id(false);
+  const auto reverse = device_rate_graph_id(true);
+  const auto changed_policy = device_rate_graph_id(false, 5);
+  ASSERT_NE(forward, 0u);
+  EXPECT_EQ(forward, reverse);
+  EXPECT_NE(forward, changed_policy);
 }
 
 TEST(CommandBatch, ExtensionDiscoveryRejectsMalformedAndPartialResults) {

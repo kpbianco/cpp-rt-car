@@ -395,6 +395,24 @@ traversal.
 
 ## Current boundary
 
+M21-01 adds configuring-only `bind_device_phase_to_rate_domain()` and
+`replace_device_rate_binding()`. The copied role span must exactly cover the
+flattened M17 declaration references and match their read/write access. After
+finalization, bounded queries expose device phases, command skeletons, payload
+slices/roles, timeline references, admission capacities/peaks, and exact
+reference intervals. Query output contains no provider pointer, vendor object,
+payload bytes, address, or wall-clock measurement.
+After a device-rate admission failure,
+`device_rate_admission_diagnostic()` exposes the fixed-size status, rejected
+phase, and first reference index while `last_error()` retains the deterministic
+text. A corrected successful finalization clears that diagnostic and publishes
+only the complete immutable plan.
+
+Reference-only mixed plans retain ordinary graph execution. If the M16 active
+policy is also selected, `start()` returns `invalid_state` before platform
+preflight, thread startup, backend initialization, provider invocation, or
+vendor entry. M21-02 owns active device release dispatch and completion.
+
 M4 finalizes aligned phase/task scratch, queue/control, and trace storage under
 a configured memory budget. M15 supplies exactly the phase/task/trace backing
 through a bounded provider or Linux resident mapping transaction. M15-04 adds

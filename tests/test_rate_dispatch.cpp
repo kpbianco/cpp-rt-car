@@ -177,6 +177,69 @@ rt::RuntimeConfig test_config() {
     return config;
 }
 
+struct DeviceAdmissionFixture {
+    std::uint32_t owner = 77;
+    rt::PhaseHandle phase{owner, 0};
+    rt::RateDomainHandle domain{owner, 0};
+    rt::DeviceBackendHandle backend{owner, 0};
+    rt::DeviceBufferHandle buffer{owner, 0};
+    rt::DeviceTimelineHandle timeline{owner, 0};
+    rt::DeviceCommandBatch declaration{};
+    rt::detail::CompiledRatePlan rate_plan{};
+    std::vector<rt::detail::DeviceRateBindingSpec> bindings;
+    std::vector<rt::detail::DeviceRateBackendSource> backends;
+    std::vector<rt::detail::DeviceRateBufferSource> buffers;
+    std::vector<rt::detail::DeviceRateTimelineSource> timelines;
+    std::vector<rt::detail::DeviceRatePhaseSource> phases;
+
+    DeviceAdmissionFixture() {
+        declaration.command_count = 1;
+        declaration.signal_count = 1;
+        auto& command = declaration.commands[0];
+        command.kind = static_cast<std::uint32_t>(
+            rt::HalV2CommandKind::dispatch);
+        command.opcode = 17;
+        command.buffer_count = 1;
+        command.buffers[0] = {
+            buffer.value, RTFW_DEVICE_ACCESS_READ, 0, 0, 64};
+        declaration.signals[0].timeline_handle = timeline.value;
+
+        rate_plan.supercycle_ns = 10;
+        rate_plan.domains.push_back({
+            domain, {}, 0, 10, 1, 10, 0,
+            rt::RateCriticality::critical, false, 1, 1, 1,
+            rt::RateLateAction::fail, 0});
+        rate_plan.bindings.push_back({
+            phase, domain, rt::RatePhaseKind::device, 0});
+        rate_plan.releases.push_back({
+            0, domain, 0, 0, phase, rt::RatePhaseKind::device, 0,
+            0, 1, 6, 6, 0, rt::RateCriticality::critical, false,
+            rt::RateLateAction::fail, 0});
+        rate_plan.releases.push_back({
+            6, domain, 0, 1, phase, rt::RatePhaseKind::device, 0,
+            0, 1, 6, 12, 0, rt::RateCriticality::critical, false,
+            rt::RateLateAction::fail, 0});
+
+        bindings.push_back({
+            phase, domain, 6, 2, {rt::DeviceRatePayloadRole::input}});
+        rt::HalV2CommandTimelineCapabilities capabilities;
+        capabilities.max_in_flight_batches = 2;
+        capabilities.max_commands_per_batch = 4;
+        capabilities.max_wait_points = 4;
+        capabilities.max_signal_points = 4;
+        capabilities.max_timelines = 4;
+        capabilities.completion_batch_capacity = 2;
+        backends.push_back({backend, capabilities, 9, true});
+        buffers.push_back({
+            buffer, backend, 64,
+            RTFW_DEVICE_BUFFER_DEVICE_READ |
+                RTFW_DEVICE_BUFFER_DEVICE_WRITE,
+            1, 1});
+        timelines.push_back({timeline, backend, 0});
+        phases.push_back({phase, backend, &declaration});
+    }
+};
+
 rt::Status add_domain(
     rt::Runtime& runtime,
     std::string_view name,
@@ -204,6 +267,136 @@ void expect_stopped(rt::Runtime& runtime) {
 }
 
 } // namespace
+
+TEST(RateDispatch, DeviceRateCyclicAdmissionModelsWrapAndHalfOpenCapacity) {
+    DeviceAdmissionFixture fixture;
+    rt::detail::CompiledDeviceRatePlan plan;
+    rt::detail::DeviceRateDiagnostic diagnostic;
+    ASSERT_EQ(
+        rt::detail::compile_device_rate_plan(
+            fixture.owner, 2, 2, fixture.rate_plan, fixture.bindings,
+            fixture.backends, fixture.buffers, fixture.timelines,
+            fixture.phases, plan, diagnostic),
+        rt::Status::ok) << (diagnostic.message ? diagnostic.message : "");
+    ASSERT_EQ(plan.phases.size(), 1u);
+    ASSERT_EQ(plan.commands.size(), 1u);
+    ASSERT_EQ(plan.payload_references.size(), 1u);
+    ASSERT_EQ(plan.timeline_references.size(), 1u);
+    ASSERT_EQ(plan.admission_intervals.size(), 2u);
+    EXPECT_EQ(plan.report.peak_global_in_flight, 2u);
+    EXPECT_EQ(plan.admission_phases[0].peak_in_flight, 2u);
+    EXPECT_TRUE(plan.admission_intervals[1].carries_across_supercycle);
+    EXPECT_EQ(plan.payload_references[0].buffer, fixture.buffer);
+    EXPECT_EQ(plan.payload_references[0].role,
+              rt::DeviceRatePayloadRole::input);
+    EXPECT_EQ(plan.timeline_references[0].timeline, fixture.timeline);
+
+    fixture.bindings[0].maximum_in_flight = 1;
+    EXPECT_EQ(
+        rt::detail::compile_device_rate_plan(
+            fixture.owner, 2, 2, fixture.rate_plan, fixture.bindings,
+            fixture.backends, fixture.buffers, fixture.timelines,
+            fixture.phases, plan, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_EQ(diagnostic.reference_index, 0u);
+    EXPECT_STREQ(diagnostic.message,
+                 "device-rate release exceeds an in-flight capacity");
+}
+
+TEST(RateDispatch, DeviceRateRejectsPayloadAndCompletionCapacityMismatch) {
+    DeviceAdmissionFixture fixture;
+    rt::detail::CompiledDeviceRatePlan plan;
+    rt::detail::DeviceRateDiagnostic diagnostic;
+    fixture.bindings[0].payload_roles[0] =
+        rt::DeviceRatePayloadRole::output;
+    EXPECT_EQ(
+        rt::detail::compile_device_rate_plan(
+            fixture.owner, 2, 2, fixture.rate_plan, fixture.bindings,
+            fixture.backends, fixture.buffers, fixture.timelines,
+            fixture.phases, plan, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_STREQ(diagnostic.message,
+                 "device-rate payload roles do not exactly match the copied declaration");
+
+    fixture.bindings[0].payload_roles[0] =
+        rt::DeviceRatePayloadRole::input;
+    fixture.rate_plan.releases[1].release_time_ns = 0;
+    fixture.rate_plan.releases[1].deadline_time_ns = 6;
+    fixture.rate_plan.releases[1].substep_ordinal = 1;
+    fixture.backends[0].capabilities.completion_batch_capacity = 1;
+    EXPECT_EQ(
+        rt::detail::compile_device_rate_plan(
+            fixture.owner, 2, 2, fixture.rate_plan, fixture.bindings,
+            fixture.backends, fixture.buffers, fixture.timelines,
+            fixture.phases, plan, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_STREQ(diagnostic.message,
+                 "device-rate poll boundary exceeds completion-batch capacity");
+}
+
+TEST(RateDispatch, DeviceRateAllowsDistinctBackendOverlapAndRejectsWaitCycle) {
+    DeviceAdmissionFixture fixture;
+    const rt::PhaseHandle second_phase{fixture.owner, 1};
+    const rt::DeviceBackendHandle second_backend{fixture.owner, 1};
+    const rt::DeviceBufferHandle second_buffer{fixture.owner, 1};
+    const rt::DeviceTimelineHandle second_timeline{fixture.owner, 1};
+    auto second_declaration = fixture.declaration;
+    second_declaration.commands[0].buffers[0].buffer_token =
+        second_buffer.value;
+    second_declaration.signals[0].timeline_handle = second_timeline.value;
+    fixture.rate_plan.bindings.push_back({
+        second_phase, fixture.domain, rt::RatePhaseKind::device, 1});
+    fixture.rate_plan.releases.push_back({
+        0, fixture.domain, 0, 2, second_phase,
+        rt::RatePhaseKind::device, 1, 0, 1, 6, 6, 0,
+        rt::RateCriticality::critical, false,
+        rt::RateLateAction::fail, 0});
+    fixture.bindings.push_back({
+        second_phase, fixture.domain, 6, 1,
+        {rt::DeviceRatePayloadRole::input}});
+    auto second_capabilities = fixture.backends[0].capabilities;
+    second_capabilities.max_in_flight_batches = 1;
+    fixture.backends.push_back({
+        second_backend, second_capabilities, 10, true});
+    fixture.buffers.push_back({
+        second_buffer, second_backend, 64,
+        RTFW_DEVICE_BUFFER_DEVICE_READ |
+            RTFW_DEVICE_BUFFER_DEVICE_WRITE,
+        1, 1});
+    fixture.timelines.push_back({second_timeline, second_backend, 0});
+    fixture.phases.push_back({
+        second_phase, second_backend, &second_declaration});
+
+    rt::detail::CompiledDeviceRatePlan plan;
+    rt::detail::DeviceRateDiagnostic diagnostic;
+    ASSERT_EQ(
+        rt::detail::compile_device_rate_plan(
+            fixture.owner, 3, 2, fixture.rate_plan, fixture.bindings,
+            fixture.backends, fixture.buffers, fixture.timelines,
+            fixture.phases, plan, diagnostic),
+        rt::Status::ok) << (diagnostic.message ? diagnostic.message : "");
+    ASSERT_EQ(plan.admission_backends.size(), 2u);
+    EXPECT_EQ(plan.report.peak_global_in_flight, 3u);
+    EXPECT_EQ(plan.admission_backends[0].peak_in_flight, 2u);
+    EXPECT_EQ(plan.admission_backends[1].peak_in_flight, 1u);
+
+    fixture.backends[0].capabilities.max_in_flight_batches = 3;
+    fixture.phases[1].backend = fixture.backend;
+    fixture.buffers[1].backend = fixture.backend;
+    fixture.timelines[1].backend = fixture.backend;
+    fixture.declaration.wait_count = 1;
+    fixture.declaration.waits[0].timeline_handle = second_timeline.value;
+    second_declaration.wait_count = 1;
+    second_declaration.waits[0].timeline_handle = fixture.timeline.value;
+    EXPECT_EQ(
+        rt::detail::compile_device_rate_plan(
+            fixture.owner, 3, 2, fixture.rate_plan, fixture.bindings,
+            fixture.backends, fixture.buffers, fixture.timelines,
+            fixture.phases, plan, diagnostic),
+        rt::Status::invalid_config);
+    EXPECT_STREQ(diagnostic.message,
+                 "device-rate wait graph contains a cycle");
+}
 
 TEST(RateDispatch, PolicyIsOptInCopiedFrozenAndLegacyDispatchIsExact) {
     rt::Runtime legacy;
@@ -386,6 +579,7 @@ TEST(RateDispatch, AdmissionMatchesIndependentCompleteSupercycleSimulation) {
             {},
             rate_plan,
             {},
+            nullptr,
             dispatch_plan,
             dispatch_diagnostic),
         rt::Status::ok);
@@ -431,6 +625,7 @@ TEST(RateDispatch, AdmissionMatchesIndependentCompleteSupercycleSimulation) {
             {},
             rate_plan,
             {},
+            nullptr,
             dispatch_plan,
             dispatch_diagnostic),
         rt::Status::invalid_config);

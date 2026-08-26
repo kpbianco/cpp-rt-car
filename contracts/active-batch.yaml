@@ -1,16 +1,16 @@
 schema_version: 1
 batch:
-  id: M20-PRE-01
-  title: Expand portable fuzz static security and provenance verification
-  goal: Add one deterministic, fail-closed portable assurance lane that expands bounded fuzzing, analyzes the complete default first-party build surface, locks and checks build dependencies, generates and verifies a versioned artifact SBOM, verifies artifact manifests and provenance statements offline, and exercises offline cryptographic attestation verification from public fixture material without signing, publishing, releasing, or changing runtime behavior.
+  id: M21-01
+  title: Add device-rate model and admission
+  goal: Extend the additive C++ rate model and immutable compiled plan so opted-in HAL-v2 command-batch device phases carry one exact backend, declared batch skeleton, completion budget, bounded in-flight demand, timeline identity, and pre-registered payload-reference inventory, and so mixed CPU/device plans are admitted or rejected transactionally before start without activating device-rate dispatch or changing legacy CPU-only execution.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
-    - products/cpp-rt-car/PRD.md#cap-m20--operational-release-and-integration-hardening
-    - products/cpp-rt-car/acceptance.yaml#CAP-M20
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-20
-    - products/cpp-rt-car/risk-register.yaml#R-008
-  milestone: products/cpp-rt-car/roadmap.yaml#M20
+    - products/cpp-rt-car/PRD.md#cap-m21--device-rate-and-sampled-io-closure
+    - products/cpp-rt-car/acceptance.yaml#CAP-M21
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-21
+    - products/cpp-rt-car/risk-register.yaml#R-009
+  milestone: products/cpp-rt-car/milestones/M21.md#M21-01--device-rate-model-and-admission
   target_contracts:
     - AGENTS.md
     - contracts/active-batch.yaml
@@ -23,23 +23,22 @@ sources:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/build_tooling.md
-    - docs/testing_ci.md
-    - docs/sanitizers.md
-    - docs/security_supply_chain.md
-    - docs/threat_model.md
-    - docs/release_policy.md
-    - docs/c_abi.md
-    - docs/real_time_readiness_checklist.md
+    - docs/compiled_graph.md
+    - docs/host_runtime.md
+    - docs/device_backend.md
+    - docs/hal_v2.md
+    - docs/heterogeneous_memory.md
+    - docs/memory_plan.md
     - docs/determinism_replay.md
-    - docs/runtime_profiles.md
-    - docs/qualification.md
+    - docs/rate_telemetry.md
+    - docs/testing_ci.md
+    - docs/c_abi.md
+    - docs/release_policy.md
+    - docs/real_time_readiness_checklist.md
     - docs/portable_support_matrix.json
+    - docs/cuda_support_matrix.json
+    - docs/xdma_support_matrix.json
     - release/rtfw-release-contract.json
-    - docs/evidence/M15-01-2026-08-04.md
-    - docs/evidence/M15-02-2026-08-04.md
-    - docs/evidence/M15-03-2026-08-04.md
-    - docs/evidence/M15-04-2026-08-05.md
     - docs/evidence/M16-01-2026-08-05.md
     - docs/evidence/M16-02-2026-08-05.md
     - docs/evidence/M16-03-2026-08-05.md
@@ -52,44 +51,50 @@ sources:
     - docs/evidence/M17-06-2026-08-23.md
     - docs/evidence/M18-01-2026-08-12.md
     - docs/evidence/M19-01-2026-08-12.md
-  baseline_commit: c846cc427c93018175a69c7372c130f00c0b713b
+    - docs/evidence/M20-PRE-01-2026-08-26.md
+  baseline_commit: d463c3a6896e54d10814f1d4ed3b05d355550900
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M20-PRE-01.yaml
-  control_plane_revision: acdbdc50f66fd66f9a8e48eee75923edfd759787
+  control_plane_path: products/cpp-rt-car/batches/M21-01.yaml
+  control_plane_revision: 022786c74e853ed9a81c17c145814543d742b4e0
 dependencies:
-  - M17-06
+  - M20-PRE-01
 scope:
   allowed_paths:
     - .portfolio-harness.json
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
-    - contracts/verification.yaml
-    - contracts/verification.commands
-    - .clang-tidy
     - CMakeLists.txt
+    - tests/CMakeLists.txt
     - .github/workflows/ci.yml
-    - scripts/verify-portable-assurance.sh
-    - tools/check_static_analysis.py
-    - tools/run_fuzz_smoke.py
-    - tools/sbom.py
-    - tools/sbom_expected.json
-    - tools/provenance.py
-    - tools/release_manifest.py
+    - rt/include/rt/runtime.hpp
+    - rt/src/rate_timeline.hpp
+    - rt/src/rate_timeline.cpp
+    - rt/src/rate_dispatch.hpp
+    - rt/src/rate_dispatch.cpp
+    - rt/src/command_batch.hpp
+    - rt/src/command_batch.cpp
+    - rt/src/compiled_graph.hpp
+    - rt/src/compiled_graph.cpp
+    - rt/src/host_runtime.cpp
+    - rt/src/resource_policy.hpp
+    - rt/src/resource_policy.cpp
+    - tests/test_rate_timeline.cpp
+    - tests/test_rate_dispatch.cpp
+    - tests/test_compiled_graph.cpp
+    - tests/test_host_runtime.cpp
+    - tests/test_device_runtime.cpp
+    - tests/test_command_batch.cpp
+    - tests/test_vendor_hal_v2.cpp
+    - tests/test_memory_plan.cpp
+    - tests/test_determinism_replay.cpp
+    - tests/test_periodic_runtime.cpp
+    - tests/test_trace_noalloc.cpp
+    - tests/package_consumer/cpp_consumer.cpp
+    - tests/package_consumer/compat_consumer.cpp
+    - tests/package_consumer/package_contract.cmake
     - tools/check_docs_contract.py
     - tools/check_release_contract.py
-    - tools/portable_assurance_toolchain.json
-    - tools/static_analysis_sources.txt
-    - tests/CMakeLists.txt
-    - tests/jobqueue_fuzz.cpp
-    - tests/snapshot_fuzz.cpp
-    - tests/runtime_profile_fuzz.cpp
-    - tests/fuzz/**
-    - tests/provenance_fixtures/**
-    - tests/test_sbom.cpp
-    - tests/test_release_tools.py
-    - release/portable-assurance-policy.json
-    - release/schemas/**
     - release/rtfw-release-contract.json
     - README.md
     - docs/CURRENT_STATE.md
@@ -97,22 +102,49 @@ scope:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/build_tooling.md
+    - docs/compiled_graph.md
+    - docs/host_runtime.md
+    - docs/device_backend.md
+    - docs/hal_v2.md
+    - docs/heterogeneous_memory.md
+    - docs/memory_plan.md
+    - docs/determinism_replay.md
+    - docs/rate_telemetry.md
     - docs/testing_ci.md
-    - docs/sanitizers.md
-    - docs/security_supply_chain.md
-    - docs/threat_model.md
-    - docs/release_policy.md
     - docs/real_time_readiness_checklist.md
-    - docs/portable_assurance.md
-    - docs/evidence/M20-PRE-01-*.md
+    - docs/evidence/M21-01-*.md
   forbidden_paths:
     - abi/
-    - rt/include/
-    - rt/src/
-    - src/
+    - rt/include/rt/c_api.h
+    - rt/include/rt/device_abi.h
+    - rt/include/rt/extension_abi.h
+    - src/c_abi.cpp
+    - rt/include/rt/config.hpp
+    - rt/include/rt/profile.hpp
+    - rt/include/rt/cuda_backend.hpp
+    - rt/include/rt/xdma_backend.hpp
+    - rt/src/runtime_profile.cpp
+    - rt/src/cross_rate_data.cpp
+    - rt/src/cross_rate_data.hpp
+    - rt/src/rate_telemetry.cpp
+    - rt/src/rate_telemetry.hpp
+    - rt/src/telemetry.cpp
+    - rt/src/telemetry.hpp
+    - rt/src/observability_export.cpp
+    - rt/src/snapshot_codec.cpp
+    - rt/src/snapshot_codec.hpp
+    - rt/src/device_manager.cpp
+    - rt/src/device_manager.hpp
+    - rt/src/hal_v2.cpp
+    - rt/src/hal_v2.hpp
+    - rt/src/heterogeneous_memory.cpp
+    - rt/src/heterogeneous_memory.hpp
+    - rt/src/mock_device.cpp
+    - rt/src/cuda_backend.cpp
+    - rt/src/cuda_driver.cpp
+    - rt/src/xdma_backend.cpp
+    - rt/src/xdma_linux.cpp
     - core/
-    - include/
     - hal/
     - gpu/
     - samples/
@@ -121,189 +153,120 @@ scope:
     - configs/
     - profiles/
     - qualification/
-    - cmake/
-    - external/
-    - .gitmodules
-    - CMakePresets.json
-    - vcpkg.json
-    - VERSION.txt
-    - LICENSE
-    - CHANGELOG.md
-    - SECURITY.md
-    - .github/workflows/release.yml
+    - release/keys/
+    - release/signatures/
     - .github/workflows/cuda-qualification.yml
     - .github/workflows/xdma-qualification.yml
-    - .github/workflows/autotune-mapping.yml
-    - .github/workflows/autotune-smoke.yml
-    - .github/workflows/scaling-smoke.yml
-    - .github/workflows/docs-contract.yml
+    - .github/workflows/release.yml
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
-    - tools/qualification.py
-    - tools/check_hardware_evidence.py
-    - tools/stage_release_artifacts.py
-    - tools/extract_release_archive.py
-    - tools/store_repro_build.py
-    - samples/cuda_qualification.cpp
-    - samples/xdma_qualification.cpp
-    - release/keys/
-    - release/signatures/
-    - tests/provenance_fixtures/private*
-    - tests/provenance_fixtures/**/*.key
     - docs/evidence/M15-*.md
     - docs/evidence/M16-*.md
     - docs/evidence/M17-*.md
     - docs/evidence/M18-*.md
     - docs/evidence/M19-*.md
+    - docs/evidence/M20-*.md
+    - VERSION.txt
+    - LICENSE
+    - CHANGELOG.md
+    - SECURITY.md
+    - include/simcore/**
+    - rt/include/rt/scheduler.hpp
+    - rt/include/rt/fiber_pool.hpp
+    - rt/include/rt/plugin_api.h
+    - rt/src/scheduler.cpp
+    - rt/src/fiber_pool.cpp
+    - rt/src/plugin_manager.cpp
 acceptance:
-  - The implementation begins from an initially clean target at exact default-branch commit `c846cc427c93018175a69c7372c130f00c0b713b`, the merged M17-06 pull request 240. All retained M15-01 through M19-01 evidence named above is present and unchanged. Governance and current-state documents record that M17-06 is merged and the portable M17 software path exists, while retaining M17-05 as failed review evidence and not inventing an absent final CI check count, separate human-review object, physical CUDA/XDMA result, CAP-M17 manual smoke, or qualification result.
-  - The batch changes verification, build/test wiring, dependency pins, CI, documentation, and retained M20-PRE-01 evidence only. It changes no production C/C++ source or public header, stable C ABI v8 export/fingerprint/SONAME, device ABI v1, extension ABI v1, HAL contract, Runtime status, runtime or artifact schema already owned by another milestone, installed target/header/alias inventory, release version, support matrix, qualification schema/workflow, license, or prior evidence.
-  - One documented noninteractive `scripts/verify-portable-assurance.sh` entry point exposes independently runnable `dependencies`, `static`, `fuzz`, `artifacts`, and cumulative `all` modes. It accepts only repository and explicit build/output paths, writes only below an explicit build/output directory, uses no credential, device, privileged host operation, Unreal tree, timing threshold, network service during artifact/attestation verification, tag, release, or publication API, and returns nonzero on every failed subgate without converting a missing tool or skipped check into a pass.
-  - The Clang 14 libFuzzer build contains the existing supported snapshot/checkpoint-input-log parser harness, a new supported runtime-profile parser harness, and the existing experimental bounded-job-queue harness. Each harness has a small reviewed immutable seed corpus; snapshot and profile dictionaries cover their version, magic, required-key, length, and malformed-boundary tokens. The runner first replays every named seed, then copies the corpus to the build tree and performs a fixed-seed, fixed-run-count, fixed-max-input ASan/UBSan mutation run with source corpora read-only and crash/timeout/oom artifacts confined to the explicit output directory.
-  - Snapshot and runtime-profile fuzz inputs are bounded at their public 64 KiB ceilings and each receives at least 20,000 mutation executions; the experimental job-queue input is bounded at 4 KiB and receives at least 10,000. Per-input timeout and memory limits are safety ceilings, not performance acceptance. Every nonempty, empty, truncated, maximum-size, invalid-UTF-8, duplicate/unknown-key, incompatible-version, checksum/length, trailing-data, and excessive-nesting seed replays without sanitizer finding, unbounded allocation from encoded lengths, exception escape, process hang, or partial profile-output publication. Job-queue results are labeled experimental and establish no supported Runtime parser claim.
-  - Fuzzer tool version, compile/link flags, seed/dictionary SHA-256 values, replay count, mutation count, maximum length, random seed, exit status, and produced failure-artifact inventory are machine-recorded. A bounded deterministic smoke is not called continuous fuzzing, proof of vulnerability absence, or coverage of every parser; external long-running fuzz service integration remains later work.
-  - A checked-in static-analysis policy and exact sorted source manifest cover every first-party translation unit emitted by a clean default non-experimental, tests-off, examples-off, demo-off Clang 14 compilation database, including the 1.x compatibility archive. The checker fails if the compile database adds, removes, duplicates, redirects, or omits a first-party translation unit, if an entry resolves outside the repository, or if generated/external code is treated as first-party evidence.
-  - Static analysis runs deterministic Clang 14 analyzer core, C++, dead-code, security, Unix, and variadic-list checks with warnings treated as errors over that complete manifest and project headers. Any excluded check is named and justified in policy; the known padding-optimization diagnostic may be excluded because reordering frozen/public compatibility records is outside scope, but there is no blanket warning baseline, wildcard `NOLINT`, unchecked generated suppression, analyzer timeout-as-pass, or silent partial-source success. Compiler warnings-as-errors and include-what-you-use remain separate signals and are not relabeled as this analyzer result.
-  - Build inputs fail closed on mutable or incompletely identified dependencies. RapidCheck uses a reviewed full 40-character commit rather than `master`; the GoogleTest fallback archive has a reviewed SHA-256; the checked-out GoogleTest submodule, vcpkg baseline, FetchContent declarations, and every workflow action are reconciled against an exact versioned policy. Missing, uninitialized, dirty, extra, mismatched, mutable-ref, hashless-download, abbreviated-commit, or policy-unlisted dependencies fail. This pinning establishes input identity, not vulnerability absence or legal approval.
-  - Pull-request dependency review becomes blocking at the documented severity threshold and may not use `continue-on-error`, a success-for-skipped fallback, or write permissions. It supplements the deterministic repository dependency check; because it depends on hosted GitHub comparison data, it is not represented as an offline or local scan.
-  - >-
-    `tools/sbom.py` produces and verifies a canonical versioned SPDX 2.3 JSON
-    SBOM for an explicitly staged default package candidate and its exact
-    source/dependency inputs. The selected official schema or validator
-    version, source, license, and SHA-256 are pinned for offline use. The
-    document identifies RTFW/version/source commit, each staged payload
-    artifact with byte length and SHA-256, the exact resolved
-    GoogleTest/RapidCheck/vcpkg build inputs, and relationships that distinguish
-    shipped content from build/test-only dependencies; it does not claim that
-    test dependencies ship in the SDK.
-  - SBOM creation is sorted and byte-deterministic for identical inputs. It contains no hostname, workspace/build absolute path, runner identifier, random UUID, wall-clock observation, credential, or uncontrolled timestamp; any required creation time is deterministically derived from the supplied source identity and documented. Two independent output directories produce byte-identical SBOMs. Verification rejects malformed/duplicate-key/trailing JSON, schema or namespace drift, duplicate/unsafe/noncanonical paths, symlinks, missing/unlisted components or artifacts, wrong package/version/source/dependency relationship, absolute paths, size/digest mutation, and extra files outside the explicit policy.
-  - >-
-    `tools/release_manifest.py` verification gains an explicit
-    expected-source-commit input and fail-closed bounded JSON/inventory
-    handling. A merely well-formed arbitrary 40-character commit is
-    insufficient. The staged archive, checksum sidecar, SBOM, and provenance
-    statement are all regular, non-symlink files covered by the final manifest;
-    missing, extra, duplicate, reordered, escaping, aliased, size-mutated,
-    digest-mutated, self-listed, wrong-version, or wrong-source inputs fail
-    before extraction or consumer use.
-  - >-
-    `tools/provenance.py` creates a canonical unsigned in-toto Statement v1
-    verification record for the local candidate, using a versioned documented
-    predicate. Its exact subjects bind the staged package payload/checksum and
-    SBOM bytes; its predicate binds project, package version, complete source
-    commit, deterministic source-tree identity including dirty-state
-    classification, build type/configuration, compiler/CMake/tool identities,
-    and resolved dependency inputs. Same inputs yield byte-identical
-    statements; volatile host/time/path data is absent. The file is visibly
-    labeled unsigned and verification-only, is not a DSSE envelope, and cannot
-    be reported as authenticated provenance or any SLSA build level.
-  - Offline statement verification uses only the supplied artifact directory, manifest, SBOM, statement, policy, and pinned local schema material. It recomputes every subject/manifest digest and enforces exact project, version, source commit/tree state, builder-policy, build parameters, dependency identities, predicate type, canonical encoding, and inventory. Artifact, SBOM, subject, predicate, source, builder, dependency, path, duplicate-key, unknown-critical-field, and canonical-byte mutations each fail without network access or output mutation.
-  - Offline cryptographic-attestation verification is exercised against at least one small, pre-generated, provenance-documented in-toto/DSSE or Sigstore bundle fixture with its exact artifact, public trust material, expected repository/source/workflow/predicate policy, fixture source/license, and file SHA-256 values retained. The verifier executable/version and distribution digest are pinned. No private key, signing token, OIDC request, signing operation, attestation upload/download, trust-root refresh, or network lookup occurs in the verification phase. Artifact, payload, signature/bundle, public root, repository, source digest/ref, workflow identity, issuer, and predicate mutations fail.
-  - Fixture verification proves only that the pinned offline verifier rejects/accepts the retained fixture under the retained public trust snapshot. It does not authenticate this batch's unsigned candidate, prove current revocation state, authorize the fixture producer, or establish RTFW release provenance. Documentation and machine output distinguish content/digest verification, cryptographic fixture verification, signer identity policy, trust-root age, and the unperformed target signing step.
-  - >-
-    The canonical SPDX SBOM, unsigned provenance statement, manifest, analyzer
-    report, dependency report, and fuzz report are generated only as candidate
-    verification outputs below build/CI evidence storage. They are not checked
-    in as a release, attached to a tag, uploaded to a public release, signed,
-    published, installed system-wide, or used to change support or
-    qualification state. CI workflow permissions remain `contents: read` with
-    no `id-token: write`, `attestations: write`, `packages: write`, or
-    `contents: write` in the M20-PRE-01 path.
-  - Focused tool tests cover deterministic generation and every malformed, bounded-resource, path, symlink, inventory, dependency, SBOM, manifest, unsigned-statement, signed-fixture-policy, and mutation rejection above, including recovery after failure and two independent temporary roots. Tests use only disposable directories, never overwrite inputs, never follow a symlink, never log artifact contents or credentials, and clean partial outputs after failure/cancellation.
-  - The default Release package is built, archived, staged, SBOM/provenance/manifest checked, extracted, relocated, and consumed without experimental code, CUDA toolkit, GPU, XDMA node, Unreal, controlled timing, signing secret, or publication. The exact default installed target/header/alias inventory, C ABI v8 70-export fingerprint and SONAME 8, device/extension ABI declarations, release 1.2.1, support matrices, qualification state, and Apache-2.0 remain unchanged.
-  - Target governance, current state, handoff, architecture, roadmap, build/testing/sanitizer/security/threat/release documentation, deterministic documentation/release checks, and retained `docs/evidence/M20-PRE-01-<date>.md` describe the exact implemented gates and their limits. Complete focused and full local validation, mandatory CI, and human security/supply-chain, analyzer/fuzz, package/compatibility, and evidence-claim review pass before merge. M20-PRE-01 does not complete CAP-M20; controlled performance, continuous service fuzzing, target signing/authenticated provenance, soak, release approval, Unreal, and hardware/RT qualification remain separate.
+  - The implementation begins from an initially clean target at exact default-branch commit `d463c3a6896e54d10814f1d4ed3b05d355550900`, the merged M20-PRE-01 pull request 241. Its retained M15 through M20 evidence is present and unchanged, and governance records M20-PRE-01 as merged without inventing an absent physical, RT, Unreal, signing, release, publication, deployment, or production result.
+  - The installed additive C++ source API can associate an already registered device command-batch phase with one rate domain and copied bounded device-rate policy metadata. The metadata includes a positive completion budget, a positive bounded per-phase in-flight demand, and an explicit fixed payload-reference role for every pre-registered buffer slice whose identity must survive into later completion/cross-rate work. It introduces no raw address, arbitrary completion-owned dynamic byte array, vendor object, stable-C-ABI field, schema-7 key, or device-ABI-v1 change.
+  - One device-rate phase has exactly one immutable phase owner, rate domain, backend, copied command-batch declaration, backend-local wait/signal timeline set, completion budget, in-flight demand, and payload-reference inventory. Runtime derives backend, command count, buffer slices, access/synchronization requirements, and timeline handles from the already copied M17 declaration; a second contradictory command or buffer declaration is forbidden.
+  - Device-rate opt-in is limited in this batch to registered HAL-v2 command-batch phases whose backend exposes the copied command/timeline capability snapshot. Legacy device-command phases and unchanged device-ABI-v1 registration remain usable by ordinary frame execution but are rejected from active device-rate admission with a deterministic diagnostic. This support boundary is documented and is not called a device-ABI incompatibility.
+  - Reference timeline compilation retains CPU and device records and appends enough immutable inspection data to identify phase kind, backend, declared batch skeleton, completion deadline/budget, per-phase in-flight demand, backend-local timeline set, and payload-reference identities without retaining a caller span or vendor pointer. Exact equal-time ordering remains rate-domain registration order, compiled phase order, and substep ordinal.
+  - Mixed-plan finalization validates owner/generation/kind for every phase, rate domain, backend, buffer, memory domain, and timeline reference; rejects foreign, stale, duplicate, rebound, missing, cross-backend, non-command-capable, malformed, zero-budget, overflow, and over-capacity combinations; and publishes no partial plan or changed Runtime state on failure.
+  - Admission is a checked integer simulation over the exact reference supercycle. CPU mandatory records retain the existing conservative single-lane declared-budget rule. Each device record consumes one in-flight slot over its declared completion interval. Per-phase overlap may not exceed that phase's declared maximum, per-backend overlap may not exceed backend `max_in_flight_batches`, global device overlap may not exceed Runtime outstanding capacity, and completions sharing an exact poll boundary may not exceed the minimum Runtime/backend completion-batch capacity. CPU and distinct backends may otherwise overlap, and optional records never make a mandatory plan appear feasible.
+  - A device record's completion deadline is the earlier of its rate release deadline and checked release-plus-completion-budget. Completion intervals are half-open, release and completion ties have one documented deterministic order, substeps each consume one batch unless the copied declaration explicitly proves otherwise, and supercycle wrap includes outstanding work from the previous cycle. Overflow, a completion beyond the representable repeating horizon, or nonzero work that cannot drain within the bounded cyclic model fails finalization.
+  - Admission validates the copied command count, wait/signal count, registered-buffer footprint, backend-local timeline identity, backend capability limits, Runtime queue/outstanding/completion-batch bounds, and timestamp-domain identity required for later completion correlation. It rejects a cyclic same-backend wait graph, an external or cross-backend wait that cannot be proven available, ambiguous timeline progress, or a payload reference not covered exactly by the copied batch declaration.
+  - Finalized device admission has an inspectable deterministic report containing per-backend capacity and peak demand, per-device-phase demand and completion budget, every accepted interval, exact constraining capacity, and the first rejected reference identity/diagnostic. The report is Runtime-instance-owned, read-only after finalization, stable across equivalent construction order, and contains no addresses, payload bytes, vendor handles, wall-clock observations, or timing measurements.
+  - Rate-plan, graph/replay compatibility identity, logical control-ledger accounting, and MemoryPlan include every new semantic descriptor and configuration-time storage exactly once. A no-device plan and an active CPU-only plan retain their exact pre-M21-01 identity and behavior; device metadata changes invalidate an otherwise incompatible explicit mixed plan without changing checkpoint/input-log or rate-action schema versions in this batch.
+  - M21-01 is model, compilation, and admission only. Host-driven `step()` and self-paced execution do not dispatch a rate-triggered device batch, poll a new completion, publish a device payload, create a sampled-I/O channel, alter late/shedding telemetry, or add a Runtime/backend lane. Existing ordinary device phases retain their pre-M21 execution behavior, and any attempted active mixed execution after finalization fails before invoking a device provider or vendor callback until M21-02 supplies dispatch.
+  - Construction, replacement, failed finalization, inspection, start rejection, checked stop, and destruction are bounded and isolated per Runtime. All new dynamic storage is acquired only while configuring/finalizing, included once in existing M15 accounting/MemoryPlan rows, and never allocated, resized, mutated, or scanned through an unbounded collection on any post-start path.
+  - Default construction, aggregate/source compatibility, the installed C++ consumer, CPU-only M16 reference/admission/dispatch/cross-rate/shedding behavior, M17 device registration and ordinary batch execution, multiple Runtime instances, deterministic replay, no-allocation checks, sanitizers, and checked cleanup remain passing.
+  - Stable C ABI v8 with exactly 70 exports and its frozen fingerprint, SONAME 8, device ABI v1, extension ABI v1, HAL core v2 and both extension v1 contracts, runtime-profile schema 7 and 25 keys, observability/checkpoint/input-log/rate-action schemas, Runtime status values, installed target/header/alias inventory, release 1.2.1, support matrices, qualification state, and Apache-2.0 remain unchanged.
+  - Target governance, current state, handoff, component contracts, release digest ledger, and retained `docs/evidence/M21-01-<date>.md` state the exact model/admission-only boundary. Focused and full local verification, mandatory hosted CI, and human public-API, admission-arithmetic, ownership, capacity, identity/accounting, compatibility, and claim review pass before merge. M21 and CAP-M21 remain incomplete after this batch.
 validation:
   local:
     - git status --short --branch
-    - test "$(git rev-parse HEAD)" = "c846cc427c93018175a69c7372c130f00c0b713b"
-    - git merge-base --is-ancestor c846cc427c93018175a69c7372c130f00c0b713b HEAD
-    - test -f docs/evidence/M17-06-2026-08-23.md
+    - test "$(git rev-parse HEAD)" = "d463c3a6896e54d10814f1d4ed3b05d355550900"
+    - git merge-base --is-ancestor d463c3a6896e54d10814f1d4ed3b05d355550900 HEAD
+    - test -f docs/evidence/M20-PRE-01-2026-08-26.md
     - ./scripts/agent-verify.sh contract
-    - python3 tests/test_release_tools.py -k PortableAssurance
-    - CC=clang-14 CXX=clang++-14 cmake -S . -B build/m20-pre-01-static -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_DOWNLOAD_GTEST=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DSIM_WERROR=ON
-    - python3 tools/check_static_analysis.py --compile-commands build/m20-pre-01-static/compile_commands.json --source-manifest tools/static_analysis_sources.txt --clang-tidy clang-tidy-14
-    - CC=clang-14 CXX=clang++-14 cmake -S . -B build/m20-pre-01-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=OFF -DSIM_BUILD_FUZZERS=ON -DSIM_DOWNLOAD_GTEST=OFF -DSIM_SANITIZERS= -DSIM_WERROR=ON
-    - cmake --build build/m20-pre-01-fuzz --target snapshot_fuzz runtime_profile_fuzz jobqueue_fuzz --parallel 2
-    - python3 tools/run_fuzz_smoke.py --build-dir build/m20-pre-01-fuzz --corpus-root tests/fuzz --output-dir build/m20-pre-01-fuzz-artifacts --seed 424242
-    - python3 tools/sbom.py verify-dependencies --policy tools/sbom_expected.json
-    - ./scripts/verify-portable-assurance.sh artifacts --build-dir build/m20-pre-01-artifacts --source-commit "$(git rev-parse HEAD)"
-    - ./scripts/verify-portable-assurance.sh all --build-dir build/m20-pre-01-all --source-commit "$(git rev-parse HEAD)"
     - ./scripts/agent-verify.sh quick
+    - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
+    - cmake --build build/agent-full --parallel 2
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='RateTimeline.*Device*:RateDispatch.*Device*:CompiledGraph.*DeviceRate*:HostRuntime.*DeviceRate*:DeviceRuntime.*Rate*:CommandBatch.*Rate*:VendorHalV2.*Rate*:MemoryPlan.*DeviceRate*:DeterminismReplay.*DeviceRate*:PeriodicRuntime.*DeviceRate*:TraceNoAlloc.*DeviceRate*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm21_device_rate_model|package_consumer'
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
     - git diff --check
-    - git diff --name-only c846cc427c93018175a69c7372c130f00c0b713b
+    - git diff --name-only d463c3a6896e54d10814f1d4ed3b05d355550900
   focused_tests_to_add:
-    - immutable seed replay and fixed-seed bounded ASan/UBSan mutation runs for snapshot/checkpoint-input-log, runtime-profile, and experimental job-queue harnesses, with exact corpus/dictionary digests and failure-artifact isolation
-    - runtime-profile fuzz transactionality over empty, malformed, invalid UTF-8, duplicate/unknown key, incompatible version, length, trailing, nesting, and maximum-size inputs without partial output mutation or exception escape
-    - exact compilation-database-to-source-manifest equality, repository containment, duplicate/omission/addition rejection, exact Clang 14 policy, warnings-as-errors, and explicit exclusion enforcement
-    - missing, dirty, extra, mutable, abbreviated, hashless, mismatched, and policy-unlisted submodule, FetchContent, vcpkg, and workflow-action dependency rejection with recovery on correction
-    - canonical SPDX 2.3 schema validation, byte-repeat generation, exact shipped-versus-build/test relationship checks, and mutation rejection for paths, symlinks, duplicate keys, namespace/version/source, component inventory, lengths, digests, and volatile host metadata
-    - release-manifest expected-source enforcement plus bounded strict JSON, exact final artifact inventory, path/symlink/alias/self-reference, size/digest, version/source, missing/unlisted, and nonmutation tests
-    - canonical unsigned in-toto Statement v1 generation and offline subject/predicate/source/tree/build/tool/dependency verification, including byte-repeat output and explicit authentication-false result
-    - offline cryptographic verification of one retained public-material signed fixture plus artifact, payload, signature/bundle, trust-root, repository, source digest/ref, workflow, issuer, and predicate negative mutations; no signing/private-key/network path exists
-    - two-root isolation, failed-output cleanup, cancellation recovery, input immutability, bounded document/file/count/byte limits, and diagnostics that disclose paths/reasons but not artifact contents or credentials
-    - default package archive, staged candidate, SBOM, unsigned statement, final manifest, extraction, relocated consumer, exact installed inventory, frozen ABI/SONAME, and no-release/no-signing workflow-permission assertions
+    - additive device-rate registration/default construction and pre-M21 positional aggregate/source compatibility in direct, preferred installed, and compatibility installed C++ consumers
+    - mixed CPU/HAL-v2 command-batch timeline compilation with exact backend, copied batch skeleton, completion budget, in-flight demand, buffer-slice/payload role, timeline, phase, domain, release, and substep inspection
+    - independent checked-integer cyclic admission oracle agreement for harmonic, non-harmonic, simultaneous, co-prime, substep, half-open tie, previous-cycle wrap, distinct-backend overlap, and exact-capacity plans
+    - boundary cases for Runtime outstanding, backend in-flight, command, wait, signal, timeline, registered-buffer, payload-reference, completion-poll, release-count, supercycle, completion-budget, and integer capacities
+    - transactional rejection of zero/overflowed budgets, foreign/stale/wrong-kind handles, duplicate/rebound ownership, legacy or non-command-capable device phases, cross-backend buffers/timelines, unsupported timestamp domains, cyclic/unprovable waits, ambiguous signals, and declaration/payload mismatch
+    - per-backend peak-demand and per-reference interval report agreement, stable first-failure diagnostics, deterministic equivalent-plan output, and absence of address/payload/vendor/wall-clock data
+    - exact graph/replay identity sensitivity and control-ledger/MemoryPlan reconciliation for every device-rate semantic field, with unchanged no-device and CPU-only identity fixtures
+    - proof that model admission performs no device provider, submit, poll, cancel, vendor, timeline, payload-publication, telemetry-schema, sampled-I/O, or new-thread action and that active mixed execution fails before callback until M21-02
+    - failed-finalize correction/retry, repeated lifecycle, two-runtime handle/storage/report isolation, checked cleanup, no post-start ordinary allocation, and unchanged ordinary device-batch execution
+    - full CPU-only M16, M17 HAL/device-ABI-v1, extension ABI, deterministic replay, package inventory, exact C ABI, and release-contract regression coverage
   required_ci:
-    - A required Ubuntu 22.04 Clang 14 portable-assurance job runs the exact dependency, static, all-three-fuzzer, SBOM, manifest, unsigned-statement, offline signed-fixture, and mutation gates with pinned tools, fixed inputs/counts, read-only repository permissions, no credentials, and retained machine-readable reports/failure artifacts.
-    - The snapshot and runtime-profile fuzzers execute with libFuzzer plus AddressSanitizer and UndefinedBehaviorSanitizer; job-queue fuzzing remains explicitly experimental. A crash, sanitizer finding, timeout, oom, corpus mutation, missing report, or skipped harness fails the required job.
-    - Static analysis covers the exact default first-party compilation manifest under Clang 14 and fails on any diagnostic, coverage drift, unapproved exclusion, missing tool, version drift, or partial result. Existing GCC/Clang/MSVC warnings-as-errors remain required independently.
-    - Pull-request dependency review is required and blocking with no `continue-on-error`; the deterministic repository dependency/pin check runs on push and pull request so a skipped hosted comparison is never the sole dependency-security evidence.
-    - A default Release package candidate is built without experimental or vendor-device requirements, then staged, given two independently generated byte-identical SPDX SBOMs, bound by an unsigned provenance statement and expected-source manifest, verified offline, extracted, and consumed. Candidate outputs may be retained as CI evidence only and are never attached to a tag or GitHub Release.
-    - Workflow-policy checks fail if the M20-PRE-01 path gains `id-token`, attestation, package, or content write permission; invokes a signing/attestation-create/release/publish command; touches the release workflow; downloads an attestation or trust root during the offline phase; or contains a private key/signing secret.
-    - Existing Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off builds with AddressSanitizer/UndefinedBehaviorSanitizer, Windows Server 2022 MSVC v143 Debug and RelWithDebInfo, unified-executor ThreadSanitizer, determinism artifact exchange, embedding/add-subdirectory, installed package/archive/relocation/non-default-layout, exact C ABI/SONAME, vendor compile-only, documentation/release-contract, autotune, and scaling gates remain required and green.
-    - >-
-      The assurance-profile performance-regression disposition is explicit: no
-      production/runtime source changes are permitted, deterministic
-      operation/file/source counts and existing scaling gates must not regress,
-      and no elapsed-time, controlled-host, worst-case, RT1, or RT2 threshold is
-      introduced or waived by this batch.
+    - Documentation contract workflow including truthful M21 model/admission-only claims, quick-start, release contract, frozen C ABI, exact SDK inventory, and support-matrix checks
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of mixed-plan validation, cyclic admission, overflow, identity, accounting, inspection, retry, and lifecycle
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical integer admission/order/report results and passing installed consumers
+    - Unified executor GCC ThreadSanitizer job covering two-runtime configuration/finalization/inspection/start-rejection/ordinary-device regressions while proving M21-01 adds no active device lane
+    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged no-device/CPU-only fixtures plus equivalent mixed-plan identity and report results
+    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and existing portable assurance/autotune/scaling smoke jobs
+    - Existing M16 no-allocation/rate/replay gates, M17 v1/HAL-v2/batch/timeline/vendor gates, M15 accounting/rollback gates, and M20 portable assurance lane; no device-rate execution, hardware, controlled timing, or performance threshold is authorized
   manual:
-    - Human fuzz/analyzer review must approve the supported-versus-experimental harness labels, seed/dictionary coverage, fixed bounds, complete default source manifest, exact Clang 14 checks, every named exclusion, absence of broad suppressions, and the distinction between a bounded smoke and continuous fuzzing or vulnerability absence.
-    - Human security and supply-chain review must approve all immutable dependency/action/tool/schema pins, the blocking dependency-review severity policy, parser/file/resource bounds, path/symlink/TOCTOU handling, diagnostics, fixture source/license, verifier distribution digest, public trust snapshot, signed-fixture identity policy, and proof that no private key, credential, signing, online lookup, or publication path exists.
-    - Human SBOM/provenance review must confirm exact artifact/component relationships, shipped-versus-build/test classification, source/tree/build/tool/dependency binding, canonical deterministic fields, final manifest coverage, and the explicit separation between unsigned target content verification and cryptographic verification of a non-target fixture. Neither result may be called authenticated target provenance, SLSA level, reproducible build, signed release, or current revocation proof.
-    - Human package, compatibility, and claim review must confirm unchanged production source, installed SDK, stable C ABI v8/70 exports/fingerprint/SONAME 8, device/extension ABI, schemas, version, license, support and qualification matrices, release workflow, retained prior evidence, and no implication of Unreal, physical hardware, HIL, field, controlled timing, RT1/RT2, release, deployment, or production readiness.
-    - A maintainer must separately authorize any commit, push, pull request, protected-branch merge, release, deployment, setting change, or external publication. This contract-generation request authorizes none of those actions and no agent may waive a failed gate.
+    - Human review must confirm the additive C++ descriptor/query shape, single source of truth from the copied M17 command-batch declaration, half-open cyclic admission semantics, conservative capacity rule, exact ownership/timestamp/timeline validation, identity/accounting preservation, deterministic diagnostics, and M21-02 dispatch boundary.
+    - The reviewer must confirm that declared completion budgets and backend capabilities are admission inputs rather than measured WCET or support evidence, and that no fake driver, hosted runner, or compiled report is described as physical CUDA, XDMA, DAC/DAQ, HIL, RT1, or RT2 validation.
 risk:
   class: high
   hazards:
-    - fixed-run fuzz smoke and hand-selected corpora can miss deep parser states, platform-specific undefined behavior, concurrency faults, or newly added unregistered input surfaces while appearing comprehensive
-    - a writable source corpus, time-based fuzz budget, unpinned compiler, nondeterministic seed, or swallowed sanitizer exit can make failures irreproducible or falsely green
-    - compilation-database drift, excluded translation units, external/generated warning suppression, broad NOLINT use, analyzer version drift, or public-layout padding noise can either hide defects or pressure an out-of-scope ABI change
-    - a pinned dependency or action can still be vulnerable, malicious, withdrawn, license-incompatible, or compromised; identity and immutability are not security clearance
-    - an SBOM can be schema-valid yet omit a build input, mislabel a test dependency as shipped, describe the source tree rather than the staged package, or contain volatile identifiers that defeat deterministic comparison
-    - manifest and provenance cycles, arbitrary full source commits, dirty-tree ambiguity, path aliases, symlinks, duplicate JSON keys, file replacement between validation and hashing, or unbounded trees can bind the wrong bytes
-    - an unsigned in-toto statement can be mistaken for authenticated provenance, a signed third-party fixture can be mistaken for a signed RTFW artifact, and an offline trust-root snapshot cannot reveal later revocation
-    - fixture generation or verifier bootstrap can accidentally retain a private key, invoke OIDC/signing, depend on online lookup during verification, or grant workflow write permissions
-    - CI evidence upload can be mislabeled as public release publication, and candidate archives/SBOMs/statements can be mistaken for released, reproducible, supported, or production artifacts
-    - broad checker, release-digest, CMake, or documentation edits can drift the default package, ABI, existing verification commands, M17-05 retained failure, support matrices, qualification boundaries, or release workflow
+    - a naive interval model can accept a plan that exceeds backend in-flight or completion-poll capacity across simultaneous releases or supercycle wrap
+    - duplicating the M17 batch/buffer/timeline declaration in a second rate API can permit contradictory ownership or payload identity
+    - ambiguous completion-budget, deadline, tie, substep, optional-record, or cyclic-wait semantics can make independent admission implementations disagree
+    - a device phase can retain a foreign, stale, cross-backend, wrong-kind, or unsupported command/timestamp/timeline reference while still producing a plausible plan
+    - admitting device records can accidentally route them through the CPU dispatcher or ordinary frame path before M21-02 supplies bounded submission/completion semantics
+    - new configuration/report storage can escape M15 accounting, mutate after finalization, allocate after start, leak across runtimes, or perturb no-device identity
+    - public aggregate edits can break 1.x C++ source consumers even when stable C and device ABIs remain unchanged
+    - a static compiled plan can be mislabeled as measured device performance, active device-rate execution, physical HIL, or RT qualification
   stop_conditions:
-    - the exact baseline is unavailable or initially dirty, commit `c846cc427c93018175a69c7372c130f00c0b713b` is not the default-branch M17-06 pull request 240 result, any named retained evidence is missing/modified, or target history no longer supports the stated M17-06/M17-05 distinction
-    - credible fuzz or static closure requires changing production C/C++ code, a public header/layout, ABI/schema/status, installed package inventory, support matrix, qualification path, release version, or license instead of a separately approved remediation batch
-    - the complete default first-party compilation surface cannot be enumerated and analyzed with one pinned available toolchain, or a required diagnostic can pass only through a broad suppression, baseline waiver, omitted source, timeout, or warnings-not-errors policy
-    - any FetchContent/submodule/vcpkg/workflow/tool/schema input required by the gate cannot be identified by a reviewed immutable commit or digest and reconciled to its source and license
-    - the staged artifact set and shipped-versus-build/test dependency relationships cannot be represented and verified deterministically in the selected versioned SPDX format without omitting or guessing a component
-    - the manifest, SBOM, or provenance verifier cannot bind exact regular-file bytes, expected source identity, safe relative paths, bounded inventory, and deterministic canonical fields without following symlinks, trusting volatile host data, or accepting an arbitrary source commit
-    - no suitably licensed and provenance-documented pre-generated signed fixture plus public trust material and pinned verifier can perform real cryptographic verification and required negative mutations offline, or content verification cannot be distinguished from signer authentication and trust freshness
-    - implementation or validation requires a private key, signing secret, OIDC token, credential, network lookup during artifact/attestation verification, write permission, attestation creation, tag, release workflow, publication, release, deployment, production access, Unreal tree, physical device, privileged host mutation, or controlled timing runner
-    - any required focused, full, package, ABI, analyzer, sanitizer/fuzz, dependency, SBOM, provenance, offline-fixture, CI, or human review gate genuinely fails and cannot be repaired within allowed paths without weakening, skipping, or relabeling it
-    - a required source, tool, fixture, schema, policy, test, workflow, documentation, governance, checker, digest, or evidence change falls outside allowed paths or enters a forbidden path
+    - the exact target baseline is unavailable, dirty, or does not contain merged M20-PRE-01 evidence and the preserved M16/M17 implementation surfaces
+    - implementation requires changing C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL version contracts, Runtime statuses, artifact/runtime schemas, installed inventory, support matrices, qualification state, release version, license, or prior evidence
+    - the same copied M17 command-batch declaration cannot remain the sole source for backend, commands, buffers, synchronization, and timeline identity
+    - exact bounded cyclic admission cannot model simultaneous releases and previous-cycle outstanding work with checked integer arithmetic and deterministic tie rules
+    - accepting a mixed plan would require active device submit/poll/cancel, payload publication, sampled-I/O semantics, late/shedding telemetry changes, a new lane/thread, or any M21-02 through M21-05 behavior
+    - configuration/report storage cannot remain bounded, Runtime-instance-owned, exactly accounted, immutable after finalization, and allocation-free after successful start
+    - credible validation requires timing sleeps/tolerances, a physical CUDA/XDMA/DAC/DAQ device, privileged or controlled host, Unreal, secrets, signing, release, deployment, or production access
+    - any required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
+    - target contracts at the exact baseline contradict this model/admission-only vertical or require a new product decision about payload bytes, sampled-I/O, dispatch, completion, late actions, or qualification
 rollback:
-  strategy: Revert the fuzz harness/corpora, static policy/manifest/runner, dependency pins and policy, SBOM/provenance/manifest tooling and public-only fixtures, portable-assurance script/CI wiring, documentation/governance, release-contract digests, and M20-PRE-01 evidence as one coherent batch. Remove only generated M20-PRE-01 build/CI candidate outputs after confirming they were never tagged, published, installed system-wide, or used for support/qualification. Restore the prior verification surface without modifying runtime data, ABI, package version, support matrices, prior evidence, secrets, releases, or deployments; a security finding discovered by the batch remains a release blocker even if the tooling is rolled back.
+  strategy: Revert the additive device-rate policy and inspection API, mixed-plan compiler/admission/report storage, identity/accounting integration, tests/CI, documentation, governance synchronization, release-contract digest updates, and M21-01 evidence as one batch. No active device-rate batch, payload, sampled-I/O state, persistent data migration, host setting, support promotion, release, or deployment is created by M21-01; preserve the existing checked stop path for any ordinary running Runtime before discarding it.
   data_migration: none
-  release_action: Do not sign, attest through a signing service, publish, tag, release, deploy, change support or qualification state, alter repository settings, or claim reproducible/authenticated target provenance. Any later signing ceremony, release promotion, controlled performance run, soak, hardware/RT campaign, or production action requires a separately approved batch and human gate.
+  release_action: Do not publish a release, promote a support or qualification tuple, alter hardware/RT records, or mark M21/CAP-M21 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M20-PRE-01-<date>.md
-    - exact baseline/default-branch identity, initial worktree state, M17-06 pull-request ancestry, retained-evidence inventory, changed-file allowlist/forbidden-path audit, commands, exit codes, required CI run/job identifiers, and human review outcomes without inferring absent records
-    - exact fuzz compiler/libFuzzer/sanitizer versions and flags, harness classification, source corpus/dictionary paths and SHA-256 values, seed replay and mutation counts, maximum input/resource ceilings, fixed seed, result, and crash/timeout/oom artifact inventory
-    - exact Clang 14 policy/check list and exclusions with rationale, compile-database and first-party source-manifest digests, translation-unit/header counts, coverage reconciliation, diagnostics, exit status, and proof that no broad suppression or production-source edit was used
-    - complete dependency/action/tool/schema inventory with source, purpose, version/full commit/digest/license, resolution mode, dirty/missing/extra checks, blocking hosted dependency-review result, and explicit identity-not-vulnerability-clearance limit
-    - canonical SPDX version/schema/validator identity, package/source/dependency/artifact relationships, artifact sizes/digests, two-generation byte comparison and SBOM SHA-256, negative mutation results, and explicit shipped-versus-build/test classification
-    - staged archive/checksum/SBOM/unsigned-statement/final-manifest inventory and SHA-256 values, exact expected source commit and deterministic source-tree/dirty-state identity, build/compiler/CMake/flags, offline content-verification report, extraction/relocated-consumer result, and authentication false state
-    - signed fixture source/license, artifact/bundle/public-root/policy/verifier versions and SHA-256 values, expected repository/source/ref/workflow/issuer/predicate identity, offline positive result, every negative mutation result, trust-root capture age/limitation, and proof that no private key/signing/network path was used
-    - workflow permission and command audit proving no signing, OIDC, attestation creation/download during verification, tag, release, publication, deployment, setting mutation, or support/qualification update
-    - unchanged production source/public surface, C ABI v8 70-export fingerprint and SONAME 8, device/extension ABI, installed SDK inventory, schemas, release 1.2.1, support matrices, qualification state, license and prior evidence; changed/preserved invariants, rollback path, residual risks, and all unperformed validation
-  claim_boundary: Evidence may establish deterministic bounded Clang 14 fuzz smoke for two supported parsers and one explicitly experimental queue, complete-manifest Clang 14 static-analyzer execution, immutable dependency identity checks, a versioned deterministic SPDX candidate SBOM, exact candidate artifact/manifest/source binding, offline content verification of an unsigned in-toto Statement, cryptographic offline verification and mutation rejection for one retained non-target public-material fixture, default-package compatibility, and portable RT0 verification behavior only. It does not establish continuous fuzzing, vulnerability absence, legal or license clearance, complete transitive runtime provenance beyond the declared policy, bit-for-bit reproducible builds, authenticated or signed RTFW provenance, current trust-root or revocation state, SLSA level, signed release, controlled performance, soak/endurance, physical CUDA/XDMA/combined behavior, HIL, field evidence, latency, RT1, RT2, Unreal integration, support promotion, publication, release, deployment, or production readiness.
+    - docs/evidence/M21-01-<date>.md
+    - exact control and target baselines, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
+    - public device-rate descriptor and report shapes with defaults, capacities, ownership, lifetime, copied/derived fields, completion-budget semantics, payload-reference roles, and deferred behavior
+    - independent-oracle mixed-plan inputs and exact ordered intervals, backend peak demand, constraining capacities, wrap/tie/substep outcomes, and every rejected arithmetic/topology/capacity case
+    - graph/replay identity comparisons and control-ledger/MemoryPlan reconciliation for every new semantic field, plus unchanged no-device and CPU-only identity/schema results
+    - proof of zero device provider/vendor/submit/poll/cancel/payload/sampled-I/O action, deterministic pre-callback active-mixed rejection, unchanged ordinary device execution, two-runtime isolation, retryable failure, and post-start allocation results
+    - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, HAL/extension contracts, schema/version, installed package/header/alias, support/qualification, license, and prior-evidence preservation results
+    - residual risks and every unperformed M21-02 dispatch/completion, M21-03 cross-rate payload, M21-04 sampled-I/O, M21-05 replay/conformance, controlled performance, physical CUDA/XDMA/DAC/DAQ, HIL, field, latency, thermal, endurance, RT1, RT2, Unreal, signing, publication, release, deployment, and production validation
+  claim_boundary: Evidence may establish additive C++ device-rate descriptors, immutable mixed CPU/device reference-plan compilation, deterministic checked-integer conservative admission, exact ownership/capacity/timeline/payload-reference validation, bounded configuration/report storage, identity/accounting integration, package compatibility, and portable RT0 static/unit/property/sanitizer behavior only. It does not establish active device-rate dispatch or completion, CPU/device payload transfer, sampled I/O, device WCET, controlled performance, physical CUDA/XDMA/DAC/DAQ behavior, HIL, electrical correctness, field evidence, latency, RT1, RT2, Unreal integration, support promotion, signing, publication, release, deployment, or production readiness.

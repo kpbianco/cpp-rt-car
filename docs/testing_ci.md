@@ -55,6 +55,13 @@ release, deploy, or qualify hardware/RT behavior.
   produced/held reads, missing/duplicate publication, fault gating, active
   checkpoint round trip/corruption transactionality, and active input-log
   rejection. Allocation instrumentation covers on-time and late-degrade paths.
+- M21-01 tests cover additive defaults and installed-source compatibility,
+  copied-role validation, command/buffer/timeline/timestamp ownership,
+  harmonic and wraparound half-open intervals, per-phase/backend/Runtime
+  in-flight limits, exact completion-batch boundaries, deterministic
+  inspection, transactional correction, identity/accounting, and pre-callback
+  active-mixed start rejection. The focused CTest target is
+  `m21_device_rate_model`; it performs no rate-triggered backend operation.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent
