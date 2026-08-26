@@ -35,10 +35,10 @@ pass; file presence or a passing smoke test is not sufficient.
 | M14.1 | Complete | Recoverable device initialization and teardown safety closure |
 | M15 | Complete | M15-01 through M15-04 merged with mandatory CI; CPU/memory policy, accounting, and rollback closure retained |
 | M16 | Complete | M16-01 through M16-04 are merged in target history; retained evidence preserves the original gate record without inventing absent review identifiers |
-| M17 | In progress | M17-01 through M17-04 are merged; M17-06 repairs native command-capability discovery and implements the portable simulated combined sample; mandatory CI/human gates and qualification remain |
+| M17 | Qualification incomplete | M17-01 through M17-04 and M17-06 are merged; the portable software path exists, while physical CUDA/XDMA/combined and RT qualification remain absent |
 | M18 | Planned | M18-01 offline schemas/tools implemented; named NVIDIA, XDMA, combined, RT1, and optional RT2 campaigns remain |
 | M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
-| M20 | Planned | Operational, security, release, and long-duration hardening |
+| M20 | In progress | M20-PRE-01 adds deterministic host-independent fuzz, static, dependency, candidate-SBOM/provenance, strict-manifest, offline-fixture, and relocated-package assurance without signing or release |
 
 ## M0 — Product contract and truth reset
 
@@ -612,7 +612,8 @@ count, or separate human-review object is inferred.
 
 ## M17 — HAL v2 and heterogeneous memory
 
-M17 is active and incomplete. M17-01 permanently implements:
+M17's portable software path is merged and its qualification remains
+incomplete. M17-01 permanently implements:
 
 - an additive C++ HAL API version 2 core table in the existing installed
   header, with capability, lifecycle, borrowed-buffer, one-submission, bounded
@@ -728,6 +729,19 @@ Exit gates:
   qualification boundaries.
 
 ## M20 — Operational and release hardening
+
+M20 is active through preparatory batch M20-PRE-01. That batch adds a bounded,
+deterministic portable assurance lane for exact dependency identity, complete
+default first-party Clang 14 static-analysis coverage, supported snapshot and
+runtime-profile fuzz smoke, explicitly experimental job-queue fuzz smoke,
+canonical SPDX 2.3 candidate SBOMs, strict expected-source manifests, unsigned
+in-toto candidate statements, offline cryptographic verification of retained
+public fixture material, and relocated default-package consumption.
+
+M20-PRE-01 does not sign or publish RTFW artifacts and does not complete
+CAP-M20. Continuous fuzzing, authenticated target provenance, reproducible
+signed releases, controlled performance, long-duration soak, vulnerability
+response operations, and supported-version maintenance remain later batches.
 
 Planned outcome:
 

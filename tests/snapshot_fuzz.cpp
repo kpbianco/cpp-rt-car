@@ -7,6 +7,9 @@
 extern "C" int LLVMFuzzerTestOneInput(
     const std::uint8_t* data,
     std::size_t size) {
+    if (size > 64u * 1024u) {
+        return 0;
+    }
     const auto bytes = std::as_bytes(
         std::span(data, size));
     rt::CheckpointMetadata checkpoint;

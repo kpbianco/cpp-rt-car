@@ -175,6 +175,26 @@ python3 tools/check_c_abi.py
 
 See [the stable C ABI contract](c_abi.md) for SONAME and compatibility rules.
 
+## Portable assurance tooling
+
+M20-PRE-01 provides one noninteractive host-independent entry point:
+
+```bash
+scripts/verify-portable-assurance.sh all \
+  --build-dir build/m20-pre-01 \
+  --source-commit "$(git rev-parse HEAD)"
+```
+
+Its `dependencies`, `static`, `fuzz`, `artifacts`, and cumulative `all` modes
+write only below the explicit build directory. Static and fuzz modes require
+Clang/clang-tidy 14; missing or mismatched tools fail. Artifact mode requires a
+default non-experimental Release package and performs deterministic candidate
+SBOM/provenance/manifest verification, safe extraction, relocated consumption,
+C ABI v8 verification, and SONAME 8 verification. It performs no network
+lookup during candidate/fixture verification, signing, tag, publication,
+release, system-wide install, device access, privileged operation, or Unreal
+build. See [portable assurance](portable_assurance.md).
+
 ## Portable release archive
 
 CPack creates a `.tar.gz` archive on non-Windows hosts and a `.zip` archive on

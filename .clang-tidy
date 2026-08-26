@@ -1,0 +1,14 @@
+---
+Checks: >-
+  -*,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  clang-analyzer-valist.*
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^(rt|src|core|include)/'
+AnalyzeTemporaryDtors: false
+FormatStyle: none
+...

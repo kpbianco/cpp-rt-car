@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "clang": {
+    "c": "clang-14",
+    "cxx": "clang++-14",
+    "tidy": "clang-tidy-14",
+    "required_major": 14
+  },
+  "static_analysis": {
+    "policy": ".clang-tidy",
+    "source_manifest": "tools/static_analysis_sources.txt",
+    "warnings_as_errors": true,
+    "checks": [
+      "clang-analyzer-core.*",
+      "clang-analyzer-cplusplus.*",
+      "clang-analyzer-deadcode.*",
+      "clang-analyzer-security.*",
+      "clang-analyzer-unix.*",
+      "clang-analyzer-valist.*"
+    ],
+    "excluded_diagnostic": {
+      "name": "clang-analyzer-optin.performance.Padding",
+      "reason": "Frozen public and compatibility records may not be reordered in M20-PRE-01."
+    }
+  },
+  "fuzzing": {
+    "engine": "Clang 14 libFuzzer",
+    "instrumentation": ["AddressSanitizer", "UndefinedBehaviorSanitizer"],
+    "fixed_seed": 424242,
+    "supported_runs": 20000,
+    "experimental_runs": 10000,
+    "supported_max_bytes": 65536,
+    "experimental_max_bytes": 4096
+  },
+  "spdx_schema": {
+    "path": "release/schemas/spdx-schema-2.3.json",
+    "version": "SPDX-2.3",
+    "source_repository": "spdx/spdx-spec",
+    "source_commit": "d99772ca9816b1615c0e53a94525550054e6a83c",
+    "source_path": "schemas/spdx-schema-2-3.json",
+    "sha256": "44f0abdeb5d5dc296a713103ba40416dd3d68925ba4bcbad9d1f2862ed11f287",
+    "license": "CC-BY-3.0"
+  },
+  "offline_fixture_verifier": {
+    "name": "rtfw-rsa-pkcs1v15-sha256-dsse-verifier",
+    "version": 1,
+    "implementation": "tools/provenance.py",
+    "network": false,
+    "private_key_support": false
+  }
+}

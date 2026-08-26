@@ -180,3 +180,18 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - Runtime start/status/stop/retry/detach add no ordinary heap allocation.
 - Portable tests do not qualify extension code, Unreal, hardware, HIL, field,
   latency, RT1, RT2, signing, release, deployment, or production use.
+
+## M20-PRE-01 portable assurance checklist
+
+- [x] Production runtime source, public headers, C ABI v8/SONAME 8, device and
+  extension ABIs, schemas, version, support matrices, and qualification state
+  are unchanged by the batch.
+- [x] Dependency, analyzer-manifest, bounded fuzz, candidate
+  SBOM/provenance/manifest, public-fixture, archive, relocation, ABI, and
+  SONAME gates are noninteractive and fail closed.
+- [x] The RTFW candidate statement is visibly unsigned and unauthenticated;
+  cryptographic verification applies only to separate fictional public fixture
+  material.
+- [ ] Continuous fuzzing, target signing/authenticated provenance,
+  reproducible release, controlled performance, soak, hardware/HIL/field,
+  RT1/RT2, Unreal, release, deployment, and production evidence remain absent.

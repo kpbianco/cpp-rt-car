@@ -27,6 +27,28 @@ may disclose paths. It must not be described as a production crash handler.
 
 ## Supply-chain helpers
 
+M20-PRE-01 adds deterministic identity and candidate-verification gates:
+
+- GoogleTest, RapidCheck, vcpkg, FetchContent, and workflow-action inputs are
+  reconciled against exact commits/digests; pull-request dependency review is
+  blocking at high severity.
+- the complete default first-party compilation manifest is analyzed by pinned
+  clang-tidy 14 checks with diagnostics treated as errors;
+- bounded ASan/UBSan fuzz smokes cover the supported checkpoint/input-log and
+  runtime-profile parsers plus an explicitly experimental job queue;
+- an exact staged package gets a canonical SPDX 2.3 candidate SBOM, unsigned
+  in-toto candidate statement, and expected-source final manifest before safe
+  extraction and relocated consumption;
+- one fictional public-material DSSE/RSA fixture exercises offline
+  cryptographic verification and identity-policy mutation rejection.
+
+Dependency pins are identity, not vulnerability or license clearance. The
+specialized SPDX verifier enforces this repository's candidate shape rather
+than claiming generic SPDX certification. The RTFW statement is unsigned and
+unauthenticated. The separate signed fixture does not authenticate RTFW or
+prove current trust/revocation state. The lane has no private key, OIDC,
+signing, network lookup during verification, publication, or release path.
+
 - CI can generate an SPDX JSON SBOM with `anchore/sbom-action`.
 - `tools/sbom.py` inventories git submodules and can compare them with a
   repository allowlist.
@@ -51,10 +73,11 @@ may disclose paths. It must not be described as a production crash handler.
   reviewer authentication, or proof of plan chronology.
 
 The archive manifest detects accidental corruption or substitution after it is
-created, but it is not authentication. Signing, provenance attestation,
-release-key policy, and reproducible-build verification remain release-
-engineering work. Vulnerability reporting and supported security versions are
-defined in the repository [security policy](../SECURITY.md).
+created, but it is not authentication. Target signing, authenticated
+provenance, release-key policy, trust freshness, and reproducible-build
+verification remain release-engineering work. Vulnerability reporting and
+supported security versions are defined in the repository
+[security policy](../SECURITY.md).
 
 ## Code anchors
 
@@ -65,6 +88,9 @@ defined in the repository [security policy](../SECURITY.md).
   `tools/check_release_contract.py`, `tools/release_manifest.py`,
   `tools/stage_release_artifacts.py`, `tools/extract_release_archive.py`,
   `tools/store_repro_build.py`
+- Portable assurance: [portable assurance](portable_assurance.md),
+  `tools/sbom.py`, `tools/provenance.py`, `tools/check_static_analysis.py`, and
+  `tools/run_fuzz_smoke.py`
 - Qualification input and proposal safety: `tools/qualification.py`,
   `qualification/schemas/`, and [qualification contract](qualification.md)
 - Threat boundaries: [threat model](threat_model.md)

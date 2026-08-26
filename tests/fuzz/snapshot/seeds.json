@@ -1,0 +1,7 @@
+{
+  "checkpoint-magic.bin": {"base64": "UlRGV0NQMQA="},
+  "empty.bin": {"base64": ""},
+  "input-log-magic.bin": {"base64": "UlRGV0lMMQA="},
+  "truncated-checkpoint.bin": {"base64": "UlRGV0NQMQABAAAA"},
+  "truncated-input-log.bin": {"base64": "UlRGV0lMMQABAAAA"}
+}

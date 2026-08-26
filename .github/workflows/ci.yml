@@ -97,33 +97,48 @@ jobs:
           done
           sha256sum "${files[@]}"
 
-  snapshot-fuzz-linux:
-    name: Snapshot parser fuzz smoke
+  dependency-review:
+    name: Blocking dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          fail-on-severity: high
+
+  portable-assurance:
+    name: Portable assurance (Clang 14)
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
-      - name: Configure snapshot fuzzer
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Verify pinned toolchain
+        run: |
+          clang-14 --version
+          clang++-14 --version
+          clang-tidy-14 --version
+          cmake --version
+      - name: Run deterministic portable assurance
         env:
           CC: clang-14
           CXX: clang++-14
         run: |
-          cmake -S . -B build-fuzz \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DENABLE_TESTS=ON \
-            -DRTFW_BUILD_EXPERIMENTAL=ON \
-            -DENABLE_RAPIDCHECK=OFF \
-            -DSIM_BUILD_FUZZERS=ON \
-            -DSIM_SANITIZERS= \
-            -DSIM_WERROR=ON
-      - name: Build snapshot fuzzer
-        run: cmake --build build-fuzz --target snapshot_fuzz -- -j2
-      - name: Run bounded snapshot fuzz corpus
-        env:
-          ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
-          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-        run: build-fuzz/tests/snapshot_fuzz -runs=20000 -max_len=65536 -timeout=5
+          scripts/verify-portable-assurance.sh all \
+            --build-dir "$RUNNER_TEMP/rtfw-portable-assurance" \
+            --source-commit "${{ github.sha }}"
+      - name: Retain candidate verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: portable-assurance-${{ github.sha }}
+          path: ${{ runner.temp }}/rtfw-portable-assurance/
+          if-no-files-found: error
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -199,7 +214,8 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
         if: github.event_name == 'pull_request'
-        continue-on-error: true
+        with:
+          fail-on-severity: high
 
   executor-tsan:
     name: Unified executor (GCC ThreadSanitizer)
@@ -268,7 +284,8 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
         if: github.event_name == 'pull_request'
-        continue-on-error: true
+        with:
+          fail-on-severity: high
 
   embedding-release:
     name: C/C++ embedding smoke (${{ matrix.compiler }})
@@ -427,6 +444,7 @@ jobs:
           --artifact-dir release-artifacts
           --manifest release-artifacts/rtfw-release-manifest.json
           --version-file VERSION.txt
+          --expected-source-commit "${{ github.sha }}"
       - name: Verify shared-library exports
         if: runner.os == 'Linux'
         run: python tools/check_c_abi.py --library build-package/librtfw.so

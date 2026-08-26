@@ -1,17 +1,16 @@
 schema_version: 1
 batch:
-  id: M17-06
-  title: Repair Runtime capability discovery and complete the portable combined graph sample
-  goal: Repair the exact Runtime-owned command/timeline capability-header mismatch retained by M17-05, prove both existing native HAL-v2 CUDA and XDMA candidates register through the canonical Runtime path, and complete one bounded CPU-to-simulated-CUDA-to-host-stage-to-simulated-XDMA-to-CPU graph with backend-local timelines, fixed storage, failure propagation, sanitizer coverage, and simulated-protocol-only evidence.
+  id: M20-PRE-01
+  title: Expand portable fuzz static security and provenance verification
+  goal: Add one deterministic, fail-closed portable assurance lane that expands bounded fuzzing, analyzes the complete default first-party build surface, locks and checks build dependencies, generates and verifies a versioned artifact SBOM, verifies artifact manifests and provenance statements offline, and exercises offline cryptographic attestation verification from public fixture material without signing, publishing, releasing, or changing runtime behavior.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
-    - products/cpp-rt-car/PRD.md#cap-m17--hal-v2-and-heterogeneous-memory
-    - products/cpp-rt-car/acceptance.yaml#CAP-M17
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-17
-    - products/cpp-rt-car/risk-register.yaml#R-005
-    - products/cpp-rt-car/risk-register.yaml#R-006
-  milestone: products/cpp-rt-car/roadmap.yaml#M17
+    - products/cpp-rt-car/PRD.md#cap-m20--operational-release-and-integration-hardening
+    - products/cpp-rt-car/acceptance.yaml#CAP-M20
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-20
+    - products/cpp-rt-car/risk-register.yaml#R-008
+  milestone: products/cpp-rt-car/roadmap.yaml#M20
   target_contracts:
     - AGENTS.md
     - contracts/active-batch.yaml
@@ -24,23 +23,19 @@ sources:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/hal_v2.md
-    - docs/heterogeneous_memory.md
-    - docs/device_backend.md
-    - docs/cuda_backend.md
-    - docs/xdma_backend.md
-    - docs/host_runtime.md
-    - docs/executor.md
-    - docs/cpu_memory_policy.md
-    - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/observability.md
+    - docs/build_tooling.md
     - docs/testing_ci.md
-    - docs/c_abi.md
-    - docs/release_policy.md
-    - docs/real_time_readiness_checklist.md
+    - docs/sanitizers.md
     - docs/security_supply_chain.md
     - docs/threat_model.md
+    - docs/release_policy.md
+    - docs/c_abi.md
+    - docs/real_time_readiness_checklist.md
+    - docs/determinism_replay.md
+    - docs/runtime_profiles.md
+    - docs/qualification.md
+    - docs/portable_support_matrix.json
+    - release/rtfw-release-contract.json
     - docs/evidence/M15-01-2026-08-04.md
     - docs/evidence/M15-02-2026-08-04.md
     - docs/evidence/M15-03-2026-08-04.md
@@ -54,241 +49,261 @@ sources:
     - docs/evidence/M17-03-2026-08-11.md
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-05-2026-08-12.md
+    - docs/evidence/M17-06-2026-08-23.md
     - docs/evidence/M18-01-2026-08-12.md
     - docs/evidence/M19-01-2026-08-12.md
-  baseline_commit: 875c486570ed84df939b8b9e75c01e7c3d43b28b
+  baseline_commit: c846cc427c93018175a69c7372c130f00c0b713b
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M17-06.yaml
-  control_plane_revision: acdbdc50f66fd66f9a8e48eee75923edfd759787  # pragma: allowlist secret
+  control_plane_path: products/cpp-rt-car/batches/M20-PRE-01.yaml
+  control_plane_revision: acdbdc50f66fd66f9a8e48eee75923edfd759787
 dependencies:
-  - M17-04
+  - M17-06
 scope:
   allowed_paths:
     - .portfolio-harness.json
     - AGENTS.md
     - contracts/active-batch.yaml
     - contracts/repo-profile.yaml
+    - contracts/verification.yaml
+    - contracts/verification.commands
+    - .clang-tidy
     - CMakeLists.txt
-    - rt/src/command_batch.cpp
-    - samples/CMakeLists.txt
-    - samples/cpu_gpu_fpga_cpu.cpp
-    - tests/CMakeLists.txt
-    - tests/test_command_batch.cpp
-    - tests/test_vendor_hal_v2.cpp
-    - tests/test_cpu_gpu_fpga_cpu_sample.cpp
     - .github/workflows/ci.yml
+    - scripts/verify-portable-assurance.sh
+    - tools/check_static_analysis.py
+    - tools/run_fuzz_smoke.py
+    - tools/sbom.py
+    - tools/sbom_expected.json
+    - tools/provenance.py
+    - tools/release_manifest.py
+    - tools/check_docs_contract.py
+    - tools/check_release_contract.py
+    - tools/portable_assurance_toolchain.json
+    - tools/static_analysis_sources.txt
+    - tests/CMakeLists.txt
+    - tests/jobqueue_fuzz.cpp
+    - tests/snapshot_fuzz.cpp
+    - tests/runtime_profile_fuzz.cpp
+    - tests/fuzz/**
+    - tests/provenance_fixtures/**
+    - tests/test_sbom.cpp
+    - tests/test_release_tools.py
+    - release/portable-assurance-policy.json
+    - release/schemas/**
+    - release/rtfw-release-contract.json
     - README.md
     - docs/CURRENT_STATE.md
     - docs/HANDOFF.md
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/hal_v2.md
-    - docs/heterogeneous_memory.md
-    - docs/device_backend.md
-    - docs/cuda_backend.md
-    - docs/xdma_backend.md
-    - docs/host_runtime.md
-    - docs/executor.md
-    - docs/cpu_memory_policy.md
-    - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/observability.md
+    - docs/build_tooling.md
     - docs/testing_ci.md
-    - docs/c_abi.md
+    - docs/sanitizers.md
+    - docs/security_supply_chain.md
+    - docs/threat_model.md
+    - docs/release_policy.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M17-06-*.md
-    - release/rtfw-release-contract.json
-    - tools/check_docs_contract.py
-    - tools/check_release_contract.py
+    - docs/portable_assurance.md
+    - docs/evidence/M20-PRE-01-*.md
   forbidden_paths:
-    - abi/rtfw_c_abi_v8.exports
-    - abi/rtfw_c_abi_v8.sha256
-    - rt/include/rt/
-    - rt/src/hal_v2.cpp
-    - rt/src/hal_v2.hpp
-    - rt/src/heterogeneous_memory.cpp
-    - rt/src/heterogeneous_memory.hpp
-    - rt/src/device_manager.cpp
-    - rt/src/device_manager.hpp
-    - rt/src/host_runtime.cpp
-    - rt/src/compiled_graph.cpp
-    - rt/src/compiled_graph.hpp
-    - rt/src/executor.cpp
-    - rt/src/executor.hpp
-    - rt/src/thread_policy.cpp
-    - rt/src/thread_policy.hpp
-    - rt/src/resource_policy.cpp
-    - rt/src/resource_policy.hpp
-    - rt/src/memory_policy.cpp
-    - rt/src/memory_policy.hpp
-    - rt/src/cuda_backend.cpp
-    - rt/src/cuda_driver.cpp
-    - rt/src/xdma_backend.cpp
-    - rt/src/xdma_linux.cpp
-    - src/c_abi.cpp
-    - core/include/core/
-    - include/simcore/
+    - abi/
+    - rt/include/
+    - rt/src/
+    - src/
+    - core/
+    - include/
     - hal/
     - gpu/
-    - configs/
-    - integrations/
+    - samples/
     - examples/
-    - schemas/qualification/
-    - tools/qualification.py
-    - tools/check_hardware_evidence.py
-    - tools/release_manifest.py
+    - integrations/
+    - configs/
+    - profiles/
+    - qualification/
+    - cmake/
+    - external/
+    - .gitmodules
+    - CMakePresets.json
+    - vcpkg.json
+    - VERSION.txt
+    - LICENSE
+    - CHANGELOG.md
+    - SECURITY.md
+    - .github/workflows/release.yml
+    - .github/workflows/cuda-qualification.yml
+    - .github/workflows/xdma-qualification.yml
+    - .github/workflows/autotune-mapping.yml
+    - .github/workflows/autotune-smoke.yml
+    - .github/workflows/scaling-smoke.yml
+    - .github/workflows/docs-contract.yml
     - docs/portable_support_matrix.json
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
-    - .github/workflows/cuda-qualification.yml
-    - .github/workflows/xdma-qualification.yml
-    - .github/workflows/release.yml
+    - tools/qualification.py
+    - tools/check_hardware_evidence.py
+    - tools/stage_release_artifacts.py
+    - tools/extract_release_archive.py
+    - tools/store_repro_build.py
     - samples/cuda_qualification.cpp
     - samples/xdma_qualification.cpp
-    - docs/evidence/M15-01-2026-08-04.md
-    - docs/evidence/M15-02-2026-08-04.md
-    - docs/evidence/M15-03-2026-08-04.md
-    - docs/evidence/M15-04-2026-08-05.md
-    - docs/evidence/M16-01-2026-08-05.md
-    - docs/evidence/M16-02-2026-08-05.md
-    - docs/evidence/M16-03-2026-08-05.md
-    - docs/evidence/M16-04-2026-08-05.md
-    - docs/evidence/M17-01-2026-08-05.md
-    - docs/evidence/M17-02-2026-08-06.md
-    - docs/evidence/M17-03-2026-08-11.md
-    - docs/evidence/M17-04-2026-08-12.md
-    - docs/evidence/M17-05-2026-08-12.md
-    - docs/evidence/M18-01-2026-08-12.md
-    - docs/evidence/M19-01-2026-08-12.md
-    - LICENSE
-    - VERSION.txt
+    - release/keys/
+    - release/signatures/
+    - tests/provenance_fixtures/private*
+    - tests/provenance_fixtures/**/*.key
+    - docs/evidence/M15-*.md
+    - docs/evidence/M16-*.md
+    - docs/evidence/M17-*.md
+    - docs/evidence/M18-*.md
+    - docs/evidence/M19-*.md
 acceptance:
-  - The implementation starts from an initially clean target at exact default-branch commit `875c486570ed84df939b8b9e75c01e7c3d43b28b`. Target history proves M17-04 (`bdc97d0122effbad07dbf6d4981e1bf0de729437`), the retained failed M17-05 review (`e5f10cc572fa9ba3d4dd488781c310dafb34dfd2`), M18-01 (`5eb8f101f692b2aff85f82f4a1660630db750706`), and M19-01 (`d5224e670e3ca5ebbe3d2aec5fda7d21213499a8`) are ancestors. Later default-branch changes are governance/schema synchronization and a bounded aggregate-test timeout change; they contain no combined sample and do not repair the discovery mismatch. Governance, current-state, handoff, roadmap, and traceable evidence are reconciled to those facts without rewriting retained evidence or inventing CI or review results.
+  - The implementation begins from an initially clean target at exact default-branch commit `c846cc427c93018175a69c7372c130f00c0b713b`, the merged M17-06 pull request 240. All retained M15-01 through M19-01 evidence named above is present and unchanged. Governance and current-state documents record that M17-06 is merged and the portable M17 software path exists, while retaining M17-05 as failed review evidence and not inventing an absent final CI check count, separate human-review object, physical CUDA/XDMA result, CAP-M17 manual smoke, or qualification result.
+  - The batch changes verification, build/test wiring, dependency pins, CI, documentation, and retained M20-PRE-01 evidence only. It changes no production C/C++ source or public header, stable C ABI v8 export/fingerprint/SONAME, device ABI v1, extension ABI v1, HAL contract, Runtime status, runtime or artifact schema already owned by another milestone, installed target/header/alias inventory, release version, support matrix, qualification schema/workflow, license, or prior evidence.
+  - One documented noninteractive `scripts/verify-portable-assurance.sh` entry point exposes independently runnable `dependencies`, `static`, `fuzz`, `artifacts`, and cumulative `all` modes. It accepts only repository and explicit build/output paths, writes only below an explicit build/output directory, uses no credential, device, privileged host operation, Unreal tree, timing threshold, network service during artifact/attestation verification, tag, release, or publication API, and returns nonzero on every failed subgate without converting a missing tool or skipped check into a pass.
+  - The Clang 14 libFuzzer build contains the existing supported snapshot/checkpoint-input-log parser harness, a new supported runtime-profile parser harness, and the existing experimental bounded-job-queue harness. Each harness has a small reviewed immutable seed corpus; snapshot and profile dictionaries cover their version, magic, required-key, length, and malformed-boundary tokens. The runner first replays every named seed, then copies the corpus to the build tree and performs a fixed-seed, fixed-run-count, fixed-max-input ASan/UBSan mutation run with source corpora read-only and crash/timeout/oom artifacts confined to the explicit output directory.
+  - Snapshot and runtime-profile fuzz inputs are bounded at their public 64 KiB ceilings and each receives at least 20,000 mutation executions; the experimental job-queue input is bounded at 4 KiB and receives at least 10,000. Per-input timeout and memory limits are safety ceilings, not performance acceptance. Every nonempty, empty, truncated, maximum-size, invalid-UTF-8, duplicate/unknown-key, incompatible-version, checksum/length, trailing-data, and excessive-nesting seed replays without sanitizer finding, unbounded allocation from encoded lengths, exception escape, process hang, or partial profile-output publication. Job-queue results are labeled experimental and establish no supported Runtime parser claim.
+  - Fuzzer tool version, compile/link flags, seed/dictionary SHA-256 values, replay count, mutation count, maximum length, random seed, exit status, and produced failure-artifact inventory are machine-recorded. A bounded deterministic smoke is not called continuous fuzzing, proof of vulnerability absence, or coverage of every parser; external long-running fuzz service integration remains later work.
+  - A checked-in static-analysis policy and exact sorted source manifest cover every first-party translation unit emitted by a clean default non-experimental, tests-off, examples-off, demo-off Clang 14 compilation database, including the 1.x compatibility archive. The checker fails if the compile database adds, removes, duplicates, redirects, or omits a first-party translation unit, if an entry resolves outside the repository, or if generated/external code is treated as first-party evidence.
+  - Static analysis runs deterministic Clang 14 analyzer core, C++, dead-code, security, Unix, and variadic-list checks with warnings treated as errors over that complete manifest and project headers. Any excluded check is named and justified in policy; the known padding-optimization diagnostic may be excluded because reordering frozen/public compatibility records is outside scope, but there is no blanket warning baseline, wildcard `NOLINT`, unchecked generated suppression, analyzer timeout-as-pass, or silent partial-source success. Compiler warnings-as-errors and include-what-you-use remain separate signals and are not relabeled as this analyzer result.
+  - Build inputs fail closed on mutable or incompletely identified dependencies. RapidCheck uses a reviewed full 40-character commit rather than `master`; the GoogleTest fallback archive has a reviewed SHA-256; the checked-out GoogleTest submodule, vcpkg baseline, FetchContent declarations, and every workflow action are reconciled against an exact versioned policy. Missing, uninitialized, dirty, extra, mismatched, mutable-ref, hashless-download, abbreviated-commit, or policy-unlisted dependencies fail. This pinning establishes input identity, not vulnerability absence or legal approval.
+  - Pull-request dependency review becomes blocking at the documented severity threshold and may not use `continue-on-error`, a success-for-skipped fallback, or write permissions. It supplements the deterministic repository dependency check; because it depends on hosted GitHub comparison data, it is not represented as an offline or local scan.
   - >-
-    The sole Runtime production repair is in `rt/src/command_batch.cpp`:
-    `discover_command_timeline_extension()` supplies a value-initialized
-    `HalV2CommandTimelineCapabilities` whose caller-owned input prefix is
-    exactly `sizeof(HalV2CommandTimelineCapabilities)` and
-    `hal_v2_command_timeline_extension_version`, whose semantic fields and
-    reserved tail begin zero, and whose complete returned record is still
-    validated before any `CommandTimelineExtensionState` is published. It no
-    longer poisons the required input header. No public declaration, table
-    layout, numeric value, callback signature, vendor callback, or other
-    Runtime path changes.
-  - Focused discovery tests observe the exact incoming size/version and zero semantic/reserved state inside a callback, prove a valid output publishes once, and prove null/throwing/error/unsupported, untouched, short-size, wrong-version, zero/excess capacity, and nonzero-reserved outputs publish nothing and return the existing fail-closed status. A corrected registration succeeds after each rejected attempt. The repair must not weaken whole-record validation merely to make the two candidates pass.
-  - A positive behavioral integration test constructs the actual `CudaDeviceBackend` and `XdmaDeviceBackend` classes with complete bounded version-2 injected driver tables and registers both native `hal_v2_registration()` results in one real `rt::Runtime`. It reaches configuring/finalize/start/step/checked-stop through the canonical Runtime discovery path; direct calls to the capability callback, the device-ABI-v1 `api()` route, a generic substitute backend, a wrapper that rewrites the record, and a disabled or expected-failure test are insufficient.
-  - A top-level default build adds exactly one non-installed `sample_cpu_gpu_fpga_cpu` executable and one focused test executable/CTest gate. They use only existing installed/public Runtime, CUDA-candidate, and XDMA-candidate C++ headers and the existing `rtfw_runtime`, `rtfw_cuda_backend`, and `rtfw_xdma_backend` targets. They configure, build, and run without `RTFW_BUILD_EXPERIMENTAL`, a CUDA toolkit, GPU, XDMA node, kernel driver, root privilege, firmware, bitstream, network access, or secrets.
-  - The compiled graph is exactly `CPU prepare -> simulated CUDA batch -> CPU host-stage bridge -> simulated XDMA batch -> CPU validate`, expressed with ordinary Runtime phase dependencies. The CUDA and XDMA phases each own one distinct backend-local timeline; no handle, wait, signal, or completion value crosses a backend. Cross-backend order is established only by valid completion of the CUDA download, the completed bounded CPU bridge, and the later XDMA upload. No hardware fence, coherent shared allocation, or direct peer path is declared or implied.
-  - CPU preparation writes a fixed deterministic input into a CUDA-owned host staging object discovered and registered through the existing heterogeneous staged-memory contract. The declared CUDA batch/provider emits, in exact order, one `copy_to_device`, one stable-ID caller-owned pre-registered CUDA Graph dispatch with exact ordered bindings, and one `copy_from_device`, plus one finite timeout and one monotonically increasing same-CUDA-timeline signal. The injected version-2 CUDA driver owns fixed opaque simulated device storage and performs a deterministic integer transform; it remains fake protocol behavior.
-  - Only after a whole successful CUDA batch completion, the CPU bridge copies the exact downloaded bytes from the CUDA-owned host region to a separate XDMA-owned borrowed-host staging region. Both spans have fixed extent, are disjoint, are never dual-registered, and have explicit access. The bridge performs no ordinary allocation, vendor call, hidden wait, pointer-derived identity, implicit coherency operation, peer-memory operation, or timeline publication.
-  - The declared XDMA batch/provider emits, in exact order, one existing H2C command, one bounded aligned 32-bit little-endian control-write trigger, one finite user-event wait, and one existing C2H command, plus one finite timeout and one monotonically increasing same-XDMA-timeline signal. Its injected version-2 driver owns fixed simulated card/control/event/output state, verifies exact opcodes/ranges/access/payloads, and applies a deterministic integer transform without opening or touching a user BAR, event node, PCI function, kernel driver, firmware, bitstream, or physical FPGA.
-  - At least two consecutive frames complete with deterministic frame-specific input/output, exact graph and injected-driver call order, one accepted-before-complete result per device phase per frame, one CUDA Graph launch and one XDMA trigger/event per frame, and strictly monotonic accepted and completed values on each backend-local timeline. The final CPU callback verifies every output element and count. The executable returns nonzero on any mismatch and prints one stable concise success line containing `evidence=simulated_protocol`, `physical_hardware=false`, `direct_peer_dma=false`, and the completed frame count.
-  - All sample payloads, graph bindings, device/card regions, control/event values, provider declarations, timeline records, call traces, failure switches, and per-frame observations use compile-time-bounded or initialization-time-fixed storage. The measured interval begins after successful `Runtime::start()` and covers complete `Runtime::step()` calls; it reports zero ordinary heap allocations. Host-independent regression evidence uses exact storage, callback, command, poll, and driver-call counts rather than elapsed-time thresholds.
-  - Thread-identity assertions prove ordinary CPU providers run only on executor workers; CUDA injected driver calls run through the matching Runtime submission/service ownership; XDMA transfer/control/event callbacks run only on its pre-existing fixed worker team; and no injected vendor callback runs on an executor worker. The sample adds no thread, lane, queue, retry loop, spill path, detached task, file/network I/O, blocking executor callback, or unbounded wait.
-  - Two independently constructed Runtime/CUDA/XDMA/sample fixtures prove isolation of Runtime handles, native registration state, Graph IDs, simulated device/card/control/event storage, host buffers, timelines, call traces, stop flags, failures, and cleanup ownership. Foreign handles are rejected and one fixture cannot advance, fail, stop, or mutate the other.
-  - Failure coverage is stage-specific and deterministic. An injected CUDA Graph failure after valid upload publishes no CUDA timeline completion, suppresses CUDA download, the CPU bridge, all XDMA submission, and CPU validation, and leaves only the existing bounded quarantine/cleanup ownership. An injected XDMA event-wait or C2H failure after successful CPU preparation, CUDA completion, bridge, and preceding XDMA operations publishes no XDMA timeline completion and suppresses the remaining XDMA work and final CPU validation. Tests assert exact first error, phase/callback/driver counts, no fabricated completion, checked-stop resolution or unresolved-only retry, and a fresh independent all-success run.
-  - Startup, success, injected failure, correction, and checked stop preserve M17-01 through M17-04 and M19-01 exception containment, accepted-before-complete causality, whole-completion publication, timeout/cancel behavior, first-error retention, reverse cleanup, uncertain-owner quarantine, unresolved-only retry, caller-owned Graph/buffer lifetime, extension readiness, and no detached work. The one discovery repair and sample add no Runtime/backend-owned storage, MemoryPlan row, provider region, status, schema, installed header/target, or support record.
-  - Stable C ABI v8 remains exactly 70 exports with fingerprint `0xd0e7a5a14bf35f97` and SONAME 8. Device ABI v1 declarations/layout/values and both candidate `api()` behaviors, HAL core v2, memory/topology v1, command/timeline v1, extension ABI v1, Runtime status values, runtime-profile schema 7/25 keys, observability/rate/checkpoint/input-log/qualification schemas and IDs, installed SDK inventory and aliases, release 1.2.1, support matrices, qualification workflows, and Apache-2.0 are byte or behavior unchanged as applicable.
-  - Target governance, current state, handoff, roadmap, architecture/device/vendor/testing/readiness contracts, README, deterministic documentation/release checks, and retained `docs/evidence/M17-06-<date>.md` describe only portable RT0 simulated-protocol composition. M17/CAP-M17 may be marked functionally complete only after focused and full local validation, all mandatory CI including executable sanitizers, and required human gates pass. M18 hardware qualification and M19 Unreal work remain separate; no physical, timing, support, release, deployment, or production state changes.
+    `tools/sbom.py` produces and verifies a canonical versioned SPDX 2.3 JSON
+    SBOM for an explicitly staged default package candidate and its exact
+    source/dependency inputs. The selected official schema or validator
+    version, source, license, and SHA-256 are pinned for offline use. The
+    document identifies RTFW/version/source commit, each staged payload
+    artifact with byte length and SHA-256, the exact resolved
+    GoogleTest/RapidCheck/vcpkg build inputs, and relationships that distinguish
+    shipped content from build/test-only dependencies; it does not claim that
+    test dependencies ship in the SDK.
+  - SBOM creation is sorted and byte-deterministic for identical inputs. It contains no hostname, workspace/build absolute path, runner identifier, random UUID, wall-clock observation, credential, or uncontrolled timestamp; any required creation time is deterministically derived from the supplied source identity and documented. Two independent output directories produce byte-identical SBOMs. Verification rejects malformed/duplicate-key/trailing JSON, schema or namespace drift, duplicate/unsafe/noncanonical paths, symlinks, missing/unlisted components or artifacts, wrong package/version/source/dependency relationship, absolute paths, size/digest mutation, and extra files outside the explicit policy.
+  - >-
+    `tools/release_manifest.py` verification gains an explicit
+    expected-source-commit input and fail-closed bounded JSON/inventory
+    handling. A merely well-formed arbitrary 40-character commit is
+    insufficient. The staged archive, checksum sidecar, SBOM, and provenance
+    statement are all regular, non-symlink files covered by the final manifest;
+    missing, extra, duplicate, reordered, escaping, aliased, size-mutated,
+    digest-mutated, self-listed, wrong-version, or wrong-source inputs fail
+    before extraction or consumer use.
+  - >-
+    `tools/provenance.py` creates a canonical unsigned in-toto Statement v1
+    verification record for the local candidate, using a versioned documented
+    predicate. Its exact subjects bind the staged package payload/checksum and
+    SBOM bytes; its predicate binds project, package version, complete source
+    commit, deterministic source-tree identity including dirty-state
+    classification, build type/configuration, compiler/CMake/tool identities,
+    and resolved dependency inputs. Same inputs yield byte-identical
+    statements; volatile host/time/path data is absent. The file is visibly
+    labeled unsigned and verification-only, is not a DSSE envelope, and cannot
+    be reported as authenticated provenance or any SLSA build level.
+  - Offline statement verification uses only the supplied artifact directory, manifest, SBOM, statement, policy, and pinned local schema material. It recomputes every subject/manifest digest and enforces exact project, version, source commit/tree state, builder-policy, build parameters, dependency identities, predicate type, canonical encoding, and inventory. Artifact, SBOM, subject, predicate, source, builder, dependency, path, duplicate-key, unknown-critical-field, and canonical-byte mutations each fail without network access or output mutation.
+  - Offline cryptographic-attestation verification is exercised against at least one small, pre-generated, provenance-documented in-toto/DSSE or Sigstore bundle fixture with its exact artifact, public trust material, expected repository/source/workflow/predicate policy, fixture source/license, and file SHA-256 values retained. The verifier executable/version and distribution digest are pinned. No private key, signing token, OIDC request, signing operation, attestation upload/download, trust-root refresh, or network lookup occurs in the verification phase. Artifact, payload, signature/bundle, public root, repository, source digest/ref, workflow identity, issuer, and predicate mutations fail.
+  - Fixture verification proves only that the pinned offline verifier rejects/accepts the retained fixture under the retained public trust snapshot. It does not authenticate this batch's unsigned candidate, prove current revocation state, authorize the fixture producer, or establish RTFW release provenance. Documentation and machine output distinguish content/digest verification, cryptographic fixture verification, signer identity policy, trust-root age, and the unperformed target signing step.
+  - >-
+    The canonical SPDX SBOM, unsigned provenance statement, manifest, analyzer
+    report, dependency report, and fuzz report are generated only as candidate
+    verification outputs below build/CI evidence storage. They are not checked
+    in as a release, attached to a tag, uploaded to a public release, signed,
+    published, installed system-wide, or used to change support or
+    qualification state. CI workflow permissions remain `contents: read` with
+    no `id-token: write`, `attestations: write`, `packages: write`, or
+    `contents: write` in the M20-PRE-01 path.
+  - Focused tool tests cover deterministic generation and every malformed, bounded-resource, path, symlink, inventory, dependency, SBOM, manifest, unsigned-statement, signed-fixture-policy, and mutation rejection above, including recovery after failure and two independent temporary roots. Tests use only disposable directories, never overwrite inputs, never follow a symlink, never log artifact contents or credentials, and clean partial outputs after failure/cancellation.
+  - The default Release package is built, archived, staged, SBOM/provenance/manifest checked, extracted, relocated, and consumed without experimental code, CUDA toolkit, GPU, XDMA node, Unreal, controlled timing, signing secret, or publication. The exact default installed target/header/alias inventory, C ABI v8 70-export fingerprint and SONAME 8, device/extension ABI declarations, release 1.2.1, support matrices, qualification state, and Apache-2.0 remain unchanged.
+  - Target governance, current state, handoff, architecture, roadmap, build/testing/sanitizer/security/threat/release documentation, deterministic documentation/release checks, and retained `docs/evidence/M20-PRE-01-<date>.md` describe the exact implemented gates and their limits. Complete focused and full local validation, mandatory CI, and human security/supply-chain, analyzer/fuzz, package/compatibility, and evidence-claim review pass before merge. M20-PRE-01 does not complete CAP-M20; controlled performance, continuous service fuzzing, target signing/authenticated provenance, soak, release approval, Unreal, and hardware/RT qualification remain separate.
 validation:
   local:
     - git status --short --branch
-    - test "$(git rev-parse HEAD)" = "875c486570ed84df939b8b9e75c01e7c3d43b28b"
-    - git merge-base --is-ancestor bdc97d0122effbad07dbf6d4981e1bf0de729437 HEAD
-    - git merge-base --is-ancestor e5f10cc572fa9ba3d4dd488781c310dafb34dfd2 HEAD
-    - git merge-base --is-ancestor d5224e670e3ca5ebbe3d2aec5fda7d21213499a8 HEAD
+    - test "$(git rev-parse HEAD)" = "c846cc427c93018175a69c7372c130f00c0b713b"
+    - git merge-base --is-ancestor c846cc427c93018175a69c7372c130f00c0b713b HEAD
+    - test -f docs/evidence/M17-06-2026-08-23.md
     - ./scripts/agent-verify.sh contract
+    - python3 tests/test_release_tools.py -k PortableAssurance
+    - CC=clang-14 CXX=clang++-14 cmake -S . -B build/m20-pre-01-static -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_DOWNLOAD_GTEST=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DSIM_WERROR=ON
+    - python3 tools/check_static_analysis.py --compile-commands build/m20-pre-01-static/compile_commands.json --source-manifest tools/static_analysis_sources.txt --clang-tidy clang-tidy-14
+    - CC=clang-14 CXX=clang++-14 cmake -S . -B build/m20-pre-01-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=OFF -DSIM_BUILD_FUZZERS=ON -DSIM_DOWNLOAD_GTEST=OFF -DSIM_SANITIZERS= -DSIM_WERROR=ON
+    - cmake --build build/m20-pre-01-fuzz --target snapshot_fuzz runtime_profile_fuzz jobqueue_fuzz --parallel 2
+    - python3 tools/run_fuzz_smoke.py --build-dir build/m20-pre-01-fuzz --corpus-root tests/fuzz --output-dir build/m20-pre-01-fuzz-artifacts --seed 424242
+    - python3 tools/sbom.py verify-dependencies --policy tools/sbom_expected.json
+    - ./scripts/verify-portable-assurance.sh artifacts --build-dir build/m20-pre-01-artifacts --source-commit "$(git rev-parse HEAD)"
+    - ./scripts/verify-portable-assurance.sh all --build-dir build/m20-pre-01-all --source-commit "$(git rev-parse HEAD)"
     - ./scripts/agent-verify.sh quick
-    - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
-    - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='CommandBatch.*Capability*:VendorHalV2.*RuntimeRegistration*'
-    - ./build/agent-full/tests/rtfw_cpu_gpu_fpga_cpu_sample_tests
-    - ./build/agent-full/samples/sample_cpu_gpu_fpga_cpu
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|m19_extension_registration|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|xdma_backend'
-    - ctest --test-dir build/agent-full --output-on-failure --repeat until-fail:20 -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu'
-    - cmake -S . -B build/m17-06-asan -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=OFF -DENABLE_RAPIDCHECK=OFF -DSIM_SANITIZERS='address;undefined' -DSIM_WERROR=ON
-    - cmake --build build/m17-06-asan --target simcore_tests rtfw_cpu_gpu_fpga_cpu_sample_tests sample_cpu_gpu_fpga_cpu rtfw_xdma_backend_tests --parallel 2
-    - ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ctest --test-dir build/m17-06-asan --output-on-failure -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|xdma_backend'
-    - cmake -S . -B build/m17-06-tsan -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=OFF -DENABLE_RAPIDCHECK=OFF -DSIM_SANITIZERS=thread -DSIM_WERROR=ON
-    - cmake --build build/m17-06-tsan --target simcore_tests rtfw_cpu_gpu_fpga_cpu_sample_tests sample_cpu_gpu_fpga_cpu rtfw_xdma_backend_tests --parallel 2
-    - TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/m17-06-tsan --output-on-failure -R 'm17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m17_cuda_graph|m17_xdma_control|m17_command_batch_timeline|m17_heterogeneous_memory_topology|m17_hal_v2_compatibility|xdma_backend'
-    - cmake -S . -B build/m17-06-package -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DRTFW_BUILD_EXPERIMENTAL=OFF -DRTFW_BUILD_EXAMPLES=OFF -DRTFW_BUILD_RUNTIME_DEMO=OFF -DSIM_WERROR=ON
-    - cmake --build build/m17-06-package --parallel 2
-    - cmake --install build/m17-06-package --prefix "$PWD/build/m17-06-install"
-    - cmake -S tests/package_consumer -B build/m17-06-package-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/build/m17-06-install"
-    - cmake --build build/m17-06-package-consumer --parallel 2
-    - ctest --test-dir build/m17-06-package-consumer --output-on-failure
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
     - git diff --check
-    - git diff --name-only 875c486570ed84df939b8b9e75c01e7c3d43b28b
+    - git diff --name-only c846cc427c93018175a69c7372c130f00c0b713b
   focused_tests_to_add:
-    - Runtime command/timeline discovery gives callbacks the exact initialized size/version input prefix and zero semantic/reserved fields, then rejects untouched, partial-malformed, header-corrupting, over-capacity, reserved, error, and exceptional outputs transactionally before accepting a corrected complete record.
-    - Both actual native CUDA and XDMA candidates with injected version-2 drivers register together through `Runtime::register_device_backend(HalV2BackendRegistration, ...)`; the regression fails on the M17-05 implementation and passes only through the repaired canonical discovery path.
-    - Default portable build and CTest execution of the combined sample on a host with no CUDA toolkit, GPU, XDMA device node, driver, firmware, bitstream, privilege, network, or secret.
-    - Exact CPU prepare, CUDA upload/Graph/download, CPU host bridge, XDMA H2C/control-write/event-wait/C2H, and CPU validate dependency/call order with deterministic final values for at least two frames.
-    - Distinct backend-local timeline ownership, accepted/completed monotonic values, whole-completion publication, and explicit proof that no CUDA timeline handle appears in XDMA waits/signals or vice versa.
-    - Disjoint CUDA/XDMA host registrations, exact fixed bridge extent, stable Graph/control/event identifiers and opcodes, and absence of peer memory, dual registration, implicit synchronization, or pointer-derived identity.
-    - Provider/executor, Runtime submission/service, and XDMA fixed-worker thread identities proving no injected vendor callback runs on an executor worker and no new worker or lane exists.
-    - Complete-frame post-start zero-allocation coverage, exact fixed storage and operation counts, deterministic repeat execution, and no wall-clock performance threshold or latency claim.
-    - Two independent Runtime/backend/sample fixtures with isolated handles, Graph IDs, device/card/event storage, buffers, timelines, traces, failure flags, stop state, and reverse cleanup.
-    - CUDA Graph failure and XDMA event/C2H failure with stage-accurate downstream suppression, no later-backend submission after upstream failure, no timeline advancement from synthesized failure, exact error propagation, quarantine/checked-stop behavior, unresolved-only retry where applicable, and fresh-run recovery.
-    - Stable sample success text and retained evidence labels explicitly stating simulated protocol, no physical hardware, and no direct peer DMA.
-    - Permanent M14.1/M15/M16/M17-01 through M17-04/M19-01 lifecycle, ABI, compatibility, accounting, determinism, package, no-allocation, sanitizer, and claim-boundary regressions.
+    - immutable seed replay and fixed-seed bounded ASan/UBSan mutation runs for snapshot/checkpoint-input-log, runtime-profile, and experimental job-queue harnesses, with exact corpus/dictionary digests and failure-artifact isolation
+    - runtime-profile fuzz transactionality over empty, malformed, invalid UTF-8, duplicate/unknown key, incompatible version, length, trailing, nesting, and maximum-size inputs without partial output mutation or exception escape
+    - exact compilation-database-to-source-manifest equality, repository containment, duplicate/omission/addition rejection, exact Clang 14 policy, warnings-as-errors, and explicit exclusion enforcement
+    - missing, dirty, extra, mutable, abbreviated, hashless, mismatched, and policy-unlisted submodule, FetchContent, vcpkg, and workflow-action dependency rejection with recovery on correction
+    - canonical SPDX 2.3 schema validation, byte-repeat generation, exact shipped-versus-build/test relationship checks, and mutation rejection for paths, symlinks, duplicate keys, namespace/version/source, component inventory, lengths, digests, and volatile host metadata
+    - release-manifest expected-source enforcement plus bounded strict JSON, exact final artifact inventory, path/symlink/alias/self-reference, size/digest, version/source, missing/unlisted, and nonmutation tests
+    - canonical unsigned in-toto Statement v1 generation and offline subject/predicate/source/tree/build/tool/dependency verification, including byte-repeat output and explicit authentication-false result
+    - offline cryptographic verification of one retained public-material signed fixture plus artifact, payload, signature/bundle, trust-root, repository, source digest/ref, workflow, issuer, and predicate negative mutations; no signing/private-key/network path exists
+    - two-root isolation, failed-output cleanup, cancellation recovery, input immutability, bounded document/file/count/byte limits, and diagnostics that disclose paths/reasons but not artifact contents or credentials
+    - default package archive, staged candidate, SBOM, unsigned statement, final manifest, extraction, relocated consumer, exact installed inventory, frozen ABI/SONAME, and no-release/no-signing workflow-permission assertions
   required_ci:
-    - Documentation contract workflow validates the repaired in/out discovery rule, exact graph/staging/timeline topology, simulated-evidence labels, current state/handoff/roadmap, release digests, frozen C/device/extension ABIs, exact SDK inventory, and all permanent M15/M16/M17/M19 gates.
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA-on/off matrix builds and runs the new discovery integration, sample success/failure/isolation tests, and executable with AddressSanitizer and UndefinedBehaviorSanitizer enabled on Debug tuples and no sanitizer finding.
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix builds and runs the same portable tests/executable with exact graph order, opcodes, fixed outputs, evidence labels, source compatibility, and no Linux, CUDA-toolkit, or device-node dependency.
-    - Unified executor GCC 11 ThreadSanitizer job executes the discovery, sample success/failure/isolation, complete VendorHalV2, CUDA Graph, XDMA control/event, CommandBatch, HeterogeneousMemory, HAL-v2/v1-adapter, blocked-stop, and permanent M15/M16/M19 selections without a report, weaker filter, disabled test, or relaxed timeout.
-    - Determinism GCC/Clang FMA-on/FMA-off jobs and artifact exchange remain byte exact for existing fixtures; the sample produces the same integer outputs, frame counts, and normalized stage trace on every portable tuple without being relabeled as hardware or controlled-timing evidence.
-    - Host-independent performance-regression gate proves compile-time/finalization-time fixed storage, zero ordinary allocations across complete post-start frames, exact bounded command/callback/poll/driver counts, and no capacity growth; it uses no elapsed-time threshold or RT1/RT2 claim.
-    - C/C++ embedding and add_subdirectory jobs build and run the default non-installed sample beside existing examples on GCC and Clang without a toolkit or device node, while installed-package, archive relocation, non-default include, header self-containment, aliases, and exact 70-export C ABI gates prove no installed-surface change.
-    - Existing CUDA-toolkit compile/install/consumer and node-free XDMA compile/install/consumer jobs remain mandatory compile/package evidence only; neither job executes hardware or upgrades a support/qualification claim.
-    - Existing warnings-as-errors/static contract checks, bounded fuzz smoke, dependency review, SBOM, autotune, scaling, observability schema, no-allocation, M14.1 recovery, M15 rollback, M16 multi-rate, all M17 core/memory/command/vendor, M19 extension, release-contract, package, CUDA fake-driver, and XDMA portable gates remain green.
+    - A required Ubuntu 22.04 Clang 14 portable-assurance job runs the exact dependency, static, all-three-fuzzer, SBOM, manifest, unsigned-statement, offline signed-fixture, and mutation gates with pinned tools, fixed inputs/counts, read-only repository permissions, no credentials, and retained machine-readable reports/failure artifacts.
+    - The snapshot and runtime-profile fuzzers execute with libFuzzer plus AddressSanitizer and UndefinedBehaviorSanitizer; job-queue fuzzing remains explicitly experimental. A crash, sanitizer finding, timeout, oom, corpus mutation, missing report, or skipped harness fails the required job.
+    - Static analysis covers the exact default first-party compilation manifest under Clang 14 and fails on any diagnostic, coverage drift, unapproved exclusion, missing tool, version drift, or partial result. Existing GCC/Clang/MSVC warnings-as-errors remain required independently.
+    - Pull-request dependency review is required and blocking with no `continue-on-error`; the deterministic repository dependency/pin check runs on push and pull request so a skipped hosted comparison is never the sole dependency-security evidence.
+    - A default Release package candidate is built without experimental or vendor-device requirements, then staged, given two independently generated byte-identical SPDX SBOMs, bound by an unsigned provenance statement and expected-source manifest, verified offline, extracted, and consumed. Candidate outputs may be retained as CI evidence only and are never attached to a tag or GitHub Release.
+    - Workflow-policy checks fail if the M20-PRE-01 path gains `id-token`, attestation, package, or content write permission; invokes a signing/attestation-create/release/publish command; touches the release workflow; downloads an attestation or trust root during the offline phase; or contains a private key/signing secret.
+    - Existing Linux GCC 11 and Clang 14 Debug and RelWithDebInfo FMA on/off builds with AddressSanitizer/UndefinedBehaviorSanitizer, Windows Server 2022 MSVC v143 Debug and RelWithDebInfo, unified-executor ThreadSanitizer, determinism artifact exchange, embedding/add-subdirectory, installed package/archive/relocation/non-default-layout, exact C ABI/SONAME, vendor compile-only, documentation/release-contract, autotune, and scaling gates remain required and green.
+    - >-
+      The assurance-profile performance-regression disposition is explicit: no
+      production/runtime source changes are permitted, deterministic
+      operation/file/source counts and existing scaling gates must not regress,
+      and no elapsed-time, controlled-host, worst-case, RT1, or RT2 threshold is
+      introduced or waived by this batch.
   manual:
-    - Human API, architecture, and compatibility review confirms the repair is the exact caller-seeded command-capability protocol already used by the surrounding versioned HAL records, preserves fail-closed output validation, changes only `rt/src/command_batch.cpp`, and adds no public/vendor/ABI/schema/status/package/support capability.
-    - Human concurrency, lifetime, and safety review confirms exact dependency order, disjoint host ownership, bounded bridge, backend-local timelines, thread ownership, accepted-before-complete and whole-completion rules, fixed storage, failure suppression, quarantine, reverse retryable cleanup, no detached work, and no allocation in measured frames.
-    - Human test and claim review confirms the behavioral regression traverses both actual native candidate registrations, failure tests would catch bypasses, and GPU/FPGA/Graph/DMA/MMIO/event wording denotes injected simulated protocol roles only.
-    - A maintainer must explicitly approve any protected-branch merge after every required CI check and review passes. M17-06 does not authorize an agent to commit, push, open or merge a pull request, release, deploy, change settings, or waive a gate.
-    - Physical combined execution is neither required nor authorized. Any later physical run requires a separately approved M18 plan with exact GPU/FPGA/driver/firmware/bitstream/BDF/topology/workload identity, pre-retained thresholds where timing is measured, raw evidence, and human promotion review.
+    - Human fuzz/analyzer review must approve the supported-versus-experimental harness labels, seed/dictionary coverage, fixed bounds, complete default source manifest, exact Clang 14 checks, every named exclusion, absence of broad suppressions, and the distinction between a bounded smoke and continuous fuzzing or vulnerability absence.
+    - Human security and supply-chain review must approve all immutable dependency/action/tool/schema pins, the blocking dependency-review severity policy, parser/file/resource bounds, path/symlink/TOCTOU handling, diagnostics, fixture source/license, verifier distribution digest, public trust snapshot, signed-fixture identity policy, and proof that no private key, credential, signing, online lookup, or publication path exists.
+    - Human SBOM/provenance review must confirm exact artifact/component relationships, shipped-versus-build/test classification, source/tree/build/tool/dependency binding, canonical deterministic fields, final manifest coverage, and the explicit separation between unsigned target content verification and cryptographic verification of a non-target fixture. Neither result may be called authenticated target provenance, SLSA level, reproducible build, signed release, or current revocation proof.
+    - Human package, compatibility, and claim review must confirm unchanged production source, installed SDK, stable C ABI v8/70 exports/fingerprint/SONAME 8, device/extension ABI, schemas, version, license, support and qualification matrices, release workflow, retained prior evidence, and no implication of Unreal, physical hardware, HIL, field, controlled timing, RT1/RT2, release, deployment, or production readiness.
+    - A maintainer must separately authorize any commit, push, pull request, protected-branch merge, release, deployment, setting change, or external publication. This contract-generation request authorizes none of those actions and no agent may waive a failed gate.
 risk:
   class: high
   hazards:
-    - Initializing the input header can accidentally make an untouched or partially malformed callback look valid if zero-capacity and reserved-tail validation is weakened.
-    - Repairing a vendor callback or public record instead of the canonical Runtime discovery site would preserve the mismatch for other conforming backends or change an already published source contract.
-    - An ordinary graph dependency can be mistaken for a cross-backend hardware fence even though correctness depends on completed CUDA download, CPU bridge completion, and later XDMA upload.
-    - Overlapping or dual-registered host storage can obscure ownership, race two backends, or falsely imply peer access or coherent shared memory.
-    - Fake CUDA Graph and XDMA control/event callbacks can mutate data synchronously or on the wrong thread and hide accepted-before-complete, staging, timeout, quarantine, or lane-ownership defects.
-    - Sample state can allocate after start, use dynamic logs, race submission/service/XDMA workers, share globals across Runtime instances, or outlive checked cleanup.
-    - A Runtime-generated failure can still advance a timeline or release downstream graph work if assertions observe only the final output instead of every phase and driver call.
-    - Default sample wiring can leak toolkit, Linux-driver, feature-macro, warning, dependency, installed-target, or package requirements into portable builds.
-    - Success wording, GPU/FPGA names, sanitizer results, hosted CI, or deterministic counts can be overstated as physical execution, peer DMA, bounded latency, hardware qualification, RT1, or RT2.
+    - fixed-run fuzz smoke and hand-selected corpora can miss deep parser states, platform-specific undefined behavior, concurrency faults, or newly added unregistered input surfaces while appearing comprehensive
+    - a writable source corpus, time-based fuzz budget, unpinned compiler, nondeterministic seed, or swallowed sanitizer exit can make failures irreproducible or falsely green
+    - compilation-database drift, excluded translation units, external/generated warning suppression, broad NOLINT use, analyzer version drift, or public-layout padding noise can either hide defects or pressure an out-of-scope ABI change
+    - a pinned dependency or action can still be vulnerable, malicious, withdrawn, license-incompatible, or compromised; identity and immutability are not security clearance
+    - an SBOM can be schema-valid yet omit a build input, mislabel a test dependency as shipped, describe the source tree rather than the staged package, or contain volatile identifiers that defeat deterministic comparison
+    - manifest and provenance cycles, arbitrary full source commits, dirty-tree ambiguity, path aliases, symlinks, duplicate JSON keys, file replacement between validation and hashing, or unbounded trees can bind the wrong bytes
+    - an unsigned in-toto statement can be mistaken for authenticated provenance, a signed third-party fixture can be mistaken for a signed RTFW artifact, and an offline trust-root snapshot cannot reveal later revocation
+    - fixture generation or verifier bootstrap can accidentally retain a private key, invoke OIDC/signing, depend on online lookup during verification, or grant workflow write permissions
+    - CI evidence upload can be mislabeled as public release publication, and candidate archives/SBOMs/statements can be mistaken for released, reproducible, supported, or production artifacts
+    - broad checker, release-digest, CMake, or documentation edits can drift the default package, ABI, existing verification commands, M17-05 retained failure, support matrices, qualification boundaries, or release workflow
   stop_conditions:
-    - The target is not initially clean at exact commit `875c486570ed84df939b8b9e75c01e7c3d43b28b`, required M17-04/M17-05/M18-01/M19-01 ancestry or retained evidence is absent, or unrelated target changes cannot be preserved.
-    - Source inspection or a reproducing test contradicts the retained M17-05 finding, or the exact mismatch cannot be repaired solely in `rt/src/command_batch.cpp` while preserving complete fail-closed discovery validation.
-    - The repair requires a public header/table/version/callback change, a CUDA/XDMA backend or driver change, a stable ABI/status/schema/package/support change, or a second Runtime implementation path.
-    - After the scoped repair, either actual native candidate still cannot register through one Runtime, or the combined graph cannot be expressed with existing public APIs, disjoint host staging, ordinary dependencies, and backend-local timelines.
-    - Correctness requires a substitute backend, device-ABI-v1 fallback, wrapper that rewrites capabilities, overlapping or dual registration, a cross-backend timeline/fence, direct peer DMA, hidden synchronization, device-rate dispatch, a new lane, unbounded retry, detached work, or measured-frame allocation.
-    - Stage-accurate tests cannot prove that CUDA failure suppresses the bridge/XDMA/validator, XDMA failure suppresses its remaining work/validator, invalid completion never advances a timeline, and checked cleanup preserves uncertain ownership.
-    - A portable deterministic test requires sleeps or timing tolerances, a CUDA toolkit, physical GPU/FPGA, XDMA node, root privilege, fixed PCI/IRQ/IOMMU topology, destructive MMIO, firmware/bitstream, Unreal, secrets, signing, release, deployment, or production access.
-    - Any required Linux/Windows build, focused/full test, ASan/UBSan/TSan, determinism, no-allocation, package/ABI, static, or human gate genuinely fails on the proposed revision and cannot be repaired within allowed paths without weakening the gate.
-    - A required source, test, sample, build, workflow, documentation, governance, or evidence edit falls outside the allowlist or touches a forbidden/retained artifact.
+    - the exact baseline is unavailable or initially dirty, commit `c846cc427c93018175a69c7372c130f00c0b713b` is not the default-branch M17-06 pull request 240 result, any named retained evidence is missing/modified, or target history no longer supports the stated M17-06/M17-05 distinction
+    - credible fuzz or static closure requires changing production C/C++ code, a public header/layout, ABI/schema/status, installed package inventory, support matrix, qualification path, release version, or license instead of a separately approved remediation batch
+    - the complete default first-party compilation surface cannot be enumerated and analyzed with one pinned available toolchain, or a required diagnostic can pass only through a broad suppression, baseline waiver, omitted source, timeout, or warnings-not-errors policy
+    - any FetchContent/submodule/vcpkg/workflow/tool/schema input required by the gate cannot be identified by a reviewed immutable commit or digest and reconciled to its source and license
+    - the staged artifact set and shipped-versus-build/test dependency relationships cannot be represented and verified deterministically in the selected versioned SPDX format without omitting or guessing a component
+    - the manifest, SBOM, or provenance verifier cannot bind exact regular-file bytes, expected source identity, safe relative paths, bounded inventory, and deterministic canonical fields without following symlinks, trusting volatile host data, or accepting an arbitrary source commit
+    - no suitably licensed and provenance-documented pre-generated signed fixture plus public trust material and pinned verifier can perform real cryptographic verification and required negative mutations offline, or content verification cannot be distinguished from signer authentication and trust freshness
+    - implementation or validation requires a private key, signing secret, OIDC token, credential, network lookup during artifact/attestation verification, write permission, attestation creation, tag, release workflow, publication, release, deployment, production access, Unreal tree, physical device, privileged host mutation, or controlled timing runner
+    - any required focused, full, package, ABI, analyzer, sanitizer/fuzz, dependency, SBOM, provenance, offline-fixture, CI, or human review gate genuinely fails and cannot be repaired within allowed paths without weakening, skipping, or relabeling it
+    - a required source, tool, fixture, schema, policy, test, workflow, documentation, governance, checker, digest, or evidence change falls outside allowed paths or enters a forbidden path
 rollback:
-  strategy: Close frame admission and use checked Runtime stop before reverting an executing integration. Retain every accepted or quarantined CUDA/XDMA batch, Runtime submission/service lane, XDMA worker, caller-owned Graph, host/device/card buffer, event/control record, and backend object until existing reverse cleanup succeeds; retry only unresolved ownership and never invent completion or force-clear it. Then revert the `rt/src/command_batch.cpp` discovery repair, focused tests, portable sample/build/CI wiring, documentation/governance, release digest changes, and M17-06 evidence as one coherent batch. The exact `875c486570ed84df939b8b9e75c01e7c3d43b28b` baseline with retained blocked M17-05 behavior is the fallback; no data migration, hardware reset, host-setting, support, qualification, release, or deployment rollback is authorized.
+  strategy: Revert the fuzz harness/corpora, static policy/manifest/runner, dependency pins and policy, SBOM/provenance/manifest tooling and public-only fixtures, portable-assurance script/CI wiring, documentation/governance, release-contract digests, and M20-PRE-01 evidence as one coherent batch. Remove only generated M20-PRE-01 build/CI candidate outputs after confirming they were never tagged, published, installed system-wide, or used for support/qualification. Restore the prior verification surface without modifying runtime data, ABI, package version, support matrices, prior evidence, secrets, releases, or deployments; a security finding discovered by the batch remains a release blocker even if the tooling is rolled back.
   data_migration: none
-  release_action: Do not publish a release, promote CUDA/XDMA/combined/peer/RT support, change a qualification record, execute physical MMIO or hardware, or mark M17/CAP-M17 complete unless the implemented revision passes every focused, full local, mandatory CI, sanitizer, and human gate and its retained evidence supports only the approved portable claim.
+  release_action: Do not sign, attest through a signing service, publish, tag, release, deploy, change support or qualification state, alter repository settings, or claim reproducible/authenticated target provenance. Any later signing ceremony, release promotion, controlled performance run, soak, hardware/RT campaign, or production action requires a separately approved batch and human gate.
 evidence:
   output:
-    - docs/evidence/M17-06-<date>.md
-    - Exact baseline and ancestry, clean initial state, retained-evidence inventory, changed-file allowlist/forbidden-path audit, commands, exit codes, focused/repeat/package/full counts, sanitizer results, required CI run/check identifiers, and human review outcomes without inferring absent results.
-    - Before/after command-capability discovery input/output records, exact callback-observed size/version/zero state, rejected malformed matrix, transactional publication/correction result, and positive canonical Runtime registration of both actual native candidates.
-    - Complete graph declaration and compiled order for CPU prepare, CUDA batch, CPU host bridge, XDMA batch, and CPU validate, including every dependency and each timeline's backend owner, accepted values, and completed values for every frame.
-    - Fixed input and expected output, CUDA staged-domain registration, Graph ID/bindings and upload/Graph/download commands, disjoint bridge spans/byte count, XDMA H2C/control/event/C2H opcodes and payloads, and normalized phase/provider/poll/injected-driver trace.
-    - Proof of fixed sample/backend storage, no capacity growth, zero measured post-start allocations, exact command/callback/poll/driver counts, thread identities, accepted-before-complete/whole-completion behavior, deterministic repetitions, and two-Runtime isolation.
-    - Stage-specific CUDA and XDMA injected failures with exact first status, timeline non-publication, downstream suppression, quarantine/ownership state, checked-stop/unresolved-only retry, and successful fresh-run recovery.
-    - Stable sample output containing the simulated-protocol/no-physical-hardware/no-direct-peer labels and proof of no toolkit, device node, user BAR, event node, PCI, firmware, bitstream, network, secret, Unreal, or hardware access.
-    - Proof that C ABI/device ABI/HAL/extension versions, Runtime statuses, schemas/IDs, installed headers/targets/aliases, release version, support matrices, qualification workflows, license, M17-04 candidate behavior, and M18/M19 artifacts remain unchanged.
-    - Changed and preserved invariants, rollback readiness/result, residual risks, and every unperformed physical CUDA Graph/device-memory/pinning/coherency/topology/timestamp, XDMA DMA/MMIO/interrupt/firmware/bitstream/BDF, combined-hardware, HIL, field, controlled-performance, latency, thermal, endurance, RT1, RT2, Unreal, signing, release, staging, deployment, production, and support-promotion validation.
-  claim_boundary: Evidence may establish the Runtime capability-discovery repair and static, unit, malformed/failure-injected, fake CUDA Graph, simulated XDMA transfer/control/event, sanitizer, package, fixed-storage/no-allocation, lifecycle/recovery, concurrency, cross-instance, deterministic, and portable RT0 functional-composition behavior only. The graph is an explicit CPU-host-staged software protocol. It is not physical GPU or FPGA execution, a hardware fence, direct peer DMA, device coherence, safe MMIO, interrupt or cancellation behavior on a device, bounded vendor or end-to-end latency, controlled performance, HIL, field, RT1, RT2, Unreal, support promotion, signing, release, deployment, or production readiness. Those claims require separately approved and retained M18-or-later tuple evidence and human approval.
+    - docs/evidence/M20-PRE-01-<date>.md
+    - exact baseline/default-branch identity, initial worktree state, M17-06 pull-request ancestry, retained-evidence inventory, changed-file allowlist/forbidden-path audit, commands, exit codes, required CI run/job identifiers, and human review outcomes without inferring absent records
+    - exact fuzz compiler/libFuzzer/sanitizer versions and flags, harness classification, source corpus/dictionary paths and SHA-256 values, seed replay and mutation counts, maximum input/resource ceilings, fixed seed, result, and crash/timeout/oom artifact inventory
+    - exact Clang 14 policy/check list and exclusions with rationale, compile-database and first-party source-manifest digests, translation-unit/header counts, coverage reconciliation, diagnostics, exit status, and proof that no broad suppression or production-source edit was used
+    - complete dependency/action/tool/schema inventory with source, purpose, version/full commit/digest/license, resolution mode, dirty/missing/extra checks, blocking hosted dependency-review result, and explicit identity-not-vulnerability-clearance limit
+    - canonical SPDX version/schema/validator identity, package/source/dependency/artifact relationships, artifact sizes/digests, two-generation byte comparison and SBOM SHA-256, negative mutation results, and explicit shipped-versus-build/test classification
+    - staged archive/checksum/SBOM/unsigned-statement/final-manifest inventory and SHA-256 values, exact expected source commit and deterministic source-tree/dirty-state identity, build/compiler/CMake/flags, offline content-verification report, extraction/relocated-consumer result, and authentication false state
+    - signed fixture source/license, artifact/bundle/public-root/policy/verifier versions and SHA-256 values, expected repository/source/ref/workflow/issuer/predicate identity, offline positive result, every negative mutation result, trust-root capture age/limitation, and proof that no private key/signing/network path was used
+    - workflow permission and command audit proving no signing, OIDC, attestation creation/download during verification, tag, release, publication, deployment, setting mutation, or support/qualification update
+    - unchanged production source/public surface, C ABI v8 70-export fingerprint and SONAME 8, device/extension ABI, installed SDK inventory, schemas, release 1.2.1, support matrices, qualification state, license and prior evidence; changed/preserved invariants, rollback path, residual risks, and all unperformed validation
+  claim_boundary: Evidence may establish deterministic bounded Clang 14 fuzz smoke for two supported parsers and one explicitly experimental queue, complete-manifest Clang 14 static-analyzer execution, immutable dependency identity checks, a versioned deterministic SPDX candidate SBOM, exact candidate artifact/manifest/source binding, offline content verification of an unsigned in-toto Statement, cryptographic offline verification and mutation rejection for one retained non-target public-material fixture, default-package compatibility, and portable RT0 verification behavior only. It does not establish continuous fuzzing, vulnerability absence, legal or license clearance, complete transitive runtime provenance beyond the declared policy, bit-for-bit reproducible builds, authenticated or signed RTFW provenance, current trust-root or revocation state, SLSA level, signed release, controlled performance, soak/endurance, physical CUDA/XDMA/combined behavior, HIL, field evidence, latency, RT1, RT2, Unreal integration, support promotion, publication, release, deployment, or production readiness.

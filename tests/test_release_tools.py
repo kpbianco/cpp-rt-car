@@ -57,6 +57,22 @@ qualification = load_module(
     "rtfw_qualification",
     "tools/qualification.py",
 )
+portable_sbom = load_module(
+    "rtfw_portable_sbom",
+    "tools/sbom.py",
+)
+portable_provenance = load_module(
+    "rtfw_portable_provenance",
+    "tools/provenance.py",
+)
+portable_static = load_module(
+    "rtfw_portable_static",
+    "tools/check_static_analysis.py",
+)
+portable_fuzz = load_module(
+    "rtfw_portable_fuzz",
+    "tools/run_fuzz_smoke.py",
+)
 
 
 class ReleaseManifestTests(unittest.TestCase):
@@ -93,6 +109,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 self.manifest,
                 self.artifacts,
                 self.version,
+                self.commit,
             ),
             [],
         )
@@ -101,6 +118,7 @@ class ReleaseManifestTests(unittest.TestCase):
             self.manifest,
             self.artifacts,
             self.version,
+            self.commit,
         )
         self.assertTrue(any("digest mismatch" in error for error in errors))
 
@@ -111,6 +129,7 @@ class ReleaseManifestTests(unittest.TestCase):
             self.manifest,
             self.artifacts,
             self.version,
+            self.commit,
         )
         self.assertTrue(any("unlisted" in error for error in errors))
 
@@ -124,6 +143,7 @@ class ReleaseManifestTests(unittest.TestCase):
             self.manifest,
             self.artifacts,
             self.version,
+            self.commit,
         )
         self.assertTrue(any("unsafe path" in error for error in errors))
 
@@ -160,6 +180,7 @@ class ReleaseManifestTests(unittest.TestCase):
             self.manifest,
             self.artifacts,
             self.version,
+            self.commit,
         )
         self.assertTrue(any("missing" in error for error in errors))
 
@@ -176,6 +197,7 @@ class ReleaseManifestTests(unittest.TestCase):
             self.manifest,
             self.artifacts,
             self.version,
+            self.commit,
         )
         self.assertTrue(any("duplicate" in error for error in errors))
 
@@ -189,6 +211,7 @@ class ReleaseManifestTests(unittest.TestCase):
             self.manifest,
             self.artifacts,
             self.version,
+            self.commit,
         )
         self.assertTrue(any("sorted" in error for error in errors))
 
@@ -201,6 +224,47 @@ class ReleaseManifestTests(unittest.TestCase):
         self.assertIsNone(
             release_manifest.safe_relative_path("C:/escape")
         )
+
+    def test_noncanonical_duplicate_json_and_overwrite_are_rejected(self) -> None:
+        self.create()
+        canonical = self.manifest.read_text(encoding="utf-8")
+
+        self.manifest.write_text(canonical + "\n", encoding="utf-8")
+        errors = release_manifest.verify_manifest(
+            self.manifest,
+            self.artifacts,
+            self.version,
+            self.commit,
+        )
+        self.assertTrue(any("canonical" in error for error in errors))
+
+        self.manifest.write_text(
+            canonical.replace(
+                '"schema_version": 1,',
+                '"schema_version": 1,\n  "schema_version": 1,',
+                1,
+            ),
+            encoding="utf-8",
+        )
+        errors = release_manifest.verify_manifest(
+            self.manifest,
+            self.artifacts,
+            self.version,
+            self.commit,
+        )
+        self.assertTrue(any("duplicate JSON key" in error for error in errors))
+
+        self.manifest.write_text(canonical, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            release_manifest.write_manifest(
+                self.manifest,
+                release_manifest.create_manifest(
+                    self.artifacts,
+                    self.manifest,
+                    self.version,
+                    self.commit,
+                ),
+            )
 
 
 class ReleaseStagingTests(unittest.TestCase):
@@ -531,6 +595,299 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertTrue(
             any("workflow set differs" in error for error in errors)
         )
+
+
+class PortableAssuranceTests(unittest.TestCase):
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    tree = "89abcdef0123456789abcdef0123456789abcdef"
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.temporary.name)
+        self.policy_path = ROOT / "release/portable-assurance-policy.json"
+        self.dependency_path = ROOT / "tools/sbom_expected.json"
+        self.policy = portable_sbom.load_assurance_policy(self.policy_path)
+        self.dependencies = portable_sbom.load_dependency_policy(
+            self.dependency_path
+        )
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def candidate(self, name: str) -> pathlib.Path:
+        candidate = self.root / name
+        candidate.mkdir()
+        archive = candidate / "rtfw-1.2.1-test.tar.gz"
+        archive.write_bytes(b"candidate archive")
+        sidecar = candidate / (archive.name + ".sha256")
+        sidecar.write_text(
+            f"{portable_sbom.sha256(archive)}  {archive.name}\n",
+            encoding="utf-8",
+        )
+        return candidate
+
+    def create_sbom(self, candidate: pathlib.Path) -> pathlib.Path:
+        path = candidate / "rtfw.spdx.json"
+        value = portable_sbom.create_sbom(
+            candidate,
+            self.policy,
+            self.dependencies,
+            self.commit,
+        )
+        portable_sbom.validate_spdx_shape(value)
+        portable_sbom.write_new(path, value)
+        return path
+
+    def test_portable_assurance_sbom_is_deterministic_and_fail_closed(
+        self,
+    ) -> None:
+        first = self.candidate("first")
+        second = self.candidate("second")
+        first_sbom = self.create_sbom(first)
+        second_sbom = self.create_sbom(second)
+        self.assertEqual(first_sbom.read_bytes(), second_sbom.read_bytes())
+        result = portable_sbom.verify_sbom(
+            ROOT,
+            first_sbom,
+            first,
+            self.policy,
+            self.dependencies,
+            self.commit,
+        )
+        self.assertEqual(result["spdx_version"], "SPDX-2.3")
+        self.assertFalse(result["test_dependencies_shipped"])
+
+        data = json.loads(first_sbom.read_text(encoding="utf-8"))
+        data["files"][0]["fileName"] = "../escape"
+        first_sbom.write_text(
+            json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "unsafe file path"):
+            portable_sbom.verify_sbom(
+                ROOT,
+                first_sbom,
+                first,
+                self.policy,
+                self.dependencies,
+                self.commit,
+            )
+
+        clean = self.candidate("source-mismatch")
+        clean_sbom = self.create_sbom(clean)
+        with self.assertRaisesRegex(ValueError, "exact package/source"):
+            portable_sbom.verify_sbom(
+                ROOT,
+                clean_sbom,
+                clean,
+                self.policy,
+                self.dependencies,
+                "f" * 40,
+            )
+
+        extra = self.candidate("extra")
+        (extra / "unlisted.bin").write_bytes(b"unlisted")
+        with self.assertRaisesRegex(ValueError, "unlisted files"):
+            portable_sbom.create_sbom(
+                extra,
+                self.policy,
+                self.dependencies,
+                self.commit,
+            )
+
+        duplicate_json = self.root / "duplicate.json"
+        duplicate_json.write_text('{"a":1,"a":2}\n', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+            portable_sbom.strict_json(duplicate_json)
+
+    def test_portable_assurance_unsigned_statement_and_manifest_binding(
+        self,
+    ) -> None:
+        candidate = self.candidate("candidate")
+        self.create_sbom(candidate)
+        statement_path = candidate / "rtfw.provenance.json"
+        statement = portable_provenance.create_statement(
+            candidate,
+            self.policy,
+            self.dependency_path,
+            self.commit,
+            self.tree,
+            "clean",
+            "Ubuntu clang version 14.0.0",
+            "cmake version 3.22.1",
+        )
+        portable_provenance.write_new(statement_path, statement)
+        manifest_path = candidate / "rtfw-release-manifest.json"
+        version_path = self.root / "VERSION.txt"
+        version_path.write_text("1.2.1\n", encoding="utf-8")
+        manifest = release_manifest.create_manifest(
+            candidate,
+            manifest_path,
+            version_path,
+            self.commit,
+        )
+        release_manifest.write_manifest(manifest_path, manifest)
+        self.assertEqual(
+            release_manifest.verify_manifest(
+                manifest_path,
+                candidate,
+                version_path,
+                self.commit,
+            ),
+            [],
+        )
+        result = portable_provenance.verify_statement(
+            statement_path,
+            candidate,
+            manifest_path,
+            self.policy,
+            self.dependency_path,
+            self.commit,
+            self.tree,
+            "clean",
+            "Ubuntu clang version 14.0.0",
+            "cmake version 3.22.1",
+        )
+        self.assertFalse(result["authentication"])
+        self.assertFalse(result["signed_target"])
+        errors = release_manifest.verify_manifest(
+            manifest_path,
+            candidate,
+            version_path,
+            "f" * 40,
+        )
+        self.assertTrue(any("expected source" in error for error in errors))
+
+    def test_portable_assurance_public_fixture_and_identity_mutations(
+        self,
+    ) -> None:
+        result = portable_provenance.verify_fixture(ROOT, self.policy)
+        self.assertTrue(result["cryptographic_fixture_verified"])
+        self.assertFalse(result["target_authenticated"])
+
+        fixture_root = self.root / "fixture-root"
+        fixture_path = fixture_root / "tests/provenance_fixtures/public"
+        shutil.copytree(
+            ROOT / "tests/provenance_fixtures/public",
+            fixture_path,
+        )
+        artifact = fixture_path / "example-artifact.txt"
+        artifact.write_bytes(artifact.read_bytes() + b"mutation")
+        with self.assertRaisesRegex(ValueError, "artifact subject mismatch"):
+            portable_provenance.verify_fixture(fixture_root, self.policy)
+
+        shutil.copy2(
+            ROOT / "tests/provenance_fixtures/public/example-artifact.txt",
+            artifact,
+        )
+        envelope_path = fixture_path / "dsse-envelope.json"
+        envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+        envelope["signatures"][0]["sig"] = (
+            "A" + envelope["signatures"][0]["sig"][1:]
+        )
+        envelope_path.write_text(json.dumps(envelope), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "cryptographic signature"):
+            portable_provenance.verify_fixture(fixture_root, self.policy)
+
+        for field in (
+            "repository",
+            "source_digest",
+            "ref",
+            "workflow",
+            "issuer",
+            "predicate_type",
+        ):
+            with self.subTest(field=field):
+                mutated = copy.deepcopy(self.policy)
+                mutated["signed_fixture"][field] = "mutated"
+                with self.assertRaises(ValueError):
+                    portable_provenance.verify_fixture(ROOT, mutated)
+
+        shutil.copy2(
+            ROOT / "tests/provenance_fixtures/public/dsse-envelope.json",
+            envelope_path,
+        )
+        trust_path = fixture_path / "public-trust.json"
+        trust = json.loads(trust_path.read_text(encoding="utf-8"))
+        trust["modulus_hex"] = "01" + trust["modulus_hex"][2:]
+        trust_path.write_text(json.dumps(trust), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "cryptographic signature"):
+            portable_provenance.verify_fixture(fixture_root, self.policy)
+
+    def test_portable_assurance_static_manifest_reconciliation(self) -> None:
+        database = self.root / "compile_commands.json"
+        source = ROOT / "rt/src/runtime_profile.cpp"
+        entry = {
+            "directory": str(self.root),
+            "file": str(source),
+            "command": (
+                "clang++ -o CMakeFiles/rtfw_runtime.dir/"
+                "rt/src/runtime_profile.cpp.o -c " + str(source)
+            ),
+        }
+        database.write_text(json.dumps([entry]), encoding="utf-8")
+        manifest = self.root / "sources.txt"
+        manifest.write_text(
+            "rtfw_runtime|rt/src/runtime_profile.cpp\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            portable_static.compile_entries(ROOT, database),
+            portable_static.load_manifest(manifest),
+        )
+        database.write_text(json.dumps([entry, entry]), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            portable_static.compile_entries(ROOT, database)
+
+        unsafe_manifest = self.root / "unsafe-sources.txt"
+        unsafe_manifest.write_text("target|../escape.cpp\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            portable_static.load_manifest(unsafe_manifest)
+
+        external_source = self.root / "external.cpp"
+        external_source.write_text("int external;\n", encoding="utf-8")
+        external_entry = copy.deepcopy(entry)
+        external_entry["file"] = str(external_source)
+        database.write_text(json.dumps([external_entry]), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "outside the repository"):
+            portable_static.compile_entries(ROOT, database)
+
+    def test_portable_assurance_dependency_inventory(self) -> None:
+        result = portable_sbom.verify_dependencies(ROOT, self.dependency_path)
+        self.assertTrue(result["identity_only"])
+        self.assertFalse(result["vulnerability_clearance"])
+
+        policy = json.loads(self.dependency_path.read_text(encoding="utf-8"))
+        policy["dependencies"]["rapidcheck"]["commit"] = "master"
+        mutated = self.root / "dependencies.json"
+        mutated.write_text(json.dumps(policy), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "RapidCheck immutable pin"):
+            portable_sbom.verify_dependencies(ROOT, mutated)
+
+    def test_portable_fuzz_seed_manifests_fail_closed(self) -> None:
+        valid = self.root / "valid-seeds.json"
+        valid.write_text(
+            '{"empty.bin":{"base64":""},"text.txt":{"utf8":"seed"}}\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            portable_fuzz.load_seeds(valid),
+            [("empty.bin", b""), ("text.txt", b"seed")],
+        )
+        duplicate = self.root / "duplicate-seeds.json"
+        duplicate.write_text(
+            '{"seed":{"utf8":"a"},"seed":{"utf8":"b"}}\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+            portable_fuzz.load_seeds(duplicate)
+        unsafe = self.root / "unsafe-seeds.json"
+        unsafe.write_text(
+            '{"../escape":{"utf8":"a"}}\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "unsafe seed"):
+            portable_fuzz.load_seeds(unsafe)
 
 
 class QualificationToolTests(unittest.TestCase):

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "project": "rtfw",
+  "version": "1.2.1",
+  "source_repository": "https://github.com/kpbianco/cpp-rt-car",
+  "predicate_type": "https://rtfw.dev/provenance/portable-assurance/v1",
+  "builder_policy": "rtfw-portable-assurance-clang14-v1",
+  "build": {
+    "type": "Release",
+    "experimental": false,
+    "examples": false,
+    "runtime_demo": false,
+    "tests": false,
+    "signing": false,
+    "publication": false
+  },
+  "artifacts": {
+    "archive_suffix": ".tar.gz",
+    "checksum_suffix": ".tar.gz.sha256",
+    "sbom": "rtfw.spdx.json",
+    "provenance": "rtfw.provenance.json",
+    "manifest": "rtfw-release-manifest.json",
+    "maximum_files": 16,
+    "maximum_total_bytes": 8589934592
+  },
+  "spdx": {
+    "version": "SPDX-2.3",
+    "data_license": "CC0-1.0",
+    "schema_path": "release/schemas/spdx-schema-2.3.json",
+    "schema_sha256": "44f0abdeb5d5dc296a713103ba40416dd3d68925ba4bcbad9d1f2862ed11f287",
+    "schema_source": "https://github.com/spdx/spdx-spec/blob/d99772ca9816b1615c0e53a94525550054e6a83c/schemas/spdx-schema-2-3.json",
+    "schema_license": "CC-BY-3.0",
+    "creation_time": "1970-01-01T00:00:00Z"
+  },
+  "signed_fixture": {
+    "artifact": "tests/provenance_fixtures/public/example-artifact.txt",
+    "envelope": "tests/provenance_fixtures/public/dsse-envelope.json",
+    "trust": "tests/provenance_fixtures/public/public-trust.json",
+    "documentation": "tests/provenance_fixtures/public/README.md",
+    "payload_type": "application/vnd.in-toto+json",
+    "predicate_type": "https://slsa.dev/provenance/v1",
+    "repository": "https://github.com/example/portable-attestation-fixture",
+    "source_digest": "0123456789abcdef0123456789abcdef01234567",
+    "ref": "refs/tags/v1.0.0",
+    "workflow": ".github/workflows/build.yml@refs/tags/v1.0.0",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "artifact_sha256": "ab4ec6135d94bcf60275fcb9cabc5a780e3b6f08dc4f69ed75abb2c79cbebf88",
+    "key_id": "b1833d5789db9754f9af98125ca2320e7fcbf69d5b57fc300a782485e3612ccf",
+    "fixture_license": "CC0-1.0"
+  }
+}

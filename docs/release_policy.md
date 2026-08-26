@@ -82,6 +82,16 @@ A release candidate must:
 8. review every present-tense support, determinism, latency, and qualification
    claim before creating tag `v<version>`.
 
+M20-PRE-01 adds a pre-release candidate gate that deterministically verifies
+dependency/action identity, exact Clang 14 analyzer coverage, bounded parser
+fuzz smoke, a canonical SPDX 2.3 candidate SBOM, an unsigned in-toto candidate
+statement, an exact expected-source final manifest, offline cryptographic
+verification of a separate public non-target fixture, and relocated package/C
+ABI/SONAME behavior. Those outputs remain below CI evidence storage and are not
+tag assets. The candidate statement is unauthenticated; the signed fixture does
+not sign RTFW. Target signing, authenticated provenance, reproducible releases,
+and publication require later approved work and human release gates.
+
 The tag must identify the exact source commit used by the release workflow.
 Release archives and their generated manifest are immutable after publication;
 a changed artifact requires a new package version.
