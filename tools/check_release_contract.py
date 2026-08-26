@@ -8,6 +8,7 @@ import hashlib
 import json
 import pathlib
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -291,6 +292,25 @@ def load_text(
     except (OSError, UnicodeError) as exc:
         errors.append(f"{relative}: cannot read: {exc}")
         return ""
+
+
+def source_entry_is_executable(root: pathlib.Path, relative: str) -> bool:
+    """Check the repository mode portably, then fall back to host metadata."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--stage", "--", relative],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError:
+        result = None
+    if result is not None and result.returncode == 0 and result.stdout.strip():
+        return result.stdout.split(maxsplit=1)[0] == "100755"
+    path = root / relative
+    return path.is_file() and path.stat().st_mode & 0o111 != 0
 
 
 def load_json(
@@ -886,7 +906,9 @@ def validate_portable_assurance_contract(
 
     script_path = root / "scripts/verify-portable-assurance.sh"
     script = load_text(root, "scripts/verify-portable-assurance.sh", errors)
-    if not script_path.is_file() or script_path.stat().st_mode & 0o111 == 0:
+    if not script_path.is_file() or not source_entry_is_executable(
+        root, "scripts/verify-portable-assurance.sh"
+    ):
         errors.append("portable assurance entry point must be executable")
     for token in (
         "dependencies|static|fuzz|artifacts|all",

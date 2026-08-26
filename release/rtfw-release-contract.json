@@ -340,7 +340,7 @@
     "tools/check_c_abi.py": "2aa2657320256c74163f8293f357cb8140f65e7db13c98ed0b9523f2aebec22b",
     "tools/check_docs_contract.py": "b0a87b3b8b2bf1de77b8879a1defc751b51b33835174106c7b1f9cfb3b44003e",
     "tools/check_hardware_evidence.py": "b284d5341cb443ad4041858a25e3c0f8cf13c1cf176bb05fb0f56b47c17ad6c4",
-    "tools/check_release_contract.py": "861380fc25383d2bae78bf5940e1a0c60d12cbbb7de8d036945874749be49e95",
+    "tools/check_release_contract.py": "b205dd3ff1058f1a299a7adb93ac53b583087b9053902701561bc2a3e24241e4",
     "tools/check_static_analysis.py": "2355df02d730d0c88f036e607b8972781a3c52be4c81f6578c5f477811d7ed28",
     "tools/extract_release_archive.py": "9d9675afb6c08e76c320ecf71d2098478523443d850b69e45369504a055561e2",
     "tools/portable_assurance_toolchain.json": "7a0e7ce2abaac1a88451cc038aa84d8fe8d91e265cc80ab63225120462500f50",
