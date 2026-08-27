@@ -70,28 +70,23 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
 
     auto source = frame(101, 1, 11, 12);
     decltype(source) destination{};
-    const auto register_memory = [&](auto& storage) {
-        rt::HalV2MemoryRegistration memory{};
-        memory.domain_identity = 1;
-        memory.bytes = storage.size();
-        memory.ownership = static_cast<std::uint32_t>(
-            rt::HalV2MemoryOwnership::borrowed_host);
-        memory.access = RTFW_DEVICE_BUFFER_HOST_READ |
+    const auto register_buffer = [&](auto& storage) {
+        rt::HalV2BufferRegistration buffer{};
+        buffer.data = storage.data();
+        buffer.bytes = storage.size();
+        buffer.flags = RTFW_DEVICE_BUFFER_HOST_READ |
             RTFW_DEVICE_BUFFER_HOST_WRITE |
             RTFW_DEVICE_BUFFER_DEVICE_READ |
             RTFW_DEVICE_BUFFER_DEVICE_WRITE;
-        memory.coherency = static_cast<std::uint32_t>(
-            rt::HalV2MemoryCoherency::host_coherent);
-        memory.host_data = storage.data();
-        rt::HalV2MemoryToken token{};
+        std::uint64_t token = 0;
         EXPECT_EQ(
-            registration.memory_topology->register_memory(
-                registration.memory_topology->instance, &memory, &token),
+            registration.api.register_buffer(
+                registration.api.instance, &buffer, &token),
             rt::HalV2Status::ok);
-        return token.submission_token;
+        return token;
     };
-    const auto source_token = register_memory(source);
-    const auto destination_token = register_memory(destination);
+    const auto source_token = register_buffer(source);
+    const auto destination_token = register_buffer(destination);
     ASSERT_NE(source_token, 0u);
     ASSERT_NE(destination_token, 0u);
     ASSERT_NE(source_token, destination_token);
