@@ -131,7 +131,9 @@ struct SampledIoLoopbackBackend::Impl {
              index < backend->config.buffer_capacity; ++index) {
             auto& slot = backend->buffers[index];
             if (!slot.occupied) {
-                slot = {registration->data, registration->bytes, true};
+                slot.data = registration->data;
+                slot.bytes = registration->bytes;
+                slot.occupied = true;
                 *token = index + 1;
                 return HalV2Status::ok;
             }
@@ -350,22 +352,25 @@ struct SampledIoLoopbackBackend::Impl {
         return hash;
     }
 
-    bool resolve(
+    HalV2Status resolve(
         const HalV2BufferReference& reference,
         std::span<std::byte>& bytes) noexcept {
         if (reference.buffer_token == 0 ||
             reference.buffer_token > config.buffer_capacity) {
-            return false;
+            return HalV2Status::invalid_argument;
         }
         const auto& buffer = buffers[reference.buffer_token - 1];
-        if (!buffer.occupied || add_overflows(reference.offset, reference.bytes) ||
+        if (!buffer.occupied) {
+            return HalV2Status::invalid_state;
+        }
+        if (add_overflows(reference.offset, reference.bytes) ||
             reference.offset + reference.bytes > buffer.bytes) {
-            return false;
+            return HalV2Status::resource_exhausted;
         }
         bytes = std::span<std::byte>(
             static_cast<std::byte*>(buffer.data) + reference.offset,
             static_cast<std::size_t>(reference.bytes));
-        return true;
+        return HalV2Status::ok;
     }
 
     HalV2Status execute(
@@ -384,9 +389,14 @@ struct SampledIoLoopbackBackend::Impl {
             }
             std::span<std::byte> source;
             std::span<std::byte> destination;
-            if (!resolve(command.buffers[0], source) ||
-                !resolve(command.buffers[1], destination)) {
-                return HalV2Status::invalid_state;
+            const auto source_status = resolve(command.buffers[0], source);
+            if (source_status != HalV2Status::ok) {
+                return source_status;
+            }
+            const auto destination_status = resolve(
+                command.buffers[1], destination);
+            if (destination_status != HalV2Status::ok) {
+                return destination_status;
             }
             if (source.size() != destination.size() ||
                 source.size() < sizeof(SampledIoFrameHeader)) {

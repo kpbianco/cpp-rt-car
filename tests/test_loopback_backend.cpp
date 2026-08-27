@@ -47,6 +47,12 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     auto registration = backend.hal_v2_registration();
     ASSERT_NE(registration.memory_topology, nullptr);
     ASSERT_NE(registration.command_timeline, nullptr);
+    rt::HalV2Capabilities capabilities{};
+    ASSERT_EQ(
+        registration.api.get_capabilities(
+            registration.api.instance, &capabilities),
+        rt::HalV2Status::ok);
+    ASSERT_EQ(capabilities.max_registered_buffers, 8u);
 
     rt::HalV2InitializeConfig initialize{};
     initialize.requested_in_flight = 2;
@@ -82,6 +88,8 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     ASSERT_NE(source_token, 0u);
     ASSERT_NE(destination_token, 0u);
     ASSERT_NE(source_token, destination_token);
+    ASSERT_LE(source_token, capabilities.max_registered_buffers);
+    ASSERT_LE(destination_token, capabilities.max_registered_buffers);
 
     rt::SampledIoFrameHeader submitted{};
     std::memcpy(&submitted, source.data(), sizeof(submitted));
