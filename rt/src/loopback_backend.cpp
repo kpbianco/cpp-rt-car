@@ -258,7 +258,10 @@ struct SampledIoLoopbackBackend::Impl {
         HalV2MemoryToken* token) noexcept {
         auto* backend = self(instance);
         if (token) {
-            *token = {};
+            // The caller owns the extension/version/native metadata. This
+            // backend produces only the submission token; avoid a whole-
+            // record assignment across a shared-library ABI boundary.
+            token->submission_token = 0;
         }
         if (!backend || !registration || !token ||
             registration->domain_identity !=
