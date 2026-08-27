@@ -41,6 +41,15 @@ std::array<std::byte, sizeof(rt::SampledIoFrameHeader) + 8> frame(
     return bytes;
 }
 
+rt::HalV2BufferReference buffer_reference(
+    std::uint64_t token,
+    std::uint64_t bytes) {
+    rt::HalV2BufferReference reference{};
+    std::memcpy(&reference.buffer_token, &token, sizeof(token));
+    std::memcpy(&reference.bytes, &bytes, sizeof(bytes));
+    return reference;
+}
+
 TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     rt::SampledIoLoopbackBackend backend;
     rt::SampledIoLoopbackRoute route{};
@@ -108,10 +117,10 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     batch.timeout_ns = 1000000;
     batch.command_count = 1;
     batch.signal_count = 1;
-    const rt::HalV2BufferReference source_reference{
-        source_token, 0, 0, 0, source.size()};
-    const rt::HalV2BufferReference destination_reference{
-        destination_token, 0, 0, 0, destination.size()};
+    const auto source_reference = buffer_reference(
+        source_token, source.size());
+    const auto destination_reference = buffer_reference(
+        destination_token, destination.size());
     ASSERT_EQ(source_reference.buffer_token, source_token);
     ASSERT_EQ(destination_reference.buffer_token, destination_token);
     rt::DeviceCommand command{};
