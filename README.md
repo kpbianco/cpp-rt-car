@@ -1,5 +1,10 @@
 # RTFW — Bounded Simulation Runtime
 
+Portable sampled-I/O users can include `<rt/loopback_backend.hpp>` for the
+installed fixed-capacity HAL-v2 software loopback and follow
+[`docs/sampled_io.md`](docs/sampled_io.md) for descriptors, frames, policies,
+and acknowledged safe output. This is software RT0 evidence, not physical HIL.
+
 [![CI](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml)
 [![Documentation contract](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml)
 

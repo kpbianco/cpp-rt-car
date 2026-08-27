@@ -12,6 +12,7 @@
 #include "rate_telemetry.hpp"
 #include "rate_timeline.hpp"
 #include "resource_policy.hpp"
+#include "sampled_io.hpp"
 #include "snapshot_codec.hpp"
 #include "telemetry.hpp"
 #include "watchdog_monitor.hpp"
@@ -1337,6 +1338,61 @@ struct Runtime::Impl {
                 hash_u64(hash, endpoint.timestamp_domain_identity);
             }
         }
+        if (!sampled_io_channels.empty()) {
+            hash_u64(hash, 0x4d32312d73696f34ull);
+            hash_u64(hash, sampled_io_channels.size());
+            std::uint64_t previous_identity = 0;
+            for (std::size_t ordinal = 0;
+                 ordinal < sampled_io_channels.size(); ++ordinal) {
+                const detail::SampledIoChannelSpec* selected = nullptr;
+                for (const auto& candidate : sampled_io_channels) {
+                    if (candidate.channel_identity > previous_identity &&
+                        (!selected || candidate.channel_identity <
+                            selected->channel_identity)) {
+                        selected = &candidate;
+                    }
+                }
+                if (!selected) {
+                    break;
+                }
+                previous_identity = selected->channel_identity;
+                hash_u64(hash, selected->channel_identity);
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->direction));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->encoding));
+                hash_u64(hash, selected->element_count);
+                hash_u64(hash, selected->samples_per_frame);
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->scale_numerator));
+                hash_u64(hash, selected->scale_denominator);
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->offset_numerator));
+                hash_u64(hash, selected->offset_denominator);
+                hash_u64(hash, selected->units_identity);
+                hash_u64(hash, selected->calibration_identity);
+                hash_u64(hash, selected->sample_period_ns);
+                hash_u64(hash, selected->timestamp_domain_identity);
+                hash_u64(hash, selected->clock_domain_identity);
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->trigger_mode));
+                hash_u64(hash, selected->trigger_identity);
+                hash_u64(hash, selected->ring_capacity);
+                hash_u64(hash, selected->initial_sequence);
+                hash_u64(hash, selected->maximum_age_ns);
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->stale_policy));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->overrun_policy));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    selected->underrun_policy));
+                hash_u64(hash, selected->safe_transition_timeout_ns);
+                hash_bytes(hash, selected->initial_frame);
+                hash_bytes(hash, selected->startup_safe_frame);
+                hash_bytes(hash, selected->failure_safe_frame);
+                hash_bytes(hash, selected->shutdown_safe_frame);
+            }
+        }
         if (!compiled_device_rate_plan.phases.empty()) {
             hash_u64(hash, 0x4d32312d64726174ull);
             hash_u64(hash, compiled_device_rate_plan.phases.size());
@@ -2312,12 +2368,46 @@ struct Runtime::Impl {
         if (payload.size() != spec.payload_size) {
             return Status::invalid_argument;
         }
+        const auto* sampled = self.sampled_io_record(index);
+        std::size_t sampled_index = 0;
+        if (sampled) {
+            sampled_index = self.sampled_io_index(index);
+            std::uint64_t expected_sequence = 0;
+            std::uint64_t expected_generation = 0;
+            if (!self.sampled_io_expected_sequence(
+                    *sampled,
+                    self.compiled_rate_plan.releases[
+                        self.active_reference_index],
+                    self.active_rate_view.domain_release_sequence,
+                    expected_sequence,
+                    expected_generation) ||
+                !detail::sampled_io_frame_valid(
+                    payload,
+                    sampled->public_record,
+                    SampledIoFrameStatus::produced,
+                    expected_sequence,
+                    expected_generation,
+                    true)) {
+                self.sampled_io_statuses[sampled_index].last_status =
+                    Status::invalid_argument;
+                return Status::invalid_argument;
+            }
+        }
         std::uint8_t expected = 0;
         if (!self.active_publication_claims[index].compare_exchange_strong(
                 expected,
                 1,
                 std::memory_order_acq_rel,
                 std::memory_order_relaxed)) {
+            if (sampled) {
+                ++self.sampled_io_statuses[sampled_index].overruns;
+                self.sampled_io_statuses[sampled_index].last_status =
+                    Status::capacity_exceeded;
+                if (sampled->public_record.overrun_policy ==
+                    SampledIoOverrunPolicy::reject_newest) {
+                    return Status::capacity_exceeded;
+                }
+            }
             self.active_publication_claims[index].store(
                 3,
                 std::memory_order_release);
@@ -2336,6 +2426,14 @@ struct Runtime::Impl {
                 std::memory_order_release,
                 std::memory_order_acquire)) {
             return Status::invalid_state;
+        }
+        if (sampled) {
+            SampledIoFrameHeader header{};
+            (void)detail::sampled_io_read_header(payload, header);
+            auto& status = self.sampled_io_statuses[sampled_index];
+            status.last_sequence = header.sequence;
+            ++status.accepted_frames;
+            status.last_status = Status::ok;
         }
         return Status::ok;
     }
@@ -2502,6 +2600,59 @@ struct Runtime::Impl {
         if (result.freshness == CrossRateFreshness::stale) {
             self.active_stale_reads.fetch_add(1, std::memory_order_relaxed);
         }
+        const auto* sampled = self.sampled_io_record(index);
+        if (sampled) {
+            auto& sampled_status = self.sampled_io_statuses[
+                self.sampled_io_index(index)];
+            SampledIoFrameHeader header{};
+            if (!detail::sampled_io_read_header(output, header)) {
+                result.status = CrossRateReadStatus::not_ready;
+                sampled_status.last_status = Status::invalid_argument;
+                return result.status;
+            }
+            if (result.freshness == CrossRateFreshness::stale) {
+                ++sampled_status.stale_frames;
+                if (sampled->public_record.direction ==
+                        SampledIoDirection::output) {
+                    ++sampled_status.underruns;
+                    if (sampled->public_record.underrun_policy !=
+                        SampledIoUnderrunPolicy::substitute_safe) {
+                        result.status = CrossRateReadStatus::stale_generation;
+                        sampled_status.last_status = Status::invalid_state;
+                        return result.status;
+                    }
+                    const auto safe = self.sampled_io_frame(
+                        sampled->failure_safe_offset,
+                        sampled->public_record.frame_bytes);
+                    std::copy(safe.begin(), safe.end(), output.begin());
+                    (void)detail::sampled_io_read_header(output, header);
+                    result.sampled_substituted = true;
+                    result.freshness = CrossRateFreshness::fresh;
+                    ++sampled_status.substituted_frames;
+                } else if (sampled->public_record.stale_policy !=
+                    SampledIoStalePolicy::substitute_initial) {
+                    result.status = CrossRateReadStatus::stale_generation;
+                    sampled_status.last_status = Status::invalid_state;
+                    return result.status;
+                } else {
+                    const auto initial = self.sampled_io_frame(
+                        sampled->initial_offset,
+                        sampled->public_record.frame_bytes);
+                    std::copy(initial.begin(), initial.end(), output.begin());
+                    (void)detail::sampled_io_read_header(output, header);
+                    result.sampled_substituted = true;
+                    result.freshness = CrossRateFreshness::fresh;
+                    ++sampled_status.substituted_frames;
+                }
+            }
+            result.sampled_sequence = header.sequence;
+            result.sampled_trigger_identity = header.trigger_identity;
+            result.sampled_trigger_sequence = header.trigger_sequence;
+            result.sampled_calibration_identity =
+                header.calibration_identity;
+            sampled_status.last_sequence = header.sequence;
+            sampled_status.last_status = Status::ok;
+        }
         return result.status;
     }
 
@@ -2637,6 +2788,54 @@ struct Runtime::Impl {
             : nullptr;
     }
 
+    [[nodiscard]] std::size_t sampled_io_index(
+        std::size_t cross_rate_channel_index) const noexcept {
+        if (cross_rate_channel_index >= compiled_sampled_io_plan
+                .channel_index_by_cross_rate.size()) {
+            return std::numeric_limits<std::size_t>::max();
+        }
+        return compiled_sampled_io_plan
+            .channel_index_by_cross_rate[cross_rate_channel_index];
+    }
+
+    [[nodiscard]] const detail::CompiledSampledIoRecord* sampled_io_record(
+        std::size_t cross_rate_channel_index) const noexcept {
+        const auto index = sampled_io_index(cross_rate_channel_index);
+        return index < compiled_sampled_io_plan.channels.size()
+            ? &compiled_sampled_io_plan.channels[index]
+            : nullptr;
+    }
+
+    [[nodiscard]] std::span<const std::byte> sampled_io_frame(
+        std::size_t offset,
+        std::size_t bytes) const noexcept {
+        if (offset > compiled_sampled_io_plan.frame_storage.size() ||
+            bytes > compiled_sampled_io_plan.frame_storage.size() - offset) {
+            return {};
+        }
+        return std::span<const std::byte>(
+            compiled_sampled_io_plan.frame_storage.data() + offset, bytes);
+    }
+
+    [[nodiscard]] static bool sampled_io_expected_sequence(
+        const detail::CompiledSampledIoRecord& channel,
+        const ReferenceRelease& release,
+        std::uint64_t domain_release_sequence,
+        std::uint64_t& sequence,
+        std::uint64_t& generation) noexcept {
+        std::uint64_t ordinal = 0;
+        return checked_time_multiply(
+                   domain_release_sequence,
+                   release.substep_count,
+                   ordinal) &&
+            checked_time_add(ordinal, release.substep_ordinal, ordinal) &&
+            checked_time_add(ordinal, 1, generation) &&
+            checked_time_add(
+                channel.public_record.initial_sequence,
+                generation,
+                sequence);
+    }
+
     [[nodiscard]] bool device_payload_slot(
         std::size_t reference_index,
         const ReferenceRelease& release,
@@ -2673,14 +2872,18 @@ struct Runtime::Impl {
     [[nodiscard]] Status prepare_device_inputs(
         const ReferenceRelease& release,
         std::uint32_t payload_slot) noexcept {
-        if (compiled_rate_dispatch_plan.consumer_channel_offsets.empty()) {
-            return Status::ok;
-        }
-        const auto begin = compiled_rate_dispatch_plan
-            .consumer_channel_offsets[release.phase.index()];
-        const auto end = compiled_rate_dispatch_plan
-            .consumer_channel_offsets[release.phase.index() + 1];
-        for (std::size_t cursor = begin; cursor < end; ++cursor) {
+        const auto consumer_begin = compiled_rate_dispatch_plan
+            .consumer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .consumer_channel_offsets[release.phase.index()];
+        const auto consumer_end = compiled_rate_dispatch_plan
+            .consumer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .consumer_channel_offsets[release.phase.index() + 1];
+        for (std::size_t cursor = consumer_begin;
+             cursor < consumer_end; ++cursor) {
             const auto channel_index = compiled_rate_dispatch_plan
                 .consumer_channel_indices[cursor];
             const auto& descriptor =
@@ -2723,6 +2926,89 @@ struct Runtime::Impl {
             if (read.freshness != CrossRateFreshness::fresh) {
                 return Status::invalid_state;
             }
+        }
+        const auto producer_begin = compiled_rate_dispatch_plan
+            .producer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .producer_channel_offsets[release.phase.index()];
+        const auto producer_end = compiled_rate_dispatch_plan
+            .producer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .producer_channel_offsets[release.phase.index() + 1];
+        for (std::size_t cursor = producer_begin;
+             cursor < producer_end; ++cursor) {
+            const auto channel_index = compiled_rate_dispatch_plan
+                .producer_channel_indices[cursor];
+            const auto& descriptor =
+                compiled_cross_rate_plan.channels[channel_index];
+            if (!descriptor.producer_device.valid()) {
+                continue;
+            }
+            const auto* sampled = sampled_io_record(channel_index);
+            const auto* endpoint = device_endpoint_for_channel(channel_index);
+            if (!sampled) {
+                continue;
+            }
+            if (!endpoint || !endpoint->producer ||
+                payload_slot >= endpoint->slot_count) {
+                return Status::internal_error;
+            }
+            std::uint64_t relative_offset = 0;
+            std::uint64_t payload_offset = 0;
+            if (!checked_time_multiply(
+                    payload_slot,
+                    endpoint->slot_stride_bytes,
+                    relative_offset) ||
+                !checked_time_add(
+                    endpoint->envelope_offset,
+                    relative_offset,
+                    payload_offset) ||
+                payload_offset > endpoint->host_storage.size() ||
+                sampled->public_record.frame_bytes >
+                    endpoint->host_storage.size() - payload_offset ||
+                sampled->public_record.frame_bytes <
+                    sizeof(SampledIoFrameHeader)) {
+                return Status::internal_error;
+            }
+            std::uint64_t sequence = 0;
+            std::uint64_t generation = 0;
+            if (!sampled_io_expected_sequence(
+                    *sampled,
+                    release,
+                    active_rate_view.domain_release_sequence,
+                    sequence,
+                    generation)) {
+                return Status::capacity_exceeded;
+            }
+            // Runtime owns release correlation. Pre-materialize only the
+            // expected header in the selected output slot; the backend must
+            // still produce a complete frame that passes terminal validation.
+            SampledIoFrameHeader header{};
+            header.channel_identity =
+                sampled->public_record.channel_identity;
+            header.sequence = sequence;
+            header.release_generation = generation;
+            header.sample_count =
+                sampled->public_record.samples_per_frame;
+            header.encoding = static_cast<std::uint32_t>(
+                sampled->public_record.encoding);
+            header.timestamp_domain_identity =
+                sampled->public_record.timestamp_domain_identity;
+            header.sample_interval_ns =
+                sampled->public_record.sample_period_ns;
+            header.trigger_identity =
+                sampled->public_record.trigger_identity;
+            header.trigger_sequence = sequence;
+            header.calibration_identity =
+                sampled->public_record.calibration_identity;
+            header.status = static_cast<std::uint32_t>(
+                SampledIoFrameStatus::produced);
+            std::memcpy(
+                endpoint->host_storage.data() + payload_offset,
+                &header,
+                sizeof(header));
         }
         return Status::ok;
     }
@@ -2837,6 +3123,71 @@ struct Runtime::Impl {
             .producer_channel_offsets[release.phase.index()];
         const auto end = compiled_rate_dispatch_plan
             .producer_channel_offsets[release.phase.index() + 1];
+        // Validate every device-produced payload before mutating any snapshot
+        // store. A multi-output terminal completion is one publication unit:
+        // one malformed frame must not leave earlier channels committed.
+        for (std::size_t cursor = begin; cursor < end; ++cursor) {
+            const auto channel_index = compiled_rate_dispatch_plan
+                .producer_channel_indices[cursor];
+            const auto& descriptor =
+                compiled_cross_rate_plan.channels[channel_index];
+            if (!descriptor.producer_device.valid()) {
+                continue;
+            }
+            const auto* endpoint = device_endpoint_for_channel(channel_index);
+            if (!endpoint || !endpoint->producer ||
+                payload_slot >= endpoint->slot_count ||
+                completion.timestamp_domain_identity !=
+                    endpoint->timestamp_domain_identity) {
+                return Status::device_error;
+            }
+            std::uint64_t relative_offset = 0;
+            std::uint64_t payload_offset = 0;
+            if (!checked_time_multiply(
+                    payload_slot,
+                    endpoint->slot_stride_bytes,
+                    relative_offset) ||
+                !checked_time_add(
+                    endpoint->envelope_offset,
+                    relative_offset,
+                    payload_offset) ||
+                payload_offset > endpoint->host_storage.size() ||
+                cross_rate_channels[channel_index].payload_size >
+                    endpoint->host_storage.size() - payload_offset) {
+                return Status::internal_error;
+            }
+            const auto source = std::span<const std::byte>(
+                endpoint->host_storage.data() + payload_offset,
+                cross_rate_channels[channel_index].payload_size);
+            const auto* sampled = sampled_io_record(channel_index);
+            if (!sampled) {
+                continue;
+            }
+            const auto sampled_index = sampled_io_index(channel_index);
+            std::uint64_t expected_sequence = 0;
+            std::uint64_t expected_generation = 0;
+            SampledIoFrameHeader sampled_header{};
+            if (!sampled_io_expected_sequence(
+                    *sampled,
+                    release,
+                    ticket.identity.domain_release_sequence,
+                    expected_sequence,
+                    expected_generation) ||
+                !detail::sampled_io_frame_valid(
+                    source,
+                    sampled->public_record,
+                    SampledIoFrameStatus::produced,
+                    expected_sequence,
+                    expected_generation,
+                    true) ||
+                !detail::sampled_io_read_header(source, sampled_header) ||
+                sampled_header.first_sample_timestamp !=
+                    completion.timestamp) {
+                sampled_io_statuses[sampled_index].last_status =
+                    Status::device_error;
+                return Status::device_error;
+            }
+        }
         for (std::size_t cursor = begin; cursor < end; ++cursor) {
             const auto channel_index = compiled_rate_dispatch_plan
                 .producer_channel_indices[cursor];
@@ -2881,6 +3232,35 @@ struct Runtime::Impl {
             const auto source = std::span<const std::byte>(
                 endpoint->host_storage.data() + payload_offset,
                 cross_rate_channels[channel_index].payload_size);
+            const auto* sampled = sampled_io_record(channel_index);
+            std::size_t sampled_index = 0;
+            SampledIoFrameHeader sampled_header{};
+            if (sampled) {
+                sampled_index = sampled_io_index(channel_index);
+                std::uint64_t expected_sequence = 0;
+                std::uint64_t expected_generation = 0;
+                if (!sampled_io_expected_sequence(
+                        *sampled,
+                        release,
+                        ticket.identity.domain_release_sequence,
+                        expected_sequence,
+                        expected_generation) ||
+                    !detail::sampled_io_frame_valid(
+                        source,
+                        sampled->public_record,
+                        SampledIoFrameStatus::produced,
+                        expected_sequence,
+                        expected_generation,
+                        true) ||
+                    !detail::sampled_io_read_header(
+                        source, sampled_header) ||
+                    sampled_header.first_sample_timestamp !=
+                        completion.timestamp) {
+                    sampled_io_statuses[sampled_index].last_status =
+                        Status::device_error;
+                    return Status::device_error;
+                }
+            }
             if (store.publish(channel_state.next_generation, source) !=
                 detail::SnapshotStoreResult::ok) {
                 return Status::internal_error;
@@ -2907,6 +3287,161 @@ struct Runtime::Impl {
             channel_state.producer_timestamp_domain_identity =
                 completion.timestamp_domain_identity;
             channel_state.producer_timestamp = completion.timestamp;
+            if (sampled) {
+                auto& status = sampled_io_statuses[sampled_index];
+                status.last_sequence = sampled_header.sequence;
+                ++status.accepted_frames;
+                status.last_status = Status::ok;
+            }
+        }
+        if (compiled_rate_dispatch_plan.consumer_channel_offsets.empty()) {
+            return Status::ok;
+        }
+        const auto consumer_begin = compiled_rate_dispatch_plan
+            .consumer_channel_offsets[release.phase.index()];
+        const auto consumer_end = compiled_rate_dispatch_plan
+            .consumer_channel_offsets[release.phase.index() + 1];
+        for (std::size_t cursor = consumer_begin;
+             cursor < consumer_end; ++cursor) {
+            const auto channel_index = compiled_rate_dispatch_plan
+                .consumer_channel_indices[cursor];
+            const auto* sampled = sampled_io_record(channel_index);
+            if (sampled && sampled->public_record.direction ==
+                    SampledIoDirection::output) {
+                auto& status = sampled_io_statuses[
+                    sampled_io_index(channel_index)];
+                status.safety_state = SampledIoSafetyState::active;
+                status.last_status = Status::ok;
+            }
+        }
+        return Status::ok;
+    }
+
+    [[nodiscard]] Status apply_sampled_io_safe_transition(
+        SampledIoSafetyState transition) noexcept {
+        if (compiled_sampled_io_plan.safe_phases.empty()) {
+            return Status::ok;
+        }
+        if (!devices) {
+            return Status::invalid_state;
+        }
+        const auto frame_offset = [transition](
+            const detail::CompiledSampledIoRecord& channel) {
+            switch (transition) {
+            case SampledIoSafetyState::startup_acknowledged:
+                return channel.startup_safe_offset;
+            case SampledIoSafetyState::failure_acknowledged:
+                return channel.failure_safe_offset;
+            case SampledIoSafetyState::shutdown_acknowledged:
+                return channel.shutdown_safe_offset;
+            default:
+                return std::numeric_limits<std::size_t>::max();
+            }
+        };
+        for (const auto& safe_phase : compiled_sampled_io_plan.safe_phases) {
+            if (!safe_phase.phase.valid() ||
+                safe_phase.phase.index() >= callbacks.size() ||
+                safe_phase.reference_index >= compiled_rate_plan.releases.size()) {
+                return Status::internal_error;
+            }
+            const auto& callback = callbacks[safe_phase.phase.index()];
+            auto batch = callback.batch_declaration;
+            auto declaration = callback.batch_declaration;
+            std::uint64_t timeout_ns =
+                std::numeric_limits<std::uint64_t>::max();
+            for (std::size_t offset = 0;
+                 offset < safe_phase.channel_count; ++offset) {
+                const auto sampled_index = compiled_sampled_io_plan
+                    .safe_channel_indices[safe_phase.first_channel_index + offset];
+                const auto& channel =
+                    compiled_sampled_io_plan.channels[sampled_index];
+                const auto* endpoint = device_endpoint_for_channel(
+                    channel.cross_rate_channel_index);
+                const auto source = sampled_io_frame(
+                    frame_offset(channel), channel.public_record.frame_bytes);
+                if (!endpoint || endpoint->producer || source.empty() ||
+                    endpoint->host_storage.size() < endpoint->envelope_offset ||
+                    source.size() > endpoint->host_storage.size() -
+                        endpoint->envelope_offset) {
+                    return Status::internal_error;
+                }
+                std::copy(
+                    source.begin(), source.end(),
+                    endpoint->host_storage.begin() +
+                        static_cast<std::ptrdiff_t>(endpoint->envelope_offset));
+                timeout_ns = std::min(
+                    timeout_ns,
+                    channel.public_record.safe_transition_timeout_ns);
+            }
+            if (timeout_ns == 0 ||
+                timeout_ns == std::numeric_limits<std::uint64_t>::max()) {
+                return Status::invalid_argument;
+            }
+            const auto& release =
+                compiled_rate_plan.releases[safe_phase.reference_index];
+            if (!materialize_device_payload_references(
+                    batch, declaration, release, 0)) {
+                return Status::internal_error;
+            }
+            batch.timeout_ns = timeout_ns;
+            for (std::size_t signal_index = 0;
+                 signal_index < batch.signal_count; ++signal_index) {
+                DeviceTimelineInfo info;
+                if (!devices->timeline_info(
+                        DeviceTimelineHandle{
+                            batch.signals[signal_index].timeline_handle},
+                        info) || info.backend != safe_phase.backend ||
+                    info.last_accepted_value ==
+                        std::numeric_limits<std::uint64_t>::max()) {
+                    return Status::capacity_exceeded;
+                }
+                batch.signals[signal_index].value =
+                    info.last_accepted_value + 1;
+            }
+            const auto now = clock_now();
+            if (timeout_ns > std::numeric_limits<std::uint64_t>::max() - now) {
+                return Status::capacity_exceeded;
+            }
+            const detail::DeviceRateReleaseIdentity identity{
+                safe_phase.reference_index,
+                release.domain,
+                release.phase,
+                0,
+                0,
+                release.substep_ordinal,
+                now,
+                now,
+                now + timeout_ns,
+                timeout_ns,
+            };
+            detail::DeviceRateTicket ticket;
+            std::uint64_t batch_id = 0;
+            auto status = devices->submit_batch(
+                safe_phase.backend.index(), safe_phase.phase.index(),
+                kNoWorker, 0, batch, declaration, batch_id, &identity, &ticket);
+            detail::DeviceRateCompletion completion;
+            if (status == Status::ok) {
+                status = devices->wait_rate_batch(ticket, completion);
+            }
+            if (ticket.valid() && completion.terminal_slot_owned) {
+                const auto release_status = devices->release_rate_batch(ticket);
+                if (status == Status::ok) {
+                    status = release_status;
+                }
+            }
+            for (std::size_t offset = 0;
+                 offset < safe_phase.channel_count; ++offset) {
+                const auto sampled_index = compiled_sampled_io_plan
+                    .safe_channel_indices[safe_phase.first_channel_index + offset];
+                auto& channel_status = sampled_io_statuses[sampled_index];
+                channel_status.safety_state = status == Status::ok
+                    ? transition
+                    : SampledIoSafetyState::unknown;
+                channel_status.last_status = status;
+            }
+            if (status != Status::ok) {
+                return status;
+            }
         }
         return Status::ok;
     }
@@ -3160,6 +3695,37 @@ struct Runtime::Impl {
                 }
                 if (active_publication_claims[channel_index].load(
                         std::memory_order_acquire) != 2) {
+                    const auto* sampled = sampled_io_record(channel_index);
+                    if (sampled && sampled->public_record.direction ==
+                            SampledIoDirection::output &&
+                        sampled->public_record.underrun_policy ==
+                            SampledIoUnderrunPolicy::substitute_safe) {
+                        const auto frame = sampled_io_frame(
+                            sampled->failure_safe_offset,
+                            sampled->public_record.frame_bytes);
+                        auto& sampled_status = sampled_io_statuses[
+                            sampled_io_index(channel_index)];
+                        ++sampled_status.underruns;
+                        if (frame.size() ==
+                            cross_rate_channels[channel_index].payload_size) {
+                            std::copy(
+                                frame.begin(), frame.end(),
+                                active_staging_payloads.begin() +
+                                    static_cast<std::ptrdiff_t>(
+                                        active_channel_states[channel_index]
+                                            .payload_offset));
+                            active_publication_claims[channel_index].store(
+                                2, std::memory_order_release);
+                            ++sampled_status.substituted_frames;
+                            sampled_status.last_status = Status::ok;
+                            continue;
+                        }
+                    } else if (sampled) {
+                        auto& sampled_status = sampled_io_statuses[
+                            sampled_io_index(channel_index)];
+                        ++sampled_status.underruns;
+                        sampled_status.last_status = Status::callback_failed;
+                    }
                     failed_phase = release.phase.index();
                     record_active_failure(
                         summary,
@@ -4149,6 +4715,9 @@ struct Runtime::Impl {
     DeviceRateAdmissionDiagnostic device_rate_diagnostic{};
     std::vector<detail::CrossRateChannelSpec> cross_rate_channels;
     detail::CompiledCrossRatePlan compiled_cross_rate_plan;
+    std::vector<detail::SampledIoChannelSpec> sampled_io_channels;
+    detail::CompiledSampledIoPlan compiled_sampled_io_plan;
+    std::vector<SampledIoChannelStatus> sampled_io_statuses;
     std::vector<ActiveChannelState> active_channel_states;
     std::vector<std::byte> active_committed_payloads;
     std::vector<std::byte> active_staging_payloads;
@@ -6078,6 +6647,177 @@ Status Runtime::replace_cross_rate_channel(
     return Status::ok;
 }
 
+Status Runtime::register_sampled_io_channel(
+    const SampledIoChannelRegistration& registration) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "sampled-I/O registration is frozen");
+    }
+    if (!impl_->valid_cross_rate_channel(registration.channel)) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "sampled-I/O channel handle is invalid or foreign");
+    }
+    if (impl_->sampled_io_channels.size() >= sampled_io_channel_capacity ||
+        std::any_of(
+            impl_->sampled_io_channels.begin(),
+            impl_->sampled_io_channels.end(),
+            [&](const detail::SampledIoChannelSpec& existing) {
+                return existing.channel == registration.channel ||
+                    (registration.channel_identity != 0 &&
+                     existing.channel_identity == registration.channel_identity);
+            })) {
+        return impl_->fail(
+            impl_->sampled_io_channels.size() >= sampled_io_channel_capacity
+                ? Status::capacity_exceeded
+                : Status::invalid_argument,
+            "sampled-I/O capacity or unique identity was violated");
+    }
+    try {
+        detail::SampledIoChannelSpec candidate;
+        candidate.channel = registration.channel;
+        candidate.direction = registration.direction;
+        candidate.channel_identity = registration.channel_identity;
+        candidate.encoding = registration.encoding;
+        candidate.element_count = registration.element_count;
+        candidate.samples_per_frame = registration.samples_per_frame;
+        candidate.scale_numerator = registration.scale_numerator;
+        candidate.scale_denominator = registration.scale_denominator;
+        candidate.offset_numerator = registration.offset_numerator;
+        candidate.offset_denominator = registration.offset_denominator;
+        candidate.units_identity = registration.units_identity;
+        candidate.calibration_identity = registration.calibration_identity;
+        candidate.sample_period_ns = registration.sample_period_ns;
+        candidate.timestamp_domain_identity =
+            registration.timestamp_domain_identity;
+        candidate.clock_domain_identity = registration.clock_domain_identity;
+        candidate.trigger_mode = registration.trigger_mode;
+        candidate.trigger_identity = registration.trigger_identity;
+        candidate.ring_capacity = registration.ring_capacity;
+        candidate.initial_sequence = registration.initial_sequence;
+        candidate.maximum_age_ns = registration.maximum_age_ns;
+        candidate.stale_policy = registration.stale_policy;
+        candidate.overrun_policy = registration.overrun_policy;
+        candidate.underrun_policy = registration.underrun_policy;
+        candidate.safe_transition_timeout_ns =
+            registration.safe_transition_timeout_ns;
+        candidate.initial_frame.assign(
+            registration.initial_frame.begin(),
+            registration.initial_frame.end());
+        candidate.startup_safe_frame.assign(
+            registration.startup_safe_frame.begin(),
+            registration.startup_safe_frame.end());
+        candidate.failure_safe_frame.assign(
+            registration.failure_safe_frame.begin(),
+            registration.failure_safe_frame.end());
+        candidate.shutdown_safe_frame.assign(
+            registration.shutdown_safe_frame.begin(),
+            registration.shutdown_safe_frame.end());
+        impl_->sampled_io_channels.push_back(std::move(candidate));
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::replace_sampled_io_channel(
+    CrossRateChannelHandle channel,
+    const SampledIoChannelRegistration& registration) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring) {
+        return impl_->fail(
+            Status::invalid_state,
+            "sampled-I/O replacement is frozen");
+    }
+    if (!impl_->valid_cross_rate_channel(channel) ||
+        registration.channel != channel) {
+        return impl_->fail(
+            Status::invalid_handle,
+            "sampled-I/O replacement handle is invalid or changed");
+    }
+    const auto existing = std::find_if(
+        impl_->sampled_io_channels.begin(),
+        impl_->sampled_io_channels.end(),
+        [&](const detail::SampledIoChannelSpec& value) {
+            return value.channel == channel;
+        });
+    if (existing == impl_->sampled_io_channels.end() ||
+        std::any_of(
+            impl_->sampled_io_channels.begin(),
+            impl_->sampled_io_channels.end(),
+            [&](const detail::SampledIoChannelSpec& value) {
+                return &value != &*existing &&
+                    value.channel_identity == registration.channel_identity;
+            })) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "sampled-I/O replacement identity is missing or duplicated");
+    }
+    try {
+        detail::SampledIoChannelSpec candidate;
+        candidate.channel = registration.channel;
+        candidate.direction = registration.direction;
+        candidate.channel_identity = registration.channel_identity;
+        candidate.encoding = registration.encoding;
+        candidate.element_count = registration.element_count;
+        candidate.samples_per_frame = registration.samples_per_frame;
+        candidate.scale_numerator = registration.scale_numerator;
+        candidate.scale_denominator = registration.scale_denominator;
+        candidate.offset_numerator = registration.offset_numerator;
+        candidate.offset_denominator = registration.offset_denominator;
+        candidate.units_identity = registration.units_identity;
+        candidate.calibration_identity = registration.calibration_identity;
+        candidate.sample_period_ns = registration.sample_period_ns;
+        candidate.timestamp_domain_identity =
+            registration.timestamp_domain_identity;
+        candidate.clock_domain_identity = registration.clock_domain_identity;
+        candidate.trigger_mode = registration.trigger_mode;
+        candidate.trigger_identity = registration.trigger_identity;
+        candidate.ring_capacity = registration.ring_capacity;
+        candidate.initial_sequence = registration.initial_sequence;
+        candidate.maximum_age_ns = registration.maximum_age_ns;
+        candidate.stale_policy = registration.stale_policy;
+        candidate.overrun_policy = registration.overrun_policy;
+        candidate.underrun_policy = registration.underrun_policy;
+        candidate.safe_transition_timeout_ns =
+            registration.safe_transition_timeout_ns;
+        candidate.initial_frame.assign(
+            registration.initial_frame.begin(),
+            registration.initial_frame.end());
+        candidate.startup_safe_frame.assign(
+            registration.startup_safe_frame.begin(),
+            registration.startup_safe_frame.end());
+        candidate.failure_safe_frame.assign(
+            registration.failure_safe_frame.begin(),
+            registration.failure_safe_frame.end());
+        candidate.shutdown_safe_frame.assign(
+            registration.shutdown_safe_frame.begin(),
+            registration.shutdown_safe_frame.end());
+        *existing = std::move(candidate);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
 Status Runtime::register_resource(
     std::string_view name,
     ResourceHandle& out_resource) noexcept {
@@ -6626,6 +7366,47 @@ Status Runtime::finalize() noexcept {
             cross_rate_diagnostic.message);
     }
 
+    detail::CompiledSampledIoPlan compiled_sampled_io_plan;
+    detail::SampledIoCompileDiagnostic sampled_io_diagnostic;
+    const auto sampled_io_status = detail::compile_sampled_io(
+        impl_->graph_owner,
+        impl_->sampled_io_channels,
+        compiled_rate_plan,
+        compiled_device_rate_plan,
+        impl_->cross_rate_channels,
+        compiled_cross_rate_plan,
+        compiled_sampled_io_plan,
+        sampled_io_diagnostic);
+    if (sampled_io_status != Status::ok) {
+        return impl_->fail(
+            sampled_io_status,
+            sampled_io_diagnostic.message);
+    }
+
+    std::vector<SampledIoChannelStatus> sampled_io_statuses;
+    try {
+        sampled_io_statuses.reserve(compiled_sampled_io_plan.channels.size());
+        for (const auto& channel : compiled_sampled_io_plan.channels) {
+            sampled_io_statuses.push_back({
+                channel.public_record.channel,
+                channel.public_record.direction == SampledIoDirection::output
+                    ? SampledIoSafetyState::unknown
+                    : SampledIoSafetyState::not_applicable,
+                channel.public_record.initial_sequence,
+                1,
+                0,
+                0,
+                0,
+                0,
+                Status::ok,
+            });
+        }
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+
     std::vector<Impl::ActiveChannelState> active_channel_states;
     std::vector<std::byte> active_committed_payloads;
     std::vector<std::byte> active_staging_payloads;
@@ -6904,6 +7685,24 @@ Status Runtime::finalize() noexcept {
         compiled_cross_rate_plan.selections.size();
     memory_plan.cross_rate_device_endpoint_count =
         compiled_cross_rate_plan.device_endpoints.size();
+    memory_plan.sampled_io_channel_count =
+        compiled_sampled_io_plan.channels.size();
+    for (const auto& channel : compiled_sampled_io_plan.channels) {
+        const auto frame_bytes = channel.public_record.frame_bytes;
+        plan_valid = plan_valid && detail::checked_add(
+            memory_plan.sampled_io_frame_bytes,
+            frame_bytes,
+            memory_plan.sampled_io_frame_bytes);
+        if (channel.public_record.direction == SampledIoDirection::output) {
+            std::size_t safe_bytes = 0;
+            plan_valid = plan_valid && detail::checked_multiply(
+                frame_bytes, std::size_t{3}, safe_bytes) &&
+                detail::checked_add(
+                    memory_plan.sampled_io_safe_frame_bytes,
+                    safe_bytes,
+                    memory_plan.sampled_io_safe_frame_bytes);
+        }
+    }
     for (const auto& endpoint :
          compiled_cross_rate_plan.device_endpoints) {
         plan_valid = plan_valid && detail::checked_add(
@@ -7234,6 +8033,39 @@ Status Runtime::finalize() noexcept {
         plan_valid = plan_valid &&
             add_rate_plan_bytes(store.payload_storage_bytes());
     }
+    const auto sampled_io_bytes_begin = memory_plan.rate_plan_bytes;
+    plan_valid = plan_valid && add_rate_plan_array(
+        impl_->sampled_io_channels.capacity(),
+        sizeof(detail::SampledIoChannelSpec));
+    for (const auto& channel : impl_->sampled_io_channels) {
+        plan_valid = plan_valid && add_rate_plan_array(
+            channel.initial_frame.capacity(), sizeof(std::byte));
+        plan_valid = plan_valid && add_rate_plan_array(
+            channel.startup_safe_frame.capacity(), sizeof(std::byte));
+        plan_valid = plan_valid && add_rate_plan_array(
+            channel.failure_safe_frame.capacity(), sizeof(std::byte));
+        plan_valid = plan_valid && add_rate_plan_array(
+            channel.shutdown_safe_frame.capacity(), sizeof(std::byte));
+    }
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_sampled_io_plan.channels.capacity(),
+        sizeof(detail::CompiledSampledIoRecord));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_sampled_io_plan.channel_index_by_cross_rate.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_sampled_io_plan.safe_channel_indices.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_sampled_io_plan.safe_phases.capacity(),
+        sizeof(detail::CompiledSampledIoSafePhase));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_sampled_io_plan.frame_storage.capacity(),
+        sizeof(std::byte));
+    plan_valid = plan_valid && add_rate_plan_array(
+        sampled_io_statuses.capacity(), sizeof(SampledIoChannelStatus));
+    memory_plan.sampled_io_control_bytes =
+        memory_plan.rate_plan_bytes - sampled_io_bytes_begin;
     const auto rate_dispatch_bytes_begin = memory_plan.rate_plan_bytes;
     plan_valid = plan_valid && add_rate_plan_array(
         compiled_rate_dispatch_plan.admission.capacity(),
@@ -7623,6 +8455,47 @@ Status Runtime::finalize() noexcept {
                 1);
         }
         add_runtime_extent(
+            impl_->sampled_io_channels.data(),
+            impl_->sampled_io_channels.capacity(),
+            sizeof(detail::SampledIoChannelSpec));
+        for (const auto& channel : impl_->sampled_io_channels) {
+            add_runtime_extent(
+                channel.initial_frame.data(),
+                channel.initial_frame.capacity(), sizeof(std::byte));
+            add_runtime_extent(
+                channel.startup_safe_frame.data(),
+                channel.startup_safe_frame.capacity(), sizeof(std::byte));
+            add_runtime_extent(
+                channel.failure_safe_frame.data(),
+                channel.failure_safe_frame.capacity(), sizeof(std::byte));
+            add_runtime_extent(
+                channel.shutdown_safe_frame.data(),
+                channel.shutdown_safe_frame.capacity(), sizeof(std::byte));
+        }
+        add_runtime_extent(
+            compiled_sampled_io_plan.channels.data(),
+            compiled_sampled_io_plan.channels.capacity(),
+            sizeof(detail::CompiledSampledIoRecord));
+        add_runtime_extent(
+            compiled_sampled_io_plan.channel_index_by_cross_rate.data(),
+            compiled_sampled_io_plan.channel_index_by_cross_rate.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_sampled_io_plan.safe_channel_indices.data(),
+            compiled_sampled_io_plan.safe_channel_indices.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_sampled_io_plan.safe_phases.data(),
+            compiled_sampled_io_plan.safe_phases.capacity(),
+            sizeof(detail::CompiledSampledIoSafePhase));
+        add_runtime_extent(
+            compiled_sampled_io_plan.frame_storage.data(),
+            compiled_sampled_io_plan.frame_storage.capacity(),
+            sizeof(std::byte));
+        add_runtime_extent(
+            sampled_io_statuses.data(), sampled_io_statuses.capacity(),
+            sizeof(SampledIoChannelStatus));
+        add_runtime_extent(
             compiled_rate_dispatch_plan.admission.data(),
             compiled_rate_dispatch_plan.admission.capacity(),
             sizeof(detail::RateAdmissionRecord));
@@ -7778,6 +8651,9 @@ Status Runtime::finalize() noexcept {
     impl_->compiled_device_rate_plan =
         std::move(compiled_device_rate_plan);
     impl_->compiled_cross_rate_plan = std::move(compiled_cross_rate_plan);
+    impl_->compiled_sampled_io_plan =
+        std::move(compiled_sampled_io_plan);
+    impl_->sampled_io_statuses = std::move(sampled_io_statuses);
     impl_->active_channel_states = std::move(active_channel_states);
     impl_->active_committed_payloads =
         std::move(active_committed_payloads);
@@ -8302,6 +9178,13 @@ Status Runtime::start() noexcept {
     impl_->executor->wait_started();
     if (impl_->devices) {
         impl_->devices->wait_started();
+    }
+    const auto safe_start_status = impl_->apply_sampled_io_safe_transition(
+        SampledIoSafetyState::startup_acknowledged);
+    if (safe_start_status != Status::ok) {
+        return rollback_startup(
+            safe_start_status,
+            "sampled-I/O startup safe output was not terminally acknowledged");
     }
     impl_->stop_pending = false;
     impl_->lane_cleanup_pending = false;
@@ -8840,10 +9723,11 @@ Status Runtime::stop() noexcept {
         return impl_->fail(Status::invalid_state, "stop requires finalized or running state");
     }
 
-    const auto extension_stop_status = impl_->request_extension_stop();
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
         impl_->in_replay.load(std::memory_order_acquire)) {
+        const auto extension_stop_status = impl_->request_extension_stop();
+        (void)extension_stop_status;
         if (g_active_runtime_callback != impl_.get() && impl_->devices &&
             impl_->devices->batch_backend_count() != 0) {
             (void)impl_->devices->request_batch_stop();
@@ -8858,6 +9742,20 @@ Status Runtime::stop() noexcept {
             "execution quiesces");
     }
 
+    Status sampled_io_safe_status = Status::ok;
+    if (impl_->state == RuntimeState::running) {
+        sampled_io_safe_status = impl_->apply_sampled_io_safe_transition(
+            impl_->active_faulted
+                ? SampledIoSafetyState::failure_acknowledged
+                : SampledIoSafetyState::shutdown_acknowledged);
+    }
+    if (sampled_io_safe_status != Status::ok) {
+        impl_->stop_pending = true;
+        return impl_->fail(
+            sampled_io_safe_status,
+            "sampled-I/O safe output was not terminally acknowledged; retry checked stop while retaining backend ownership");
+    }
+    const auto extension_stop_status = impl_->request_extension_stop();
     const bool watchdog_lane_present =
         impl_->runtime_stack_results_available &&
         impl_->config.watchdog_timeout_ns != 0;
@@ -9700,6 +10598,49 @@ bool Runtime::device_rate_admission_diagnostic(
         return false;
     }
     diagnostic = impl_->device_rate_diagnostic;
+    return true;
+}
+
+bool Runtime::sampled_io_model_enabled() const noexcept {
+    return impl_ && !impl_->provider_callback_active() &&
+        impl_->state != RuntimeState::configuring &&
+        !impl_->compiled_sampled_io_plan.channels.empty();
+}
+
+std::size_t Runtime::sampled_io_channel_count() const noexcept {
+    return sampled_io_model_enabled()
+        ? impl_->compiled_sampled_io_plan.channels.size()
+        : 0;
+}
+
+bool Runtime::compiled_sampled_io_channel_at(
+    std::size_t registration_index,
+    CompiledSampledIoChannel& channel) const noexcept {
+    channel = {};
+    if (!sampled_io_model_enabled() || registration_index >=
+        impl_->compiled_sampled_io_plan.channels.size()) {
+        return false;
+    }
+    channel = impl_->compiled_sampled_io_plan
+        .channels[registration_index].public_record;
+    return true;
+}
+
+bool Runtime::sampled_io_channel_status(
+    CrossRateChannelHandle channel,
+    SampledIoChannelStatus& status) const noexcept {
+    status = {};
+    if (!sampled_io_model_enabled() || !channel.valid() ||
+        channel.owner() != impl_->graph_owner || channel.index() >=
+            impl_->compiled_sampled_io_plan.channel_index_by_cross_rate.size()) {
+        return false;
+    }
+    const auto index = impl_->compiled_sampled_io_plan
+        .channel_index_by_cross_rate[channel.index()];
+    if (index >= impl_->sampled_io_statuses.size()) {
+        return false;
+    }
+    status = impl_->sampled_io_statuses[index];
     return true;
 }
 

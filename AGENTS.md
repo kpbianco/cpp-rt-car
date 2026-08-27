@@ -4,8 +4,8 @@ RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
 ABI v1, and Apache-2.0. M14, M14.1, M15, M16, and the portable M17 software
 path through M17-06 are complete, while hardware/RT qualification remains
-incomplete. M20-PRE-01, M21-01, and M21-02 are merged. M21-03 is the active
-approved batch.
+incomplete. M20-PRE-01 and M21-01 through M21-03 are merged. M21-04 is the
+active approved batch.
 M16-01 supplies the exact reference timeline, M16-02 adds deterministic
 CPU-only cross-rate channel selection and bounded SPSC stores, and M16-03 adds
 opt-in mandatory admission, dispatch, transfer, and late actions. M16-04 adds
@@ -33,11 +33,13 @@ integration for opted-in HAL-v2 command-batch phases. M21-02 activates their
 bounded release dispatch and completion on existing Runtime backend lanes,
 with precomputed release/frontier/slot state, concurrent admitted work, exact
 dependency barriers, and deterministic timeout/cancel/stop ownership. M21-03
-adds only bounded CPU-to-device and device-to-CPU cross-rate payload transport
-over explicitly selected, pre-registered host-visible command references. It
-does not add sampled I/O, replay integration, change telemetry schemas, create
-a lane/thread, promote support, or establish physical CUDA, XDMA, DAC/DAQ,
-HIL, RT1, or RT2 evidence.
+adds bounded CPU-to-device and device-to-CPU cross-rate payload transport over
+explicitly selected, pre-registered host-visible command references. M21-04
+adds only generic fixed-capacity sampled-I/O descriptors, acknowledged safe-
+output transitions, and a public package-consumable HAL-v2 loopback backend.
+It does not add replay/telemetry closure, a vendor adapter, change versioned
+schemas, promote support, or establish physical CUDA, XDMA, DAC/DAQ, CAN,
+IIO, HIL, RT1, or RT2 evidence.
 
 ## Read before nontrivial work
 
@@ -109,7 +111,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `f282c6899472999d9d881c81f277067238a84f5f`; harness version: `2`.
+- Control revision: `a5a6668445bda00a6d9cb721763db0293e75665d`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.

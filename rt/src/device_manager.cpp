@@ -997,6 +997,26 @@ bool DeviceManager::timeline_at(
     return false;
 }
 
+bool DeviceManager::timeline_info(
+    DeviceTimelineHandle handle,
+    DeviceTimelineInfo& info) const noexcept {
+    info = {};
+    if (!handle.valid() || handle.owner() != owner_ ||
+        handle.index() >= timeline_count_) {
+        return false;
+    }
+    const auto& timeline = timelines_[handle.index()];
+    info.timeline = handle;
+    info.backend = DeviceBackendHandle{owner_, timeline.backend_index};
+    info.name = timeline.name;
+    info.initial_value = timeline.initial_value;
+    info.last_accepted_value =
+        timeline.last_accepted.load(std::memory_order_acquire);
+    info.completed_value =
+        timeline.completed.load(std::memory_order_acquire);
+    return true;
+}
+
 Status DeviceManager::submit_batch(
     std::size_t backend_index,
     std::size_t phase_index,

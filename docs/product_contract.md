@@ -1,5 +1,10 @@
 # RTFW Product Contract
 
+M21-04 extends portable RT0 with bounded sampled-I/O metadata and a
+deterministic software loopback backend. Application-owned plant, vehicle, and
+controller models remain outside the core. See [sampled_io.md](sampled_io.md);
+loopback success is not physical HIL or electrical/timing qualification.
+
 Status: accepted contract for the supported 1.x portable runtime
 
 Current release: 1.2.1 portable RT0 product with stable C ABI v8

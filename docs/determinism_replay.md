@@ -1,5 +1,10 @@
 # Determinism, Checkpoints, and Replay
 
+M21-04 graph identity includes frozen sampled semantics and copied initial/safe
+frames in canonical identity order. Live frames and completion order remain
+excluded. Sampled device metadata is not added to checkpoint/input-log schema
+1; M21-05 owns replay closure.
+
 RTFW 1.2 retains milestone M7 for the target `rt::Runtime` path. It provides
 an explicit D1 contract for registered state, a stable little-endian
 checkpoint format, a stable input-log format, and bounded checkpoint replay.

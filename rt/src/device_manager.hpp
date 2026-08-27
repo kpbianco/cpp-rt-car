@@ -200,6 +200,9 @@ public:
         std::size_t backend_index,
         std::size_t ordinal,
         DeviceTimelineInfo& info) const noexcept;
+    [[nodiscard]] bool timeline_info(
+        DeviceTimelineHandle timeline,
+        DeviceTimelineInfo& info) const noexcept;
     [[nodiscard]] const ThreadStartupResult* submission_startup_results()
         const noexcept { return submission_startup_results_.get(); }
     [[nodiscard]] std::size_t submission_startup_result_count() const noexcept {

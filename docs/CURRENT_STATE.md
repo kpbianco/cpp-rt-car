@@ -1,7 +1,7 @@
 # Current state
 
-Last audited: 2026-08-26
-Batch baseline: `ff143eede097885c1535ed7b335b709e1cec44bd`
+Last audited: 2026-08-27
+Batch baseline: `46a69204ecccd17e7c1da76e30d4e23bde6eb9ef`
 
 ## Product state
 
@@ -12,8 +12,9 @@ Batch baseline: `ff143eede097885c1535ed7b335b709e1cec44bd`
 - Runtime-profile schema 7 and its 25 keys, global observability schema 2,
   checkpoint/input-log schema 1, and rate-action schema 1 are unchanged.
 - The installed target inventory, 1.x aliases, support matrices, and
-  Apache-2.0 license are unchanged. The default header inventory adds exactly
-  `rt/extension_abi.h`.
+  Apache-2.0 license are unchanged. The retained M19 addition is
+  `rt/extension_abi.h`; M21-04 adds exactly the additive C++ header
+  `rt/loopback_backend.hpp`.
 - M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 and the
   M17-06 portable discovery/composition repair are merged. M17 and CAP-M17
   remain incomplete because named physical CUDA/XDMA, combined-hardware, RT,
@@ -21,7 +22,25 @@ Batch baseline: `ff143eede097885c1535ed7b335b709e1cec44bd`
   schemas and tools remain proposal-only and unpromoted. M19-01 adds extension
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
   current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
-  is the active approved CPU/device cross-rate-payload batch.
+  is merged. M21-04 is the active approved sampled-I/O and portable-loopback
+  batch.
+
+## M21-04 sampled I/O and loopback
+
+M21-04 adds copied fixed-capacity sampled input/output descriptors over one
+exact admitted M21-03 payload endpoint. Finalization closes encoding and frame
+geometry, rational scaling, units/calibration, sample interval, clock,
+timestamp and trigger identities, sequence/generation, ring capacity,
+stale/overrun/underrun policy, and exact initial/startup/failure/shutdown
+frames. Device input publishes only after exact terminal completion and full
+frame validation. Startup and checked stop submit safe outputs through the
+existing backend lane and require terminal acknowledgement.
+
+The installed `SampledIoLoopbackBackend` provides deterministic host-coherent
+HAL-v2 frame transfer and bounded fault injection for portable tests. This is
+RT0 software-loopback behavior only; M21-05 replay/telemetry/overload closure,
+vendor/physical I/O, electrical and timing validation, and RT1/RT2 remain
+unclaimed. M21 and CAP-M21 remain incomplete.
 
 ## M21-03 CPU/device cross-rate payloads
 

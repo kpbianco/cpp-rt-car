@@ -1,5 +1,15 @@
 # Handoff
 
+## Active batch: M21-04
+
+Baseline `46a69204ecccd17e7c1da76e30d4e23bde6eb9ef` is the merged M21-03
+payload path. M21-04 adds only portable sampled-I/O descriptors, frame and
+policy validation, acknowledged output safety, and the installed HAL-v2
+loopback described in [sampled_io.md](sampled_io.md). Preserve C ABI v8/70
+exports, all versioned schemas, support matrices, CUDA/XDMA candidates, and
+prior evidence. Do not claim physical I/O, electrical correctness, controlled
+timing, HIL, RT1/RT2, Unreal, release, or M21-05 replay/telemetry closure.
+
 ## Restart context
 
 RTFW 1.2.1 is a portable RT0 C++20 runtime. M21-03 starts from exact target

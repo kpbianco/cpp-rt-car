@@ -1,5 +1,9 @@
 # HAL v2 Core, Memory/Topology, and Device-ABI-v1 Compatibility Contract
 
+The M21-04 loopback is a public implementation of the unchanged HAL-v2 tables.
+Its deterministic software timestamps and injected faults are portable test
+inputs, not physical clock, trigger, latency, or electrical evidence.
+
 M17-01 adds an additive C++ HAL v2 core contract to the already installed
 `rt/device.hpp` header. The HAL API version is exactly 2. It is a source API:
 applications must recompile, and RTFW makes no C++ binary ABI promise. Stable C

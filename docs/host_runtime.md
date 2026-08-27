@@ -1,5 +1,10 @@
 # Host Runtime Lifecycle
 
+M21-04 `start()` requires terminal acknowledgement of copied startup-safe
+outputs before the Runtime becomes running. Checked stop submits failure-safe
+output after an active fault or shutdown-safe output otherwise, waits for exact
+completion, then detaches the backend. Unacknowledged safety stays unknown.
+
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
 extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
 plan, M5 time/platform controls, M6 versioned observability, M7

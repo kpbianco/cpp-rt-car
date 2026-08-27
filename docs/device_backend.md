@@ -1,5 +1,9 @@
 # Bounded Device Backend Contract
 
+M21-04 adds no HAL version. The installed `SampledIoLoopbackBackend` implements
+the existing HAL-v2 core, memory/topology, and command/timeline extensions with
+fixed storage and no hidden thread. See [sampled_io.md](sampled_io.md).
+
 RTFW 1.2 retains the M8 target `rt::Runtime` device contract introduced in
 0.9. The base contract adds a size/versioned C backend ABI, device phases in
 the compiled graph, one runtime-owned completion-service lane, and a

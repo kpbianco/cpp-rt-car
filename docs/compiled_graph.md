@@ -1,5 +1,10 @@
 # Compiled Graph Contract
 
+M21-04 finalization adds direct sampled-channel maps, safe-phase slices, copied
+frame storage, and fixed status records. Graph identity hashes sampled
+semantics and copied initial/safe frames in channel-identity order, excluding
+addresses and live payload/completion order.
+
 Release 0.3 added the M2 compiled graph to the target-path `rt::Runtime`.
 The graph is an RT0 functional surface: it validates dependency and logical
 resource ordering before start, supplies an immutable deterministic phase order

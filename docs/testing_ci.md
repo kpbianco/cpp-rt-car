@@ -1,5 +1,10 @@
 # Testing and CI Evidence
 
+M21-04 focused gates cover transactional admission, frame validation, terminal
+publication, three-domain loopback, safe startup/shutdown, fault injection,
+accounting/identity, prior payload regressions, installed relocation, and
+sanitizers. Hosted GCC/Clang/MSVC and TSan remain mandatory before merge.
+
 CI is regression evidence for selected builds and behaviors. It is not a
 latency qualification and does not prove the complete product contract.
 
