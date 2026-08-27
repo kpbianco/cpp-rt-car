@@ -772,9 +772,9 @@ ordinary device-frame execution remains unchanged.
 M21-02 is merged with bounded dispatch/completion on existing backend lanes,
 direct dependency slices, independent in-flight overlap, exact release
 tickets, deadline/budget timeout clamping, and late-completion quarantine.
-M21-03 is the active software batch and adds explicit CPU/device cross-rate
-payload selectors, disjoint slot subranges, Runtime-only materialization, and
-terminal-success publication. M21-04 adds the generic sampled-I/O and safe-
-state loopback contract; M21-05 closes overload, replay, and conformance.
+M21-03 is merged and adds explicit CPU/device cross-rate payload selectors,
+disjoint slot subranges, Runtime-only materialization, and terminal-success
+publication. M21-04 is the active generic sampled-I/O and safe-state loopback
+batch; M21-05 closes overload, replay, and conformance.
 Portable evidence does not qualify physical CUDA, XDMA, DAC/DAQ, HIL, RT1, or
 RT2 behavior.

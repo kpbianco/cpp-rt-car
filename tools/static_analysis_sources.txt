@@ -9,6 +9,7 @@ simcore_rt|rt/src/fiber_pool.cpp
 rtfw_runtime|rt/src/hal_v2.cpp
 rtfw_runtime|rt/src/heterogeneous_memory.cpp
 rtfw_runtime|rt/src/host_runtime.cpp
+rtfw_runtime|rt/src/loopback_backend.cpp
 rtfw_runtime|rt/src/memory_policy.cpp
 rtfw_runtime|rt/src/mock_device.cpp
 rtfw_runtime|rt/src/native_platform_preflight.cpp
@@ -20,6 +21,7 @@ rtfw_runtime|rt/src/resource_policy.cpp
 simcore_rt|rt/src/runtime.cpp
 rtfw_runtime|rt/src/runtime_compat.cpp
 rtfw_runtime|rt/src/runtime_profile.cpp
+rtfw_runtime|rt/src/sampled_io.cpp
 rtfw_runtime|rt/src/snapshot_codec.cpp
 rtfw_runtime|rt/src/telemetry.cpp
 rtfw_runtime|rt/src/thread_policy.cpp

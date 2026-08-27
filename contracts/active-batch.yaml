@@ -50,7 +50,7 @@ sources:
   baseline_commit: 46a69204ecccd17e7c1da76e30d4e23bde6eb9ef
   control_plane_repository: kpbianco/portfolio-control
   control_plane_path: products/cpp-rt-car/batches/M21-04.yaml
-  control_plane_revision: a30e35c840f582d27724024034a28c147e31b7ec
+  control_plane_revision: a5a6668445bda00a6d9cb721763db0293e75665d
 dependencies:
   - M21-03
 scope:
@@ -108,6 +108,7 @@ scope:
     - tests/package_consumer/package_contract.cmake
     - tools/check_docs_contract.py
     - tools/check_release_contract.py
+    - tools/static_analysis_sources.txt
     - release/rtfw-release-contract.json
     - README.md
     - docs/CURRENT_STATE.md
@@ -238,6 +239,7 @@ validation:
     - unchanged CPU-only M16, ordinary M17/HAL-v2, M21-02 channel-free, M21-03 non-sampled payload, checkpoint/replay/rate-action/observability schemas, CUDA/XDMA candidates, C ABI/package inventory, and prior evidence
   required_ci:
     - Documentation contract workflow including truthful M21-04 portable sampled-I/O/loopback-only claims, release contract, frozen C ABI, additive loopback header inventory, and unchanged support matrices
+    - Portable static analysis source manifest includes every compiled runtime source, including sampled_io.cpp and loopback_backend.cpp, with no unreviewed compile-database entries
     - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of descriptor admission, frame publication, ring policies, safe-state ordering, loopback lifecycle, capacity, and compatibility
     - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical descriptor, frame, policy, safety, graph-identity, and accounting results and passing installed loopback consumers
     - Unified executor GCC ThreadSanitizer job covering sampled producer/backend/consumer ownership, ring retirement/reuse, safe-state work versus active completion, concurrent checked stop, late completion, and two Runtime instances without races
