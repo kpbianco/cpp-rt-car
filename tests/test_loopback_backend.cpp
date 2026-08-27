@@ -20,6 +20,8 @@ std::array<std::byte, sizeof(rt::SampledIoFrameHeader) + 8> frame(
         bytes[index] = static_cast<std::byte>(index);
     }
     rt::SampledIoFrameHeader header{};
+    header.struct_size = sizeof(header);
+    header.version = rt::sampled_io_frame_version;
     header.channel_identity = channel;
     header.sequence = 2;
     header.release_generation = 2;
@@ -79,6 +81,17 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     const auto destination_token = register_memory(destination);
     ASSERT_NE(source_token, 0u);
     ASSERT_NE(destination_token, 0u);
+    ASSERT_NE(source_token, destination_token);
+
+    rt::SampledIoFrameHeader submitted{};
+    std::memcpy(&submitted, source.data(), sizeof(submitted));
+    ASSERT_EQ(submitted.struct_size, sizeof(submitted));
+    ASSERT_EQ(submitted.version, rt::sampled_io_frame_version);
+    ASSERT_EQ(submitted.channel_identity, 101u);
+    ASSERT_EQ(
+        submitted.payload_checksum,
+        rt::sampled_io_payload_checksum(
+            std::span<const std::byte>(source).subspan(sizeof(submitted))));
 
     rt::DeviceCommandBatch batch{};
     batch.batch_id = 9;

@@ -321,7 +321,7 @@
     "tests/test_hal_v2.cpp": "7cbde6842bdb787f869d4fb50e93b0a78fd0a2b2a1059d83e16e9c3bcb98ce59",
     "tests/test_heterogeneous_memory.cpp": "914ffeebda41e393552542a78167f0d77e248094fc670b7495d634ad23edc564",
     "tests/test_host_runtime.cpp": "4111c760c29c065fa3fdb620c0e7e5abbd01650f0e014a138fc49e40766d7d3a",
-    "tests/test_loopback_backend.cpp": "9f9101139b6f8330793d8cd6b165b74871cfb872c601309789c32fb61094afcd",
+    "tests/test_loopback_backend.cpp": "423d5fa9c4f63a7117e95bcc3f8b2dc52f05e7c2a0829678e67b810da8674b1d",
     "tests/test_memory_plan.cpp": "5a57e72985a1815fdb9a1101cc14ceda17dca00fa42a0c6780914fa48eb7ab59",
     "tests/test_memory_policy.cpp": "d9dcfb266168b6ee5728b9488b333cf1b7227700a5975a8494d015072a2a7202",
     "tests/test_periodic_runtime.cpp": "8121b33f3f18f58239d4ac53587532deafabb555cb3e8e2c7ab8c1ba3f070229",
