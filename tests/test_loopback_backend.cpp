@@ -113,14 +113,24 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     batch.timeout_ns = 1000000;
     batch.command_count = 1;
     batch.signal_count = 1;
-    batch.commands[0].kind = static_cast<std::uint32_t>(
+    rt::HalV2BufferReference source_reference{};
+    source_reference.buffer_token = source_token;
+    source_reference.bytes = source.size();
+    rt::HalV2BufferReference destination_reference{};
+    destination_reference.buffer_token = destination_token;
+    destination_reference.bytes = destination.size();
+    ASSERT_EQ(source_reference.buffer_token, source_token);
+    ASSERT_EQ(destination_reference.buffer_token, destination_token);
+    rt::DeviceCommand command{};
+    command.kind = static_cast<std::uint32_t>(
         rt::HalV2CommandKind::dispatch);
-    batch.commands[0].opcode = 17;
-    batch.commands[0].buffer_count = 2;
-    batch.commands[0].buffers[0].buffer_token = source_token;
-    batch.commands[0].buffers[0].bytes = source.size();
-    batch.commands[0].buffers[1].buffer_token = destination_token;
-    batch.commands[0].buffers[1].bytes = destination.size();
+    command.opcode = 17;
+    command.buffer_count = 2;
+    command.buffers[0] = source_reference;
+    command.buffers[1] = destination_reference;
+    ASSERT_EQ(command.buffers[0].buffer_token, source_token);
+    ASSERT_EQ(command.buffers[1].buffer_token, destination_token);
+    batch.commands[0] = command;
     batch.signals[0].timeline_handle = 55;
     batch.signals[0].value = 1;
     ASSERT_EQ(batch.commands[0].kind, static_cast<std::uint32_t>(
