@@ -37,12 +37,21 @@ struct SampledIoLoopbackBackend::Impl {
         HalV2BatchCompletion completion{};
     };
 
+#if defined(_MSC_VER)
+// The cache-line alignment is intentional. MSVC reports the resulting
+// isolation padding as C4324 under /W4.
+#    pragma warning(push)
+#    pragma warning(disable : 4324)
+#endif
     struct alignas(64) LogicalActionSlot {
         std::atomic_flag writer = ATOMIC_FLAG_INIT;
         std::atomic<std::uint64_t> committed{
             std::numeric_limits<std::uint64_t>::max()};
         std::array<std::atomic<std::uint64_t>, 8> words{};
     };
+#if defined(_MSC_VER)
+#    pragma warning(pop)
+#endif
 
     void record_logical_action(
         const DeviceCommandBatch& batch,
