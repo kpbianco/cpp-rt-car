@@ -56,7 +56,7 @@ backends only.
 9. `.agents/skills/rtfw-assurance/SKILL.md`
 
 The control-plane product source is
-`kpbianco/portfolio-control/products/cpp-rt-car/`. Repository contracts and the
+`tranquilWorks/portfolio-control/products/cpp-rt-car/`. Repository contracts and the
 actual code remain authoritative when a stale control-plane copy conflicts.
 
 ## Protected invariants

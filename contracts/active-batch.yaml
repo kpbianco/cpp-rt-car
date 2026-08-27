@@ -50,7 +50,7 @@ sources:
     - docs/evidence/M21-03-2026-08-26.md
     - docs/evidence/M21-04-2026-08-27.md
   baseline_commit: 2821f90fb09dc86820b879bb47a39d8165ff0e0f
-  control_plane_repository: kpbianco/portfolio-control
+  control_plane_repository: tranquilWorks/portfolio-control
   control_plane_path: products/cpp-rt-car/batches/M21-05.yaml
   control_plane_revision: 8bf0d8e7a6563fe88246925b44e2bddc77a457fe
 dependencies:
