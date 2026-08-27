@@ -41,15 +41,6 @@ std::array<std::byte, sizeof(rt::SampledIoFrameHeader) + 8> frame(
     return bytes;
 }
 
-rt::HalV2BufferReference buffer_reference(
-    std::uint64_t token,
-    std::uint64_t bytes) {
-    rt::HalV2BufferReference reference{};
-    std::memcpy(&reference.buffer_token, &token, sizeof(token));
-    std::memcpy(&reference.bytes, &bytes, sizeof(bytes));
-    return reference;
-}
-
 TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     rt::SampledIoLoopbackBackend backend;
     rt::SampledIoLoopbackRoute route{};
@@ -117,24 +108,33 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     batch.timeout_ns = 1000000;
     batch.command_count = 1;
     batch.signal_count = 1;
-    const auto source_reference = buffer_reference(
-        source_token, source.size());
-    const auto destination_reference = buffer_reference(
-        destination_token, destination.size());
-    ASSERT_EQ(source_reference.buffer_token, source_token);
-    ASSERT_EQ(destination_reference.buffer_token, destination_token);
     rt::DeviceCommand command{};
     command.kind = static_cast<std::uint32_t>(
         rt::HalV2CommandKind::dispatch);
     command.opcode = 17;
     command.buffer_count = 2;
-    command.buffers[0] = source_reference;
-    command.buffers[1] = destination_reference;
-    ASSERT_EQ(command.buffers[0].buffer_token, source_token);
-    ASSERT_EQ(command.buffers[1].buffer_token, destination_token);
     batch.commands[0] = command;
     batch.signals[0].timeline_handle = 55;
     batch.signals[0].value = 1;
+    const auto source_bytes = static_cast<std::uint64_t>(source.size());
+    const auto destination_bytes = static_cast<std::uint64_t>(
+        destination.size());
+    std::memcpy(
+        &batch.commands[0].buffers[0].buffer_token,
+        &source_token,
+        sizeof(source_token));
+    std::memcpy(
+        &batch.commands[0].buffers[0].bytes,
+        &source_bytes,
+        sizeof(source_bytes));
+    std::memcpy(
+        &batch.commands[0].buffers[1].buffer_token,
+        &destination_token,
+        sizeof(destination_token));
+    std::memcpy(
+        &batch.commands[0].buffers[1].bytes,
+        &destination_bytes,
+        sizeof(destination_bytes));
     ASSERT_EQ(batch.commands[0].kind, static_cast<std::uint32_t>(
         rt::HalV2CommandKind::dispatch));
     ASSERT_EQ(batch.commands[0].opcode, route.opcode);
