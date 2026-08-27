@@ -17,7 +17,8 @@ std::vector<std::byte> sampled_frame(
     std::uint64_t timestamp_domain,
     std::uint64_t calibration,
     std::uint64_t trigger,
-    std::uint64_t sequence = 1) {
+    std::uint64_t sequence = 1,
+    std::uint64_t release_generation = 0) {
     std::vector<std::byte> bytes(sizeof(rt::SampledIoFrameHeader) + 8);
     for (std::size_t index = sizeof(rt::SampledIoFrameHeader);
          index < bytes.size(); ++index) {
@@ -26,6 +27,7 @@ std::vector<std::byte> sampled_frame(
     rt::SampledIoFrameHeader header{};
     header.channel_identity = channel_identity;
     header.sequence = sequence;
+    header.release_generation = release_generation;
     header.sample_count = 4;
     header.encoding = static_cast<std::uint32_t>(
         rt::SampledIoEncoding::signed_int16_le);
@@ -128,6 +130,47 @@ struct CompilerFixture {
             owner, sampled_specs, rate_plan, device_plan, specs,
             cross_plan, output, diagnostic);
     }
+
+    void configure_output() {
+        initial = sampled_frame(
+            101, rt::SampledIoFrameStatus::initial,
+            rt::cross_rate_runtime_logical_timestamp_domain_identity,
+            303, 404);
+        const auto safe = sampled_frame(
+            101, rt::SampledIoFrameStatus::safe,
+            rt::cross_rate_runtime_logical_timestamp_domain_identity,
+            303, 404);
+        device_storage.assign(initial.size() * 2, std::byte{});
+        sampled.direction = rt::SampledIoDirection::output;
+        sampled.timestamp_domain_identity =
+            rt::cross_rate_runtime_logical_timestamp_domain_identity;
+        sampled.underrun_policy =
+            rt::SampledIoUnderrunPolicy::substitute_safe;
+        sampled.safe_transition_timeout_ns = 1000;
+        sampled.initial_frame = initial;
+        sampled.startup_safe_frame = safe;
+        sampled.failure_safe_frame = safe;
+        sampled.shutdown_safe_frame = safe;
+
+        cross_spec.producer = cpu_phase;
+        cross_spec.consumer = device_phase;
+        cross_spec.initial_sample = initial;
+        cross_spec.producer_device = {};
+        cross_spec.consumer_device = {0, initial.size()};
+        auto& compiled = cross_plan.channels[0];
+        compiled.producer = cpu_phase;
+        compiled.consumer = device_phase;
+        compiled.producer_device = {};
+        compiled.consumer_device = cross_spec.consumer_device;
+        auto& endpoint = cross_plan.device_endpoints[0];
+        endpoint.producer = false;
+        endpoint.timestamp_domain_identity =
+            rt::cross_rate_runtime_logical_timestamp_domain_identity;
+        endpoint.host_storage = device_storage;
+        rt::ReferenceRelease release{};
+        release.phase = device_phase;
+        rate_plan.releases.push_back(release);
+    }
 };
 
 TEST(SampledIo, CompilesExactInputDescriptorAndDirectMap) {
@@ -156,6 +199,113 @@ TEST(SampledIo, FailureIsTransactionalAndCorrectionIsRetryable) {
     EXPECT_EQ(plan.channels.size(), 1u);
 }
 
+TEST(SampledIo, RejectsMalformedDescriptorsAndEndpointDisagreement) {
+    const auto expect_rejected = [](auto mutate, rt::Status expected) {
+        CompilerFixture fixture;
+        mutate(fixture);
+        rt::detail::CompiledSampledIoPlan plan;
+        rt::detail::SampledIoCompileDiagnostic diagnostic;
+        EXPECT_EQ(fixture.compile(plan, diagnostic), expected);
+        EXPECT_TRUE(plan.channels.empty());
+    };
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.sampled.direction =
+                static_cast<rt::SampledIoDirection>(255);
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.sampled.encoding =
+                static_cast<rt::SampledIoEncoding>(255);
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.sampled.scale_denominator = 0;
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.sampled.ring_capacity = 0;
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.sampled.element_count = rt::cross_rate_payload_capacity;
+            fixture.sampled.samples_per_frame =
+                rt::cross_rate_payload_capacity;
+        },
+        rt::Status::capacity_exceeded);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            ++fixture.cross_plan.channels[0].payload_size;
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            ++fixture.cross_plan.device_endpoints[0]
+                  .timestamp_domain_identity;
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.cross_plan.device_endpoints[0].host_storage = {};
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.device_plan.phases.clear();
+        },
+        rt::Status::invalid_argument);
+    expect_rejected(
+        [](CompilerFixture& fixture) {
+            fixture.sampled.startup_safe_frame = fixture.initial;
+        },
+        rt::Status::invalid_argument);
+}
+
+TEST(SampledIo, OutputRequiresExactSafeFramesAndSignalOnlyPhase) {
+    CompilerFixture accepted;
+    accepted.configure_output();
+    rt::detail::CompiledSampledIoPlan plan;
+    rt::detail::SampledIoCompileDiagnostic diagnostic;
+    ASSERT_EQ(accepted.compile(plan, diagnostic), rt::Status::ok);
+    ASSERT_EQ(plan.channels.size(), 1u);
+    EXPECT_EQ(plan.safe_channel_indices.size(), 1u);
+    EXPECT_EQ(plan.safe_phases.size(), 1u);
+    EXPECT_EQ(
+        plan.frame_storage.size(),
+        accepted.initial.size() * 4);
+
+    const auto expect_invalid = [](auto mutate) {
+        CompilerFixture fixture;
+        fixture.configure_output();
+        mutate(fixture);
+        rt::detail::CompiledSampledIoPlan rejected;
+        rt::detail::SampledIoCompileDiagnostic rejected_diagnostic;
+        EXPECT_EQ(
+            fixture.compile(rejected, rejected_diagnostic),
+            rt::Status::invalid_argument);
+        EXPECT_TRUE(rejected.channels.empty());
+    };
+    expect_invalid([](CompilerFixture& fixture) {
+        fixture.sampled.safe_transition_timeout_ns = 0;
+    });
+    expect_invalid([](CompilerFixture& fixture) {
+        fixture.sampled.failure_safe_frame = {};
+    });
+    expect_invalid([](CompilerFixture& fixture) {
+        fixture.device_plan.phases[0].wait_count = 1;
+    });
+    expect_invalid([](CompilerFixture& fixture) {
+        fixture.device_plan.phases[0].signal_count = 0;
+    });
+    expect_invalid([](CompilerFixture& fixture) {
+        fixture.rate_plan.releases.clear();
+    });
+}
+
 TEST(SampledIo, FrameValidationAcceptsUnalignedStorageWithoutAliasing) {
     CompilerFixture fixture;
     rt::detail::CompiledSampledIoPlan plan;
@@ -168,6 +318,54 @@ TEST(SampledIo, FrameValidationAcceptsUnalignedStorageWithoutAliasing) {
         std::span<const std::byte>(unaligned).subspan(1),
         plan.channels[0].public_record,
         rt::SampledIoFrameStatus::initial, 1, 0, false));
+}
+
+TEST(SampledIo, FrameValidationRejectsEveryCorrelatedFieldAndChecksumDrift) {
+    CompilerFixture fixture;
+    rt::detail::CompiledSampledIoPlan plan;
+    rt::detail::SampledIoCompileDiagnostic diagnostic;
+    ASSERT_EQ(fixture.compile(plan, diagnostic), rt::Status::ok);
+    const auto& channel = plan.channels[0].public_record;
+    const auto valid = sampled_frame(
+        101, rt::SampledIoFrameStatus::produced, 7, 303, 404, 5, 9);
+    ASSERT_TRUE(rt::detail::sampled_io_frame_valid(
+        valid, channel, rt::SampledIoFrameStatus::produced, 5, 9, true));
+
+    const auto expect_invalid = [&](auto mutate) {
+        auto candidate = valid;
+        rt::SampledIoFrameHeader header{};
+        std::memcpy(&header, candidate.data(), sizeof(header));
+        mutate(header, candidate);
+        std::memcpy(candidate.data(), &header, sizeof(header));
+        EXPECT_FALSE(rt::detail::sampled_io_frame_valid(
+            candidate, channel, rt::SampledIoFrameStatus::produced,
+            5, 9, true));
+    };
+    expect_invalid([](auto& header, auto&) { --header.struct_size; });
+    expect_invalid([](auto& header, auto&) { ++header.version; });
+    expect_invalid([](auto& header, auto&) { ++header.channel_identity; });
+    expect_invalid([](auto& header, auto&) { ++header.sequence; });
+    expect_invalid([](auto& header, auto&) {
+        ++header.release_generation;
+    });
+    expect_invalid([](auto& header, auto&) { ++header.sample_count; });
+    expect_invalid([](auto& header, auto&) { ++header.encoding; });
+    expect_invalid([](auto& header, auto&) {
+        ++header.timestamp_domain_identity;
+    });
+    expect_invalid([](auto& header, auto&) {
+        ++header.sample_interval_ns;
+    });
+    expect_invalid([](auto& header, auto&) { ++header.trigger_identity; });
+    expect_invalid([](auto& header, auto&) { ++header.trigger_sequence; });
+    expect_invalid([](auto& header, auto&) {
+        ++header.calibration_identity;
+    });
+    expect_invalid([](auto& header, auto&) { ++header.status; });
+    expect_invalid([](auto& header, auto&) { ++header.reserved0; });
+    expect_invalid([](auto&, auto& bytes) {
+        bytes.back() ^= std::byte{1};
+    });
 }
 
 TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
@@ -187,6 +385,9 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
         rt::CrossRateReadResult read{};
         std::uint64_t signal_value = 1;
         std::size_t consume_count = 0;
+        bool skip_output = false;
+        bool publish_twice = false;
+        rt::Status second_publish_status = rt::Status::ok;
     } state;
     rt::SampledIoLoopbackBackend backend({4, 2, 4096, 1, 7});
     ASSERT_EQ(backend.add_route({17, 101, 202, 7, 303, 404}), rt::Status::ok);
@@ -203,7 +404,7 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     config.device_outstanding_capacity = 4;
     config.device_completion_batch = 4;
     ASSERT_EQ(runtime.configure(config), rt::Status::ok);
-    ASSERT_EQ(runtime.set_rate_execution_policy({3}), rt::Status::ok);
+    ASSERT_EQ(runtime.set_rate_execution_policy({6}), rt::Status::ok);
     rt::DeviceBackendHandle backend_handle;
     ASSERT_EQ(runtime.register_device_backend(
         backend.hal_v2_registration(), backend_handle), rt::Status::ok);
@@ -235,10 +436,15 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
              if (!context.rate_release) {
                  return rt::CallbackResult::error;
              }
+             if (value.skip_output) {
+                 return rt::CallbackResult::ok;
+             }
              rt::SampledIoFrameHeader header{};
              header.channel_identity = 101;
-             header.sequence = 2;
-             header.release_generation = 1;
+             header.sequence =
+                 context.rate_release->domain_release_sequence + 2;
+             header.release_generation =
+                 context.rate_release->domain_release_sequence + 1;
              header.sample_count = 4;
              header.encoding = static_cast<std::uint32_t>(
                  rt::SampledIoEncoding::signed_int16_le);
@@ -247,7 +453,7 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
                  context.rate_release->logical_release_ns;
              header.sample_interval_ns = 1000;
              header.trigger_identity = 404;
-             header.trigger_sequence = 2;
+             header.trigger_sequence = header.sequence;
              header.calibration_identity = 303;
              header.status = static_cast<std::uint32_t>(
                  rt::SampledIoFrameStatus::produced);
@@ -255,10 +461,16 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
                  std::span<const std::byte>(value.produced).subspan(
                      sizeof(header)));
              std::memcpy(value.produced.data(), &header, sizeof(header));
-             return context.rate_release->publish(
-                        value.output, value.produced) == rt::Status::ok
-                 ? rt::CallbackResult::ok
-                 : rt::CallbackResult::error;
+             if (context.rate_release->publish(
+                     value.output, value.produced) != rt::Status::ok) {
+                 return rt::CallbackResult::error;
+             }
+             if (value.publish_twice) {
+                 value.second_publish_status = context.rate_release->publish(
+                     value.output, value.produced);
+                 return rt::CallbackResult::error;
+             }
+             return rt::CallbackResult::ok;
          }, &state}, output_phase), rt::Status::ok);
 
     state.declaration.command_count = 1;
@@ -303,13 +515,13 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     rt::RateDomainHandle device_rate;
     rt::RateDomainHandle input_rate;
     ASSERT_EQ(runtime.register_rate_domain(
-        {"sampled.output.rate", 1'000'000'000, 1, 900'000'000, 10},
+        {"sampled.output.rate", 2'000'000'000, 1, 900'000'000, 10},
         output_rate), rt::Status::ok);
     ASSERT_EQ(runtime.register_rate_domain(
-        {"sampled.device.rate", 2'000'000'000, 1, 900'000'000, 0},
+        {"sampled.device.rate", 4'000'000'000, 1, 900'000'000, 0},
         device_rate), rt::Status::ok);
     ASSERT_EQ(runtime.register_rate_domain(
-        {"sampled.input.rate", 4'000'000'000, 1, 900'000'000, 10},
+        {"sampled.input.rate", 1'000'000'000, 1, 900'000'000, 10},
         input_rate), rt::Status::ok);
     ASSERT_EQ(runtime.bind_phase_to_rate_domain(output_phase, output_rate),
               rt::Status::ok);
@@ -334,7 +546,7 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     ASSERT_EQ(runtime.register_cross_rate_channel(
         {"sampled.input.channel", device_phase, input_phase, frame_bytes,
          input_initial, rt::CrossRateMode::sample_and_hold,
-         4'000'000'000, {1, frame_bytes}, {}}, state.input), rt::Status::ok);
+         1'000'000'000, {1, frame_bytes}, {}}, state.input), rt::Status::ok);
     rt::SampledIoChannelRegistration output_registration{};
     output_registration.channel = state.output;
     output_registration.direction = rt::SampledIoDirection::output;
@@ -364,6 +576,9 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     input_registration.direction = rt::SampledIoDirection::input;
     input_registration.channel_identity = 202;
     input_registration.timestamp_domain_identity = 7;
+    input_registration.maximum_age_ns = 1'000'000'000;
+    input_registration.stale_policy =
+        rt::SampledIoStalePolicy::substitute_initial;
     input_registration.safe_transition_timeout_ns = 0;
     input_registration.underrun_policy =
         rt::SampledIoUnderrunPolicy::fail_release;
@@ -393,6 +608,49 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     EXPECT_EQ(state.read.sampled_sequence, 2u);
     EXPECT_EQ(state.read.sampled_trigger_identity, 404u);
     EXPECT_EQ(state.read.sampled_calibration_identity, 303u);
+
+    ASSERT_EQ(runtime.step(
+        {1, std::chrono::seconds(1), std::nullopt, 1'001}, &result),
+        rt::Status::ok) << runtime.last_error();
+    EXPECT_EQ(state.consume_count, 2u);
+    EXPECT_TRUE(state.read.held);
+    EXPECT_EQ(state.read.age_ns, 1'000'000'000u);
+    EXPECT_EQ(state.read.freshness, rt::CrossRateFreshness::fresh);
+    EXPECT_FALSE(state.read.sampled_substituted);
+
+    state.skip_output = true;
+    ASSERT_EQ(runtime.step(
+        {2, std::chrono::seconds(1), std::nullopt, 1'000'001'001}, &result),
+        rt::Status::ok) << runtime.last_error();
+    EXPECT_EQ(state.consume_count, 3u);
+    EXPECT_TRUE(state.read.sampled_substituted);
+    EXPECT_EQ(state.read.sampled_sequence, 1u);
+    rt::SampledIoChannelStatus input_status;
+    ASSERT_TRUE(runtime.sampled_io_channel_status(state.input, input_status));
+    EXPECT_EQ(input_status.stale_frames, 1u);
+    EXPECT_EQ(input_status.substituted_frames, 1u);
+    ASSERT_TRUE(runtime.sampled_io_channel_status(state.output, output_status));
+    EXPECT_EQ(output_status.underruns, 1u);
+    EXPECT_EQ(output_status.substituted_frames, 1u);
+
+    state.skip_output = false;
+    ASSERT_EQ(runtime.step(
+        {3, std::chrono::seconds(2), std::nullopt, 2'000'001'001}, &result),
+        rt::Status::ok) << runtime.last_error();
+    EXPECT_EQ(state.consume_count, 5u);
+    EXPECT_FALSE(state.read.sampled_substituted);
+    EXPECT_EQ(state.read.sampled_sequence, 3u);
+    EXPECT_EQ(
+        state.read.producer_timestamp_domain_identity,
+        7u);
+
+    state.publish_twice = true;
+    EXPECT_EQ(runtime.step(
+        {4, std::chrono::seconds(2), std::nullopt, 4'000'001'001}, &result),
+        rt::Status::callback_failed);
+    EXPECT_EQ(state.second_publish_status, rt::Status::invalid_state);
+    ASSERT_TRUE(runtime.sampled_io_channel_status(state.output, output_status));
+    EXPECT_EQ(output_status.overruns, 1u);
     ASSERT_EQ(backend.inject_next(
         rt::SampledIoLoopbackFault::completion_error), rt::Status::ok);
     EXPECT_EQ(runtime.stop(), rt::Status::device_error);

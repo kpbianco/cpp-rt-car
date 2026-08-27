@@ -34,6 +34,10 @@ identities, status, extent, and payload checksum before publication.
   enter the existing fixed snapshot store.
 - Device input publication occurs only after the exact M21-02 ticket reaches
   correlated terminal success. The frame timestamp must match completion.
+- Before provider submission, Runtime pre-materializes the exact expected
+  sequence, release generation, and trigger sequence in each selected sampled
+  device-output slot. This is correlation metadata only: the backend must
+  still produce a complete frame that passes terminal validation.
 - Stale input follows only `fail_release`, bounded `hold_last`, or copied
   `substitute_initial`. Output underrun either fails or copies the declared
   failure-safe frame. Duplicate publication records an overrun and fails.
@@ -57,7 +61,10 @@ completion slots, deterministic opcode routes, cancellation/reset/stop, and a
 single atomic next-submission fault injection. A route copies a complete frame
 from dispatch buffer reference 0 to reference 1 and rewrites only its frozen
 destination channel, timestamp, calibration, trigger, status, and logical
-timestamp fields. It owns no thread and allocates nothing after construction.
+timestamp fields. When Runtime supplied a valid destination correlation
+template, loopback preserves its sequence, release generation, and trigger
+sequence rather than retaining a differently rated source channel's values.
+It owns no thread and allocates nothing after construction.
 
 This is fake software loopback evidence. It does not establish DAC, DAQ, CAN,
 IIO, XDMA, CUDA, electrical scaling, physical trigger/sample-clock accuracy,

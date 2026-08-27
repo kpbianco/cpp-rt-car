@@ -202,6 +202,44 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     ASSERT_EQ(count, 1u);
     EXPECT_EQ(completion.status, static_cast<std::int32_t>(
         rt::HalV2Status::canceled));
+
+    const auto submit_fault = [&](rt::SampledIoLoopbackFault fault,
+                                  std::uint64_t batch_id,
+                                  rt::HalV2Status expected_status) {
+        ASSERT_EQ(backend.inject_next(fault), rt::Status::ok);
+        batch.batch_id = batch_id;
+        ++batch.signals[0].value;
+        ASSERT_EQ(registration.command_timeline->submit(
+                      registration.command_timeline->instance, &batch),
+                  rt::HalV2Status::ok);
+        count = 0;
+        ASSERT_EQ(registration.command_timeline->poll(
+                      registration.command_timeline->instance,
+                      &completion, 1, &count),
+                  rt::HalV2Status::ok);
+        ASSERT_EQ(count, 1u);
+        EXPECT_EQ(completion.batch_id, batch_id);
+        EXPECT_EQ(completion.status, static_cast<std::int32_t>(
+            expected_status));
+    };
+    submit_fault(
+        rt::SampledIoLoopbackFault::malformed_sequence,
+        12, rt::HalV2Status::ok);
+    std::memcpy(&copied, destination.data(), sizeof(copied));
+    EXPECT_EQ(copied.sequence, 3u);
+    submit_fault(
+        rt::SampledIoLoopbackFault::completion_error,
+        13, rt::HalV2Status::error);
+    submit_fault(
+        rt::SampledIoLoopbackFault::completion_lost,
+        14, rt::HalV2Status::lost);
+    EXPECT_EQ(
+        backend.inject_next(rt::SampledIoLoopbackFault::none),
+        rt::Status::invalid_argument);
+    EXPECT_EQ(
+        backend.inject_next(
+            static_cast<rt::SampledIoLoopbackFault>(255)),
+        rt::Status::invalid_argument);
     EXPECT_EQ(
         registration.api.shutdown(registration.api.instance),
         rt::HalV2Status::ok);

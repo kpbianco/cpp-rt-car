@@ -2872,14 +2872,18 @@ struct Runtime::Impl {
     [[nodiscard]] Status prepare_device_inputs(
         const ReferenceRelease& release,
         std::uint32_t payload_slot) noexcept {
-        if (compiled_rate_dispatch_plan.consumer_channel_offsets.empty()) {
-            return Status::ok;
-        }
-        const auto begin = compiled_rate_dispatch_plan
-            .consumer_channel_offsets[release.phase.index()];
-        const auto end = compiled_rate_dispatch_plan
-            .consumer_channel_offsets[release.phase.index() + 1];
-        for (std::size_t cursor = begin; cursor < end; ++cursor) {
+        const auto consumer_begin = compiled_rate_dispatch_plan
+            .consumer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .consumer_channel_offsets[release.phase.index()];
+        const auto consumer_end = compiled_rate_dispatch_plan
+            .consumer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .consumer_channel_offsets[release.phase.index() + 1];
+        for (std::size_t cursor = consumer_begin;
+             cursor < consumer_end; ++cursor) {
             const auto channel_index = compiled_rate_dispatch_plan
                 .consumer_channel_indices[cursor];
             const auto& descriptor =
@@ -2922,6 +2926,89 @@ struct Runtime::Impl {
             if (read.freshness != CrossRateFreshness::fresh) {
                 return Status::invalid_state;
             }
+        }
+        const auto producer_begin = compiled_rate_dispatch_plan
+            .producer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .producer_channel_offsets[release.phase.index()];
+        const auto producer_end = compiled_rate_dispatch_plan
+            .producer_channel_offsets.empty()
+            ? 0
+            : compiled_rate_dispatch_plan
+                  .producer_channel_offsets[release.phase.index() + 1];
+        for (std::size_t cursor = producer_begin;
+             cursor < producer_end; ++cursor) {
+            const auto channel_index = compiled_rate_dispatch_plan
+                .producer_channel_indices[cursor];
+            const auto& descriptor =
+                compiled_cross_rate_plan.channels[channel_index];
+            if (!descriptor.producer_device.valid()) {
+                continue;
+            }
+            const auto* sampled = sampled_io_record(channel_index);
+            const auto* endpoint = device_endpoint_for_channel(channel_index);
+            if (!sampled) {
+                continue;
+            }
+            if (!endpoint || !endpoint->producer ||
+                payload_slot >= endpoint->slot_count) {
+                return Status::internal_error;
+            }
+            std::uint64_t relative_offset = 0;
+            std::uint64_t payload_offset = 0;
+            if (!checked_time_multiply(
+                    payload_slot,
+                    endpoint->slot_stride_bytes,
+                    relative_offset) ||
+                !checked_time_add(
+                    endpoint->envelope_offset,
+                    relative_offset,
+                    payload_offset) ||
+                payload_offset > endpoint->host_storage.size() ||
+                sampled->public_record.frame_bytes >
+                    endpoint->host_storage.size() - payload_offset ||
+                sampled->public_record.frame_bytes <
+                    sizeof(SampledIoFrameHeader)) {
+                return Status::internal_error;
+            }
+            std::uint64_t sequence = 0;
+            std::uint64_t generation = 0;
+            if (!sampled_io_expected_sequence(
+                    *sampled,
+                    release,
+                    active_rate_view.domain_release_sequence,
+                    sequence,
+                    generation)) {
+                return Status::capacity_exceeded;
+            }
+            // Runtime owns release correlation. Pre-materialize only the
+            // expected header in the selected output slot; the backend must
+            // still produce a complete frame that passes terminal validation.
+            SampledIoFrameHeader header{};
+            header.channel_identity =
+                sampled->public_record.channel_identity;
+            header.sequence = sequence;
+            header.release_generation = generation;
+            header.sample_count =
+                sampled->public_record.samples_per_frame;
+            header.encoding = static_cast<std::uint32_t>(
+                sampled->public_record.encoding);
+            header.timestamp_domain_identity =
+                sampled->public_record.timestamp_domain_identity;
+            header.sample_interval_ns =
+                sampled->public_record.sample_period_ns;
+            header.trigger_identity =
+                sampled->public_record.trigger_identity;
+            header.trigger_sequence = sequence;
+            header.calibration_identity =
+                sampled->public_record.calibration_identity;
+            header.status = static_cast<std::uint32_t>(
+                SampledIoFrameStatus::produced);
+            std::memcpy(
+                endpoint->host_storage.data() + payload_offset,
+                &header,
+                sizeof(header));
         }
         return Status::ok;
     }

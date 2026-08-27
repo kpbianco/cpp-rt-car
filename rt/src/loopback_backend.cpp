@@ -421,6 +421,36 @@ struct SampledIoLoopbackBackend::Impl {
                 sampled_io_payload_checksum(payload)) {
                 return HalV2Status::error;
             }
+            SampledIoFrameHeader destination_template{};
+            std::memcpy(
+                &destination_template,
+                destination.data(),
+                sizeof(destination_template));
+            // A Runtime-dispatched device output carries its exact expected
+            // release correlation in the destination slot. Standalone use
+            // without that template preserves the source correlation.
+            const bool has_runtime_correlation =
+                destination_template.struct_size ==
+                    sizeof(destination_template) &&
+                destination_template.version == sampled_io_frame_version &&
+                destination_template.channel_identity ==
+                    selected->destination_channel_identity &&
+                destination_template.sample_count == header.sample_count &&
+                destination_template.encoding == header.encoding &&
+                destination_template.timestamp_domain_identity ==
+                    selected->destination_timestamp_domain_identity &&
+                destination_template.sample_interval_ns ==
+                    header.sample_interval_ns &&
+                destination_template.trigger_identity ==
+                    selected->destination_trigger_identity &&
+                destination_template.calibration_identity ==
+                    selected->destination_calibration_identity &&
+                destination_template.status == static_cast<std::uint32_t>(
+                    SampledIoFrameStatus::produced) &&
+                destination_template.sequence != 0 &&
+                destination_template.release_generation != 0 &&
+                destination_template.trigger_sequence ==
+                    destination_template.sequence;
             std::copy(source.begin(), source.end(), destination.begin());
             header.channel_identity = selected->destination_channel_identity;
             header.timestamp_domain_identity =
@@ -431,6 +461,13 @@ struct SampledIoLoopbackBackend::Impl {
             header.trigger_identity = selected->destination_trigger_identity;
             header.status = static_cast<std::uint32_t>(
                 SampledIoFrameStatus::produced);
+            if (has_runtime_correlation) {
+                header.sequence = destination_template.sequence;
+                header.release_generation =
+                    destination_template.release_generation;
+                header.trigger_sequence =
+                    destination_template.trigger_sequence;
+            }
             if (fault == SampledIoLoopbackFault::malformed_sequence) {
                 ++header.sequence;
             }
