@@ -633,6 +633,8 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/resource_policy.cpp
     rt/src/runtime_compat.cpp
     rt/src/runtime_profile.cpp
+    rt/src/sampled_io.cpp
+    rt/src/loopback_backend.cpp
     rt/src/snapshot_codec.cpp
     rt/src/telemetry.cpp
     rt/src/thread_policy.cpp
@@ -1056,6 +1058,7 @@ install(
         rt/include/rt/observability_export.hpp
         rt/include/rt/profile.hpp
         rt/include/rt/runtime.hpp
+        rt/include/rt/loopback_backend.hpp
         rt/include/rt/status.hpp
         rt/include/rt/version.hpp
         rt/include/rt/cuda_backend.hpp

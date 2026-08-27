@@ -116,6 +116,8 @@ if (SIM_GTEST_AVAILABLE)
         test_rate_dispatch.cpp
         test_rate_telemetry.cpp
         test_rate_timeline.cpp
+        test_sampled_io.cpp
+        test_loopback_backend.cpp
         test_cpu_memory_policy.cpp
         test_memory_policy.cpp
         test_thread_policy.cpp)

@@ -1,5 +1,11 @@
 # Architecture
 
+M21-04 compiles above M21-03 cross-rate endpoints rather than adding a second
+transport: sampled descriptor, validated fixed frame, existing snapshot/device
+slot, then terminal completion. Safe frames use the same isolated backend lane
+and must complete before active start or backend detach. See
+[sampled_io.md](sampled_io.md).
+
 This page separates the supported 1.2 target runtime from compatibility and
 candidate paths. The normative contract is the
 [product contract](product_contract.md); the decisions behind it are recorded

@@ -1,5 +1,9 @@
 # Real-Time Readiness Gates
 
+M21-04 is portable RT0 only. Fixed-capacity copies and direct indexes add no
+active allocation, blocking mutex, file/network I/O, host-lane vendor call, or
+hidden thread. Loopback evidence does not promote physical or RT readiness.
+
 This checklist is a release/qualification gate, not a feature inventory. RTFW
 1.2 has not completed any end-to-end RT2 qualification.
 

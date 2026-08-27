@@ -456,6 +456,14 @@ struct CrossRateReadResult {
     Status producer_completion_status = Status::ok;
     std::uint64_t producer_timestamp_domain_identity = 0;
     std::uint64_t producer_timestamp = 0;
+    // M21-04 sampled-I/O metadata. Ordinary cross-rate channels leave these
+    // fields zeroed. A substituted frame is copied from frozen Runtime-owned
+    // initial/safe bytes, never inferred from zero-filled storage.
+    std::uint64_t sampled_sequence = 0;
+    std::uint64_t sampled_trigger_identity = 0;
+    std::uint64_t sampled_trigger_sequence = 0;
+    std::uint64_t sampled_calibration_identity = 0;
+    bool sampled_substituted = false;
 };
 
 class RateReleaseView {
@@ -1096,6 +1104,173 @@ struct CrossRateChannelRegistration {
     CrossRateDeviceEndpointSelector consumer_device{};
 };
 
+inline constexpr std::uint32_t sampled_io_frame_version = 1;
+inline constexpr std::size_t sampled_io_channel_capacity =
+    cross_rate_channel_capacity;
+
+enum class SampledIoDirection : std::uint8_t {
+    input = 1,
+    output = 2,
+};
+
+enum class SampledIoEncoding : std::uint8_t {
+    signed_int16_le = 1,
+    unsigned_int16_le = 2,
+    signed_int32_le = 3,
+    unsigned_int32_le = 4,
+};
+
+enum class SampledIoTriggerMode : std::uint8_t {
+    periodic = 1,
+    software = 2,
+    external = 3,
+};
+
+enum class SampledIoStalePolicy : std::uint8_t {
+    fail_release = 1,
+    hold_last = 2,
+    substitute_initial = 3,
+};
+
+enum class SampledIoOverrunPolicy : std::uint8_t {
+    fail_release = 1,
+    reject_newest = 2,
+};
+
+enum class SampledIoUnderrunPolicy : std::uint8_t {
+    fail_release = 1,
+    substitute_safe = 2,
+};
+
+enum class SampledIoFrameStatus : std::uint32_t {
+    initial = 1,
+    produced = 2,
+    safe = 3,
+};
+
+enum class SampledIoSafetyState : std::uint8_t {
+    not_applicable = 0,
+    unknown = 1,
+    startup_acknowledged = 2,
+    active = 3,
+    failure_acknowledged = 4,
+    shutdown_acknowledged = 5,
+};
+
+// This header is part of the additive C++ sampled-I/O contract, not a stable
+// C ABI or a versioned artifact schema. Multi-byte fields and sample payloads
+// are little-endian. payload_checksum covers only bytes after this header.
+struct SampledIoFrameHeader {
+    std::uint32_t struct_size = sizeof(SampledIoFrameHeader);
+    std::uint32_t version = sampled_io_frame_version;
+    std::uint64_t channel_identity = 0;
+    std::uint64_t sequence = 0;
+    std::uint64_t release_generation = 0;
+    std::uint32_t sample_count = 0;
+    std::uint32_t encoding = 0;
+    std::uint64_t timestamp_domain_identity = 0;
+    std::uint64_t first_sample_timestamp = 0;
+    std::uint64_t sample_interval_ns = 0;
+    std::uint64_t trigger_identity = 0;
+    std::uint64_t trigger_sequence = 0;
+    std::uint64_t calibration_identity = 0;
+    std::uint64_t payload_checksum = 0;
+    std::uint32_t status =
+        static_cast<std::uint32_t>(SampledIoFrameStatus::initial);
+    std::uint32_t reserved0 = 0;
+    std::array<std::uint64_t, 2> reserved{};
+};
+
+static_assert(sizeof(SampledIoFrameHeader) == 120);
+
+struct SampledIoChannelRegistration {
+    CrossRateChannelHandle channel{};
+    SampledIoDirection direction = SampledIoDirection::input;
+    std::uint64_t channel_identity = 0;
+    SampledIoEncoding encoding = SampledIoEncoding::signed_int16_le;
+    std::uint32_t element_count = 0;
+    std::uint32_t samples_per_frame = 0;
+    // Exact affine engineering conversion: value * scale_num / scale_den +
+    // offset_num / offset_den. Denominators are positive and nonzero.
+    std::int64_t scale_numerator = 1;
+    std::uint64_t scale_denominator = 1;
+    std::int64_t offset_numerator = 0;
+    std::uint64_t offset_denominator = 1;
+    std::uint64_t units_identity = 0;
+    std::uint64_t calibration_identity = 0;
+    std::uint64_t sample_period_ns = 0;
+    std::uint64_t timestamp_domain_identity = 0;
+    std::uint64_t clock_domain_identity = 0;
+    SampledIoTriggerMode trigger_mode = SampledIoTriggerMode::periodic;
+    std::uint64_t trigger_identity = 0;
+    std::uint32_t ring_capacity = 0;
+    std::uint64_t initial_sequence = 0;
+    std::uint64_t maximum_age_ns = 0;
+    SampledIoStalePolicy stale_policy = SampledIoStalePolicy::fail_release;
+    SampledIoOverrunPolicy overrun_policy =
+        SampledIoOverrunPolicy::fail_release;
+    SampledIoUnderrunPolicy underrun_policy =
+        SampledIoUnderrunPolicy::fail_release;
+    std::uint64_t safe_transition_timeout_ns = 0;
+    std::span<const std::byte> initial_frame{};
+    std::span<const std::byte> startup_safe_frame{};
+    std::span<const std::byte> failure_safe_frame{};
+    std::span<const std::byte> shutdown_safe_frame{};
+};
+
+struct CompiledSampledIoChannel {
+    CrossRateChannelHandle channel{};
+    std::size_t registration_index = 0;
+    SampledIoDirection direction = SampledIoDirection::input;
+    std::uint64_t channel_identity = 0;
+    SampledIoEncoding encoding = SampledIoEncoding::signed_int16_le;
+    std::uint32_t element_count = 0;
+    std::uint32_t samples_per_frame = 0;
+    std::size_t frame_bytes = 0;
+    std::int64_t scale_numerator = 1;
+    std::uint64_t scale_denominator = 1;
+    std::int64_t offset_numerator = 0;
+    std::uint64_t offset_denominator = 1;
+    std::uint64_t units_identity = 0;
+    std::uint64_t calibration_identity = 0;
+    std::uint64_t sample_period_ns = 0;
+    std::uint64_t timestamp_domain_identity = 0;
+    std::uint64_t clock_domain_identity = 0;
+    SampledIoTriggerMode trigger_mode = SampledIoTriggerMode::periodic;
+    std::uint64_t trigger_identity = 0;
+    std::uint32_t ring_capacity = 0;
+    std::uint64_t initial_sequence = 0;
+    std::uint64_t maximum_age_ns = 0;
+    SampledIoStalePolicy stale_policy = SampledIoStalePolicy::fail_release;
+    SampledIoOverrunPolicy overrun_policy =
+        SampledIoOverrunPolicy::fail_release;
+    SampledIoUnderrunPolicy underrun_policy =
+        SampledIoUnderrunPolicy::fail_release;
+    std::uint64_t safe_transition_timeout_ns = 0;
+    PhaseHandle device_phase{};
+    DeviceBackendHandle backend{};
+    std::size_t payload_reference_ordinal =
+        invalid_device_rate_payload_reference_ordinal;
+};
+
+struct SampledIoChannelStatus {
+    CrossRateChannelHandle channel{};
+    SampledIoSafetyState safety_state =
+        SampledIoSafetyState::not_applicable;
+    std::uint64_t last_sequence = 0;
+    std::uint64_t accepted_frames = 0;
+    std::uint64_t stale_frames = 0;
+    std::uint64_t overruns = 0;
+    std::uint64_t underruns = 0;
+    std::uint64_t substituted_frames = 0;
+    Status last_status = Status::ok;
+};
+
+[[nodiscard]] std::size_t sampled_io_encoding_bytes(
+    SampledIoEncoding encoding) noexcept;
+[[nodiscard]] std::uint64_t sampled_io_payload_checksum(
+    std::span<const std::byte> payload) noexcept;
+
 struct CompiledCrossRateChannel {
     CrossRateChannelHandle channel{};
     std::array<char, cross_rate_channel_name_capacity> name{};
@@ -1214,6 +1389,12 @@ struct MemoryPlan {
     // payload bytes remain borrowed and are excluded from planned_bytes.
     std::size_t cross_rate_device_endpoint_count = 0;
     std::size_t cross_rate_device_staging_bytes = 0;
+    // M21-04 sampled descriptors, copied initial/safe frames, direct maps,
+    // and status records remain inside rate_plan_bytes/runtime_control_bytes.
+    std::size_t sampled_io_channel_count = 0;
+    std::size_t sampled_io_frame_bytes = 0;
+    std::size_t sampled_io_safe_frame_bytes = 0;
+    std::size_t sampled_io_control_bytes = 0;
     // Active dispatcher/control/canonical checkpoint bytes remain a
     // subcomponent of rate_plan_bytes and runtime_control_bytes.
     std::size_t rate_dispatch_state_bytes = 0;
@@ -1668,6 +1849,11 @@ public:
     [[nodiscard]] Status replace_cross_rate_channel(
         CrossRateChannelHandle channel,
         const CrossRateChannelRegistration& registration) noexcept;
+    [[nodiscard]] Status register_sampled_io_channel(
+        const SampledIoChannelRegistration& registration) noexcept;
+    [[nodiscard]] Status replace_sampled_io_channel(
+        CrossRateChannelHandle channel,
+        const SampledIoChannelRegistration& registration) noexcept;
     [[nodiscard]] Status register_resource(
         std::string_view name,
         ResourceHandle& out_resource) noexcept;
@@ -1838,6 +2024,14 @@ public:
     [[nodiscard]] bool compiled_cross_rate_selection_at(
         std::size_t selection_index,
         CompiledCrossRateSelection& selection) const noexcept;
+    [[nodiscard]] bool sampled_io_model_enabled() const noexcept;
+    [[nodiscard]] std::size_t sampled_io_channel_count() const noexcept;
+    [[nodiscard]] bool compiled_sampled_io_channel_at(
+        std::size_t registration_index,
+        CompiledSampledIoChannel& channel) const noexcept;
+    [[nodiscard]] bool sampled_io_channel_status(
+        CrossRateChannelHandle channel,
+        SampledIoChannelStatus& status) const noexcept;
     // Copies only into an exact-size caller span. Failure leaves output
     // unchanged and no inspector allocates or mutates the frozen plan.
     [[nodiscard]] Status copy_cross_rate_initial_sample(

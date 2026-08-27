@@ -1,5 +1,9 @@
 # RTFW Completion Roadmap
 
+M21-01 through M21-03 are merged. M21-04 is active for portable sampled-I/O,
+acknowledged safe output, and installed software loopback. M21-05 remains the
+separate overload/replay/telemetry/watchdog/conformance closure batch.
+
 The roadmap converts the [product contract](product_contract.md) into
 dependency-ordered milestones. A milestone is complete only when its exit gates
 pass; file presence or a passing smoke test is not sufficient.

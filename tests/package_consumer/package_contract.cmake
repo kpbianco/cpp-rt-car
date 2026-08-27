@@ -104,6 +104,7 @@ set(expected_headers
     rt/device_abi.h
     rt/extension_abi.h
     rt/graph.hpp
+    rt/loopback_backend.hpp
     rt/mock_device.hpp
     rt/observability_export.hpp
     rt/profile.hpp
@@ -175,6 +176,8 @@ rtfw_check_cpp_header("rt/config.hpp" config rtfw::runtime)
 rtfw_check_cpp_header("rt/device.hpp" device rtfw::runtime)
 rtfw_check_cpp_header("rt/extension_abi.h" extension_abi_cpp rtfw::runtime)
 rtfw_check_cpp_header("rt/graph.hpp" graph rtfw::runtime)
+rtfw_check_cpp_header(
+    "rt/loopback_backend.hpp" loopback_backend rtfw::runtime)
 rtfw_check_cpp_header("rt/mock_device.hpp" mock_device rtfw::runtime)
 rtfw_check_cpp_header(
     "rt/observability_export.hpp" observability_export rtfw::runtime)

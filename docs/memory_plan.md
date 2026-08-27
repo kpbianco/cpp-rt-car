@@ -1,5 +1,10 @@
 # Finalized Memory and Overload Contract
 
+M21-04 sampled descriptor copies, initial/safe frames, compiled direct maps and
+safe slices, and fixed status records are included exactly once inside
+`rate_plan_bytes` and `runtime_control_bytes`. Registered coherent buffer
+payloads and loopback-owned backend storage are not double-counted.
+
 Release 1.2 retains the M4 memory closure for the target-path runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
 bounded storage and nonblocking overload behavior, but it is not a latency or

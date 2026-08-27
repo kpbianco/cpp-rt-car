@@ -1,5 +1,8 @@
 # Rate-action telemetry schema 1
 
+M21-04 adds fixed C++ sampled status counters only. It does not change the
+versioned rate-action or observability schemas; M21-05 owns telemetry closure.
+
 M16-04 adds a C++-only rate-action stream beside the global observability
 surface. Its schema version is 1; global observability remains schema 2 with
 trace IDs 1-14 and metric IDs 0-31. Rate telemetry is bounded RT0 functional
