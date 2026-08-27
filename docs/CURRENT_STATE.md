@@ -53,8 +53,9 @@ A table-driven public-header conformance fixture runs CPU plant, device sensor,
 CPU controller, device actuator, and observer work across three distinct rate
 periods, sampled hold behavior, acknowledged safety, checkpoint, and exact
 active replay. Local strict compilation, 9 focused tests, a 91-test impacted
-suite, and direct package-consumer execution pass; hosted and human review are
-still required. M21 and CAP-M21 remain incomplete until this candidate merges.
+suite, and direct package-consumer execution pass. All five hosted workflows
+and the 24-job main CI matrix pass; human review and merge remain required.
+M21 and CAP-M21 remain incomplete until this candidate merges.
 Physical/vendor I/O, HIL, RT1, and RT2 remain unclaimed.
 
 ## M21-04 sampled I/O and loopback

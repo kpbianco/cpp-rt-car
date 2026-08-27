@@ -5,8 +5,8 @@ mutation rejection, deterministic device-active replay, public loopback logical
 hooks, a multi-rate plant/sensor/controller/actuator fixture, exact accounting,
 optional-device shed/recover, completion-error/timeout/loss fault replay,
 two-instance isolation, and direct package consumption. Hosted GCC/Clang/MSVC,
-TSan, determinism, packaging, and portable assurance remain mandatory before
-merge.
+TSan, determinism, packaging, and portable assurance passed for candidate run
+33110390319 and remain required for any changed candidate head before merge.
 
 CI is regression evidence for selected builds and behaviors. It is not a
 latency qualification and does not prove the complete product contract.
