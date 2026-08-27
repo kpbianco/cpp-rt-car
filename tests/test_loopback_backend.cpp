@@ -113,12 +113,10 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     batch.timeout_ns = 1000000;
     batch.command_count = 1;
     batch.signal_count = 1;
-    rt::HalV2BufferReference source_reference{};
-    source_reference.buffer_token = source_token;
-    source_reference.bytes = source.size();
-    rt::HalV2BufferReference destination_reference{};
-    destination_reference.buffer_token = destination_token;
-    destination_reference.bytes = destination.size();
+    const rt::HalV2BufferReference source_reference{
+        source_token, 0, 0, 0, source.size()};
+    const rt::HalV2BufferReference destination_reference{
+        destination_token, 0, 0, 0, destination.size()};
     ASSERT_EQ(source_reference.buffer_token, source_token);
     ASSERT_EQ(destination_reference.buffer_token, destination_token);
     rt::DeviceCommand command{};
