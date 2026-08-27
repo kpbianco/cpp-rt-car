@@ -26,8 +26,10 @@ granularity, completion timestamp identity, per-backend in-flight demand, and
 per-poll completion count. It invokes no extension operation because of a rate
 release and does not promote a HAL or hardware support claim. M21-02 uses those
 frozen inputs to queue active batches through the same M17 submission lanes and
-to correlate poll-only completion in the same service lane. It adds no HAL
-table/version, callback, lane, payload, or hardware support claim.
+to correlate poll-only completion in the same service lane. M21-03 uses the
+unchanged copied buffer references and memory/timestamp descriptors to derive
+host-coherent payload subranges; Runtime-only materialization and terminal
+capture add no HAL table/version, callback, lane, or hardware support claim.
 
 ## Public core shape
 

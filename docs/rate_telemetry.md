@@ -10,7 +10,10 @@ M21-01 and M21-02 add no rate-action ID, counter, record field, or global
 observability event. Admission remains immutable configuration evidence.
 M21-02 reuses the existing device submitted/completed metrics and trace events
 plus existing active-rate failure/action accounting; it emits no completion
-payload and changes no telemetry schema.
+payload and changes no telemetry schema. M21-03 adds fixed C++ cross-rate read
+metadata for producer release/substep, completion status, timestamp domain,
+and timestamp, but no rate-action, global observability, checkpoint, or trace
+schema field.
 
 ## Policy and bounds
 

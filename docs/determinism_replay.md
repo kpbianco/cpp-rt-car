@@ -124,6 +124,14 @@ checkpoint or input-log schema 1. M21-02 active mixed execution remains D0
 only and does not encode device terminal order, timeout decisions, or payload
 in schema-1 artifacts, so active mixed replay remains unavailable.
 
+M21-03 additionally hashes each explicit endpoint selector and derived
+direction, backend/buffer/reference identity, envelope, stride, slot count,
+and completion timestamp domain. Raw host addresses, provider pointers,
+payload contents after configuration, completion arrival order, and wall-clock
+measurements remain excluded. Device payload bytes and their completion
+metadata are not added to checkpoint/input-log schema 1; M21-05 owns replay
+closure.
+
 M17-01 preserves the exact pre-M17 device identity path for every adapted
 device-ABI-v1 registration. Its backend name and copied backend identifier are
 hashed at the same positions as before; the adapter kind, HAL table, context,

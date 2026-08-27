@@ -417,6 +417,15 @@ entry. Existing submission/service lanes own submit, poll, and submitted
 timeout cancellation. Exact tickets preserve device prerequisites and the
 release-group terminal barrier while independent records may overlap.
 
+M21-03 keeps channel-free execution exact and adds direct producer/consumer
+channel slices for opted-in device endpoints. CPU→device selection copies one
+fresh exact generation into the deterministic execution-slot subrange before
+the provider runs. The provider must match the frozen envelope; Runtime alone
+substitutes the compiled offset and payload byte count in its owned batch.
+Device→CPU completion retains the terminal slot until the output subrange is
+copied into the channel store and one generation with fixed release/status/
+timestamp metadata is published. Failed terminal states publish nothing.
+
 M4 finalizes aligned phase/task scratch, queue/control, and trace storage under
 a configured memory budget. M15 supplies exactly the phase/task/trace backing
 through a bounded provider or Linux resident mapping transaction. M15-04 adds

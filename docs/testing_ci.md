@@ -68,6 +68,11 @@ release, deploy, or qualify hardware/RT behavior.
   timeout, one-shot cancellation, terminal quarantine, late-completion
   suppression, and unchanged ordinary command-batch behavior. These are
   portable fake-driver RT0 tests, not timing or hardware qualification.
+- M21-03 tests cover invalid-stride correction before callbacks, exact
+  CPU→device pre-provider copy, Runtime-only reference materialization,
+  submit-without-publication blocking, terminal device→CPU payload capture,
+  completion metadata, direct memory accounting, and unchanged M16/M21-02
+  suites. They are portable fake-driver RT0 evidence only.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent

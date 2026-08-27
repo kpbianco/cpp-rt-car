@@ -258,6 +258,12 @@ if (SIM_GTEST_AVAILABLE)
     set_tests_properties(m21_device_rate_model PROPERTIES TIMEOUT 60)
 
     add_test(
+        NAME m21_cross_rate_payload
+        COMMAND simcore_tests
+            --gtest_filter=CommandBatch.*CrossRatePayload*:CrossRateData.*Device*:RateDispatch.*DevicePayload*:HostRuntime.*DevicePayload*:HeterogeneousMemory.*CrossRate*:MemoryPlan.*DevicePayload*:PeriodicRuntime.*DevicePayload*:TraceNoAlloc.*DevicePayload*:MultipleInstances.*DevicePayload*:DeterminismReplay.*DevicePayload*)
+    set_tests_properties(m21_cross_rate_payload PROPERTIES TIMEOUT 60)
+
+    add_test(
         NAME m16_rate_dispatch
         COMMAND simcore_tests
             --gtest_filter=RateDispatch.*:RateTimeline.*Admission*:CrossRateData.*Active*:HostRuntime.*RateDispatch*:PeriodicRuntime.*RateDispatch*:UnifiedExecutor.*RateDispatch*:MemoryPlan.*RateDispatch*:DeterminismReplay.*RateDispatch*:TraceNoAlloc.*RateDispatch*)

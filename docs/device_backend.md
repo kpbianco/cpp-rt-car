@@ -173,7 +173,15 @@ A device phase has two distinct moments in ordinary graph execution:
 - the command provider is a normal bounded CPU phase and ends when submission
   is accepted or rejected;
 - the graph phase completes only when the service lane publishes its device
-  completion.
+completion.
+
+M21-03 does not change backend tables. An opted-in cross-rate device endpoint
+must select one copied payload-reference envelope on host-coherent registered
+storage. Runtime validates the provider against that envelope before replacing
+only its offset and byte count with a precompiled execution-slot subrange.
+Input bytes are committed before submit; output bytes are captured only after
+correlated terminal success and before the retained rate slot is recycled.
+Borrowed buffer bytes remain application/backend-owned.
 
 CPU compute workers never wait for a device fence, future, callback, or
 condition variable. `step()` remains synchronous to its host: it returns after

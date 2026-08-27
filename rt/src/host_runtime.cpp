@@ -791,6 +791,11 @@ struct Runtime::Impl {
         CrossRateSampleProvenance provenance =
             CrossRateSampleProvenance::initial_sample;
         bool held = false;
+        std::uint64_t producer_release_sequence = 0;
+        std::uint32_t producer_substep_ordinal = 0;
+        Status producer_completion_status = Status::ok;
+        std::uint64_t producer_timestamp_domain_identity = 0;
+        std::uint64_t producer_timestamp = 0;
     };
 
     struct ActiveSheddingState {
@@ -1294,11 +1299,42 @@ struct Runtime::Impl {
                     hash,
                     static_cast<std::uint64_t>(channel.mode));
                 hash_u64(hash, channel.maximum_age_ns);
+                hash_u64(
+                    hash,
+                    channel.producer_device.payload_reference_ordinal);
+                hash_u64(
+                    hash,
+                    channel.producer_device.slot_stride_bytes);
+                hash_u64(
+                    hash,
+                    channel.consumer_device.payload_reference_ordinal);
+                hash_u64(
+                    hash,
+                    channel.consumer_device.slot_stride_bytes);
                 hash_bytes(
                     hash,
                     std::span<const std::byte>(
                         channel.initial_sample.data(),
                         channel.initial_sample.size()));
+            }
+            hash_u64(
+                hash, compiled_cross_rate_plan.device_endpoints.size());
+            for (const auto& endpoint :
+                 compiled_cross_rate_plan.device_endpoints) {
+                hash_u64(hash, endpoint.channel_index);
+                hash_u64(hash, endpoint.producer ? 1u : 0u);
+                hash_u64(hash, endpoint.phase.index());
+                hash_u64(hash, endpoint.backend.index());
+                hash_u64(hash, endpoint.buffer.index());
+                hash_u64(
+                    hash, static_cast<std::uint64_t>(endpoint.reference_kind));
+                hash_u64(hash, endpoint.command_index);
+                hash_u64(hash, endpoint.command_reference_index);
+                hash_u64(hash, endpoint.envelope_offset);
+                hash_u64(hash, endpoint.envelope_bytes);
+                hash_u64(hash, endpoint.slot_stride_bytes);
+                hash_u64(hash, endpoint.slot_count);
+                hash_u64(hash, endpoint.timestamp_domain_identity);
             }
         }
         if (!compiled_device_rate_plan.phases.empty()) {
@@ -1862,6 +1898,11 @@ struct Runtime::Impl {
                 static_cast<std::uint8_t>(bytes[offset + 40]));
             channel_state.held =
                 static_cast<std::uint8_t>(bytes[offset + 41]) != 0;
+            channel_state.producer_release_sequence = 0;
+            channel_state.producer_substep_ordinal = 0;
+            channel_state.producer_completion_status = Status::ok;
+            channel_state.producer_timestamp_domain_identity = 0;
+            channel_state.producer_timestamp = 0;
             active_publication_claims[index].store(
                 0,
                 std::memory_order_relaxed);
@@ -2374,6 +2415,12 @@ struct Runtime::Impl {
             return result.status;
         }
         const auto& state = self.active_channel_states[index];
+        if (descriptor.producer_device.valid() &&
+            state.provenance == CrossRateSampleProvenance::produced &&
+            state.producer_timestamp_domain_identity == 0) {
+            result.status = CrossRateReadStatus::not_ready;
+            return result.status;
+        }
         if (!state.held) {
             if (selection.provenance != state.provenance) {
                 result.status = CrossRateReadStatus::stale_generation;
@@ -2443,6 +2490,15 @@ struct Runtime::Impl {
                 result.age_ns <= spec.maximum_age_ns
             ? CrossRateFreshness::fresh
             : CrossRateFreshness::stale;
+        result.producer_release_sequence =
+            state.producer_release_sequence;
+        result.producer_substep_ordinal =
+            state.producer_substep_ordinal;
+        result.producer_completion_status =
+            state.producer_completion_status;
+        result.producer_timestamp_domain_identity =
+            state.producer_timestamp_domain_identity;
+        result.producer_timestamp = state.producer_timestamp;
         if (result.freshness == CrossRateFreshness::stale) {
             self.active_stale_reads.fetch_add(1, std::memory_order_relaxed);
         }
@@ -2568,6 +2624,293 @@ struct Runtime::Impl {
         return transition;
     }
 
+    [[nodiscard]] const detail::CompiledCrossRateDeviceEndpoint*
+    device_endpoint_for_channel(std::size_t channel_index) const noexcept {
+        if (channel_index >=
+                compiled_cross_rate_plan.device_endpoint_index_by_channel.size()) {
+            return nullptr;
+        }
+        const auto endpoint_index = compiled_cross_rate_plan
+            .device_endpoint_index_by_channel[channel_index];
+        return endpoint_index < compiled_cross_rate_plan.device_endpoints.size()
+            ? &compiled_cross_rate_plan.device_endpoints[endpoint_index]
+            : nullptr;
+    }
+
+    [[nodiscard]] bool device_payload_slot(
+        std::size_t reference_index,
+        const ReferenceRelease& release,
+        std::uint64_t domain_release_sequence,
+        std::uint32_t& slot) const noexcept {
+        if (release.phase_kind != RatePhaseKind::device ||
+            reference_index >= compiled_rate_dispatch_plan
+                .device_phase_by_reference.size()) {
+            return false;
+        }
+        const auto device_phase_index = compiled_rate_dispatch_plan
+            .device_phase_by_reference[reference_index];
+        if (device_phase_index >= compiled_device_rate_plan.phases.size()) {
+            return false;
+        }
+        const auto slot_count = compiled_device_rate_plan
+            .phases[device_phase_index].maximum_in_flight;
+        std::uint64_t release_ordinal = 0;
+        if (slot_count == 0 ||
+            !checked_time_multiply(
+                domain_release_sequence,
+                release.substep_count,
+                release_ordinal) ||
+            !checked_time_add(
+                release_ordinal,
+                release.substep_ordinal,
+                release_ordinal)) {
+            return false;
+        }
+        slot = static_cast<std::uint32_t>(release_ordinal % slot_count);
+        return true;
+    }
+
+    [[nodiscard]] Status prepare_device_inputs(
+        const ReferenceRelease& release,
+        std::uint32_t payload_slot) noexcept {
+        if (compiled_rate_dispatch_plan.consumer_channel_offsets.empty()) {
+            return Status::ok;
+        }
+        const auto begin = compiled_rate_dispatch_plan
+            .consumer_channel_offsets[release.phase.index()];
+        const auto end = compiled_rate_dispatch_plan
+            .consumer_channel_offsets[release.phase.index() + 1];
+        for (std::size_t cursor = begin; cursor < end; ++cursor) {
+            const auto channel_index = compiled_rate_dispatch_plan
+                .consumer_channel_indices[cursor];
+            const auto& descriptor =
+                compiled_cross_rate_plan.channels[channel_index];
+            if (!descriptor.consumer_device.valid()) {
+                continue;
+            }
+            const auto* endpoint = device_endpoint_for_channel(channel_index);
+            if (!endpoint || endpoint->producer ||
+                payload_slot >= endpoint->slot_count) {
+                return Status::internal_error;
+            }
+            std::uint64_t relative_offset = 0;
+            std::uint64_t payload_offset = 0;
+            if (!checked_time_multiply(
+                    payload_slot,
+                    endpoint->slot_stride_bytes,
+                    relative_offset) ||
+                !checked_time_add(
+                    endpoint->envelope_offset,
+                    relative_offset,
+                    payload_offset) ||
+                payload_offset > endpoint->host_storage.size() ||
+                cross_rate_channels[channel_index].payload_size >
+                    endpoint->host_storage.size() - payload_offset) {
+                return Status::internal_error;
+            }
+            CrossRateReadResult read;
+            const auto read_status = copy_active_channel(
+                this,
+                CrossRateChannelHandle{
+                    graph_owner, static_cast<std::uint32_t>(channel_index)},
+                std::span<std::byte>(
+                    endpoint->host_storage.data() + payload_offset,
+                    cross_rate_channels[channel_index].payload_size),
+                read);
+            if (read_status != CrossRateReadStatus::ok) {
+                return Status::invalid_argument;
+            }
+            if (read.freshness != CrossRateFreshness::fresh) {
+                return Status::invalid_state;
+            }
+        }
+        return Status::ok;
+    }
+
+    [[nodiscard]] bool materialize_device_payload_references(
+        DeviceCommandBatch& batch,
+        DeviceCommandBatch& declaration,
+        const ReferenceRelease& release,
+        std::uint32_t payload_slot) const noexcept {
+        const auto reference_at = [](
+            DeviceCommandBatch& candidate,
+            const detail::CompiledCrossRateDeviceEndpoint& endpoint)
+            -> HalV2BufferReference* {
+            if (endpoint.command_index >= candidate.command_count) {
+                return nullptr;
+            }
+            auto& command = candidate.commands[endpoint.command_index];
+            switch (endpoint.reference_kind) {
+            case DeviceRateReferenceKind::dispatch_buffer:
+                return endpoint.command_reference_index < command.buffer_count
+                    ? &command.buffers[endpoint.command_reference_index]
+                    : nullptr;
+            case DeviceRateReferenceKind::copy_source:
+                return &command.source;
+            case DeviceRateReferenceKind::copy_destination:
+                return &command.destination;
+            case DeviceRateReferenceKind::synchronization_target:
+                return &command.target;
+            }
+            return nullptr;
+        };
+        const auto materialize_channel = [&](std::size_t channel_index) {
+            const auto* endpoint = device_endpoint_for_channel(channel_index);
+            if (!endpoint || endpoint->phase != release.phase ||
+                payload_slot >= endpoint->slot_count) {
+                return false;
+            }
+            auto* requested = reference_at(batch, *endpoint);
+            auto* copied = reference_at(declaration, *endpoint);
+            if (!requested || !copied ||
+                requested->buffer_token != endpoint->buffer.value ||
+                requested->offset != endpoint->envelope_offset ||
+                requested->bytes != endpoint->envelope_bytes) {
+                return false;
+            }
+            std::uint64_t slot_offset = 0;
+            if (!checked_time_multiply(
+                    payload_slot,
+                    endpoint->slot_stride_bytes,
+                    slot_offset) ||
+                !checked_time_add(
+                    endpoint->envelope_offset,
+                    slot_offset,
+                    slot_offset)) {
+                return false;
+            }
+            requested->offset = slot_offset;
+            requested->bytes = cross_rate_channels[channel_index].payload_size;
+            copied->offset = requested->offset;
+            copied->bytes = requested->bytes;
+            return true;
+        };
+        const auto apply_slice = [&](const std::vector<std::size_t>& offsets,
+                                     const std::vector<std::size_t>& indices) {
+            if (offsets.empty()) {
+                return true;
+            }
+            const auto begin = offsets[release.phase.index()];
+            const auto end = offsets[release.phase.index() + 1];
+            for (std::size_t cursor = begin; cursor < end; ++cursor) {
+                const auto channel_index = indices[cursor];
+                const auto& channel =
+                    compiled_cross_rate_plan.channels[channel_index];
+                if ((channel.producer == release.phase &&
+                     channel.producer_device.valid()) ||
+                    (channel.consumer == release.phase &&
+                     channel.consumer_device.valid())) {
+                    if (!materialize_channel(channel_index)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+        return apply_slice(
+                   compiled_rate_dispatch_plan.producer_channel_offsets,
+                   compiled_rate_dispatch_plan.producer_channel_indices) &&
+               apply_slice(
+                   compiled_rate_dispatch_plan.consumer_channel_offsets,
+                   compiled_rate_dispatch_plan.consumer_channel_indices);
+    }
+
+    [[nodiscard]] Status capture_device_outputs(
+        const detail::DeviceRateTicket& ticket,
+        const detail::DeviceRateCompletion& completion) noexcept {
+        if (completion.status != Status::ok ||
+            !completion.terminal_slot_owned ||
+            ticket.identity.reference_index >= compiled_rate_plan.releases.size()) {
+            return completion.status;
+        }
+        const auto& release =
+            compiled_rate_plan.releases[ticket.identity.reference_index];
+        std::uint32_t payload_slot = 0;
+        if (!device_payload_slot(
+                ticket.identity.reference_index,
+                release,
+                ticket.identity.domain_release_sequence,
+                payload_slot)) {
+            return Status::internal_error;
+        }
+        const auto begin = compiled_rate_dispatch_plan
+            .producer_channel_offsets[release.phase.index()];
+        const auto end = compiled_rate_dispatch_plan
+            .producer_channel_offsets[release.phase.index() + 1];
+        for (std::size_t cursor = begin; cursor < end; ++cursor) {
+            const auto channel_index = compiled_rate_dispatch_plan
+                .producer_channel_indices[cursor];
+            const auto& descriptor =
+                compiled_cross_rate_plan.channels[channel_index];
+            if (!descriptor.producer_device.valid()) {
+                continue;
+            }
+            const auto* endpoint = device_endpoint_for_channel(channel_index);
+            if (!endpoint || !endpoint->producer ||
+                payload_slot >= endpoint->slot_count ||
+                completion.timestamp_domain_identity !=
+                    endpoint->timestamp_domain_identity) {
+                return Status::device_error;
+            }
+            std::uint64_t relative_offset = 0;
+            std::uint64_t payload_offset = 0;
+            if (!checked_time_multiply(
+                    payload_slot,
+                    endpoint->slot_stride_bytes,
+                    relative_offset) ||
+                !checked_time_add(
+                    endpoint->envelope_offset,
+                    relative_offset,
+                    payload_offset) ||
+                payload_offset > endpoint->host_storage.size() ||
+                cross_rate_channels[channel_index].payload_size >
+                    endpoint->host_storage.size() - payload_offset) {
+                return Status::internal_error;
+            }
+            auto& channel_state = active_channel_states[channel_index];
+            auto& store = compiled_cross_rate_plan.stores[channel_index];
+            if (!store.can_publish(channel_state.next_generation)) {
+                const auto slots = static_cast<std::uint64_t>(
+                    store.slot_count());
+                if (channel_state.next_generation <= slots ||
+                    store.retire(channel_state.next_generation - slots) !=
+                        detail::SnapshotStoreResult::ok) {
+                    return Status::internal_error;
+                }
+            }
+            const auto source = std::span<const std::byte>(
+                endpoint->host_storage.data() + payload_offset,
+                cross_rate_channels[channel_index].payload_size);
+            if (store.publish(channel_state.next_generation, source) !=
+                detail::SnapshotStoreResult::ok) {
+                return Status::internal_error;
+            }
+            std::copy(
+                source.begin(), source.end(),
+                active_committed_payloads.begin() +
+                    static_cast<std::ptrdiff_t>(channel_state.payload_offset));
+            std::copy(
+                source.begin(), source.end(),
+                active_staging_payloads.begin() +
+                    static_cast<std::ptrdiff_t>(channel_state.payload_offset));
+            channel_state.generation = channel_state.next_generation;
+            channel_state.next_generation = store.next_generation();
+            channel_state.source_logical_release_ns =
+                ticket.identity.logical_release_ns;
+            channel_state.provenance = CrossRateSampleProvenance::produced;
+            channel_state.held = false;
+            channel_state.producer_release_sequence =
+                ticket.identity.domain_release_sequence;
+            channel_state.producer_substep_ordinal =
+                ticket.identity.substep_ordinal;
+            channel_state.producer_completion_status = completion.status;
+            channel_state.producer_timestamp_domain_identity =
+                completion.timestamp_domain_identity;
+            channel_state.producer_timestamp = completion.timestamp;
+        }
+        return Status::ok;
+    }
+
     void emit_rate_action(
         const HostFrameContext& frame,
         const CompiledRateDomain& domain,
@@ -2663,9 +3006,20 @@ struct Runtime::Impl {
             if (!ticket.valid()) {
                 return Status::ok;
             }
-            const auto status = devices
-                ? devices->wait_rate_batch(ticket)
+            detail::DeviceRateCompletion completion;
+            auto status = devices
+                ? devices->wait_rate_batch(ticket, completion)
                 : Status::invalid_state;
+            if (status == Status::ok) {
+                status = capture_device_outputs(ticket, completion);
+            }
+            if (completion.terminal_slot_owned && devices) {
+                const auto release_status =
+                    devices->release_rate_batch(ticket);
+                if (status == Status::ok) {
+                    status = release_status;
+                }
+            }
             ticket = {};
             if (status != Status::ok) {
                 const auto& failed = compiled_rate_plan.releases[
@@ -2745,6 +3099,31 @@ struct Runtime::Impl {
                 &Impl::copy_active_channel,
             };
             active_device_ticket = {};
+            active_device_payload_slot = 0;
+            if (release.phase_kind == RatePhaseKind::device) {
+                if (!device_payload_slot(
+                        reference_index,
+                        release,
+                        domain_release_sequence,
+                        active_device_payload_slot)) {
+                    failed_phase = release.phase.index();
+                    record_active_failure(
+                        summary, release, domain_release_sequence);
+                    active_reference_index =
+                        invalid_reference_release_index;
+                    return Status::capacity_exceeded;
+                }
+                const auto input_status = prepare_device_inputs(
+                    release, active_device_payload_slot);
+                if (input_status != Status::ok) {
+                    failed_phase = release.phase.index();
+                    record_active_failure(
+                        summary, release, domain_release_sequence);
+                    active_reference_index =
+                        invalid_reference_release_index;
+                    return input_status;
+                }
+            }
             const auto status = executor->run_selected(
                 release.phase.index(),
                 &Impl::run_phase,
@@ -2775,6 +3154,10 @@ struct Runtime::Impl {
                  channel_cursor < channel_end; ++channel_cursor) {
                 const auto channel_index = compiled_rate_dispatch_plan
                     .producer_channel_indices[channel_cursor];
+                if (compiled_cross_rate_plan.channels[channel_index]
+                        .producer_device.valid()) {
+                    continue;
+                }
                 if (active_publication_claims[channel_index].load(
                         std::memory_order_acquire) != 2) {
                     failed_phase = release.phase.index();
@@ -2791,6 +3174,10 @@ struct Runtime::Impl {
                  channel_cursor < channel_end; ++channel_cursor) {
                 const auto channel_index = compiled_rate_dispatch_plan
                     .producer_channel_indices[channel_cursor];
+                if (compiled_cross_rate_plan.channels[channel_index]
+                        .producer_device.valid()) {
+                    continue;
+                }
                 auto& channel_state = active_channel_states[channel_index];
                 auto& store = compiled_cross_rate_plan.stores[channel_index];
                 if (!store.can_publish(channel_state.next_generation)) {
@@ -2840,6 +3227,14 @@ struct Runtime::Impl {
                 channel_state.provenance =
                     CrossRateSampleProvenance::produced;
                 channel_state.held = false;
+                channel_state.producer_release_sequence =
+                    domain_release_sequence;
+                channel_state.producer_substep_ordinal =
+                    release.substep_ordinal;
+                channel_state.producer_completion_status = Status::ok;
+                channel_state.producer_timestamp_domain_identity =
+                    cross_rate_runtime_logical_timestamp_domain_identity;
+                channel_state.producer_timestamp = logical_release_ns;
             }
         }
 
@@ -3601,20 +3996,28 @@ struct Runtime::Impl {
             }
             if (result == CallbackResult::ok && self.devices) {
                 std::uint64_t batch_id = 0;
+                auto materialized_batch = batch;
+                auto materialized_declaration =
+                    callback.batch_declaration;
                 const auto active_rate = self.active_reference_index !=
                     invalid_reference_release_index;
                 detail::DeviceRateReleaseIdentity identity;
                 bool dispatch_ready = true;
                 if (active_rate) {
+                    if (!detail::batch_matches_declaration(
+                            batch, callback.batch_declaration)) {
+                        status = Status::invalid_argument;
+                        dispatch_ready = false;
+                    }
                     const auto device_phase_index = self
                         .compiled_rate_dispatch_plan
                         .device_phase_by_reference[
                             self.active_reference_index];
-                    if (device_phase_index >=
+                    if (dispatch_ready && device_phase_index >=
                         self.compiled_device_rate_plan.phases.size()) {
                         status = Status::internal_error;
                         dispatch_ready = false;
-                    } else {
+                    } else if (dispatch_ready) {
                         const auto completion_budget = self
                             .compiled_device_rate_plan
                             .phases[device_phase_index]
@@ -3633,15 +4036,15 @@ struct Runtime::Impl {
                                 budget_deadline,
                                 self.active_absolute_deadline_ns);
                             const auto now = self.clock_now();
-                            if (batch.timeout_ns == 0) {
+                            if (materialized_batch.timeout_ns == 0) {
                                 status = Status::invalid_argument;
                                 dispatch_ready = false;
                             } else if (now >= completion_deadline) {
                                 status = Status::device_timeout;
                                 dispatch_ready = false;
                             } else {
-                                batch.timeout_ns = std::min(
-                                    batch.timeout_ns,
+                                materialized_batch.timeout_ns = std::min(
+                                    materialized_batch.timeout_ns,
                                     completion_deadline - now);
                                 const auto& release = self
                                     .compiled_rate_plan.releases[
@@ -3659,6 +4062,14 @@ struct Runtime::Impl {
                                     self.active_absolute_deadline_ns,
                                     completion_budget,
                                 };
+                                if (!self.materialize_device_payload_references(
+                                        materialized_batch,
+                                        materialized_declaration,
+                                        release,
+                                        self.active_device_payload_slot)) {
+                                    status = Status::invalid_argument;
+                                    dispatch_ready = false;
+                                }
                             }
                         }
                     }
@@ -3667,8 +4078,8 @@ struct Runtime::Impl {
                     status = self.devices->submit_batch(
                         callback.device_backend_index, index,
                         task_context.worker_index(),
-                        self.active_frame->frame_index, batch,
-                        callback.batch_declaration, batch_id,
+                        self.active_frame->frame_index, materialized_batch,
+                        materialized_declaration, batch_id,
                         active_rate ? &identity : nullptr,
                         active_rate ? &self.active_device_ticket : nullptr);
                     pending = status == Status::ok && !active_rate;
@@ -3745,6 +4156,7 @@ struct Runtime::Impl {
     std::unique_ptr<std::atomic<std::uint8_t>[]> active_publication_claims;
     std::vector<detail::DeviceRateTicket> active_device_tickets;
     detail::DeviceRateTicket active_device_ticket{};
+    std::uint32_t active_device_payload_slot = 0;
     std::unique_ptr<ActiveSheddingState> active_shedding_state;
     std::uint64_t active_logical_cursor_ns = 0;
     std::uint64_t active_nominal_epoch_ns = 0;
@@ -5581,6 +5993,8 @@ Status Runtime::register_cross_rate_channel(
             registration.initial_sample.end());
         candidate.mode = registration.mode;
         candidate.maximum_age_ns = registration.maximum_age_ns;
+        candidate.producer_device = registration.producer_device;
+        candidate.consumer_device = registration.consumer_device;
         const auto index = static_cast<std::uint32_t>(
             impl_->cross_rate_channels.size());
         impl_->cross_rate_channels.push_back(std::move(candidate));
@@ -5652,6 +6066,8 @@ Status Runtime::replace_cross_rate_channel(
             registration.initial_sample.end());
         candidate.mode = registration.mode;
         candidate.maximum_age_ns = registration.maximum_age_ns;
+        candidate.producer_device = registration.producer_device;
+        candidate.consumer_device = registration.consumer_device;
         impl_->cross_rate_channels[channel.index()] = std::move(candidate);
     } catch (const std::bad_alloc&) {
         return impl_->fail(Status::resource_exhausted, nullptr);
@@ -6136,6 +6552,39 @@ Status Runtime::finalize() noexcept {
         }
     }
 
+    std::vector<detail::CrossRateDeviceBufferSource>
+        cross_rate_device_buffers;
+    try {
+        cross_rate_device_buffers.reserve(impl_->device_buffers.size());
+        for (std::size_t index = 0;
+             index < impl_->device_buffers.size(); ++index) {
+            const auto& buffer = impl_->device_buffers[index];
+            const auto& backend =
+                impl_->device_backends[buffer.backend_index];
+            const auto* domain = backend.memory_state
+                ? detail::find_memory_domain(
+                      *backend.memory_state, buffer.domain_identity)
+                : nullptr;
+            cross_rate_device_buffers.push_back({
+                DeviceBufferHandle{
+                    impl_->graph_owner, static_cast<std::uint32_t>(index)},
+                DeviceBackendHandle{
+                    impl_->graph_owner, buffer.backend_index},
+                buffer.storage,
+                buffer.bytes,
+                buffer.flags,
+                buffer.coherency,
+                buffer.synchronization,
+                domain ? domain->byte_granularity : 1u,
+                domain ? domain->offset_granularity : 1u,
+            });
+        }
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+
     detail::CompiledRateDispatchPlan compiled_rate_dispatch_plan;
     if (impl_->rate_execution_policy_set) {
         detail::RateDispatchDiagnostic dispatch_diagnostic;
@@ -6165,6 +6614,10 @@ Status Runtime::finalize() noexcept {
         impl_->callbacks.size(),
         compiled_rate_plan,
         impl_->cross_rate_channels,
+        impl_->device_rate_bindings.empty()
+            ? nullptr
+            : &compiled_device_rate_plan,
+        cross_rate_device_buffers,
         compiled_cross_rate_plan,
         cross_rate_diagnostic);
     if (cross_rate_status != Status::ok) {
@@ -6449,6 +6902,15 @@ Status Runtime::finalize() noexcept {
         compiled_cross_rate_plan.channels.size();
     memory_plan.cross_rate_selection_count =
         compiled_cross_rate_plan.selections.size();
+    memory_plan.cross_rate_device_endpoint_count =
+        compiled_cross_rate_plan.device_endpoints.size();
+    for (const auto& endpoint :
+         compiled_cross_rate_plan.device_endpoints) {
+        plan_valid = plan_valid && detail::checked_add(
+            memory_plan.cross_rate_device_staging_bytes,
+            impl_->cross_rate_channels[endpoint.channel_index].payload_size,
+            memory_plan.cross_rate_device_staging_bytes);
+    }
     memory_plan.rate_checkpoint_state_bytes =
         active_checkpoint_state.size();
     memory_plan.optional_rate_domain_count =
@@ -6759,6 +7221,12 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_rate_plan_array(
         compiled_cross_rate_plan.stores.capacity(),
         sizeof(detail::SnapshotStore));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_cross_rate_plan.device_endpoints.capacity(),
+        sizeof(detail::CompiledCrossRateDeviceEndpoint));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_cross_rate_plan.device_endpoint_index_by_channel.capacity(),
+        sizeof(std::size_t));
     for (const auto& store : compiled_cross_rate_plan.stores) {
         plan_valid = plan_valid && add_rate_plan_array(
             store.slot_count(),
@@ -6784,6 +7252,12 @@ Status Runtime::finalize() noexcept {
         sizeof(std::size_t));
     plan_valid = plan_valid && add_rate_plan_array(
         compiled_rate_dispatch_plan.producer_channel_indices.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.consumer_channel_offsets.capacity(),
+        sizeof(std::size_t));
+    plan_valid = plan_valid && add_rate_plan_array(
+        compiled_rate_dispatch_plan.consumer_channel_indices.capacity(),
         sizeof(std::size_t));
     const auto device_execution_bytes_begin = memory_plan.rate_plan_bytes;
     plan_valid = plan_valid && add_rate_plan_array(
@@ -7130,6 +7604,14 @@ Status Runtime::finalize() noexcept {
             compiled_cross_rate_plan.stores.data(),
             compiled_cross_rate_plan.stores.capacity(),
             sizeof(detail::SnapshotStore));
+        add_runtime_extent(
+            compiled_cross_rate_plan.device_endpoints.data(),
+            compiled_cross_rate_plan.device_endpoints.capacity(),
+            sizeof(detail::CompiledCrossRateDeviceEndpoint));
+        add_runtime_extent(
+            compiled_cross_rate_plan.device_endpoint_index_by_channel.data(),
+            compiled_cross_rate_plan.device_endpoint_index_by_channel.capacity(),
+            sizeof(std::size_t));
         for (const auto& store : compiled_cross_rate_plan.stores) {
             add_runtime_extent(
                 store.control_data(),
@@ -7163,6 +7645,14 @@ Status Runtime::finalize() noexcept {
         add_runtime_extent(
             compiled_rate_dispatch_plan.producer_channel_indices.data(),
             compiled_rate_dispatch_plan.producer_channel_indices.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.consumer_channel_offsets.data(),
+            compiled_rate_dispatch_plan.consumer_channel_offsets.capacity(),
+            sizeof(std::size_t));
+        add_runtime_extent(
+            compiled_rate_dispatch_plan.consumer_channel_indices.data(),
+            compiled_rate_dispatch_plan.consumer_channel_indices.capacity(),
             sizeof(std::size_t));
         add_runtime_extent(
             compiled_rate_dispatch_plan.device_phase_by_reference.data(),

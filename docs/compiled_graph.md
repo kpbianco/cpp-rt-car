@@ -25,6 +25,11 @@ and precomputes same-group device-prerequisite slices. Independent admitted
 records may remain outstanding together, but a dependent CPU/device record
 consumes the exact prerequisite ticket first and a release group cannot settle
 successfully until every remaining device ticket is terminal.
+M21-03 appends one explicit device selector to the device side of a cross-rate
+edge. It names a phase-local copied payload-reference ordinal and stride;
+finalization derives and validates every subrange and publishes direct phase/
+channel slices. Device-to-device edges and implicit reference matching remain
+invalid.
 Failed admission publishes no partial plan; a fixed-size diagnostic retains the
 status, rejected phase, and first reference index for configuring-time repair.
 
@@ -56,11 +61,13 @@ While the runtime is `configuring`, a host may:
 4. declare one `read` or `write` access per phase/resource pair.
 
 The additive C++ configuration path may also register a copied cross-rate
-channel between distinct CPU phases after registering explicit domain
-ownership. Finalization rejects foreign/stale endpoints, same-phase or
-same-domain edges, unsupported device endpoints, duplicate name/semantic
-edges, malformed payload/initial bytes, and bounded-capacity/arithmetic errors
-before publishing any descriptor or store.
+channel between distinct rate-bound phases after registering explicit domain
+ownership. CPU/CPU retains M16 behavior. M21-03 permits exactly one device side
+when its explicit selector resolves to an admitted host-coherent M21 payload
+envelope. Finalization rejects foreign/stale endpoints, same-phase or same-
+domain edges, device/device edges, missing/partial selectors, duplicate or
+overlapping envelopes, malformed payload/initial bytes, and bounded-capacity/
+arithmetic errors before publishing any descriptor or store.
 
 Duplicate names, edges, and phase/resource declarations are rejected. A
 self-dependency is rejected immediately. Longer cycles are diagnosed by

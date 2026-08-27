@@ -38,6 +38,14 @@ release group may overlap; dependency and group barriers consume exact tickets
 before advancing. Vendor-owned timeouts are quarantined from reuse until
 checked backend shutdown.
 
+M21-03 compiles one direct device endpoint per CPU/device cross-rate channel.
+The endpoint derives its buffer envelope, role, access, timestamp domain, and
+slot count from M21-01 and maps each deterministic release-slot ordinal to a
+disjoint host-coherent subrange. CPU input copy precedes provider invocation;
+device output capture follows terminal success while the M21-02 ticket remains
+owned. The same packed-atomic SPSC store remains the publication boundary, and
+no copy lane, vendor call, mutex, or active registry scan is added.
+
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval
 windows, exact trace-sequence loss reporting, and immutable

@@ -2,10 +2,32 @@
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M21-02 starts from exact target
-baseline `2c7ab323cfe5f00b68a71467889ca1dc5507365a`, the merged M21-01 result.
-The binding M21-02 contract is `contracts/active-batch.yaml`, sourced from
-control revision `cfd4d34cc402e248e00082fcbed6d72d2bfb5382`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. M21-03 starts from exact target
+baseline `ff143eede097885c1535ed7b335b709e1cec44bd`, the merged M21-02 result.
+The binding M21-03 contract is `contracts/active-batch.yaml`, sourced from
+control revision `f282c6899472999d9d881c81f277067238a84f5f`.
+
+## M21-03 implementation handoff
+
+Use `CrossRateDeviceEndpointSelector` only for the device side of a
+CPU→device or device→CPU channel. Its phase-local payload-reference ordinal and
+positive stride are copied and frozen. Finalization derives the backend,
+buffer, envelope, role, host access, timestamp domain, and in-flight slot count
+from M21-01; it rejects device→device, implicit matching, incoherent/opaque
+memory, overlapping envelopes, and partial selectors transactionally.
+
+CPU input is copied before the provider runs. The provider still returns the
+exact frozen declaration; Runtime alone materializes the selected slot offset
+and payload byte count. Device output is copied and published only after exact
+terminal success while the M21-02 slot remains host-owned. Failure, timeout,
+cancel, malformed completion, loss, skip, and shed paths do not call the output
+publisher. Channel-free M21-02 and ordinary M17 batches retain exact-reference
+behavior.
+
+M21-04 owns sampled-I/O descriptors, clocks/triggers, safe outputs, and
+overrun/underrun policy. M21-05 owns replay/conformance closure. Do not describe
+this portable fake-driver path as physical device, DAC/DAQ, HIL, RT1, or RT2
+evidence.
 
 ## M21-02 implementation handoff
 
@@ -25,10 +47,9 @@ dependent CPU/device record or successful step from advancing early.
 Submitted timeouts are settled once by the existing service lane and retain
 their slot in quarantine through checked backend shutdown. The exact batch and
 release identity prevents a late completion from settling a reused slot.
-Ordinary M17 batches retain executor-token completion behavior. M21-02 adds no
-completion payload, sampled I/O, new telemetry schema, replay encoding, lane,
-or hardware/RT qualification. Continue with M21-03 only after this batch is
-merged and its hosted CI and human ownership review are complete.
+Ordinary M17 batches retain executor-token completion behavior. M21-02 added no
+new telemetry schema, replay encoding, lane, or hardware/RT qualification and
+remains the ownership foundation consumed by M21-03.
 
 ## M20-PRE-01 implementation handoff
 

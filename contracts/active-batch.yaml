@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M21-02
-  title: Add device release dispatch and completion
-  goal: Activate admitted M21-01 HAL-v2 command-batch phases in the existing multi-rate executor by precomputing bounded release/dispatch/completion state, invoking each due command provider exactly once, submitting only through the existing isolated backend lanes, resolving poll-only terminal completion with exact release identity, and applying deterministic timeout, cancellation, dependency, late, stop, and retryable-cleanup semantics without adding payload publication, sampled I/O, a vendor call on an executor worker, or a new runtime lane.
+  id: M21-03
+  title: Add CPU/device cross-rate payloads
+  goal: Extend the existing M16 fixed-capacity sample-and-hold channels and the admitted M21-01/M21-02 device-rate execution path with explicit CPU-to-device and device-to-CPU payload endpoints over copied pre-registered host-visible buffer references, publishing only exact generation-tagged terminal-success data and selecting it by immutable reference-timeline records without adding sampled-I/O clock, trigger, calibration, safe-output, overrun, underrun, replay, or physical-device semantics.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -10,7 +10,7 @@ sources:
     - products/cpp-rt-car/acceptance.yaml#CAP-M21
     - products/cpp-rt-car/telemetry-plan.yaml#Q-21
     - products/cpp-rt-car/risk-register.yaml#R-009
-  milestone: products/cpp-rt-car/milestones/M21.md#M21-02--device-release-dispatch-and-completion
+  milestone: products/cpp-rt-car/milestones/M21.md#M21-03--cpu/device-cross-rate-payloads
   target_contracts:
     - AGENTS.md
     - contracts/active-batch.yaml
@@ -38,19 +38,21 @@ sources:
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
     - release/rtfw-release-contract.json
+    - docs/evidence/M16-02-2026-08-05.md
     - docs/evidence/M16-03-2026-08-05.md
-    - docs/evidence/M16-04-2026-08-05.md
+    - docs/evidence/M17-02-2026-08-07.md
     - docs/evidence/M17-03-2026-08-11.md
     - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-06-2026-08-23.md
     - docs/evidence/M20-PRE-01-2026-08-26.md
     - docs/evidence/M21-01-2026-08-26.md
-  baseline_commit: 2c7ab323cfe5f00b68a71467889ca1dc5507365a
+    - docs/evidence/M21-02-2026-08-26.md
+  baseline_commit: ff143eede097885c1535ed7b335b709e1cec44bd
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M21-02.yaml
-  control_plane_revision: cfd4d34cc402e248e00082fcbed6d72d2bfb5382
+  control_plane_path: products/cpp-rt-car/batches/M21-03.yaml
+  control_plane_revision: f282c6899472999d9d881c81f277067238a84f5f
 dependencies:
-  - M21-01
+  - M21-02
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -61,6 +63,8 @@ scope:
     - tests/CMakeLists.txt
     - .github/workflows/ci.yml
     - rt/include/rt/runtime.hpp
+    - rt/src/cross_rate_data.hpp
+    - rt/src/cross_rate_data.cpp
     - rt/src/rate_timeline.hpp
     - rt/src/rate_timeline.cpp
     - rt/src/rate_dispatch.hpp
@@ -69,22 +73,24 @@ scope:
     - rt/src/command_batch.cpp
     - rt/src/device_manager.hpp
     - rt/src/device_manager.cpp
-    - rt/src/executor.hpp
-    - rt/src/executor.cpp
+    - rt/src/heterogeneous_memory.hpp
+    - rt/src/heterogeneous_memory.cpp
     - rt/src/host_runtime.cpp
     - rt/src/resource_policy.hpp
     - rt/src/resource_policy.cpp
+    - tests/test_cross_rate_data.cpp
     - tests/test_rate_timeline.cpp
     - tests/test_rate_dispatch.cpp
     - tests/test_host_runtime.cpp
     - tests/test_device_runtime.cpp
     - tests/test_command_batch.cpp
     - tests/test_vendor_hal_v2.cpp
-    - tests/test_executor.cpp
+    - tests/test_heterogeneous_memory.cpp
     - tests/test_memory_plan.cpp
     - tests/test_periodic_runtime.cpp
     - tests/test_trace_noalloc.cpp
     - tests/test_multiple_instances.cpp
+    - tests/test_determinism.cpp
     - tests/package_consumer/cpp_consumer.cpp
     - tests/package_consumer/compat_consumer.cpp
     - tests/package_consumer/package_contract.cmake
@@ -106,7 +112,7 @@ scope:
     - docs/rate_telemetry.md
     - docs/testing_ci.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M21-02-*.md
+    - docs/evidence/M21-03-*.md
   forbidden_paths:
     - abi/
     - rt/include/rt/c_api.h
@@ -118,8 +124,6 @@ scope:
     - rt/include/rt/cuda_backend.hpp
     - rt/include/rt/xdma_backend.hpp
     - rt/src/runtime_profile.cpp
-    - rt/src/cross_rate_data.cpp
-    - rt/src/cross_rate_data.hpp
     - rt/src/rate_telemetry.cpp
     - rt/src/rate_telemetry.hpp
     - rt/src/telemetry.cpp
@@ -129,8 +133,6 @@ scope:
     - rt/src/snapshot_codec.hpp
     - rt/src/hal_v2.cpp
     - rt/src/hal_v2.hpp
-    - rt/src/heterogeneous_memory.cpp
-    - rt/src/heterogeneous_memory.hpp
     - rt/src/mock_device.cpp
     - rt/src/cuda_backend.cpp
     - rt/src/cuda_driver.cpp
@@ -160,6 +162,7 @@ scope:
     - docs/evidence/M19-*.md
     - docs/evidence/M20-*.md
     - docs/evidence/M21-01-*.md
+    - docs/evidence/M21-02-*.md
     - VERSION.txt
     - LICENSE
     - CHANGELOG.md
@@ -172,99 +175,96 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The implementation begins from an initially clean target at exact default-branch commit `2c7ab323cfe5f00b68a71467889ca1dc5507365a`, the merged M21-01 pull request 242. Its retained M15 through M21-01 evidence is present and unchanged, and governance records M21-01 as merged without inventing an absent payload, sampled-I/O, physical, RT, Unreal, signing, release, publication, deployment, or production result.
-  - Active execution accepts a mixed CPU/device plan only when every device release belongs to an immutable admitted M21-01 HAL-v2 command-batch phase. Legacy command phases, device-ABI-v1 phases without the command/timeline extension, ordinary unbound device phases, stale plans, and a device phase whose current copied declaration or capability identity differs from finalization fail before any callback or lane start.
-  - Finalization extends the immutable active plan with bounded device dispatch records, dependency/frontier information, per-phase and per-backend slot slices, and completion-ledger capacity derived from the already compiled M21-01 plan. The active path indexes those records directly and does not repeatedly scan all phases, buffers, timelines, channels, backends, or graph edges for each release or completion.
-  - One due device reference invokes its registered command-batch provider exactly once with the exact domain, phase, supercycle cycle, release sequence, substep, logical release, nominal release, absolute deadline, declared budget, late action, and degradation level. Any additive C++ context field is appended with a source-compatible default; no caller span or context pointer may be retained after the callback.
-  - The provider may supply only invocation values permitted by the copied M17 declaration, including fixed command parameters, pre-registered buffer contents, strictly increasing values for the declared wait/signal handles, and a finite timeout. Runtime validates the complete materialized batch against the copied declaration and M21-01 identity, clamps or replaces its device timeout with the earlier checked completion-budget/deadline remainder, and rejects zero, expired, overflowed, contradictory, or foreign invocation data before queue publication.
-  - Successful device-rate dispatch copies the complete fixed-capacity materialized batch and exact release identity into Runtime-owned preallocated storage, assigns a nonzero generation-safe batch identity, and enqueues it through the existing per-backend submission lane. No executor worker or host step thread invokes submit, poll, cancel, health, reset, CUDA, XDMA, driver, or vendor code directly, and M21-02 creates no additional runtime, backend, polling, timeout, or cancellation thread.
-  - Independent admitted device references may remain in flight concurrently up to the exact per-phase, per-backend, Runtime-outstanding, and completion-batch capacities proved by M21-01. An implementation that serializes all device releases behind each individual completion does not satisfy this batch. Same-domain order, graph dependencies, backend-local waits, and CPU/device completion barriers are preserved; a dependent CPU or device reference cannot run before the prerequisite terminal success, while independent backends and dependency frontiers may overlap.
-  - Every queued, submitting, submitted, early-completed, completion-ready, cancel-requested, timed-out, terminal, and reusable slot transition has one documented atomic owner and finite transition set. A slot is not reused until its exact batch identity reaches one terminal outcome, late or duplicate completions cannot complete a newer generation, and malformed, foreign-backend, wrong-phase, wrong-timestamp-domain, wrong-signal, decreasing-signal, duplicate, or unknown completions fail closed without publishing timeline progress.
-  - Completion remains poll-only on the existing bounded service/submission infrastructure. Each accepted completion is correlated to backend, phase, rate domain, supercycle cycle, release sequence, substep, logical release, nominal release, absolute deadline, completion budget, batch identity, timestamp-domain identity, and declared signal set before the release becomes terminal. Provider and vendor pointers, addresses, payload bytes, wall-clock samples, and unbounded histories are not retained in the immutable plan or public inspection.
-  - Completion-budget expiry and release-deadline expiry have one checked monotonic-host-clock rule and deterministic equal-time ordering. Runtime issues at most one bounded cancellation request when the copied backend capability supports it, maps cancel success, cancel rejection, unsupported cancellation, late terminal completion, device loss, and malformed completion to explicit existing Runtime statuses, and never converts a timeout or cancel into success merely because a completion arrives later.
-  - A timed-out or canceled batch whose provider has not established terminal ownership is quarantined from slot reuse. If bounded cleanup cannot prove terminal release, active admission closes, the current step fails with the first exact release identity, and checked `stop()` remains retryable instead of detaching storage, freeing provider-owned memory, spinning without bound, or claiming cleanup succeeded.
-  - Queue saturation, provider failure, submission rejection, timeout, cancellation, completion error, and device loss settle the exact affected release once and propagate through existing active-rate failure/late handling. Existing skip, hold, bounded catch-up, degrade, fail, optional shedding, and recovery decisions remain deterministic; omitted or shed device releases invoke neither the command provider nor backend, and mandatory work is never silently dropped.
-  - A successful active step does not return until every mandatory device reference due in its logical interval is either terminally successful or has produced its documented failure result. The step summary counts a device reference as executed once, reports the first failing domain/sequence/substep exactly, and existing device metrics, trace events, rate actions, watchdog/degradation state, and checked error text reconcile without changing any telemetry, trace, rate-action, checkpoint, input-log, or observability schema in this batch.
-  - Runtime `start()` removes the M21-01 mixed-plan rejection only after preflight, memory policy, executor, device manager, and all existing submission/service lanes pass their ordinary transactional startup gates. Any partial startup rolls back in reverse ownership order; retry follows existing finalized/cleanup-pending rules and no provider callback occurs before all required lanes are ready.
-  - Runtime `stop()` first closes device-rate admission, then prevents new provider invocations, requests bounded cancellation/cleanup through existing backend lanes, waits only through existing checked finite ownership transitions, and tears down executor, device, watchdog, extension, and memory ownership in the documented order. Concurrent stop during a step requests quiescence and returns retryable `invalid_state`; callback reentrancy, repeated stop, failed-stop retry, destruction, and start/stop/restart do not leak or double-complete work.
-  - All device-rate execution storage is allocated and exactly accounted during configuration/finalization/startup only. Provider invocation, batch materialization, dispatch, completion, timeout, cancellation, late action, stop request, metric/trace emission, and slot recycling perform no ordinary heap allocation, file/network I/O, blocking mutex acquisition, hidden thread creation, unbounded wait, or unbounded collection scan.
-  - M21-02 activates dispatch and completion only. It does not publish CPU/device payload data, add or reinterpret cross-rate channels for device endpoints, create sampled input/output descriptors, add a loopback adapter, change replay/checkpoint content, integrate device shedding beyond existing release decisions, add a new benchmark schema, alter CUDA physics content, add a golden demo, or implement configuration/code/Unreal hot reload; those remain M21-03 through M26.
-  - Ordinary frame execution for CPU, legacy device command, and HAL-v2 command-batch phases retains its pre-M21 behavior. CPU-only M16 active execution, M17 ordinary batch/timeline execution, no-device identity, two Runtime instances, package consumers, deterministic fixtures, and checked teardown remain unchanged except for additive source-compatible C++ inspection/context fields explicitly authorized here.
+  - The implementation begins from an initially clean target at exact default-branch commit `ff143eede097885c1535ed7b335b709e1cec44bd`, the merged M21-02 pull request 243. Retained M15 through M21-02 evidence is present and unchanged, and governance records M21-02 as merged without inventing sampled-I/O, replay, physical, RT, Unreal, signing, release, publication, deployment, or production results.
+  - Cross-rate registration remains copied and frozen at finalization. An additive source-compatible device-endpoint selector explicitly identifies the ordered copied M21-01 payload-reference ordinal and positive slot stride for each device producer or consumer; CPU endpoints retain the existing invalid/default selector. Device-to-device channels, implicit first-match selection, raw addresses, unregistered memory, and arbitrary completion-owned bytes are rejected in M21-03.
+  - >-
+    A device endpoint is accepted only when it is an admitted M21-01 HAL-v2 command-batch phase, its selected reference belongs to that exact phase/backend/declaration, its copied role permits the direction, and its access and heterogeneous-memory properties make it CPU-readable for device production or CPU-writable for device consumption. The copied reference is an immutable envelope: checked `maximum_in_flight`, stride, alignment, and payload-size arithmetic must partition it into one disjoint exact-size subrange per M21-02 execution slot. Foreign, stale, ambiguous, inaccessible, incoherent, undersized, overlapping, zero-size, out-of-range, or declaration-mismatched endpoints fail transactionally before start.
+  - Finalization compiles immutable per-channel device-endpoint records, producer and consumer release selections, fixed store/slot ownership, staging offsets, and direct phase-to-channel slices. It derives every backend, buffer, range, access, timestamp-domain, phase, rate-domain, and capacity identity from the existing copied M17/M21 declarations and does not scan all channels, phases, buffers, commands, or graph edges on each release or completion.
+  - CPU-to-device publication uses the existing CPU producer `RateReleaseView::publish` operation and exact produced generation. Before invoking the due device command provider, Runtime selects the immutable first-cycle or repeating-cycle source record, claims the M21-02 execution slot and its derived input subrange, copies the exact generation once, and supplies the provider only after the copy is committed. A failed, stale, not-ready, size-mismatched, foreign, or capacity-exceeded selection cannot dispatch the device release.
+  - The provider continues to materialize a batch matching its copied declaration. After provider validation and before queue publication, Runtime alone substitutes the selected payload reference's buffer offset and byte count with the precompiled execution-slot subrange; buffer token, access, command/reference identity, and every non-payload reference remain exact. Provider-selected offsets or ranges are rejected, ordinary M17 and channel-free M21-02 batches retain exact-reference behavior, and the backend receives only the Runtime-owned bounded materialization.
+  - Device-to-CPU publication occurs only after M21-02 correlates the exact device release and execution slot to one terminal successful completion, including backend, phase, rate domain, supercycle cycle, release sequence, substep, batch generation, signal set, status, and completion timestamp-domain identity. Runtime then copies that slot's pre-registered host-visible output subrange into the channel's preallocated store and publishes exactly one generation before any dependent CPU consumer becomes runnable.
+  - Submission acceptance, synchronous early completion, asynchronous completion, dependency-frontier release, and device-output publication have one deterministic order. Backend submit success alone never publishes output; timeout, cancel, submission rejection, completion error, malformed completion, device loss, quarantined late completion, skipped/shed release, or provider failure publishes no produced generation and cannot overwrite the channel's last committed sample.
+  - Every produced payload result exposes exact channel generation, producer release sequence and substep, producer completion status, producer timestamp-domain identity, producer timestamp, selection age, provenance, freshness, and held state through additive fixed-size C++ inspection/read metadata. CPU-produced values use the Runtime logical release timestamp domain; device-produced values use the copied completion timestamp domain and correlated completion timestamp. Unsupported or uncorrelatable domains fail closed rather than fabricating an age.
+  - Sample-and-hold selection is computed from immutable integer release/completion identity, never callback or thread arrival order. First-cycle initial data remains distinct from a produced generation; repeating-cycle wrap selects the exact prior-cycle generation; equal-time ties, maximum-age inclusivity, stale classification, held status, skipped producers, and generation exhaustion have one documented deterministic rule.
+  - Store slots preserve exact single-producer/single-consumer ownership for each CPU-to-device or device-to-CPU channel. A store slot cannot be overwritten while its selected device release or CPU consumer can still read it, device completion cannot publish into a newer generation, and retirement/reuse occurs only after the one compiled consumer reference for that generation is settled. M21-03 adds no implicit shared-store fan-in or fan-out; applications may retain the existing explicit separate-channel pattern.
+  - Potentially overlapping device releases map the M21-02 generation-safe execution-slot ordinal to disjoint precompiled buffer subranges. A later generation cannot overwrite input or output bytes still owned by an earlier submitted release, and a slot is not recycled until terminal ownership plus payload capture/consumption has settled. M21-03 adds no hidden copy thread and no vendor call on the executor or host-step lane.
+  - CPU consumer `RateReleaseView::copy`, CPU producer `publish`, device input materialization, and device output capture preserve the existing exact-size caller contract and perform at most one bounded slot claim and one bounded payload copy. They allocate no ordinary heap, take no blocking mutex, perform no file/network I/O, start no thread, wait for no vendor operation, and do not retry or scan for a substitute generation.
+  - Failed finalization publishes no partial compiled channel plan or memory accounting and preserves copied registration for correction through the existing replacement API. Successful finalization includes device-channel metadata, controls, staging bytes, and retention state exactly once in `cross_rate_*`, `rate_plan_bytes`, `runtime_control_bytes`, and `planned_bytes` reconciliation without counting borrowed registered-buffer bytes as Runtime-owned payload storage.
+  - Graph/config identity includes the additive device endpoint selector, slot stride, derived subrange layout, and every copied semantic identity that can change publication or selection, but excludes raw pointer values, addresses, payload contents after configuration, wall-clock measurements, provider callback addresses, and completion arrival order. Equivalent registration order canonicalizes to the same identity; changing direction, reference ordinal, stride/range identity, timestamp domain, maximum age, or initial bytes changes identity.
+  - Existing CPU-to-CPU M16 channels, CPU-only active execution, ordinary M17 command batches, M21-02 release/completion behavior without channels, checkpoint schema-1 artifacts, replay inputs, rate-action schema, observability schema, package consumers, two Runtime instances, and start/stop/restart retain their prior behavior. M21-03 does not retrofit device payload bytes into existing checkpoint or replay artifacts; M21-05 owns replay and conformance closure.
+  - M21-03 adds CPU/device payload transport only. It does not add sampled-channel descriptors, sample rate, sample format, units, calibration identity, external clock or trigger identity, ring-buffer overrun/underrun, startup/shutdown safe output, a loopback backend, vendor DAC/DAQ/CAN/IIO adapters, overload/replay integration, benchmarks, CUDA physics, a golden demo, or configuration/code/Unreal hot reload.
   - Stable C ABI v8 with exactly 70 exports and frozen fingerprint `0xd0e7a5a14bf35f97`, SONAME 8, device ABI v1, extension ABI v1, HAL core v2 and extension v1 contracts, runtime-profile schema 7 and 25 keys, observability/checkpoint/input-log/rate-action schemas, Runtime status values, installed target/header/alias inventory, release 1.2.1, support matrices, qualification state, and Apache-2.0 remain unchanged.
-  - Target governance, current state, handoff, component contracts, release digest ledger, and retained `docs/evidence/M21-02-<date>.md` state the exact portable simulated dispatch/completion boundary. Focused and full local verification, mandatory hosted CI, and human execution-state, dependency, timeout/cancel, ownership, allocation, compatibility, and claim review pass before merge. M21 and CAP-M21 remain incomplete after this batch.
+  - Target governance, current state, handoff, component contracts, release digest ledger, and retained `docs/evidence/M21-03-<date>.md` state the exact portable RT0 CPU/device payload boundary. Focused and full local verification, mandatory hosted CI, and human ownership, ordering, accessibility/coherency, generation, allocation, compatibility, and claim review pass before merge. M21 and CAP-M21 remain incomplete after this batch.
 validation:
   local:
     - git status --short --branch
-    - test "$(git rev-parse HEAD)" = "2c7ab323cfe5f00b68a71467889ca1dc5507365a"
-    - git merge-base --is-ancestor 2c7ab323cfe5f00b68a71467889ca1dc5507365a HEAD
-    - test -f docs/evidence/M21-01-2026-08-26.md
+    - test "$(git rev-parse HEAD)" = "ff143eede097885c1535ed7b335b709e1cec44bd"
+    - git merge-base --is-ancestor ff143eede097885c1535ed7b335b709e1cec44bd HEAD
+    - test -f docs/evidence/M21-02-2026-08-26.md
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='RateDispatch.*DeviceExecution*:HostRuntime.*DeviceRateExecution*:DeviceRuntime.*Rate*:CommandBatch.*Rate*:VendorHalV2.*Rate*:Executor.*DeviceRate*:MemoryPlan.*DeviceRate*:PeriodicRuntime.*DeviceRate*:TraceNoAlloc.*DeviceRate*:MultipleInstances.*DeviceRate*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm21_device_rate_execution|package_consumer'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='CrossRateData.*Device*:RateDispatch.*DevicePayload*:HostRuntime.*DevicePayload*:CommandBatch.*Payload*:HeterogeneousMemory.*CrossRate*:MemoryPlan.*DevicePayload*:PeriodicRuntime.*DevicePayload*:TraceNoAlloc.*DevicePayload*:MultipleInstances.*DevicePayload*:Determinism.*DevicePayload*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm21_cross_rate_payload|package_consumer'
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
     - git diff --check
-    - git diff --name-only 2c7ab323cfe5f00b68a71467889ca1dc5507365a
+    - git diff --name-only ff143eede097885c1535ed7b335b709e1cec44bd
   focused_tests_to_add:
-    - exact start-gate transition from M21-01 rejection to accepted mixed execution, with rejection before callback for stale, legacy, non-command-capable, unadmitted, or declaration-mismatched phases
-    - materialized batch/provider context agreement for domain, phase, cycle, sequence, substep, logical/nominal release, absolute deadline, budget, late action, degradation, fixed command skeleton, buffer identities, and monotonic wait/signal values
-    - precomputed release/dispatch/frontier/slot slices with exact MemoryPlan and logical control-ledger reconciliation and no per-release full-plan, graph, backend, buffer, timeline, or channel scan
-    - independent backend and dependency-frontier overlap proving more than one admitted release can be outstanding, plus enforced CPU/device, same-domain, graph, and backend-timeline completion barriers
-    - exact-capacity and one-over-capacity cases for per-phase, backend, Runtime outstanding, completion batch, provider materialization, dispatch queue, early completion, and terminal ledger slots
-    - callback failure, malformed materialization, queue full, submit rejection, synchronous early completion, normal completion, batch error, malformed completion, unknown/duplicate/stale completion, device loss, and decreasing/wrong signal identity
-    - checked completion-budget/deadline timeout arithmetic, equal-time ordering, one-shot cancellation, unsupported/rejected cancel, late completion quarantine, cleanup-pending retry, and no slot reuse before terminal ownership
-    - deterministic existing skip, hold, bounded catch-up, degrade, fail, optional shedding/recovery, first-failure identity, StepResult counters, device metrics, trace, rate-action, and watchdog reconciliation for device releases
-    - concurrent checked stop during provider, queued, submitting, submitted, early-complete, completion-ready, cancel, timeout, and terminal states; repeated stop, failed-stop retry, destruction, and start/stop/restart
-    - no device provider for omitted work, no vendor call on executor/host lanes, no new thread, no post-start allocation, bounded scans/waits, two-runtime isolation, and unchanged ordinary device-batch behavior
-    - default construction, positional aggregate/source compatibility, installed C++ consumer, CPU-only M16 execution, M17 v1/HAL-v2 behavior, exact ABI/package inventory, sanitizers, determinism, and prior evidence regressions
+    - transactional endpoint validation for exact phase/backend/reference ordinal, direction/role/access, host visibility, coherency, envelope, positive aligned stride, exact slot subranges, checked size arithmetic, timestamp domain, overlap, topology, and correction/retry
+    - immutable direct channel/phase slices, registration-order canonicalization, graph identity sensitivity, exact MemoryPlan accounting, and no active full-registry scans
+    - CPU producer to device consumer first-cycle, same-cycle, prior-cycle wrap, equal-time tie, maximum-age boundary, held/fresh/stale, skipped producer, and generation-exhaustion selection
+    - device producer terminal success to CPU consumer publication with exact release, batch generation, completion status, timestamp-domain, timestamp, age, provenance, freshness, held, and payload agreement
+    - proof that submit success, timeout, cancel, reject, error, malformed completion, loss, quarantine, skip, shed, and provider failure do not publish device output or overwrite the last committed generation
+    - synchronous early completion and asynchronous completion ordering before dependency release, with a dependent CPU callback unable to observe uncommitted or partially copied output
+    - exact-capacity and one-over-capacity store, staging, retention, channel, selection, in-flight range, and generation cases with stale/duplicate/foreign completion rejection
+    - disjoint per-in-flight execution-slot subranges plus rejection of undersized envelopes, misaligned or overlapping strides, provider-selected offsets, implicit references, device-to-device edges, shared-store fan-in/fan-out, and unregistered-memory topology
+    - no post-start allocation, no blocking mutex or spin, one bounded claim/copy, no new thread, no executor/host vendor call, ThreadSanitizer publication/copy coverage, and two-runtime isolation
+    - unchanged CPU-to-CPU M16 channels, M17 batch/timeline execution, M21-02 channel-free execution, checkpoint/replay schemas and fixtures, default/positional aggregate construction, installed C++ consumer, ABI/package inventory, and prior evidence
   required_ci:
-    - Documentation contract workflow including truthful M21-02 simulated dispatch/completion-only claims, quick-start, release contract, frozen C ABI, exact SDK inventory, and unchanged support matrices
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of provider materialization, overlap, dependency barriers, early/late completion, timeout/cancel, stop/retry, and lifecycle
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical ordering, capacity, timeout-state, first-failure, and cleanup results and passing installed consumers
-    - Unified executor GCC ThreadSanitizer job covering simultaneous backend completions, early completion, stop versus dispatch/poll/cancel, slot generation/reuse, and two Runtime instances without races or duplicate terminal settlement
-    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged no-device/CPU-only fixtures plus equivalent mixed-plan release, terminal status, trace identity, and action results for deterministic fake backends
+    - Documentation contract workflow including truthful M21-03 CPU/device payload-only claims, quick-start, release contract, frozen C ABI, exact SDK inventory, and unchanged support matrices
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of endpoint admission, wrap selection, publication ordering, completion failures, capacity, lifecycle, and compatibility
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical selection, generation, timestamp/status, freshness, failure, and accounting results and passing installed consumers
+    - Unified executor GCC ThreadSanitizer job covering CPU publish versus device input copy, backend completion versus device output publication, dependent CPU reads, slot retirement/reuse, concurrent stop, late completion, and two Runtime instances without races
+    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged CPU-only fixtures plus equivalent CPU/device payload generations, selected source identity, status, timestamp domain, freshness, held state, and payload checksums for deterministic fake backends
     - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and existing portable assurance/autotune/scaling smoke jobs
-    - Existing M16 no-allocation/rate/replay gates, M17 v1/HAL-v2/batch/timeline/vendor gates, M15 accounting/rollback gates, and M20 portable assurance lane; no payload, sampled-I/O, physical-device, controlled-timing, or performance threshold is authorized
+    - Existing M16 cross-rate/no-allocation/rate/replay gates, M17 memory/batch/timeline/vendor gates, M21-01 admission and M21-02 dispatch/completion gates; no sampled-I/O, physical-device, controlled-timing, or performance threshold is authorized
   manual:
-    - Human review must confirm that the execution design permits admitted independent in-flight overlap, preserves every dependency/completion barrier, invokes vendor operations only on existing backend lanes, uses one finite atomic slot lifecycle, and cannot confuse a late completion with a reused generation.
-    - The reviewer must confirm exact timeout/deadline/cancellation/stop ownership, no-allocation and bounded-scan arguments, additive C++ source compatibility, unchanged schema/ABI/package boundaries, and that fake-driver or hosted timing is not described as physical CUDA, XDMA, DAC/DAQ, HIL, RT1, or RT2 evidence.
+    - Human review must confirm that each device endpoint resolves one exact copied pre-registered host-visible range, potentially overlapping releases cannot alias writable bytes, terminal success is the sole device-output publication point, and immutable selection rather than completion arrival order chooses data.
+    - The reviewer must confirm finite store ownership and retirement, no-allocation/bounded-copy arguments, additive C++ source compatibility, unchanged ABI/schema/package/support boundaries, and that fake-driver payload evidence is not described as physical CUDA, XDMA, DAC/DAQ, CAN, IIO, HIL, RT1, or RT2 evidence.
 risk:
   class: high
   hazards:
-    - simply removing the M21-01 start guard can serialize every device release, violate admitted overlap, run a dependent CPU phase early, or reuse executor phase state while an earlier release is still outstanding
-    - callback, submission-lane, poll-lane, timeout, cancellation, and stop actors can race to settle or recycle one slot and allow duplicate completion or use-after-free
-    - a provider can mutate the copied declaration, inject a foreign buffer/timeline, choose an unbounded timeout, or publish non-monotonic timeline progress after finalization
-    - an early, duplicate, stale-generation, malformed, cross-backend, or late completion can be attributed to the wrong domain release or advance a timeline incorrectly
-    - timeout without proven provider terminal ownership can lead to premature slot reuse, backend teardown, or indefinite checked stop
-    - per-release searches, dynamic storage, hidden waits, or vendor calls can enter executor/host active paths and invalidate the boundedness and no-allocation claims
-    - device failures can be counted inconsistently across StepResult, rate actions, metrics, traces, watchdog state, and checked error identity
-    - portable fake-driver concurrency or timing can be mislabeled as physical hardware performance, CUDA/XDMA support, HIL, RT1, or RT2 qualification
+    - mapping a channel implicitly to the first device reference can route bytes to the wrong buffer, direction, backend, command, execution slot, or release
+    - unchecked envelope/stride arithmetic or one static writable subrange reused by overlapping releases can corrupt input before submission or output before terminal capture
+    - publishing at submit or poll arrival instead of correlated terminal success can expose partial, failed, stale, or wrong-generation device data
+    - callback, backend completion, dependency release, stop, and slot retirement actors can race and permit a consumer to read while bytes are changing
+    - host-inaccessible or incoherent memory can be dereferenced on a Runtime lane, causing undefined behavior or inventing portability the HAL does not provide
+    - completion timestamps from an unrelated or uncorrelatable domain can produce fabricated freshness and selection age
+    - new staging/store bytes can be omitted, double-counted, dynamically allocated, or confused with borrowed registered-buffer payloads
+    - portable fake-driver byte movement can be mislabeled as physical CUDA/XDMA/DAC/DAQ behavior, electrical correctness, HIL, or RT qualification
   stop_conditions:
-    - the exact target baseline is unavailable, dirty, or does not contain merged M21-01 evidence and the immutable admitted device-rate plan
+    - the exact target baseline is unavailable, dirty, or lacks merged M21-02 evidence and the bounded release/completion state machine
     - implementation requires changing C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL version contracts, Runtime statuses, artifact/runtime schemas, installed inventory, support matrices, qualification state, release version, license, or prior evidence
-    - active device execution cannot preserve the copied M17 declaration as the sole source for backend, commands, buffers, synchronization, and timeline identity
-    - independent admitted releases cannot remain concurrently in flight without unbounded state, a new lane/thread, executor-phase corruption, dependency violation, or ordinary allocation after start
-    - a finite timeout/cancel/late-completion/stop state machine cannot prevent reuse before terminal provider ownership or cannot provide retryable cleanup
-    - implementation requires CPU/device payload publication, device cross-rate stores, sampled-I/O semantics, telemetry/schema changes, replay/checkpoint changes, M21-03 or later behavior, or a product decision not fixed by this contract
-    - credible validation requires timing sleeps/tolerances, a physical CUDA/XDMA/DAC/DAQ device, privileged or controlled host, Unreal, secrets, signing, release, deployment, or production access
+    - an endpoint cannot be resolved to one exact copied M17/M21 payload-reference envelope and CPU-accessible/coherent pre-registered storage without raw pointers or implicit matching
+    - the M21-02 execution-slot ordinal cannot deterministically select a disjoint aligned subrange within that envelope while keeping the provider unable to choose arbitrary offsets
+    - exact generation, release sequence, terminal status, timestamp domain, timestamp, freshness, and sample/hold selection cannot be established without completion-arrival-order dependence or unbounded history
+    - implementation requires device-to-device channels, sampled-I/O clock/trigger/calibration/safe-state semantics, overrun/underrun rings, replay/checkpoint schema changes, telemetry schema changes, vendor adapters, M21-04 or later behavior, or another unfixed product decision
+    - credible validation requires timing sleeps/tolerances, a physical CUDA/XDMA/DAC/DAQ/CAN/IIO device, privileged or controlled host, Unreal, secrets, signing, release, deployment, or production access
     - any required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
-    - target contracts at the exact baseline contradict this dispatch/completion-only vertical or require weakening a deterministic, sanitizer, no-allocation, compatibility, or release gate
+    - target contracts at the exact baseline contradict this payload-only vertical or require weakening a deterministic, sanitizer, no-allocation, compatibility, or release gate
 rollback:
-  strategy: Revert the additive device release context, immutable dispatch/frontier/ledger storage, active provider scheduling, DeviceManager rate identity and terminal state machine, timeout/cancel/stop integration, tests/CI, documentation, governance synchronization, release-contract digest updates, and M21-02 evidence as one batch. Restore the exact M21-01 pre-callback mixed-start rejection while preserving ordinary M17 command-batch execution and the M21-01 compiled admission model.
-  data_migration: none
-  release_action: Do not publish a release, promote a support or qualification tuple, alter hardware/RT records, or mark M21/CAP-M21 complete from this batch.
+  strategy: Revert the additive device endpoint selectors/strides and read metadata, compiled endpoint/channel/subrange slices, Runtime-owned active-batch subrange materialization, preallocated staging and retention state, CPU-to-device materialization, device-terminal-to-CPU publication, tests/CI, documentation, governance synchronization, release-contract digest updates, and M21-03 evidence as one batch. Restore the M21-02 rule that cross-rate compilation rejects every device endpoint and active batches require exact declared ranges while preserving CPU-to-CPU channels and active device dispatch/completion.
 evidence:
   output:
-    - docs/evidence/M21-02-<date>.md
+    - docs/evidence/M21-03-<date>.md
     - exact control and target baselines, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public additive release-context/inspection shapes, immutable dispatch/frontier/slot layout, ownership diagram, capacities, defaults, lifetime, timeout/deadline rule, and deferred behavior
-    - deterministic due-release inputs and exact provider, enqueue, submission, completion, dependency-barrier, terminal, late-action, and StepResult order across normal, overlap, wrap, saturation, timeout, cancellation, failure, and stop cases
-    - slot-state transition and generation proof for early, duplicate, unknown, malformed, stale, late, canceled, lost, and terminal completions with exact timeline publication results
-    - no-allocation/bounded-scan evidence, exact MemoryPlan/control-ledger accounting, existing-lane inventory, provider/vendor thread provenance, two-runtime isolation, retryable cleanup, and unchanged ordinary device execution
+    - public additive endpoint/read shapes, copied-reference envelope and slot-stride mapping, memory accessibility/coherency rules, immutable channel/phase/subrange slices, capacities, defaults, lifetime, and deferred sampled-I/O/replay behavior
+    - deterministic CPU publication, device input materialization, terminal output capture, dependency release, consumer selection, retention, and retirement order across first-cycle, repeating-cycle, wrap, overlap, failure, timeout, cancellation, loss, and stop cases
+    - generation/release/batch/status/timestamp-domain/timestamp/freshness proof for stale, duplicate, foreign, malformed, late, canceled, skipped, shed, failed, and terminal completions with exact publication results
+    - no-allocation/bounded-copy evidence, exact MemoryPlan reconciliation, pre-registered range ownership, two-runtime isolation, retryable correction/cleanup, and unchanged CPU-only/channel-free execution
     - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, HAL/extension contracts, schema/version, installed package/header/alias, support/qualification, license, and prior-evidence preservation results
-    - residual risks and every unperformed M21-03 payload, M21-04 sampled-I/O, M21-05 replay/conformance, controlled performance, physical CUDA/XDMA/DAC/DAQ, HIL, field, latency, thermal, endurance, RT1, RT2, Unreal, signing, publication, release, deployment, and production validation
-  claim_boundary: Evidence may establish bounded active release/provider dispatch, independent in-flight overlap, dependency barriers, existing-lane HAL-v2 command-batch submission, poll-only completion, deterministic timeout/cancel/late/stop behavior, exact release identity, fixed-capacity slot ownership, package compatibility, and portable RT0 fake-driver static/unit/property/sanitizer behavior only. It does not establish CPU/device payload transfer, sampled I/O, replay closure, device WCET, controlled performance, physical CUDA/XDMA/DAC/DAQ behavior, HIL, electrical correctness, field evidence, latency, RT1, RT2, Unreal integration, support promotion, signing, publication, release, deployment, or production readiness.
+    - residual risks and every unperformed M21-04 sampled-I/O/loopback, M21-05 overload/replay/conformance, controlled performance, physical CUDA/XDMA/DAC/DAQ/CAN/IIO, HIL, field, latency, electrical, thermal, endurance, RT1, RT2, Unreal, signing, publication, release, deployment, and production validation
+  claim_boundary: Evidence may establish bounded CPU-to-device and device-to-CPU payload publication over exact Runtime-selected disjoint subranges of copied pre-registered host-visible envelopes, terminal-success ordering, immutable generation/release/status/timestamp-domain/freshness selection, fixed-capacity ownership, package compatibility, and portable RT0 fake-driver static/unit/property/sanitizer behavior only. It does not establish sampled-I/O clocks, triggers, scaling, calibration, safe outputs, overrun/underrun handling, replay closure, physical CUDA/XDMA/DAC/DAQ/CAN/IIO behavior, electrical correctness, HIL, field evidence, latency, RT1, RT2, Unreal integration, support promotion, signing, publication, release, deployment, or production readiness.

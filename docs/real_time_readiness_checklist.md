@@ -211,6 +211,9 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
   submission/service lanes, permits independent in-flight overlap, preserves
   precomputed dependency/group barriers, and quarantines vendor-owned timeout
   slots without adding a lane or schema.
-- [ ] M21-03 through M21-05 CPU/device payload, sampled-
-  I/O, overload/replay, and conformance evidence remains outstanding. Physical
+- [x] M21-03 adds explicit host-coherent CPU/device payload endpoints,
+  disjoint execution-slot subranges, pre-provider input copy, and terminal-
+  success-only output publication without a new lane or schema.
+- [ ] M21-04 through M21-05 sampled-I/O, overload/replay, and conformance
+  evidence remains outstanding. Physical
   CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain separate named gates.
