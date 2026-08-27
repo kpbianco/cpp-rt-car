@@ -43,7 +43,14 @@ std::array<std::byte, sizeof(rt::SampledIoFrameHeader) + 8> frame(
 
 TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     rt::SampledIoLoopbackBackend backend;
-    ASSERT_EQ(backend.add_route({17, 101, 202, 7, 303, 404}), rt::Status::ok);
+    rt::SampledIoLoopbackRoute route{};
+    route.opcode = 17;
+    route.source_channel_identity = 101;
+    route.destination_channel_identity = 202;
+    route.destination_timestamp_domain_identity = 7;
+    route.destination_calibration_identity = 303;
+    route.destination_trigger_identity = 404;
+    ASSERT_EQ(backend.add_route(route), rt::Status::ok);
     auto registration = backend.hal_v2_registration();
     ASSERT_NE(registration.memory_topology, nullptr);
     ASSERT_NE(registration.command_timeline, nullptr);
@@ -116,6 +123,14 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     batch.commands[0].buffers[1].bytes = destination.size();
     batch.signals[0].timeline_handle = 55;
     batch.signals[0].value = 1;
+    ASSERT_EQ(batch.commands[0].kind, static_cast<std::uint32_t>(
+        rt::HalV2CommandKind::dispatch));
+    ASSERT_EQ(batch.commands[0].opcode, route.opcode);
+    ASSERT_EQ(batch.commands[0].buffer_count, 2u);
+    ASSERT_EQ(batch.commands[0].buffers[0].buffer_token, source_token);
+    ASSERT_EQ(batch.commands[0].buffers[1].buffer_token, destination_token);
+    ASSERT_EQ(batch.commands[0].buffers[0].bytes, source.size());
+    ASSERT_EQ(batch.commands[0].buffers[1].bytes, destination.size());
     ASSERT_EQ(
         registration.command_timeline->submit(
             registration.command_timeline->instance, &batch),

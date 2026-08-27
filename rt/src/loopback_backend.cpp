@@ -412,7 +412,7 @@ struct SampledIoLoopbackBackend::Impl {
             }
             if (header.channel_identity !=
                 selected->source_channel_identity) {
-                return HalV2Status::invalid_argument;
+                return HalV2Status::error;
             }
             if (header.payload_checksum !=
                 sampled_io_payload_checksum(payload)) {
