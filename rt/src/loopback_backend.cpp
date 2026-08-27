@@ -368,34 +368,45 @@ struct SampledIoLoopbackBackend::Impl {
         return true;
     }
 
-    bool execute(
+    HalV2Status execute(
         const DeviceCommandBatch& batch,
         std::uint64_t completion_timestamp,
         SampledIoLoopbackFault fault) noexcept {
         for (std::size_t index = 0; index < batch.command_count; ++index) {
             const auto& command = batch.commands[index];
             const auto* selected = route(command.opcode);
-            if (!selected || command.kind != static_cast<std::uint32_t>(
+            if (!selected) {
+                return HalV2Status::unsupported;
+            }
+            if (command.kind != static_cast<std::uint32_t>(
                     HalV2CommandKind::dispatch) || command.buffer_count != 2) {
-                return false;
+                return HalV2Status::invalid_argument;
             }
             std::span<std::byte> source;
             std::span<std::byte> destination;
             if (!resolve(command.buffers[0], source) ||
-                !resolve(command.buffers[1], destination) ||
-                source.size() != destination.size() ||
+                !resolve(command.buffers[1], destination)) {
+                return HalV2Status::invalid_state;
+            }
+            if (source.size() != destination.size() ||
                 source.size() < sizeof(SampledIoFrameHeader)) {
-                return false;
+                return HalV2Status::resource_exhausted;
             }
             SampledIoFrameHeader header{};
             std::memcpy(&header, source.data(), sizeof(header));
             const auto payload = std::span<const std::byte>(source).subspan(
                 sizeof(SampledIoFrameHeader));
             if (header.struct_size != sizeof(header) ||
-                header.version != sampled_io_frame_version ||
-                header.channel_identity != selected->source_channel_identity ||
-                header.payload_checksum != sampled_io_payload_checksum(payload)) {
-                return false;
+                header.version != sampled_io_frame_version) {
+                return HalV2Status::reset_required;
+            }
+            if (header.channel_identity !=
+                selected->source_channel_identity) {
+                return HalV2Status::invalid_argument;
+            }
+            if (header.payload_checksum !=
+                sampled_io_payload_checksum(payload)) {
+                return HalV2Status::error;
             }
             std::copy(source.begin(), source.end(), destination.begin());
             header.channel_identity = selected->destination_channel_identity;
@@ -413,7 +424,7 @@ struct SampledIoLoopbackBackend::Impl {
             std::memcpy(destination.data(), &header, sizeof(header));
             frames_copied.fetch_add(1, std::memory_order_relaxed);
         }
-        return true;
+        return HalV2Status::ok;
     }
 
     static HalV2Status submit_batch(
@@ -454,14 +465,14 @@ struct SampledIoLoopbackBackend::Impl {
         std::copy_n(
             batch->signals.begin(), batch->signal_count,
             completion.signals.begin());
-        const auto ok = backend->execute(
+        const auto execution_status = backend->execute(
             *batch, completion.device_timestamp, fault);
         const auto completion_status =
             fault == SampledIoLoopbackFault::completion_error
             ? HalV2Status::error
             : fault == SampledIoLoopbackFault::completion_lost
                 ? HalV2Status::lost
-                : ok ? HalV2Status::ok : HalV2Status::invalid_argument;
+                : execution_status;
         completion.status = static_cast<std::int32_t>(completion_status);
         slot->completion = completion;
         backend->submissions.fetch_add(1, std::memory_order_relaxed);
