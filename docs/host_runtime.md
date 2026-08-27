@@ -1,9 +1,9 @@
 # Host Runtime Lifecycle
 
-M21-04 `start()` requires terminal acknowledgement of copied startup-safe
-outputs before the Runtime becomes running. Checked stop submits failure-safe
-output after an active fault or shutdown-safe output otherwise, waits for exact
-completion, then detaches the backend. Unacknowledged safety stays unknown.
+M21-05 records M21-04 startup/failure/shutdown acknowledgements as closed
+mixed-rate actions. Checkpoint export and active replay require a quiescent
+release boundary; active replay prevalidates its full bounded artifact before
+restore and accepts only explicitly deterministic mock/loopback backends.
 
 `rt::Runtime` is the target-path embedding surface introduced in M1 and
 extended with the M2 compiled graph, M3 unified executor, M4 finalized memory
@@ -430,6 +430,16 @@ substitutes the compiled offset and payload byte count in its owned batch.
 Device→CPU completion retains the terminal slot until the output subrange is
 copied into the channel store and one generation with fixed release/status/
 timestamp metadata is published. Failed terminal states publish nothing.
+
+M21-04 validates sampled frames and makes acknowledged safe output part of
+start and checked stop. M21-05 adds `set_mixed_rate_closure_policy()`, direct
+action inspection, active-artifact writing/inspection, and `replay_active()`.
+The policy is copied only while configuring. Action records become visible
+only after their logical or terminal result settles; completion arrival cannot
+rewrite an emitted terminal record. Active replay uses recorded nominal time
+and decisions, re-executes the deterministic provider/backend path, and fails
+at the first action, status, sampled metadata, content digest, or final-state
+mismatch. Completed replay frames are not rolled back.
 
 M4 finalizes aligned phase/task scratch, queue/control, and trace storage under
 a configured memory budget. M15 supplies exactly the phase/task/trace backing

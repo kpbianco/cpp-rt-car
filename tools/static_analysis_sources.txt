@@ -11,6 +11,8 @@ rtfw_runtime|rt/src/heterogeneous_memory.cpp
 rtfw_runtime|rt/src/host_runtime.cpp
 rtfw_runtime|rt/src/loopback_backend.cpp
 rtfw_runtime|rt/src/memory_policy.cpp
+rtfw_runtime|rt/src/mixed_rate_actions.cpp
+rtfw_runtime|rt/src/mixed_rate_replay.cpp
 rtfw_runtime|rt/src/mock_device.cpp
 rtfw_runtime|rt/src/native_platform_preflight.cpp
 rtfw_runtime|rt/src/observability_export.cpp

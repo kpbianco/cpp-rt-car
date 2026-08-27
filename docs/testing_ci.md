@@ -1,9 +1,12 @@
 # Testing and CI Evidence
 
-M21-04 focused gates cover transactional admission, frame validation, terminal
-publication, three-domain loopback, safe startup/shutdown, fault injection,
-accounting/identity, prior payload regressions, installed relocation, and
-sanitizers. Hosted GCC/Clang/MSVC and TSan remain mandatory before merge.
+M21-05 focused gates cover action-ring bounds/loss, active-artifact parsing and
+mutation rejection, deterministic device-active replay, public loopback logical
+hooks, a multi-rate plant/sensor/controller/actuator fixture, exact accounting,
+optional-device shed/recover, completion-error/timeout/loss fault replay,
+two-instance isolation, and direct package consumption. Hosted GCC/Clang/MSVC,
+TSan, determinism, packaging, and portable assurance passed for candidate run
+33110390319 and remain required for any changed candidate head before merge.
 
 CI is regression evidence for selected builds and behaviors. It is not a
 latency qualification and does not prove the complete product contract.
@@ -78,6 +81,19 @@ release, deploy, or qualify hardware/RT behavior.
   submit-without-publication blocking, terminal device→CPU payload capture,
   completion metadata, direct memory accounting, and unchanged M16/M21-02
   suites. They are portable fake-driver RT0 evidence only.
+- M21-04 tests retain sampled admission, complete frame validation, terminal-
+  success publication, stale/overrun/underrun policy, acknowledged startup and
+  checked-stop safety, fixed loopback fault behavior, accounting, identity,
+  relocation, and instance isolation.
+- M21-05 tests cover configuring-policy bounds, fixed action records and
+  capacity-zero/exact/overwrite/gap semantics, deterministic active-artifact
+  bytes and checksum rejection, checkpoint-backed loopback replay with exact
+  generated actions and final state, bounded loopback logical-action hooks,
+  optional-device shed/recover without ownership, terminal sampled/stop
+  actions, completion-error/timeout/loss replay with failure-safe output, and
+  one reusable public-header conformance flow at 100/150/225 ms plus a 450 ms
+  observer. The fixture is also compiled and run as a package consumer.
+  Physical timing, vendor I/O, and RT qualification remain outside it.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent

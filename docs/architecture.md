@@ -1,10 +1,12 @@
 # Architecture
 
-M21-04 compiles above M21-03 cross-rate endpoints rather than adding a second
-transport: sampled descriptor, validated fixed frame, existing snapshot/device
-slot, then terminal completion. Safe frames use the same isolated backend lane
-and must complete before active start or backend detach. See
-[sampled_io.md](sampled_io.md).
+M21-05 closes the existing M21 transport without adding an execution lane:
+sampled descriptor, validated fixed frame, cross-rate snapshot/device slot,
+terminal completion, then one closed logical action. Conditional checkpoint
+state and the separate active-replay artifact preserve exact logical decisions
+for deterministic mock/loopback re-execution. See
+[sampled_io.md](sampled_io.md) and
+[determinism_replay.md](determinism_replay.md).
 
 This page separates the supported 1.2 target runtime from compatibility and
 candidate paths. The normative contract is the
@@ -51,6 +53,17 @@ disjoint host-coherent subrange. CPU input copy precedes provider invocation;
 device output capture follows terminal success while the M21-02 ticket remains
 owned. The same packed-atomic SPSC store remains the publication boundary, and
 no copy lane, vendor call, mutex, or active registry scan is added.
+
+M21-04 layers sampled descriptors, strict frame validation, selection policy,
+and acknowledged safe outputs on those endpoints. M21-05 freezes a semantic
+closure policy and allocates one direct-index action ring plus replay/checkpoint
+controls. Runtime emits settled rate, device, sampled, safety, watchdog, and
+stop results; action loss is explicit and disqualifies replay. A quiescent
+active artifact binds a checkpoint, caller-owned input records, and the
+gap-free transcript. Replay prevalidates the complete artifact, restores once,
+drives recorded logical choices, re-runs deterministic providers/backends, and
+compares every generated action and content identity. It never treats physical
+arrival order or live watchdog time as replay input.
 
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval

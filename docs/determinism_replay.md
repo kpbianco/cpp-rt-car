@@ -1,9 +1,10 @@
 # Determinism, Checkpoints, and Replay
 
-M21-04 graph identity includes frozen sampled semantics and copied initial/safe
-frames in canonical identity order. Live frames and completion order remain
-excluded. Sampled device metadata is not added to checkpoint/input-log schema
-1; M21-05 owns replay closure.
+M21-05 preserves checkpoint and input-log schema 1 byte-for-byte and adds a
+distinct additive active-replay schema 1 for mixed-rate execution. A closure-
+enabled checkpoint conditionally carries one ordinary mixed-rate state record;
+active replay binds that checkpoint to a complete logical-action transcript
+and explicit caller-owned inputs for deterministic mock/loopback re-execution.
 
 RTFW 1.2 retains milestone M7 for the target `rt::Runtime` path. It provides
 an explicit D1 contract for registered state, a stable little-endian
@@ -117,7 +118,9 @@ cannot affect dispatch. Its canonical generic state tail transactionally
 retains thresholds, streaks, optional order, shed bitset, and policy version;
 mandatory-only state bytes remain exact. The separate rate-action telemetry
 history, counters, and caller cursors are process-local and not checkpointed.
-Action-aware replay remains unsupported rather than being inferred as D1.
+That legacy rate-action history remains observational and is not inferred as
+D1 input. M21-05 active replay instead uses its separate complete mixed-rate
+action transcript.
 
 M21-01 conditionally appends the device-rate phase/domain indexes, completion
 budget, per-phase in-flight bound, and ordered payload roles to `graph_id` only
@@ -125,17 +128,54 @@ when a device-rate binding exists. Backend, batch, buffer, and timeline
 identity already come from the copied M17 graph semantics and remain the sole
 source. No-device and CPU-only conditional hash paths are unchanged. A mixed
 metadata change therefore changes graph/replay compatibility without changing
-checkpoint or input-log schema 1. M21-02 active mixed execution remains D0
-only and does not encode device terminal order, timeout decisions, or payload
-in schema-1 artifacts, so active mixed replay remains unavailable.
+checkpoint or input-log schema 1. M21-02 alone remains D0 and does not encode
+device terminal order, timeout decisions, or payload in existing schema-1
+artifacts.
 
 M21-03 additionally hashes each explicit endpoint selector and derived
 direction, backend/buffer/reference identity, envelope, stride, slot count,
 and completion timestamp domain. Raw host addresses, provider pointers,
 payload contents after configuration, completion arrival order, and wall-clock
-measurements remain excluded. Device payload bytes and their completion
-metadata are not added to checkpoint/input-log schema 1; M21-05 owns replay
-closure.
+measurements remain excluded. Device payload bytes and completion metadata are
+not added to checkpoint/input-log schema 1. M21-05 hashes its semantic policy
+into compatibility identity, while excluding observational action capacity,
+payload content, addresses, caller cursor position, arrival order, and wall-
+clock observations.
+
+## Mixed-rate checkpoint and active replay schema 1
+
+When `MixedRateClosurePolicy` is enabled, checkpoint export appends one
+`rtfw.mixed-rate` ordinary state record. At a quiescent release boundary it
+captures the canonical active cursor, next logical generation/action sequence,
+shedding and degradation state, sampled counters/status/safety/freshness, and
+the replay-action position. It contains no in-flight vendor owner, action
+history, caller cursor, backend token, address, or wall-clock value. Disabled
+checkpoints remain byte-identical to their pre-M21-05 form.
+
+The active artifact is fixed-width little-endian with a 384-byte header,
+direct-index input descriptors, fixed 256-byte action records, per-record
+content checksums, and one whole-artifact checksum. Its copied policy bounds
+record count and byte count below the existing 1 GiB absolute ceiling. It
+binds runtime/build/workload, determinism tier, graph/replay/state schema,
+policy, checkpoint frame, first/last frame, nominal epoch, ordered explicit
+inputs, and the complete gap-free action transcript. Inspection validates all
+encoded lengths, identity, checksums, reserved fields, sequence/order, and
+trailing extent without allocating from encoded values.
+
+`Runtime::replay_active()` requires a compatible quiescent checkpoint, no
+telemetry loss, and only backends whose frozen capabilities report
+deterministic-mock behavior. Complete artifact and checkpoint validation occurs
+before restore. Replay invokes the input callback once per recorded frame,
+uses recorded nominal time and legal rate/watchdog decisions, re-executes the
+provider and mock/loopback completion path, and compares each generated action,
+payload/frame digest, sampled metadata, safety state, terminal status, and the
+final registered-state hash. The first mismatch returns exact progress;
+already completed frames are not rolled back. Nondeterministic or physical
+backends cannot enter this mode.
+
+Existing `Runtime::replay()` retains its non-active behavior and active-plan
+rejection. Existing checkpoint/input-log magic, versions, layouts, and parser
+behavior are unchanged.
 
 M17-01 preserves the exact pre-M17 device identity path for every adapted
 device-ABI-v1 registration. Its backend name and copied backend identifier are

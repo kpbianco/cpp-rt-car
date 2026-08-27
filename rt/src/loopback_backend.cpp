@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -35,6 +36,98 @@ struct SampledIoLoopbackBackend::Impl {
         std::atomic<std::uint32_t> state{kFree};
         HalV2BatchCompletion completion{};
     };
+
+#if defined(_MSC_VER)
+// The cache-line alignment is intentional. MSVC reports the resulting
+// isolation padding as C4324 under /W4.
+#    pragma warning(push)
+#    pragma warning(disable : 4324)
+#endif
+    struct alignas(64) LogicalActionSlot {
+        std::atomic_flag writer = ATOMIC_FLAG_INIT;
+        std::atomic<std::uint64_t> committed{
+            std::numeric_limits<std::uint64_t>::max()};
+        std::array<std::atomic<std::uint64_t>, 8> words{};
+    };
+#if defined(_MSC_VER)
+#    pragma warning(pop)
+#endif
+
+    void record_logical_action(
+        const DeviceCommandBatch& batch,
+        SampledIoLoopbackFault fault,
+        HalV2Status status,
+        std::uint64_t device_timestamp) noexcept {
+        auto sequence = logical_action_sequence.load(std::memory_order_relaxed);
+        while (sequence != std::numeric_limits<std::uint64_t>::max() &&
+               !logical_action_sequence.compare_exchange_weak(
+                   sequence,
+                   sequence + 1,
+                   std::memory_order_relaxed,
+                   std::memory_order_relaxed)) {
+        }
+        if (sequence == std::numeric_limits<std::uint64_t>::max()) {
+            return;
+        }
+        auto& slot = logical_actions[sequence % logical_actions.size()];
+        if (slot.writer.test_and_set(std::memory_order_acquire)) {
+            return;
+        }
+        SampledIoLoopbackLogicalAction action;
+        action.sequence = sequence;
+        action.batch_id = batch.batch_id;
+        action.device_timestamp = device_timestamp;
+        action.opcode = batch.command_count == 0
+            ? 0
+            : batch.commands[0].opcode;
+        action.status = static_cast<std::int32_t>(status);
+        action.fault = fault;
+        action.command_count = static_cast<std::uint8_t>(batch.command_count);
+        std::uint64_t identity = 14695981039346656037ull;
+        const auto mix = [&identity](std::uint64_t value) noexcept {
+            for (std::size_t index = 0; index < 8; ++index) {
+                identity ^= static_cast<std::uint8_t>(value >> (index * 8));
+                identity *= 1099511628211ull;
+            }
+        };
+        mix(action.batch_id);
+        mix(action.device_timestamp);
+        mix(action.opcode);
+        mix(static_cast<std::uint32_t>(action.status));
+        mix(static_cast<std::uint8_t>(fault));
+        action.content_identity = identity;
+        slot.committed.store(
+            std::numeric_limits<std::uint64_t>::max(),
+            std::memory_order_release);
+        const auto words = std::bit_cast<std::array<std::uint64_t, 8>>(action);
+        for (std::size_t index = 0; index < words.size(); ++index) {
+            slot.words[index].store(words[index], std::memory_order_relaxed);
+        }
+        slot.committed.store(sequence, std::memory_order_release);
+        slot.writer.clear(std::memory_order_release);
+    }
+
+    [[nodiscard]] bool read_logical_action(
+        std::uint64_t sequence,
+        SampledIoLoopbackLogicalAction& action) const noexcept {
+        action = {};
+        const auto& slot = logical_actions[sequence % logical_actions.size()];
+        if (slot.committed.load(std::memory_order_acquire) != sequence) {
+            return false;
+        }
+        std::array<std::uint64_t, 8> words{};
+        for (std::size_t index = 0; index < words.size(); ++index) {
+            words[index] = slot.words[index].load(std::memory_order_relaxed);
+        }
+        const auto candidate =
+            std::bit_cast<SampledIoLoopbackLogicalAction>(words);
+        if (slot.committed.load(std::memory_order_acquire) != sequence ||
+            candidate.sequence != sequence) {
+            return false;
+        }
+        action = candidate;
+        return true;
+    }
 
     explicit Impl(const SampledIoLoopbackConfig& requested) noexcept
         : config(requested) {
@@ -489,6 +582,8 @@ struct SampledIoLoopbackBackend::Impl {
             SampledIoLoopbackFault::none, std::memory_order_acq_rel);
         if (fault == SampledIoLoopbackFault::reject_submission) {
             backend->rejected.fetch_add(1, std::memory_order_relaxed);
+            backend->record_logical_action(
+                *batch, fault, HalV2Status::queue_full, 0);
             return HalV2Status::queue_full;
         }
         Slot* slot = nullptr;
@@ -503,6 +598,8 @@ struct SampledIoLoopbackBackend::Impl {
         }
         if (!slot) {
             backend->rejected.fetch_add(1, std::memory_order_relaxed);
+            backend->record_logical_action(
+                *batch, fault, HalV2Status::queue_full, 0);
             return HalV2Status::queue_full;
         }
         HalV2BatchCompletion completion{};
@@ -524,6 +621,11 @@ struct SampledIoLoopbackBackend::Impl {
                 ? HalV2Status::lost
                 : execution_status;
         completion.status = static_cast<std::int32_t>(completion_status);
+        backend->record_logical_action(
+            *batch,
+            fault,
+            completion_status,
+            completion.device_timestamp);
         slot->completion = completion;
         backend->submissions.fetch_add(1, std::memory_order_relaxed);
         if (fault != SampledIoLoopbackFault::completion_timeout) {
@@ -602,6 +704,9 @@ struct SampledIoLoopbackBackend::Impl {
     std::atomic<std::uint64_t> cancellations{0};
     std::atomic<std::uint64_t> rejected{0};
     std::atomic<std::uint64_t> frames_copied{0};
+    std::array<LogicalActionSlot, sampled_io_loopback_capacity>
+        logical_actions{};
+    std::atomic<std::uint64_t> logical_action_sequence{0};
     std::atomic<SampledIoLoopbackFault> next_fault{
         SampledIoLoopbackFault::none};
     HalV2BackendApi api{};
@@ -680,7 +785,55 @@ SampledIoLoopbackStats SampledIoLoopbackBackend::stats() const noexcept {
         impl_->cancellations.load(std::memory_order_relaxed),
         impl_->rejected.load(std::memory_order_relaxed),
         impl_->frames_copied.load(std::memory_order_relaxed),
+        impl_->logical_action_sequence.load(std::memory_order_relaxed),
     };
+}
+
+Status SampledIoLoopbackBackend::reset_logical_actions() noexcept {
+    if (!impl_ || impl_->initialized.load(std::memory_order_acquire)) {
+        return Status::invalid_state;
+    }
+    for (auto& slot : impl_->logical_actions) {
+        slot.committed.store(
+            std::numeric_limits<std::uint64_t>::max(),
+            std::memory_order_release);
+        slot.writer.clear(std::memory_order_release);
+    }
+    impl_->logical_action_sequence.store(0, std::memory_order_release);
+    impl_->timestamp.store(0, std::memory_order_release);
+    impl_->next_fault.store(
+        SampledIoLoopbackFault::none,
+        std::memory_order_release);
+    return Status::ok;
+}
+
+std::size_t SampledIoLoopbackBackend::logical_action_count() const noexcept {
+    if (!impl_) {
+        return 0;
+    }
+    const auto count = impl_->logical_action_sequence.load(
+        std::memory_order_acquire);
+    return static_cast<std::size_t>(std::min<std::uint64_t>(
+        count, sampled_io_loopback_capacity));
+}
+
+bool SampledIoLoopbackBackend::logical_action_at(
+    std::size_t chronological_index,
+    SampledIoLoopbackLogicalAction& action) const noexcept {
+    action = {};
+    if (!impl_) {
+        return false;
+    }
+    const auto end = impl_->logical_action_sequence.load(
+        std::memory_order_acquire);
+    const auto retained = std::min<std::uint64_t>(
+        end, sampled_io_loopback_capacity);
+    if (chronological_index >= retained) {
+        return false;
+    }
+    const auto first = end - retained;
+    return impl_->read_logical_action(
+        first + chronological_index, action);
 }
 
 } // namespace rt

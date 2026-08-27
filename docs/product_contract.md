@@ -1,9 +1,11 @@
 # RTFW Product Contract
 
-M21-04 extends portable RT0 with bounded sampled-I/O metadata and a
-deterministic software loopback backend. Application-owned plant, vehicle, and
-controller models remain outside the core. See [sampled_io.md](sampled_io.md);
-loopback success is not physical HIL or electrical/timing qualification.
+M21-05 closes the portable mixed-rate software path with bounded logical
+actions, quiescent checkpoint state, deterministic active replay, and a
+reusable public-surface conformance fixture. Application-owned plant, vehicle,
+and controller models remain outside the core. See
+[determinism_replay.md](determinism_replay.md); loopback success is not
+physical HIL or electrical/timing qualification.
 
 Status: accepted contract for the supported 1.x portable runtime
 
@@ -102,9 +104,14 @@ waits on exact generation-tagged completion tickets, and quarantines vendor-
 owned timeout slots through checked shutdown. M21-03 adds explicit C++
 CPU/device cross-rate endpoint selectors, host-coherent execution-slot
 subranges, pre-provider CPU input copies, and terminal-success-only device
-output publication. It adds no sampled-I/O, replay, physical-device, or HIL
-semantics. No stable ABI, schema, support, qualification, or release claim
-changes; M21 and CAP-M21 remain incomplete.
+output publication. M21-04 adds sampled descriptors, exact frames,
+overrun/underrun policy, acknowledged safe output, and the installed
+deterministic loopback. M21-05 adds a configuring-only closure policy, fixed
+mixed-rate actions, conditional schema-1 checkpoint state, and a distinct
+bounded active-replay schema for deterministic mock/loopback backends. It does
+not alter an existing stable ABI or schema and does not promote physical, HIL,
+support, qualification, or release claims. M21 and CAP-M21 remain incomplete
+until the implementation candidate passes hosted/human gates and merges.
 
 ## Claim policy
 

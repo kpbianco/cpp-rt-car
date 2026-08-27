@@ -1,8 +1,9 @@
 # Bounded Device Backend Contract
 
-M21-04 adds no HAL version. The installed `SampledIoLoopbackBackend` implements
-the existing HAL-v2 core, memory/topology, and command/timeline extensions with
-fixed storage and no hidden thread. See [sampled_io.md](sampled_io.md).
+M21-05 adds no HAL version. The installed `SampledIoLoopbackBackend` retains
+the existing HAL-v2 core, memory/topology, and command/timeline tables and adds
+only a bounded instance-local logical-action inspection/reset surface. It owns
+no hidden thread. See [sampled_io.md](sampled_io.md).
 
 RTFW 1.2 retains the M8 target `rt::Runtime` device contract introduced in
 0.9. The base contract adds a size/versioned C backend ABI, device phases in
@@ -186,6 +187,13 @@ only its offset and byte count with a precompiled execution-slot subrange.
 Input bytes are committed before submit; output bytes are captured only after
 correlated terminal success and before the retained rate slot is recycled.
 Borrowed buffer bytes remain application/backend-owned.
+
+M21-05 active replay admits a backend only when its frozen existing
+capabilities report deterministic-mock behavior. It still executes provider,
+submit, poll, completion, frame validation, and publication, but compares the
+result with the recorded logical transcript instead of deriving decisions from
+completion arrival order. Physical or nondeterministic backends may produce
+ordinary action evidence but cannot enter active replay.
 
 CPU compute workers never wait for a device fence, future, callback, or
 condition variable. `step()` remains synchronous to its host: it returns after

@@ -1,8 +1,9 @@
 # HAL v2 Core, Memory/Topology, and Device-ABI-v1 Compatibility Contract
 
-The M21-04 loopback is a public implementation of the unchanged HAL-v2 tables.
-Its deterministic software timestamps and injected faults are portable test
-inputs, not physical clock, trigger, latency, or electrical evidence.
+The M21-05 loopback hooks preserve the unchanged HAL-v2 tables. Their bounded
+instance-local logical sequence and deterministic fault identity support
+portable active replay; they are not physical clock, trigger, latency, or
+electrical evidence.
 
 M17-01 adds an additive C++ HAL v2 core contract to the already installed
 `rt/device.hpp` header. The HAL API version is exactly 2. It is a source API:
@@ -34,6 +35,9 @@ to correlate poll-only completion in the same service lane. M21-03 uses the
 unchanged copied buffer references and memory/timestamp descriptors to derive
 host-coherent payload subranges; Runtime-only materialization and terminal
 capture add no HAL table/version, callback, lane, or hardware support claim.
+M21-04 and M21-05 consume the same tables for sampled frames, acknowledged safe
+outputs, and deterministic re-execution. The additive action/replay surfaces
+are Runtime and loopback C++ APIs, not HAL extensions.
 
 ## Public core shape
 

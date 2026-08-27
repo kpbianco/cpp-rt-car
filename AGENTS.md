@@ -4,7 +4,7 @@ RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
 ABI v1, and Apache-2.0. M14, M14.1, M15, M16, and the portable M17 software
 path through M17-06 are complete, while hardware/RT qualification remains
-incomplete. M20-PRE-01 and M21-01 through M21-03 are merged. M21-04 is the
+incomplete. M20-PRE-01 and M21-01 through M21-04 are merged. M21-05 is the
 active approved batch.
 M16-01 supplies the exact reference timeline, M16-02 adds deterministic
 CPU-only cross-rate channel selection and bounded SPSC stores, and M16-03 adds
@@ -39,7 +39,9 @@ adds only generic fixed-capacity sampled-I/O descriptors, acknowledged safe-
 output transitions, and a public package-consumable HAL-v2 loopback backend.
 It does not add replay/telemetry closure, a vendor adapter, change versioned
 schemas, promote support, or establish physical CUDA, XDMA, DAC/DAQ, CAN,
-IIO, HIL, RT1, or RT2 evidence.
+IIO, HIL, RT1, or RT2 evidence. M21-05 owns the distinct bounded mixed-rate
+action and deterministic active-replay closure for declared mock/loopback
+backends only.
 
 ## Read before nontrivial work
 
@@ -54,7 +56,7 @@ IIO, HIL, RT1, or RT2 evidence.
 9. `.agents/skills/rtfw-assurance/SKILL.md`
 
 The control-plane product source is
-`kpbianco/portfolio-control/products/cpp-rt-car/`. Repository contracts and the
+`tranquilWorks/portfolio-control/products/cpp-rt-car/`. Repository contracts and the
 actual code remain authoritative when a stale control-plane copy conflicts.
 
 ## Protected invariants
@@ -111,7 +113,7 @@ mandatory hardware/RT evidence, signing, release, or deployment gate. See
 ## Governed agentic delivery
 
 - Product: `cpp-rt-car`; delivery profile: `assurance`.
-- Control revision: `a5a6668445bda00a6d9cb721763db0293e75665d`; harness version: `2`.
+- Control revision: `6d5653b45181cd34850628d5967f65237402da5a`; harness version: `2`.
 - Read `contracts/profile-requirements.yaml` and the approved
   `contracts/active-batch.yaml` before implementation.
 - Stay inside active-batch allowed paths and preserve every forbidden path.

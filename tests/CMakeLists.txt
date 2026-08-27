@@ -118,6 +118,9 @@ if (SIM_GTEST_AVAILABLE)
         test_rate_timeline.cpp
         test_sampled_io.cpp
         test_loopback_backend.cpp
+        test_mixed_rate_actions.cpp
+        test_mixed_rate_replay.cpp
+        test_mixed_rate_conformance.cpp
         test_cpu_memory_policy.cpp
         test_memory_policy.cpp
         test_thread_policy.cpp)

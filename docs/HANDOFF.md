@@ -1,21 +1,48 @@
 # Handoff
 
-## Active batch: M21-04
+## Active batch: M21-05
 
-Baseline `46a69204ecccd17e7c1da76e30d4e23bde6eb9ef` is the merged M21-03
-payload path. M21-04 adds only portable sampled-I/O descriptors, frame and
-policy validation, acknowledged output safety, and the installed HAL-v2
-loopback described in [sampled_io.md](sampled_io.md). Preserve C ABI v8/70
-exports, all versioned schemas, support matrices, CUDA/XDMA candidates, and
-prior evidence. Do not claim physical I/O, electrical correctness, controlled
-timing, HIL, RT1/RT2, Unreal, release, or M21-05 replay/telemetry closure.
+Baseline `2821f90fb09dc86820b879bb47a39d8165ff0e0f` is the merged M21-04
+sampled-I/O and loopback path. M21-05 adds only the additive C++ mixed-rate
+closure policy, fixed logical actions, conditional ordinary checkpoint state,
+a separate bounded active-replay artifact, instance-local loopback hooks, and
+a reusable installed-surface conformance fixture. Preserve C ABI v8/70
+exports, every existing artifact/schema byte contract, support matrices,
+CUDA/XDMA candidates, and prior evidence. Do not claim physical I/O,
+electrical correctness, controlled timing, HIL, RT1/RT2, Unreal, release, or
+deployment.
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. M21-03 starts from exact target
-baseline `ff143eede097885c1535ed7b335b709e1cec44bd`, the merged M21-02 result.
-The binding M21-03 contract is `contracts/active-batch.yaml`, sourced from
-control revision `f282c6899472999d9d881c81f277067238a84f5f`.
+RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M21-05 contract is
+`contracts/active-batch.yaml`, sourced from control revision
+`8bf0d8e7a6563fe88246925b44e2bddc77a457fe`.
+
+## M21-05 implementation handoff
+
+`MixedRateClosurePolicy` is configuring-only and freezes bounded action and
+replay capacities plus its semantic policy identity. Action capacity is
+observational and may be zero; active replay requires positive transcript and
+byte limits and an explicitly deterministic backend. The 256-byte action
+records and runtime-bound cursors are distinct from rate-action schema 1 and
+global observability schema 2. Any action gap, overwrite, or drop makes the
+captured range replay-ineligible.
+
+Closure-enabled checkpoints append `rtfw.mixed-rate` as a normal schema-1
+state record. Export and active replay require quiescence. The active artifact
+is its own fixed little-endian schema and must be fully validated before
+restore; legacy `Runtime::replay()` keeps its active-plan rejection. Replay
+uses recorded logical decisions, suppresses live watchdog timing, permits only
+deterministic mock/loopback backends, re-executes providers, and compares the
+complete generated action and content-identity sequence.
+
+The public loopback logical-action log is fixed capacity and instance-local;
+reset is allowed only after shutdown. The conformance fixture includes only
+installed headers and is shared by repository and relocated-package tests.
+Keep caller replay payloads borrowed/explicit, never add sampled payload bytes
+to default telemetry, and retain exact MemoryPlan accounting. M21/CAP-M21 may
+be called software-complete only after this candidate merges; physical and RT
+qualification remain separate.
 
 ## M21-03 implementation handoff
 
@@ -35,9 +62,9 @@ publisher. Channel-free M21-02 and ordinary M17 batches retain exact-reference
 behavior.
 
 M21-04 owns sampled-I/O descriptors, clocks/triggers, safe outputs, and
-overrun/underrun policy. M21-05 owns replay/conformance closure. Do not describe
-this portable fake-driver path as physical device, DAC/DAQ, HIL, RT1, or RT2
-evidence.
+overrun/underrun policy. M21-05 consumes those semantics without changing
+their HAL or artifact versions. Do not describe this portable fake-driver path
+as physical device, DAC/DAQ, HIL, RT1, or RT2 evidence.
 
 ## M21-02 implementation handoff
 

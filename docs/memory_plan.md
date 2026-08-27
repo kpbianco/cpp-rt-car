@@ -1,9 +1,10 @@
 # Finalized Memory and Overload Contract
 
-M21-04 sampled descriptor copies, initial/safe frames, compiled direct maps and
-safe slices, and fixed status records are included exactly once inside
-`rate_plan_bytes` and `runtime_control_bytes`. Registered coherent buffer
-payloads and loopback-owned backend storage are not double-counted.
+M21-05 action slots/counters, replay controls, digest staging, and conditional
+mixed-rate checkpoint state are included exactly once inside
+`rate_plan_bytes` and `runtime_control_bytes`. The plan exposes their exact
+subtotals without adding a seventh row. Caller artifacts, registered coherent
+payloads, telemetry output spans, and loopback-owned storage are not counted.
 
 Release 1.2 retains the M4 memory closure for the target-path runtime,
 `rt::Runtime`. This is portable RT0 functionality: it defines and tests
@@ -273,6 +274,16 @@ once in `rate_plan_bytes` and `runtime_control_bytes`. The
 reconcile endpoint metadata and the existing Runtime-owned staging subset.
 Pre-registered device-buffer envelope bytes are borrowed and are never added
 to `planned_bytes`.
+
+M21-04 counts sampled descriptor copies, initial/safe frames, direct maps,
+safe-phase slices, and fixed status state once in the same categories. M21-05
+adds `mixed_rate_action_capacity`, exact slot/storage bytes, and
+`mixed_rate_replay_control_bytes`. The latter includes copied policy,
+checkpoint state, replay decision/index state, and fixed digest/comparison
+staging retained by Runtime. Observational capacity zero commits no action
+slots; enabled active replay requires positive copied record and byte limits.
+Caller-owned encoded artifacts and their explicit input payloads remain outside
+`planned_bytes`.
 
 M16-03 active state is allocated only during finalization. Admission records,
 domain-release groups, channel aliases/generations, staged and committed
