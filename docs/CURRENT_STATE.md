@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-08-27
-Batch baseline: `46a69204ecccd17e7c1da76e30d4e23bde6eb9ef`
+Batch baseline: `2821f90fb09dc86820b879bb47a39d8165ff0e0f`
 
 ## Product state
 
@@ -11,6 +11,8 @@ Batch baseline: `46a69204ecccd17e7c1da76e30d4e23bde6eb9ef`
   command/timeline extension v1 are unchanged.
 - Runtime-profile schema 7 and its 25 keys, global observability schema 2,
   checkpoint/input-log schema 1, and rate-action schema 1 are unchanged.
+  M21-05 uses separate additive C++ mixed-rate-action and active-replay
+  schemas, both version 1.
 - The installed target inventory, 1.x aliases, support matrices, and
   Apache-2.0 license are unchanged. The retained M19 addition is
   `rt/extension_abi.h`; M21-04 adds exactly the additive C++ header
@@ -22,8 +24,38 @@ Batch baseline: `46a69204ecccd17e7c1da76e30d4e23bde6eb9ef`
   schemas and tools remain proposal-only and unpromoted. M19-01 adds extension
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
   current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
-  is merged. M21-04 is the active approved sampled-I/O and portable-loopback
-  batch.
+  and M21-04 are merged. M21-05 is the active approved overload, action,
+  checkpoint/replay, and reusable-conformance closure batch.
+
+## M21-05 mixed-rate closure candidate
+
+M21-05 copies and freezes an optional C++ closure policy before finalization.
+It preallocates a fixed 256-byte action-record ring with runtime-bound cursors,
+monotonic sequence reservation, exact drop/overwrite/gap reporting, and replay
+eligibility that fails closed after telemetry loss. Closed actions correlate
+rate decisions, settled device outcomes, sampled publication/selection,
+safe-output acknowledgement, watchdog/degradation changes, and checked stop
+without exposing payload bytes, addresses, vendor handles, or wall-clock
+thread identity.
+
+Closure-enabled checkpoints append one ordinary schema-1 state record at a
+quiescent release boundary; disabled and legacy checkpoint bytes remain
+unchanged. A distinct bounded little-endian active-replay artifact binds that
+checkpoint, explicit caller-owned inputs, the complete ordered action
+transcript, semantic identities, per-record checksums, and a whole-artifact
+checksum. Active replay accepts only frozen deterministic-mock backends,
+prevalidates before restore, drives recorded logical decisions, re-executes the
+mock/loopback provider path, and compares actions, payload/frame identities,
+sampled metadata, terminal status, and final state.
+
+The installed loopback adds bounded instance-local logical-action inspection.
+A table-driven public-header conformance fixture runs CPU plant, device sensor,
+CPU controller, device actuator, and observer work across three distinct rate
+periods, sampled hold behavior, acknowledged safety, checkpoint, and exact
+active replay. Local strict compilation, 9 focused tests, a 91-test impacted
+suite, and direct package-consumer execution pass; hosted and human review are
+still required. M21 and CAP-M21 remain incomplete until this candidate merges.
+Physical/vendor I/O, HIL, RT1, and RT2 remain unclaimed.
 
 ## M21-04 sampled I/O and loopback
 
@@ -38,9 +70,8 @@ existing backend lane and require terminal acknowledgement.
 
 The installed `SampledIoLoopbackBackend` provides deterministic host-coherent
 HAL-v2 frame transfer and bounded fault injection for portable tests. This is
-RT0 software-loopback behavior only; M21-05 replay/telemetry/overload closure,
-vendor/physical I/O, electrical and timing validation, and RT1/RT2 remain
-unclaimed. M21 and CAP-M21 remain incomplete.
+RT0 software-loopback behavior only; vendor/physical I/O, electrical and timing
+validation, and RT1/RT2 remain unclaimed.
 
 ## M21-03 CPU/device cross-rate payloads
 
@@ -62,8 +93,8 @@ releases dependent work and recycles the device slot.
 
 This is portable RT0 fake-driver payload evidence. It adds no sampled-clock,
 trigger, calibration, safe-output, overrun/underrun, replay, physical CUDA/
-XDMA/DAC/DAQ, HIL, RT1, or RT2 claim. M21-04, M21-05, and CAP-M21 remain
-incomplete.
+XDMA/DAC/DAQ, HIL, RT1, or RT2 claim. The later M21 batches do not promote
+those claims.
 
 ## M21-02 device-rate dispatch and completion
 

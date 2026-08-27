@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M21-04
-  title: Add sampled-I/O contract and loopback backend
-  goal: Define additive fixed-capacity sampled input/output descriptors over the merged M21-01 through M21-03 device-rate and payload path, including exact sample encoding, clock/trigger, units/calibration, sequence/timestamp, ring ownership, stale/overrun/underrun, and acknowledged safe-output semantics, then prove the portable contract with a public package-consumable HAL-v2 loopback backend without adding a vendor adapter, replay/telemetry closure, physical-I/O behavior, or qualification claims.
+  id: M21-05
+  title: Close mixed-rate overload, replay, telemetry, watchdog, and conformance
+  goal: Add a bounded additive C++ mixed-rate action and replay closure over the merged M21-01 through M21-04 device-rate, payload, sampled-I/O, and loopback path. Integrate optional-device shedding/recovery, terminal device and sampled actions, watchdog/degradation identity, quiescent checkpoint state, deterministic active replay for explicitly deterministic mock/loopback backends, and a reusable three-rate conformance suite while preserving all existing artifact schemas, stable ABIs, physical-I/O boundaries, and portable RT0 claims.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -10,7 +10,7 @@ sources:
     - products/cpp-rt-car/acceptance.yaml#CAP-M21
     - products/cpp-rt-car/telemetry-plan.yaml#Q-21
     - products/cpp-rt-car/risk-register.yaml#R-009
-  milestone: products/cpp-rt-car/milestones/M21.md#M21-04--sampled-io-contract-and-loopback
+  milestone: products/cpp-rt-car/milestones/M21.md#M21-05--overload-replay-and-conformance-closure
   target_contracts:
     - AGENTS.md
     - contracts/active-batch.yaml
@@ -27,9 +27,11 @@ sources:
     - docs/host_runtime.md
     - docs/device_backend.md
     - docs/hal_v2.md
+    - docs/sampled_io.md
     - docs/memory_plan.md
     - docs/determinism_replay.md
     - docs/rate_telemetry.md
+    - docs/observability.md
     - docs/testing_ci.md
     - docs/c_abi.md
     - docs/release_policy.md
@@ -38,21 +40,21 @@ sources:
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
     - release/rtfw-release-contract.json
-    - docs/evidence/M16-02-2026-08-05.md
-    - docs/evidence/M17-02-2026-08-07.md
+    - docs/evidence/M16-03-2026-08-05.md
+    - docs/evidence/M16-04-2026-08-05.md
     - docs/evidence/M17-03-2026-08-11.md
-    - docs/evidence/M17-04-2026-08-12.md
     - docs/evidence/M17-06-2026-08-23.md
     - docs/evidence/M20-PRE-01-2026-08-26.md
     - docs/evidence/M21-01-2026-08-26.md
     - docs/evidence/M21-02-2026-08-26.md
     - docs/evidence/M21-03-2026-08-26.md
-  baseline_commit: 46a69204ecccd17e7c1da76e30d4e23bde6eb9ef
+    - docs/evidence/M21-04-2026-08-27.md
+  baseline_commit: 2821f90fb09dc86820b879bb47a39d8165ff0e0f
   control_plane_repository: kpbianco/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M21-04.yaml
-  control_plane_revision: a5a6668445bda00a6d9cb721763db0293e75665d
+  control_plane_path: products/cpp-rt-car/batches/M21-05.yaml
+  control_plane_revision: 8bf0d8e7a6563fe88246925b44e2bddc77a457fe
 dependencies:
-  - M21-03
+  - M21-04
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -65,6 +67,10 @@ scope:
     - rt/include/rt/runtime.hpp
     - rt/include/rt/device.hpp
     - rt/include/rt/loopback_backend.hpp
+    - rt/src/mixed_rate_actions.hpp
+    - rt/src/mixed_rate_actions.cpp
+    - rt/src/mixed_rate_replay.hpp
+    - rt/src/mixed_rate_replay.cpp
     - rt/src/sampled_io.hpp
     - rt/src/sampled_io.cpp
     - rt/src/loopback_backend.cpp
@@ -85,6 +91,10 @@ scope:
     - rt/src/host_runtime.cpp
     - rt/src/resource_policy.hpp
     - rt/src/resource_policy.cpp
+    - tests/mixed_rate_conformance.hpp
+    - tests/test_mixed_rate_actions.cpp
+    - tests/test_mixed_rate_replay.cpp
+    - tests/test_mixed_rate_conformance.cpp
     - tests/test_sampled_io.cpp
     - tests/test_loopback_backend.cpp
     - tests/test_cross_rate_data.cpp
@@ -98,10 +108,13 @@ scope:
     - tests/test_heterogeneous_memory.cpp
     - tests/test_memory_plan.cpp
     - tests/test_periodic_runtime.cpp
+    - tests/test_watchdog.cpp
     - tests/test_trace_noalloc.cpp
     - tests/test_multiple_instances.cpp
     - tests/test_determinism.cpp
+    - tests/test_determinism_replay.cpp
     - tests/package_consumer/CMakeLists.txt
+    - tests/package_consumer/mixed_rate_consumer.cpp
     - tests/package_consumer/loopback_consumer.cpp
     - tests/package_consumer/cpp_consumer.cpp
     - tests/package_consumer/compat_consumer.cpp
@@ -124,9 +137,10 @@ scope:
     - docs/memory_plan.md
     - docs/determinism_replay.md
     - docs/rate_telemetry.md
+    - docs/observability.md
     - docs/testing_ci.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M21-04-*.md
+    - docs/evidence/M21-05-*.md
   forbidden_paths:
     - abi/
     - rt/include/rt/c_api.h
@@ -176,6 +190,7 @@ scope:
     - docs/evidence/M21-01-*.md
     - docs/evidence/M21-02-*.md
     - docs/evidence/M21-03-*.md
+    - docs/evidence/M21-04-*.md
     - VERSION.txt
     - LICENSE
     - CHANGELOG.md
@@ -188,97 +203,112 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The implementation begins from an initially clean target at exact default-branch commit `46a69204ecccd17e7c1da76e30d4e23bde6eb9ef`, the merged M21-03 pull request 244. Retained M15 through M21-03 evidence is present and unchanged, and governance records M21-03 as merged without inventing sampled-I/O loopback, replay, physical, RT, Unreal, signing, release, publication, deployment, or production results.
-  - Sampled-I/O registration is an additive C++ surface copied and frozen before finalization. Each descriptor has an explicit direction, nonzero channel identity, closed fixed-width sample encoding, checked channel/element/frame extents and strides, rational or otherwise exactly representable scaling metadata, units identity, calibration identity, sample period/rate identity, timestamp domain, clock domain, trigger mode and trigger identity, bounded ring capacity, initial sequence, maximum age, and explicit stale, overrun, underrun, startup-safe, failure-safe, and shutdown-safe policies. Raw addresses, dynamic strings, callbacks, vendor handles, implicit defaults for safety behavior, and unbounded payloads are forbidden.
-  - Every sampled input or output resolves to one exact admitted M21-03 device payload endpoint and copied pre-registered host-visible coherent buffer envelope. Direction, access, sample encoding, checked byte geometry, alignment, execution-slot stride, ring-slot stride, maximum in-flight count, rate domain, backend, command reference, and clock/timestamp identities must agree. Foreign, stale, ambiguous, inaccessible, incoherent, overlapping, undersized, zero-capacity, overflowed, or declaration-mismatched registrations fail transactionally before start.
-  - Finalization compiles immutable direct sampled-channel, release, execution-slot, and ring-slot records plus fixed ownership and retirement state. It derives all backend, buffer, range, rate, trigger, clock, timestamp, and capacity identities from copied declarations and does not scan every channel, phase, buffer, command, or graph edge on each sample, release, completion, or safe-state transition.
+  - The implementation begins from an initially clean target at exact default-branch commit `2821f90fb09dc86820b879bb47a39d8165ff0e0f`, the merged M21-04 pull request 245. Retained M15 through M21-04 evidence is present and unchanged, governance records M21-04 as merged, and no absent review, physical, RT, replay, release, deployment, or production result is invented.
+  - Mixed-rate closure is an additive C++ configuring-only policy copied and frozen before finalization. It has explicit bounded capacities and byte limits for the new action stream and active-replay transcript, a nonzero host policy/schema identity, a closed overflow policy, and an explicit requirement that every replayed device backend report the existing deterministic-mock capability. Observational action capacity may be zero with exact drops; replay capacities are positive whenever active replay is enabled. It contains no dynamic string, raw address, callback, vendor handle, file path, implicit timing source, or unbounded history.
+  - Existing checkpoint schema 1, input-log schema 1, rate-action schema 1, global observability schema 2, their constants, magic values, record layouts, parser behavior, C ABI operations, and byte-for-byte legacy artifacts remain unchanged. Existing `Runtime::replay()` retains its non-active behavior and active-plan rejection. M21-05 uses a distinct additive C++ mixed-rate action schema 1 and active-replay artifact schema 1 rather than repurposing reserved bytes or silently changing an existing version.
   - >-
-    Sample frames have one fixed header and exact payload extent: channel identity, monotonically checked nonzero sequence, release/batch generation, sample count, timestamp domain, first-sample timestamp, fixed sample interval where applicable, trigger identity/sequence, status, calibration identity, and payload checksum or equivalent deterministic content identity. A backend cannot publish an uncorrelated frame, change the frozen format or calibration identity, or supply completion-owned dynamic metadata.
-  - Input capture publishes only after exact correlated terminal success and complete frame validation. Sequence, release, completion status, timestamp/clock/trigger domains, timestamps, sample count, encoding, extent, checksum, and execution/ring slot must match the compiled declaration before the frame becomes selectable by a CPU consumer. Submission acceptance, partial capture, malformed completion, error, timeout, cancellation, loss, quarantine, skipped or shed release, and late completion publish no new input frame.
-  - Output materialization selects one exact committed CPU-produced generation by immutable release-time rules, applies the declared deterministic encoding/scaling contract into the Runtime-selected execution/ring slot, and completes the copy before provider invocation and lane publication. The backend may not choose a different range, format, calibration, sequence, safe value, or trigger identity. Failed or stale selection follows only the declared output policy and never silently reuses arbitrary bytes.
-  - Stale, underrun, and overrun behavior is closed and deterministic. Input may fail the release, hold the last frame only within its inclusive maximum age, or substitute an explicitly copied initial/safe frame. Output may fail the release or substitute the explicitly copied safe frame. Ring-full behavior either rejects the new frame or fails the release; it never overwrites a slot still owned by an in-flight release or selectable consumer. Every result is inspectable through fixed-size additive C++ status/sequence counters without changing the versioned observability or rate-action schemas.
+    Each fixed mixed-rate action record carries schema/record size, monotonic record sequence, runtime and host-policy identity, frame, rate domain/phase/release sequence/substep, logical and nominal release, action/reason/stage, optional/late/shed/degradation/watchdog state, backend/batch/timeline/completion generation, terminal status, timestamp-domain/timestamp, payload and sampled-frame content identity, sampled freshness/held/substitution/safety state, and exact before/after shedding state where applicable. Closed numeric tables and zero reserved fields reject future, foreign, partial, contradictory, or uncorrelated records.
+  - Action publication is generation safe and follows execution ownership. A device release emits no terminal-success record at submission; exactly one terminal action becomes visible only after correlated completion, timeout/cancel/loss/quarantine, declared skip/hold/shed, or safe-state acknowledgement is settled. Late completion cannot rewrite a terminal record. Sampled payload bytes, raw addresses, application signal values, callback pointers, vendor handles, and wall-clock thread identities are never emitted by default.
+  - The new action ring is fixed at finalization and uses direct runtime-bound cursors with exact gap reporting. Capacity zero deterministically drops while reserving sequence; busy slots drop; committed replacement overwrites with exact counters. A slow or malformed reader cannot block, reorder, or change execution. Telemetry loss is explicit and makes a transcript ineligible for replay rather than silently producing incomplete replay evidence.
+  - Optional device domains participate in the exact existing M16 shedding/recovery order and hysteresis. A shed or late-skipped device release invokes no provider or backend, claims no execution slot, publishes no payload, and emits one exact action tied to the corresponding rate-action identity. Recovery affects only the next total-order release. Mandatory device releases are never silently skipped, and supported non-CPU records are not rejected merely because their phase is device-owned.
+  - Device overload is closed at zero, exact, and one-over backend, Runtime outstanding, phase in-flight, completion-ticket, dispatch-record, sampled-ring, and action-ring capacities. It follows only the declared reject, skip, hold, shed, degrade, timeout, cancel, quarantine, safe-output, or fail behavior. It never spills to heap storage, executes a vendor call on an executor, steals another backend's slot, overwrites owned bytes, converts mandatory work to optional, or depends on completion arrival order.
+  - Watchdog and degradation closure records the exact step/release action and before/after level without treating elapsed hosted-CI timing as deterministic input. Normal active replay consumes the recorded logical decision/action transcript and suppresses live watchdog timing as an execution decision; it validates and reproduces the recorded watchdog/degradation transition. Malformed, impossible, out-of-policy, or over-maximum levels reject before state mutation.
+  - A conditional quiescent mixed-rate checkpoint state is appended as one ordinary schema-1 checkpoint state record only when the M21-05 policy is enabled. It captures the canonical active cursor, device/sampled publication correlation, next generation/sequence, sampled safety and selected freshness state, shedding streak/mask, degradation state, and replay-action position required to resume without ambiguity. It contains no in-flight vendor ownership, telemetry history, caller cursor, backend-private token, address, or wall-clock observation. Existing checkpoints without M21-05 remain byte exact.
+  - Checkpoint export and active replay require a quiescent release boundary with no provider callback, active step, periodic run, submitted ticket, pending safe transition, cleanup-pending owner, or uncertain completion. Complete validation of every application, rate, mixed-rate, sampled, replay, identity, extent, checksum, reserved, and ordering field occurs before any registered state, cross-rate store, safety state, shedding state, or action cursor changes. Failure is transactional and retryable.
   - >-
-    Safe output is a copied exact-size frame per output channel and cannot be inferred from zeroed memory. Startup drives the declared startup-safe frame and requires correlated terminal acknowledgement before active output admission. Stop/failure order is fixed: close new release admission, settle or cancel owned work within existing finite budgets, enqueue each required safe frame through the existing backend lane, correlate terminal acknowledgement, then stop/detach the backend. Timeout, loss, malformed acknowledgement, or cancellation leaves checked stop non-successful and safety state explicitly unknown; software never claims an unacknowledged physical safe state.
-  - The public loopback backend implements the unchanged HAL-v2 registration/start/submit/poll/cancel/reset/stop contract with caller-provided or Runtime-accounted fixed storage, no hidden thread, no heap allocation after start, and no vendor dependency. It accepts only the sampled descriptors registered for its exact backend, transfers complete frames between paired input/output channels, provides deterministic timestamp/trigger/completion identity from injected logical inputs, supports bounded injected stale/overrun/underrun/error/timeout/loss cases, and exposes acknowledged safe frames for test inspection.
-  - One installed-package-tested loopback scenario executes plant output to sensor encoding to controller input to actuator output across at least three distinct rate domains. It proves normal first-cycle and steady-state data, scaling/calibration identity, sample/hold age, external/software trigger identity, wraparound, backpressure, safe startup, injected stale/overrun/underrun/failure, and ordered checked shutdown without network, process, sleep-based timing, hardware, or vendor-specific code.
-  - Ring and execution-slot ownership is generation safe. A producer cannot overwrite bytes readable by the backend or consumer; a late completion cannot publish into a recycled slot; sequence wrap/exhaustion fails before ambiguity; safe-state work has distinct ownership from active output; and retirement occurs only after exact completion plus all compiled consumers settle. Multiple Runtime and loopback instances share no mutable global state.
-  - Sample capture, selection, encoding, copying, ring claim/retirement, and safe-frame materialization perform bounded direct-index work with checked integer arithmetic. They allocate no ordinary heap, take no blocking mutex, perform no file/network I/O, start no thread, invoke no vendor code on executor/host lanes, wait for no device operation, and do not retry, scan, or spill to another slot.
-  - Failed finalization or startup publishes no partial sampled plan, ring ownership, active release, or safety claim and remains retryable through existing replacement/cleanup rules. Successful finalization counts descriptor copies, initial/safe frames, ring metadata, controls, staging, loopback state, and retention exactly once in existing `MemoryPlan` categories and `planned_bytes`; borrowed registered-buffer bytes are not counted as Runtime-owned storage.
-  - Graph/config identity includes every copied sampled descriptor, encoding/extent/stride, scale, units/calibration, rate/clock/trigger/timestamp, policy, initial/safe frame, derived range/ring layout, and loopback pairing identity that can change execution. It excludes raw addresses, pointer/callback values, wall-clock measurements, post-configuration payloads, completion arrival order, and injected fault timing. Equivalent registration order canonicalizes to the same identity.
-  - Existing CPU-only M16 channels, ordinary M17/HAL-v2 backends, M21-02 channel-free dispatch, M21-03 non-sampled payloads, checkpoint schema-1 artifacts, replay inputs, rate-action and observability schemas, CUDA/XDMA candidates, package consumers, two Runtime instances, and repeated start/checked-stop retain prior behavior. M21-04 does not retrofit sampled frames into checkpoint/replay or device-action telemetry; M21-05 owns overload, replay, telemetry, watchdog, and reusable conformance closure.
-  - M21-04 adds portable sampled-I/O and loopback semantics only. It does not add a DAC/DAQ/CAN/IIO/XDMA/CUDA vendor adapter, physical trigger or sample-clock measurement, electrical scaling/calibration correctness, external-process CIL, performance thresholds, CUDA physics, hot reload, a golden demo, Unreal, or a support/qualification promotion.
-  - Stable C ABI v8 with exactly 70 exports and frozen fingerprint `0xd0e7a5a14bf35f97`, SONAME 8, device ABI v1, extension ABI v1, HAL core v2 and extension v1 contracts, runtime-profile schema 7 and 25 keys, observability/checkpoint/input-log/rate-action schemas, Runtime status values, release 1.2.1, installed target/alias inventory, support matrices, qualification state, and Apache-2.0 remain unchanged. The additive loopback header is the only intended installed-header inventory addition and is covered by relocation/self-containment checks.
-  - Target governance, current state, handoff, sampled-I/O/HAL documentation, release digest ledger, and retained `docs/evidence/M21-04-<date>.md` state the exact portable RT0 loopback boundary. Focused and full local verification, mandatory hosted CI, and human ownership, safety-ordering, boundedness, compatibility, and claim review pass before merge. M21 and CAP-M21 remain incomplete until M21-05.
+    The new active-replay artifact is fixed-width little-endian and bounded by copied record/byte capacities and the existing 1 GiB absolute safety ceiling. It binds runtime/build/workload, determinism tier, graph/replay/state schema, M21-05 policy, checkpoint frame, first/last frame, nominal epoch, ordered input payloads, ordered rate/device/sampled/safe/watchdog actions, per-record content checksums, and a whole-artifact checksum. Parsers allocate nothing from encoded lengths, reject truncation/trailing bytes/overflow/gaps/duplicates/foreign identity before restore, and expose allocation-free inspection metadata.
+  - Active replay accepts only a compatible quiescent checkpoint, a complete gap-free transcript, and device backends whose frozen existing capabilities report `deterministic_mock == 1`. It restores transactionally, invokes the input callback once per frame, drives the exact recorded nominal release and legal rate/device decisions without consulting completion arrival order or live watchdog time, re-executes the deterministic mock/loopback provider path, and compares every generated action, payload/frame digest, sampled metadata, safety transition, status, and final registered-state hash. The first mismatch fails closed with exact progress; earlier completed replay frames are not rolled back.
+  - Non-deterministic or physical backends cannot enter active replay. Their fixed action records and payload/frame digests may be retained as explicitly recorded boundary evidence, but M21-05 does not infer deterministic physical input, regenerate physical samples, replay a vendor driver, or qualify a device. No default telemetry surface stores sampled payload bytes; any application input payload supplied to the bounded replay artifact remains caller-owned explicit replay data under the existing trust boundary.
+  - Terminal error, submission rejection, timeout, cancellation, loss, late quarantine, skipped/shed work, sampled stale/underrun/overrun, callback failure, watchdog transition, safe-output failure, stop, and retryable cleanup each have one closed action result. No failed or uncertain action publishes a device input or success, no late completion mutates a recycled generation, and replay reproduces or rejects the same action rather than normalizing it to success.
+  - The public loopback remains the portable deterministic backend and gains only bounded hooks needed to reset, inspect, and reproduce its declared logical action sequence. Fault injection identity is copied or explicitly supplied; it cannot depend on sleep timing, process state, a hidden thread, a global singleton, or mutable data shared between Runtime instances. Existing standalone HAL-v2 lifecycle behavior remains unchanged when M21-05 is disabled.
+  - One reusable mixed-rate conformance fixture uses only public installed-package surfaces and runs CPU plant, device sensor loopback, CPU controller, and device actuator across at least three distinct harmonic and non-harmonic rates. It covers first cycle, steady state, supercycle/wrap, equal-time ordering, sample-and-hold age, optional device shedding/recovery, backpressure, watchdog/degradation, timeout/cancel/loss/quarantine, stale/under/overrun, safe startup/failure/shutdown, checkpoint, replay, reset/restart, and final state/action/payload identity.
+  - The conformance fixture is table-driven and reusable by the repository tests and an installed relocated consumer without private headers or repository-only data. It uses a manual logical clock and bounded deterministic fault script, not network, subprocess, filesystem transport, sleep-based timing, physical hardware, vendor SDKs, or controlled-host thresholds. Every scenario states whether it is static, unit, simulated-protocol, package, sanitizer, or manual evidence.
+  - Sequence, generation, action, artifact, and slot exhaustion fail before zero, wrap, or reuse can become ambiguous. Safe-state work remains isolated from active generations. A producer cannot overwrite backend/consumer-owned bytes; retirement occurs only after exact terminal completion and all compiled consumers settle. Two Runtime/loopback/conformance instances share no mutable global state and may execute concurrently under ThreadSanitizer.
+  - Action emission, action comparison, replay-decision selection, checkpoint synchronization, sampled selection, payload digesting, slot claim/retirement, watchdog/degradation application, and conformance execution use checked integer arithmetic and bounded direct-index work. Running paths allocate no ordinary heap, take no blocking mutex, perform no file/network I/O, create no thread, scan no full configuring registry, wait for no unbounded operation, retry no unbounded sequence, and invoke no vendor function on executor/host lanes.
+  - Failed finalization or startup publishes no partial M21-05 policy, action ring, replay state, device release, sampled payload, or safety claim and remains retryable through existing replacement/cleanup rules. Successful finalization counts policy copies, action controls/slots/counters, replay/checkpoint state, digest staging, conformance/runtime controls, and retention exactly once in existing `MemoryPlan` categories and `planned_bytes`; caller artifacts, borrowed registered buffers, backend-private bytes, and telemetry output buffers are not double-counted.
+  - Graph/config/replay identity includes every semantic M21-05 policy version, legal action table, deterministic-backend requirement, checkpoint state shape, transcript format, device/sampled descriptor, safe-state rule, and replay decision rule that can change execution. It excludes action-ring capacity when observational only, caller cursor position, post-configuration payload bytes, raw addresses, callback pointers, wall-clock measurements, thread IDs, completion arrival order, and fault timing. Equivalent registration order canonicalizes as already contracted.
+  - Existing reference-only and CPU-only M16 plans, rate-action schema-1 telemetry, ordinary M17/HAL-v2 backends, adapted device-ABI-v1 backends, M21-02 channel-free dispatch, M21-03 non-sampled payloads, M21-04 sampled loopback without closure enabled, checkpoint/input-log schema-1 artifacts, legacy replay, CUDA/XDMA candidates, package consumers, repeated start/checked-stop, and two Runtime instances retain prior behavior and byte-compatible artifacts.
+  - M21-05 closes CAP-M21's portable software semantics only. It adds no vendor DAC/DAQ/CAN/IIO adapter, physical trigger/sample-clock or electrical scaling result, external-process CIL transport, benchmark threshold, CUDA physics, transactional live control, hot reload, golden demo, Unreal, support/qualification promotion, signing, publication, release, deployment, or production behavior. M18 remains the sole physical and RT qualification plane.
+  - Stable C ABI v8 with exactly 70 exports and frozen fingerprint `0xd0e7a5a14bf35f97`, SONAME 8, device ABI v1, extension ABI v1, HAL core v2 and extension-v1 tables, Runtime status numeric values, runtime-profile schema 7 and 25 keys, checkpoint/input-log/rate-action/observability schemas, release 1.2.1, installed target/header/alias inventory, support matrices, qualification state, and Apache-2.0 remain unchanged. No new installed header is required; additive C++ types remain in the existing runtime/loopback headers.
+  - Target governance, current state, handoff, replay/rate/sampled/device/observability documentation, release digest ledger, and retained `docs/evidence/M21-05-<date>.md` state exact implementation and evidence. Focused and full local verification, mandatory hosted CI, and human ownership, replay-transactionality, concurrency, boundedness, compatibility, and claim review pass before merge. M21 and CAP-M21 may be marked software-complete only after this batch merges; physical and RT gates remain explicitly incomplete.
 validation:
   local:
     - git status --short --branch
-    - test "$(git rev-parse HEAD)" = "46a69204ecccd17e7c1da76e30d4e23bde6eb9ef"
-    - git merge-base --is-ancestor 46a69204ecccd17e7c1da76e30d4e23bde6eb9ef HEAD
-    - test -f docs/evidence/M21-03-2026-08-26.md
+    - test "$(git rev-parse HEAD)" = "2821f90fb09dc86820b879bb47a39d8165ff0e0f"
+    - git merge-base --is-ancestor 2821f90fb09dc86820b879bb47a39d8165ff0e0f HEAD
+    - test -f docs/evidence/M21-04-2026-08-27.md
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='SampledIo.*:LoopbackBackend.*:CrossRateData.*Sampled*:RateDispatch.*Sampled*:HostRuntime.*Sampled*:CommandBatch.*Sampled*:HalV2.*Loopback*:MemoryPlan.*Sampled*:PeriodicRuntime.*Sampled*:TraceNoAlloc.*Sampled*:MultipleInstances.*Sampled*:Determinism.*Sampled*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm21_sampled_io|loopback_consumer|package_consumer'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='MixedRateActions.*:MixedRateReplay.*:MixedRateConformance.*:RateDispatch.*Device*:RateDispatch.*Replay*:SampledIo.*Replay*:SampledIo.*Overload*:LoopbackBackend.*Replay*:HostRuntime.*Watchdog*:DeviceRuntime.*Rate*:DeterminismReplay.*Active*:MemoryPlan.*MixedRate*:TraceNoAlloc.*MixedRate*:MultipleInstances.*MixedRate*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm21_mixed_rate|mixed_rate_consumer|package_consumer'
     - ./scripts/agent-verify.sh full
+    - ./scripts/verify-portable-assurance.sh --build-dir build/portable-assurance --source-commit "$(git rev-parse HEAD)" all
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
     - git diff --check
-    - git diff --name-only 46a69204ecccd17e7c1da76e30d4e23bde6eb9ef
+    - git diff --name-only 2821f90fb09dc86820b879bb47a39d8165ff0e0f
   focused_tests_to_add:
-    - transactional descriptor validation for direction, channel, encoding, checked geometry, scale, units/calibration, rate, clock/trigger/timestamp domains, policies, initial/safe frames, exact payload endpoint, access/coherency, envelope, strides, capacity, overlap, and correction/retry
-    - immutable direct channel/release/execution/ring slices, registration-order canonicalization, graph identity sensitivity, exact MemoryPlan accounting, and no active full-registry scans
-    - sampled input terminal-success publication with exact sequence, release/batch generation, sample count/interval, status, timestamp, clock/trigger, calibration, checksum, and slot correlation
-    - output selection and deterministic encoding for first-cycle, same-cycle, prior-cycle wrap, equal-time tie, inclusive maximum-age boundary, held/fresh/stale, skipped producer, and sequence/generation exhaustion
-    - explicit stale, underrun, and overrun policies at zero, exact, and one-over capacity, proving no owned-slot overwrite and no publication after partial, malformed, rejected, failed, timed-out, canceled, lost, quarantined, skipped, shed, or late work
-    - startup-safe acknowledgement before active output, normal stop and failure-safe ordering, duplicate safe requests, safe-work isolation, bounded cancellation/drain, unacknowledged safe state remaining unknown, and retryable checked cleanup
-    - public loopback HAL-v2 lifecycle, exact paired-channel transfer, injected logical clock/trigger/completion identity, fixed storage, deterministic faults, reset/restart, multiple instances, and no post-start allocation or hidden thread
-    - installed loopback consumer plant-to-sensor-to-controller-to-actuator flow across three rates with scaling/calibration, sample/hold, trigger, wrap, backpressure, safe output, faults, and ordered shutdown
-    - ThreadSanitizer coverage of producer/backend/consumer, ring claim/retirement, safe output versus active completion, stop/cancel/late completion, and two Runtime instances
-    - unchanged CPU-only M16, ordinary M17/HAL-v2, M21-02 channel-free, M21-03 non-sampled payload, checkpoint/replay/rate-action/observability schemas, CUDA/XDMA candidates, C ABI/package inventory, and prior evidence
+    - transactional M21-05 policy validation for versions, capacities, byte bounds, overflow policy, deterministic-backend requirement, duplicate setup, finalization correction/retry, and unchanged disabled path
+    - fixed mixed-rate action schema numeric tables, reserved fields, metadata, counters, runtime-bound cursors, capacity zero/exact/one-over, drop/overwrite/gap behavior, malformed/foreign cursors, and noninterference with dispatch
+    - exact action correlation for CPU/device releases, submit/terminal completion, error, timeout, cancel, loss, quarantine, skip, hold, optional shed/recover, sampled stale/under/overrun, startup/failure/shutdown safety, watchdog, degradation, and checked stop
+    - optional device shedding/recovery order and hysteresis across equal-time CPU/device releases, proving no provider/backend call or slot/payload claim while shed and no mandatory-device omission
+    - overload at every Runtime/backend/phase/ticket/dispatch/ring/action capacity boundary, including independent-device progress without head-of-line blocking and exact failure/ownership retention
+    - conditional mixed-rate checkpoint state round trip, canonical bytes, application/rate/device/sampled/safety/shedding/degradation/action position, complete prevalidation, correction/retry, and byte-exact legacy checkpoint preservation
+    - active-replay artifact construction, allocation-free inspection, exact nominal/action transcript, checksums, bounds, truncation/trailing/overflow/gap/duplicate/foreign identity rejection, short-output reporting, and deterministic artifact bytes
+    - active replay from a quiescent checkpoint through deterministic mock and loopback backends across normal, late, shed/recover, watchdog/degrade, timeout/cancel/loss, stale/under/overrun, and safe transitions with exact action/payload/final-state equality
+    - rejection of non-deterministic/physical backends, incomplete or lossy telemetry, in-flight or cleanup-pending checkpoints, impossible actions, mismatched payload digests, live watchdog dependence, and replay reentrancy without partial restore
+    - post-restore failure semantics for input callback, provider callback, backend result, action mismatch, and final-state mismatch, preserving exact processed-frame reporting and retry from the original checkpoint
+    - reusable harmonic/non-harmonic three-rate plant-sensor-controller-actuator conformance table covering supercycle/wrap, equal time, freshness, backpressure, faults, reset/restart, safe lifecycle, checkpoint/replay, and multiple instances
+    - no ordinary allocation, blocking mutex, hidden thread, file/network I/O, unbounded wait/retry/scan, or executor-lane vendor call during action emission, active dispatch, checkpoint synchronization, and replay execution
+    - ThreadSanitizer coverage of action publication/reading, optional device shed/recover versus completion, safe transition versus active completion, timeout/cancel/late completion, checkpoint/replay exclusion, stop/retry, and two Runtime/loopback instances
+    - unchanged checkpoint/input-log schema-1 bytes and inspectors, legacy replay, CPU-only M16, ordinary M17/HAL-v2, M21-02 channel-free, M21-03 payload-only, M21-04 closure-disabled loopback, CUDA/XDMA candidates, C ABI/package inventory, and prior evidence
   required_ci:
-    - Documentation contract workflow including truthful M21-04 portable sampled-I/O/loopback-only claims, release contract, frozen C ABI, additive loopback header inventory, and unchanged support matrices
-    - Portable static analysis source manifest includes every compiled runtime source, including sampled_io.cpp and loopback_backend.cpp, with no unreviewed compile-database entries
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo, FMA on/off matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of descriptor admission, frame publication, ring policies, safe-state ordering, loopback lifecycle, capacity, and compatibility
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical descriptor, frame, policy, safety, graph-identity, and accounting results and passing installed loopback consumers
-    - Unified executor GCC ThreadSanitizer job covering sampled producer/backend/consumer ownership, ring retirement/reuse, safe-state work versus active completion, concurrent checked stop, late completion, and two Runtime instances without races
-    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged prior fixtures plus equivalent sampled sequences, selected generation, status, clock/trigger/timestamp/calibration identity, freshness/held policy, safe transitions, and payload checksums for the loopback backend
-    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, loopback consumer, and existing portable assurance/autotune/scaling smoke jobs
-    - Existing M16 cross-rate/no-allocation/rate/replay gates, M17 memory/batch/timeline/vendor gates, and M21-01 through M21-03 gates; no M21-05 replay closure, physical-device, controlled-timing, electrical, or performance threshold is authorized
+    - Documentation contract workflow including truthful M21-05 portable deterministic-mock replay/conformance claims, frozen existing artifact schemas and C ABI, unchanged installed inventory/support matrices, release contract, and exact static source manifest
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of mixed-rate action admission, overload, checkpoint, active replay parsing/execution, sampled safety, watchdog/degradation, conformance, capacity, and compatibility
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical action/artifact/checkpoint/conformance results and passing installed mixed-rate consumers
+    - Unified executor GCC ThreadSanitizer job covering device action publication, shedding/recovery, completion/timeout/cancel/quarantine, sampled ownership, safe transition, checkpoint/replay exclusion, concurrent stop, late completion, cursors, and two Runtime instances without races
+    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged prior checkpoint/input-log fixtures plus byte-identical mixed-rate replay artifacts, ordered action digests, selected generations, payload checksums, sampled metadata, shed/recover, watchdog/degradation, safety state, and final state for the integer loopback fixture
+    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, loopback and mixed-rate conformance consumers, and unchanged default installed inventory
+    - Clang 14 portable static/fuzz/artifact assurance includes every compiled new runtime source and bounded malformed mixed-rate artifact mutations; blocking dependency review, candidate SBOM/provenance, autotune, scaling, and existing package relocation remain green
+    - Existing M7 replay/checkpoint, M16 rate/action/cross-rate/no-allocation, M17 memory/batch/timeline/vendor, and M21-01 through M21-04 gates all pass; no physical-device, controlled-timing, electrical, performance-threshold, Unreal, release, or deployment workflow is authorized
   manual:
-    - Human review must confirm every sampled channel resolves one exact copied payload envelope, ring/execution slots cannot alias while owned, frame publication follows correlated terminal success, and each stale/under/overrun result follows the frozen policy rather than arrival order.
-    - The reviewer must confirm startup/failure/shutdown safe frames are exact copied data, active admission cannot precede startup-safe acknowledgement, unacknowledged safe state remains unknown, the public loopback remains bounded and package-consumable, and fake loopback evidence is not described as physical DAC/DAQ/CAN/IIO/XDMA/CUDA, electrical, HIL, RT1, or RT2 evidence.
+    - Human review must confirm the new schemas are distinct and versioned, existing artifact bytes and legacy replay remain exact, every action is correlated once to immutable release/completion identity, optional device shedding cannot omit mandatory work, and overload cannot overwrite an owned slot or depend on arrival order.
+    - The reviewer must confirm complete artifact/checkpoint validation precedes mutation, active replay accepts only deterministic mock/loopback backends and a gap-free transcript, watchdog/degradation is transcript-driven rather than live-time inferred, sampled/safe state restores without a false acknowledgement, and post-start failures report exact partial progress.
+    - The reviewer must confirm the conformance suite is reusable through installed public surfaces, all running operations remain bounded and allocation-free where contracted, and no simulated action, payload digest, replay, hosted timing, or loopback result is described as physical DAC/DAQ/CAN/IIO/XDMA/CUDA, HIL, RT1, or RT2 evidence.
 risk:
   class: high
   hazards:
-    - an ambiguous format, stride, scale, units, calibration, clock, or trigger identity can reinterpret bytes or timestamps and drive the wrong logical actuator value
-    - unchecked ring/execution-slot arithmetic or reuse can overwrite samples still owned by a backend or consumer
-    - publishing at submit or partial capture can expose malformed, failed, stale, or wrong-generation sensor data
-    - permissive hold/substitute behavior can silently mask stale input, underrun, overrun, or failed output
-    - ordering safe output after backend stop, or treating enqueue as acknowledgement, can leave output state unknown while software reports success
-    - callback, backend completion, consumer selection, safe-state work, stop, and slot retirement can race across generations
-    - loopback success can be mislabeled as physical timing, trigger, electrical scaling, DAC/DAQ/CAN/IIO compatibility, HIL, or RT qualification
+    - an action record published before terminal ownership settles can make a failed, stale, late, or wrong-generation device result appear successful or replayable
+    - extending an existing artifact or telemetry schema in place can silently corrupt legacy compatibility or cause old consumers to reinterpret reserved bytes
+    - optional shedding, device completion, safe output, watchdog, and stop can race and produce arrival-order-dependent actions or recycle an owned slot
+    - replaying from live wall-clock or completion timing can diverge across hosts while appearing deterministic
+    - restoring sampled metadata, safety state, generation, or action position incompletely can publish stale bytes, duplicate work, or claim an unacknowledged safe state
+    - lossy telemetry can be mistaken for a complete replay transcript unless gaps and drops fail closed
+    - deterministic fake-driver success or recorded physical boundary metadata can be mislabeled as physical timing, electrical correctness, vendor compatibility, HIL, or RT qualification
   stop_conditions:
-    - the exact target baseline is unavailable, dirty, or lacks merged M21-03 evidence and device payload publication semantics
-    - implementation requires changing C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL version contracts, Runtime statuses, artifact/runtime schemas, support matrices, qualification state, release version, license, or prior evidence
-    - a sampled channel cannot resolve to one exact copied pre-registered host-visible coherent M21-03 payload endpoint with checked format, geometry, ring, and execution-slot ownership
-    - startup/failure/shutdown safe output cannot be distinguished from active work, dispatched through the existing backend lane, and correlated to terminal acknowledgement without unbounded wait or a false safety claim
-    - stale, overrun, underrun, sequence, timestamp, clock/trigger, and calibration behavior cannot be deterministic without arrival-order dependence, implicit fallback, or unbounded history
-    - implementation requires a vendor adapter, physical clock/trigger or electrical behavior, replay/checkpoint or telemetry schema changes, overload/watchdog closure, M21-05 behavior, benchmark thresholds, external-process transport, hot reload, CUDA physics, golden demo, or another unfixed product decision
-    - credible validation requires timing sleeps/tolerances, a physical CUDA/XDMA/DAC/DAQ/CAN/IIO device, privileged or controlled host, Unreal, secrets, signing, release, deployment, or production access
+    - the exact target baseline is unavailable, dirty, or lacks merged M21-04 evidence, terminal-only sampled publication, and acknowledged safe-output behavior
+    - implementation requires changing stable C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL versions, Runtime status values, runtime-profile schema 7, existing checkpoint/input-log/rate-action/observability layouts, release version, license, installed inventory, support matrices, qualification state, or prior evidence
+    - a complete distinct bounded action/replay schema cannot represent nominal release, device terminal outcome, sampled content identity, shedding/recovery, watchdog/degradation, safe state, and exact gaps without arrival-order or live-time dependence
+    - optional device shedding cannot reuse the existing immutable total order and hysteresis without silently skipping mandatory work, invoking a provider while shed, or changing prior CPU semantics
+    - quiescent checkpoint state cannot restore active cursor, device/sampled generation, safety, shedding, degradation, and replay position transactionally without including in-flight vendor ownership or backend-private state
+    - active replay cannot reject nondeterministic backends, validate all inputs before restore, reproduce deterministic mock/loopback actions, or fail on the first transcript/content/state mismatch with exact progress
+    - implementation requires sampled payload bytes in default telemetry, a vendor adapter, physical clock/trigger/electrical behavior, external-process transport, benchmark thresholds, M22 live controls, M23 benchmarks, M24 CUDA physics, M26 golden demo, hot reload, Unreal, signing, publication, release, deployment, or production access
+    - credible validation requires timing sleeps/tolerances, physical CUDA/XDMA/DAC/DAQ/CAN/IIO hardware, privileged or controlled hosts, secrets, signing keys, or a qualification/promotion decision
     - any required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
-    - target contracts at the exact baseline contradict this sampled-I/O/loopback-only vertical or require weakening a deterministic, sanitizer, no-allocation, compatibility, or release gate
+    - target contracts at the exact baseline contradict this additive portable closure or repair would require weakening deterministic, sanitizer, no-allocation, compatibility, artifact-parser, package, or release gates
 rollback:
-  strategy: Revert the additive sampled descriptors/metadata and loopback header, compiled channel/release/ring/safety slices, initial/safe-frame storage, Runtime sampled capture/materialization and safe-state ordering, loopback backend, installed consumer, tests/CI, documentation, governance synchronization, release-contract digest updates, and M21-04 evidence as one batch. Restore the M21-03 CPU/device payload-only behavior while preserving active device dispatch/completion and ordinary HAL-v2 backends.
+  strategy: Revert the additive M21-05 policy and public C++ types, mixed-rate action/replay sources, conditional checkpoint record, host-runtime action/replay integration, loopback deterministic replay hooks, reusable conformance fixture and installed consumer, tests/CI, documentation, governance synchronization, release-contract digest updates, and M21-05 evidence as one batch. Restore the merged M21-04 sampled-I/O/loopback behavior, including unchanged legacy artifact schemas and active replay rejection, while preserving all M21-01 through M21-04 execution and safety semantics.
 evidence:
   output:
-    - docs/evidence/M21-04-<date>.md
+    - docs/evidence/M21-05-<date>.md
     - exact control and target baselines, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public sampled descriptor/frame/policy and loopback shapes, copied payload-envelope mapping, sample geometry, rate/clock/trigger/timestamp/calibration identities, fixed ring ownership, capacities, defaults, lifetime, and deferred replay/telemetry behavior
-    - deterministic input capture, output selection/encoding, frame publication, ring retirement, stale/underrun/overrun decisions, safe startup, failure, shutdown, and acknowledgement order across wrap, overlap, malformed, timeout, cancellation, loss, and stop cases
-    - sequence/release/batch/status/timestamp/clock/trigger/calibration/checksum/freshness proof for stale, duplicate, foreign, malformed, late, canceled, skipped, shed, failed, terminal, initial, held, and safe frames with exact publication results
-    - no-allocation/direct-index/bounded-copy evidence, exact MemoryPlan reconciliation, pre-registered range ownership, public loopback package/relocation results, multiple-instance isolation, retryable cleanup, and unchanged prior execution
-    - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, HAL/extension contracts, artifact/runtime schema, installed target/header/alias inventory, support/qualification, license, and prior-evidence preservation results
-    - residual risks and every unperformed M21-05 overload/replay/telemetry/conformance, controlled performance, physical CUDA/XDMA/DAC/DAQ/CAN/IIO, trigger, clock, electrical, calibration, HIL, field, latency, thermal, endurance, RT1, RT2, hot reload, Unreal, signing, publication, release, deployment, and production validation
-  claim_boundary: Evidence may establish bounded sampled-I/O descriptors, exact frame and ring ownership, deterministic stale/overrun/underrun and safe-output state transitions, package compatibility, and portable RT0 fake loopback static/unit/property/sanitizer behavior only. It does not establish physical sample-clock or trigger accuracy, electrical scaling or calibration correctness, DAC/DAQ/CAN/IIO/XDMA/CUDA compatibility, replay/telemetry closure, controlled latency, HIL, field evidence, RT1, RT2, Unreal integration, support promotion, signing, publication, release, deployment, or production readiness.
+    - copied M21-05 policy, fixed action/replay schema layouts and numeric tables, capacities, overflow/loss behavior, deterministic-backend admission, checkpoint state shape, identity inputs/exclusions, and disabled-path compatibility
+    - exact rate/device/sampled/safe/watchdog action correlation across execute, submit, terminal success/error, timeout, cancel, loss, quarantine, skip, hold, shed/recover, stale, underrun, overrun, degradation, failure, stop, late completion, and retry
+    - canonical checkpoint and active-replay artifact bytes, parser mutation/boundary results, prevalidation transactionality, gap/drop rejection, payload/action/final-state comparisons, partial-progress semantics, and legacy artifact byte-preservation results
+    - reusable harmonic/non-harmonic three-rate conformance matrix results for first/steady/wrap, equal-time order, freshness, backpressure, overload, faults, reset/restart, safe lifecycle, checkpoint/replay, and multiple instances
+    - no-allocation/direct-index/bounded-copy evidence, ThreadSanitizer ownership results, exact MemoryPlan reconciliation, package/relocation results, and unchanged prior execution
+    - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, HAL/extension contracts, existing artifact/runtime schemas, installed target/header/alias inventory, support/qualification, license, and prior-evidence preservation results
+    - residual risks and every unperformed physical sampled-input replay, vendor DAC/DAQ/CAN/IIO/XDMA/CUDA, controlled trigger/clock/electrical/calibration, performance, endurance, HIL, field, RT1, RT2, live-control, benchmark, CUDA-physics, golden-demo, Unreal, signing, publication, release, deployment, and production validation
+  claim_boundary: Evidence may establish bounded mixed CPU/device overload actions, exact optional-device shedding/recovery and terminal correlation, distinct versioned action/active-replay artifacts, transactional quiescent checkpoint restore, deterministic replay for the declared portable mock/loopback backend, watchdog/degradation transcript handling, reusable installed-package conformance, and portable RT0 static/unit/property/sanitizer behavior only. Recorded physical boundary metadata is not deterministic physical replay. No result establishes physical sample-clock or trigger accuracy, electrical scaling or calibration correctness, DAC/DAQ/CAN/IIO/XDMA/CUDA compatibility, HIL, controlled latency, RT1, RT2, Unreal integration, support promotion, signing, publication, release, deployment, or production readiness.

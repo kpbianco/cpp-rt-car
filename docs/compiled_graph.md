@@ -1,9 +1,10 @@
 # Compiled Graph Contract
 
-M21-04 finalization adds direct sampled-channel maps, safe-phase slices, copied
-frame storage, and fixed status records. Graph identity hashes sampled
-semantics and copied initial/safe frames in channel-identity order, excluding
-addresses and live payload/completion order.
+M21-05 finalization retains M21-04's direct sampled-channel maps and adds a
+copied closure policy, fixed action/replay controls, and conditional checkpoint
+state. Graph/replay identity hashes semantic policy and action/replay rules but
+excludes observational ring capacity, caller cursors, addresses, payload bytes,
+completion arrival order, and live timing.
 
 Release 0.3 added the M2 compiled graph to the target-path `rt::Runtime`.
 The graph is an RT0 functional surface: it validates dependency and logical
@@ -35,6 +36,11 @@ edge. It names a phase-local copied payload-reference ordinal and stride;
 finalization derives and validates every subrange and publishes direct phase/
 channel slices. Device-to-device edges and implicit reference matching remain
 invalid.
+M21-04 adds direct sampled and safe-output slices without changing graph
+dependency order. M21-05 attaches closed actions to already compiled direct
+indexes; running execution never rescans the configuring registries. Active
+replay consumes the recorded release/action order only after complete identity,
+extent, checksum, and ordering validation.
 Failed admission publishes no partial plan; a fixed-size diagnostic retains the
 status, rejected phase, and first reference index for configuring-time repair.
 

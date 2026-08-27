@@ -52,6 +52,15 @@ inline constexpr std::uint32_t observability_schema_version = 2;
 inline constexpr std::uint32_t observability_metadata_size = 184;
 inline constexpr std::uint32_t rate_action_schema_version = 1;
 inline constexpr std::size_t rate_action_counter_count = 20;
+inline constexpr std::uint32_t mixed_rate_action_schema_version = 1;
+inline constexpr std::uint32_t active_replay_schema_version = 1;
+inline constexpr std::size_t mixed_rate_action_counter_count = 3;
+inline constexpr std::size_t mixed_rate_action_capacity_limit =
+    reference_release_capacity;
+inline constexpr std::size_t active_replay_record_capacity_limit =
+    reference_release_capacity;
+inline constexpr std::size_t active_replay_absolute_max_bytes =
+    std::size_t{1} << 30u;
 inline constexpr std::size_t rate_telemetry_capacity_limit =
     reference_release_capacity;
 inline constexpr std::uint32_t rate_policy_threshold_limit =
@@ -841,6 +850,207 @@ struct RateCounterSnapshot {
     std::array<std::uint64_t, rate_action_counter_count> values{};
 };
 
+// M21-05 is a distinct additive C++ closure. It does not extend checkpoint,
+// input-log, rate-action, or observability schemas in place.
+enum class MixedRateOverflowPolicy : std::uint8_t {
+    overwrite_committed = 1,
+};
+
+struct MixedRateClosurePolicy {
+    std::uint64_t host_policy_version = 1;
+    std::size_t action_capacity = 0;
+    std::size_t active_replay_record_capacity = 0;
+    std::size_t active_replay_max_bytes = 0;
+    std::size_t maximum_actions_per_step = 0;
+    MixedRateOverflowPolicy overflow_policy =
+        MixedRateOverflowPolicy::overwrite_committed;
+    bool active_replay_enabled = false;
+    bool require_deterministic_backends = true;
+    std::array<std::byte, 5> reserved{};
+};
+
+enum class MixedRateActionId : std::uint8_t {
+    rate_execute = 1,
+    rate_skip = 2,
+    rate_hold = 3,
+    rate_shed = 4,
+    rate_recover = 5,
+    device_terminal = 6,
+    sampled_publish = 7,
+    sampled_select = 8,
+    safe_transition = 9,
+    watchdog_transition = 10,
+    runtime_stop = 11,
+};
+
+enum class MixedRateActionReason : std::uint8_t {
+    normal = 1,
+    deadline_late = 2,
+    already_shed = 3,
+    callback_failure = 4,
+    submission_rejected = 5,
+    completion_error = 6,
+    timeout = 7,
+    canceled = 8,
+    lost = 9,
+    quarantined = 10,
+    stale = 11,
+    overrun = 12,
+    underrun = 13,
+    safe_acknowledged = 14,
+    safe_failed = 15,
+    watchdog = 16,
+    late_threshold = 17,
+    on_time_threshold = 18,
+    cleanup_pending = 19,
+};
+
+enum class MixedRateActionStage : std::uint8_t {
+    decision = 1,
+    submitted = 2,
+    terminal = 3,
+    published = 4,
+    selected = 5,
+    acknowledged = 6,
+    quarantined = 7,
+};
+
+enum class MixedRateSampleFreshness : std::uint8_t {
+    not_applicable = 0,
+    fresh = 1,
+    held = 2,
+    stale = 3,
+    substituted = 4,
+};
+
+enum class MixedRateSafetyState : std::uint8_t {
+    not_applicable = 0,
+    unknown = 1,
+    startup_acknowledged = 2,
+    active = 3,
+    failure_acknowledged = 4,
+    shutdown_acknowledged = 5,
+};
+
+// Fixed schema-1 record. It carries identity and content digests only; no
+// payload bytes, addresses, callbacks, vendor handles, or thread identities.
+struct MixedRateActionRecord {
+    std::uint32_t schema_version = mixed_rate_action_schema_version;
+    std::uint32_t record_size = sizeof(MixedRateActionRecord);
+    std::uint64_t sequence = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t host_policy_version = 0;
+    std::uint64_t frame_index = 0;
+    std::uint64_t logical_release_ns = 0;
+    std::uint64_t nominal_release_ns = 0;
+    std::uint64_t release_sequence = 0;
+    std::uint64_t backend_identity = 0;
+    std::uint64_t batch_identity = 0;
+    std::uint64_t timeline_identity = 0;
+    std::uint64_t completion_generation = 0;
+    std::uint64_t timestamp_domain_identity = 0;
+    std::uint64_t timestamp = 0;
+    std::uint64_t payload_content_identity = 0;
+    std::uint64_t sampled_content_identity = 0;
+    std::uint64_t sampled_sequence = 0;
+    std::uint64_t sampled_age_ns = 0;
+    std::uint64_t shed_state_before = 0;
+    std::uint64_t shed_state_after = 0;
+    std::uint64_t watchdog_identity = 0;
+    std::uint32_t rate_domain_registration_index = 0;
+    std::uint32_t phase_index = 0;
+    std::uint32_t substep_ordinal = 0;
+    std::int32_t terminal_status = static_cast<std::int32_t>(Status::ok);
+    std::uint32_t degradation_before = 0;
+    std::uint32_t degradation_after = 0;
+    MixedRateActionId action = MixedRateActionId::rate_execute;
+    MixedRateActionReason reason = MixedRateActionReason::normal;
+    MixedRateActionStage stage = MixedRateActionStage::decision;
+    bool optional = false;
+    bool late = false;
+    bool shed = false;
+    MixedRateSampleFreshness freshness =
+        MixedRateSampleFreshness::not_applicable;
+    bool held = false;
+    bool substituted = false;
+    MixedRateSafetyState safety_state =
+        MixedRateSafetyState::not_applicable;
+    std::array<std::byte, 54> reserved{};
+};
+
+static_assert(sizeof(MixedRateActionRecord) == 256);
+
+struct MixedRateActionMetadata {
+    std::uint32_t schema_version = mixed_rate_action_schema_version;
+    std::uint32_t record_size = sizeof(MixedRateActionRecord);
+    std::uint32_t counter_count = mixed_rate_action_counter_count;
+    std::uint32_t reserved0 = 0;
+    std::uint64_t host_policy_version = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t capacity = 0;
+    std::uint64_t next_sequence = 0;
+    std::uint64_t records_emitted = 0;
+    std::uint64_t records_overwritten = 0;
+    std::uint64_t records_dropped = 0;
+    bool replay_eligible = false;
+    std::array<std::byte, 7> reserved1{};
+};
+
+struct MixedRateActionCursor {
+    std::uint32_t schema_version = mixed_rate_action_schema_version;
+    std::uint32_t reserved0 = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t next_sequence = 0;
+};
+
+struct MixedRateActionReadResult {
+    MixedRateActionMetadata metadata{};
+    std::uint64_t first_sequence = 0;
+    std::uint64_t next_sequence = 0;
+    std::size_t records_read = 0;
+    std::uint64_t lost_records = 0;
+    std::uint64_t remaining_sequence_count = 0;
+};
+
+struct ActiveReplayMetadata {
+    std::uint32_t schema_version = active_replay_schema_version;
+    std::uint32_t header_size = 0;
+    std::uint64_t total_bytes = 0;
+    std::uint64_t artifact_checksum = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t config_id = 0;
+    std::uint64_t replay_id = 0;
+    std::uint64_t graph_id = 0;
+    std::uint64_t state_schema_id = 0;
+    std::uint64_t host_policy_version = 0;
+    std::uint64_t checkpoint_frame_index = 0;
+    std::uint64_t first_frame_index = 0;
+    std::uint64_t last_frame_index = 0;
+    std::uint64_t nominal_epoch_ns = 0;
+    std::uint64_t final_state_hash = 0;
+    std::uint64_t checkpoint_bytes = 0;
+    std::uint64_t input_payload_bytes = 0;
+    std::uint64_t first_action_sequence = 0;
+    std::uint64_t last_action_sequence = 0;
+    std::uint32_t input_record_count = 0;
+    std::uint32_t action_record_count = 0;
+    DeterminismTier determinism_tier = DeterminismTier::unspecified;
+    std::array<std::byte, 7> reserved{};
+    std::array<char, replay_identifier_capacity> build_id{};
+    std::array<char, replay_identifier_capacity> workload_id{};
+};
+
+struct ActiveReplayResult {
+    ReplayResult replay{};
+    std::size_t actions_compared = 0;
+    std::uint64_t mismatch_sequence = 0;
+    Status mismatch_status = Status::ok;
+};
+
+[[nodiscard]] Status inspect_active_replay_artifact(
+    std::span<const std::byte> artifact,
+    ActiveReplayMetadata& metadata) noexcept;
+
 // M16-01 rate metadata is an additive C++ source API. Periods, deadlines, and
 // budget/WCET estimates are integral nanoseconds and are not schema-7 fields.
 struct RateDomainRegistration {
@@ -1406,6 +1616,12 @@ struct MemoryPlan {
     std::size_t rate_telemetry_slot_bytes = 0;
     std::size_t rate_telemetry_storage_bytes = 0;
     std::size_t rate_telemetry_counter_bytes = 0;
+    // M21-05 remains inside rate_plan_bytes/runtime_control_bytes and adds no
+    // planned row or provider-backed region.
+    std::size_t mixed_rate_action_capacity = 0;
+    std::size_t mixed_rate_action_slot_bytes = 0;
+    std::size_t mixed_rate_action_storage_bytes = 0;
+    std::size_t mixed_rate_replay_control_bytes = 0;
     // M21-01 device-rate model/admission storage is included exactly once in
     // rate_plan_bytes and the existing runtime_control_bytes row.
     std::size_t device_rate_phase_count = 0;
@@ -1784,6 +2000,8 @@ public:
     // unset operation; reference-only behavior is retained by not calling it.
     [[nodiscard]] Status set_rate_execution_policy(
         const RateExecutionPolicy& policy) noexcept;
+    [[nodiscard]] Status set_mixed_rate_closure_policy(
+        const MixedRateClosurePolicy& policy) noexcept;
     [[nodiscard]] Status configure_key(
         std::string_view key,
         std::string_view value) noexcept;
@@ -2088,6 +2306,12 @@ public:
         RateTelemetryCursor& cursor,
         std::span<RateActionRecord> output,
         RateTelemetryReadResult& result) noexcept;
+    [[nodiscard]] Status mixed_rate_action_metadata(
+        MixedRateActionMetadata& metadata) noexcept;
+    [[nodiscard]] Status read_mixed_rate_actions(
+        MixedRateActionCursor& cursor,
+        std::span<MixedRateActionRecord> output,
+        MixedRateActionReadResult& result) noexcept;
 
     // Checkpoint and replay calls are non-RT host operations. Buffers are
     // caller-owned, and their maximum accepted sizes are frozen by
@@ -2111,6 +2335,16 @@ public:
         ReplayInputCallback input_callback,
         void* input_user_data = nullptr,
         ReplayResult* result = nullptr) noexcept;
+    [[nodiscard]] Status write_active_replay_artifact(
+        std::span<const std::byte> checkpoint,
+        std::span<const ReplayInputRecord> records,
+        std::span<std::byte> output,
+        ArtifactWriteResult& result) noexcept;
+    [[nodiscard]] Status replay_active(
+        std::span<const std::byte> artifact,
+        ReplayInputCallback input_callback,
+        void* input_user_data = nullptr,
+        ActiveReplayResult* result = nullptr) noexcept;
     [[nodiscard]] Status registered_state_hash(
         std::uint64_t& hash) noexcept;
 

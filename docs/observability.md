@@ -16,6 +16,14 @@ cursors are specified in the [rate-action telemetry contract](rate_telemetry.md)
 They do not append global schema-2 event or metric IDs, are not exported by the
 C ABI, and are not checkpoint or replay history.
 
+M21-05 likewise leaves global schema 2 and every existing trace/metric ID
+unchanged. Its additive C++ mixed-rate-action schema is a separate fixed ring
+with its own runtime-bound cursors and loss counters. It carries content
+identities and terminal logical results, never sampled payload bytes, raw
+addresses, vendor handles, callback pointers, or thread identity. A complete
+gap-free range may be embedded in the distinct active-replay artifact; global
+trace and metric history is never treated as replay input.
+
 ## Schema and provenance
 
 Observability schema version 2 has fixed numeric trace-event and metric IDs.

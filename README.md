@@ -1,9 +1,11 @@
 # RTFW — Bounded Simulation Runtime
 
-Portable sampled-I/O users can include `<rt/loopback_backend.hpp>` for the
-installed fixed-capacity HAL-v2 software loopback and follow
-[`docs/sampled_io.md`](docs/sampled_io.md) for descriptors, frames, policies,
-and acknowledged safe output. This is software RT0 evidence, not physical HIL.
+Portable mixed-rate users can combine `<rt/runtime.hpp>` with the installed
+`<rt/loopback_backend.hpp>` for fixed-capacity sampled I/O, closed logical
+actions, quiescent checkpoints, and deterministic active replay. See
+[`docs/sampled_io.md`](docs/sampled_io.md) and
+[`docs/determinism_replay.md`](docs/determinism_replay.md). This is software
+RT0 evidence, not physical HIL.
 
 [![CI](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml)
 [![Documentation contract](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml)
@@ -32,7 +34,7 @@ versioned observability/replay, and asynchronous device integration.
 | Target-path memory plan | Implemented RT0 surface | Finalization budgets aligned phase/task scratch, CPU/device queue/control storage, and the trace ring; post-start CPU/device-frame tests observe zero runtime heap allocation |
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
 | Multi-rate simulation | M16 complete in merged history | Bounded domains/reference order, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
-| Active device-rate dispatch and payloads | M21-03 implementation candidate | M21-01 admission and M21-02 existing-lane dispatch now support explicitly selected CPU→device and device→CPU cross-rate payloads over pre-registered host-coherent buffers. Runtime derives disjoint execution-slot subranges, validates the provider against the frozen envelope before Runtime-only materialization, and publishes device output only after correlated terminal success. Sampled I/O, replay closure, hardware, HIL, and RT qualification remain deferred. |
+| Mixed-rate device and sampled-I/O closure | M21-05 implementation candidate | M21-01 through M21-04 admission, concurrent dispatch, cross-rate payloads, sampled frames, safe outputs, and public HAL-v2 loopback are joined by a fixed mixed-rate action stream, conditional checkpoint state, and bounded active replay for explicitly deterministic backends. The reusable public-surface fixture exercises plant, sensor, controller, and actuator rates. Merge and hosted/human gates remain pending; hardware, HIL, and RT qualification remain separate. |
 | HAL v2 command/timeline, memory/topology, and device ABI v1 compatibility | M17-06 portable path merged; qualification incomplete | Runtime seeds the exact native command-capability input header and retains whole-record validation. Actual CUDA/XDMA candidates register together through canonical Runtime, and one portable CPU-to-simulated-CUDA-to-host-stage-to-simulated-XDMA-to-CPU sample uses separate backend-local timelines and fixed storage. This is simulated protocol, not hardware qualification. |
 | Qualification schemas and proposals | M18-01 offline tooling; no tuple qualified | Version-1 plan, record, review, and proposal schemas with bounded artifact/digest/threshold/trial validation and deterministic proposal-only output; synthetic fixtures cannot promote support |
 | Extension registration | M19-01 implemented; M19 incomplete | Installed size-versioned C ABI v1 plus transactional C++ Runtime registration, device-v1 compatibility, host-control services, checked stop and detach; direct entry pointers only, with no loader or Unreal lifecycle |
@@ -240,11 +242,12 @@ per channel. M16-03 optionally activates D0 mandatory-CPU serialized admission
 and exact reference dispatch, with checked logical/nominal windows, staged
 cross-rate transfer, bounded skip/catch-up/hold/degrade/fail actions, functional
 summaries, and canonical checkpoint state. Reference-only behavior is unchanged.
-M16-04 admits bounded optional CPU domains beside the mandatory-only admission
-result, applies mandatory-release hysteresis with deterministic shed/recovery
-order, and exposes a separate fixed-capacity versioned rate-action stream with
-explicit loss and runtime-bound cursors. Active D1/action replay remains
-unsupported.
+M16-04 admits bounded optional CPU/device domains beside the mandatory-only
+admission result, applies mandatory-release hysteresis with deterministic
+shed/recovery order, and exposes its unchanged fixed-capacity versioned
+rate-action stream. M21-05 adds a distinct mixed-rate action schema and active-
+replay artifact; legacy `Runtime::replay()` and every existing artifact remain
+byte-compatible.
 
 M16 is complete in merged target history. M17-01 adds a distinct C++ HAL API
 version 2 core table to the existing installed device header. Native v2 tables

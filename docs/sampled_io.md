@@ -1,9 +1,11 @@
 # Sampled I/O and portable loopback
 
 M21-04 adds a portable RT0 sampled-I/O contract on top of the admitted M21-03
-CPU/device cross-rate payload path. It is an additive C++ API. The stable C
-ABI, HAL versions, artifact schemas, support matrices, and release version do
-not change.
+CPU/device cross-rate payload path. M21-05 records its publication, selection,
+freshness, substitution, and acknowledged-safety outcomes in a separate closed
+action schema and can replay them only through deterministic mock/loopback
+backends. These are additive C++ APIs; stable ABIs and prior schemas do not
+change.
 
 ## Channel contract
 
@@ -66,7 +68,11 @@ template, loopback preserves its sequence, release generation, and trigger
 sequence rather than retaining a differently rated source channel's values.
 It owns no thread and allocates nothing after construction.
 
+M21-05 adds a fixed instance-local logical-action log to the loopback. Accepted
+and rejected submissions and terminal outcomes retain deterministic identities;
+inspection is bounded, and reset is allowed only after shutdown. No mutable
+global state, hidden thread, process observation, or sleep timing participates.
+
 This is fake software loopback evidence. It does not establish DAC, DAQ, CAN,
 IIO, XDMA, CUDA, electrical scaling, physical trigger/sample-clock accuracy,
-HIL, controlled latency, RT1, or RT2 behavior. M21-05 still owns replay,
-telemetry, watchdog, overload, and reusable conformance closure.
+HIL, controlled latency, RT1, or RT2 behavior.

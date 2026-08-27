@@ -4,6 +4,7 @@
 
 #include "rt/src/sampled_io.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -405,6 +406,19 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     config.device_completion_batch = 4;
     ASSERT_EQ(runtime.configure(config), rt::Status::ok);
     ASSERT_EQ(runtime.set_rate_execution_policy({6}), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.set_mixed_rate_closure_policy({
+            42,
+            128,
+            0,
+            0,
+            0,
+            rt::MixedRateOverflowPolicy::overwrite_committed,
+            false,
+            true,
+            {},
+        }),
+        rt::Status::ok);
     rt::DeviceBackendHandle backend_handle;
     ASSERT_EQ(runtime.register_device_backend(
         backend.hal_v2_registration(), backend_handle), rt::Status::ok);
@@ -651,6 +665,25 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     EXPECT_EQ(state.second_publish_status, rt::Status::invalid_state);
     ASSERT_TRUE(runtime.sampled_io_channel_status(state.output, output_status));
     EXPECT_EQ(output_status.overruns, 1u);
+    rt::MixedRateActionCursor action_cursor;
+    std::array<rt::MixedRateActionRecord, 128> actions{};
+    rt::MixedRateActionReadResult action_read;
+    ASSERT_EQ(
+        runtime.read_mixed_rate_actions(
+            action_cursor, actions, action_read),
+        rt::Status::ok);
+    EXPECT_EQ(action_read.lost_records, 0u);
+    EXPECT_TRUE(std::any_of(
+        actions.begin(),
+        actions.begin() +
+            static_cast<std::ptrdiff_t>(action_read.records_read),
+        [](const rt::MixedRateActionRecord& action) {
+            return action.action == rt::MixedRateActionId::sampled_publish &&
+                action.reason == rt::MixedRateActionReason::overrun &&
+                action.stage == rt::MixedRateActionStage::terminal &&
+                action.terminal_status == static_cast<std::int32_t>(
+                    rt::Status::capacity_exceeded);
+        }));
     ASSERT_EQ(backend.inject_next(
         rt::SampledIoLoopbackFault::completion_error), rt::Status::ok);
     EXPECT_EQ(runtime.stop(), rt::Status::device_error);
@@ -661,6 +694,26 @@ TEST(SampledIo, RuntimeLoopbackAcknowledgesSafeAndPublishesTerminalInput) {
     ASSERT_TRUE(runtime.sampled_io_channel_status(state.output, output_status));
     EXPECT_EQ(output_status.safety_state,
               rt::SampledIoSafetyState::shutdown_acknowledged);
+    ASSERT_EQ(
+        runtime.read_mixed_rate_actions(
+            action_cursor, actions, action_read),
+        rt::Status::ok);
+    bool saw_failed_stop = false;
+    bool saw_successful_stop = false;
+    for (std::size_t index = 0; index < action_read.records_read; ++index) {
+        const auto& action = actions[index];
+        if (action.action != rt::MixedRateActionId::runtime_stop) {
+            continue;
+        }
+        saw_failed_stop = saw_failed_stop ||
+            action.reason == rt::MixedRateActionReason::cleanup_pending;
+        saw_successful_stop = saw_successful_stop ||
+            (action.reason == rt::MixedRateActionReason::normal &&
+             action.terminal_status == static_cast<std::int32_t>(
+                 rt::Status::ok));
+    }
+    EXPECT_TRUE(saw_failed_stop);
+    EXPECT_TRUE(saw_successful_stop);
     EXPECT_GE(backend.stats().frames_copied, 4u);
 }
 

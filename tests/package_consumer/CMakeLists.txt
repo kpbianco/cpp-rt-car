@@ -51,6 +51,9 @@ target_link_libraries(
 add_executable(rtfw_consumer_loopback loopback_consumer.cpp)
 target_link_libraries(rtfw_consumer_loopback PRIVATE rtfw::runtime)
 
+add_executable(rtfw_consumer_mixed_rate mixed_rate_consumer.cpp)
+target_link_libraries(rtfw_consumer_mixed_rate PRIVATE rtfw::runtime)
+
 add_executable(rtfw_consumer_extension_c extension_consumer.c)
 target_link_libraries(
     rtfw_consumer_extension_c PRIVATE rtfw::runtime)
@@ -129,6 +132,7 @@ add_test(NAME installed_c_shared_compat COMMAND rtfw_consumer_shared_compat)
 add_test(NAME installed_c_static_compat COMMAND rtfw_consumer_static_compat)
 add_test(NAME installed_cpp_runtime COMMAND rtfw_consumer_cpp)
 add_test(NAME installed_loopback COMMAND rtfw_consumer_loopback)
+add_test(NAME installed_mixed_rate COMMAND rtfw_consumer_mixed_rate)
 add_test(NAME installed_extension_c COMMAND rtfw_consumer_extension_c)
 add_test(NAME installed_extension_cpp COMMAND rtfw_consumer_extension_cpp)
 add_test(NAME installed_cpp_compat COMMAND rtfw_consumer_cpp_compat)

@@ -243,6 +243,27 @@ TEST(LoopbackBackend, TransfersCompleteSampledFrameAndRewritesIdentity) {
     EXPECT_EQ(
         registration.api.shutdown(registration.api.instance),
         rt::HalV2Status::ok);
+    const auto logical_count = backend.logical_action_count();
+    ASSERT_GT(logical_count, 0u);
+    rt::SampledIoLoopbackLogicalAction previous{};
+    for (std::size_t index = 0; index < logical_count; ++index) {
+        rt::SampledIoLoopbackLogicalAction action{};
+        ASSERT_TRUE(backend.logical_action_at(index, action));
+        EXPECT_EQ(action.sequence, index);
+        EXPECT_NE(action.content_identity, 0u);
+        EXPECT_TRUE(std::all_of(
+            action.reserved.begin(), action.reserved.end(),
+            [](std::byte value) { return value == std::byte{0}; }));
+        if (index != 0) {
+            EXPECT_LT(previous.sequence, action.sequence);
+        }
+        previous = action;
+    }
+    EXPECT_FALSE(backend.logical_action_at(logical_count, previous));
+    EXPECT_EQ(backend.stats().logical_actions, logical_count);
+    EXPECT_EQ(backend.reset_logical_actions(), rt::Status::ok);
+    EXPECT_EQ(backend.logical_action_count(), 0u);
+    EXPECT_EQ(backend.stats().logical_actions, 0u);
 }
 
 TEST(LoopbackBackend, ConfigurationIsBoundedAndInstanceLocal) {

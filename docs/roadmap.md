@@ -1,8 +1,9 @@
 # RTFW Completion Roadmap
 
-M21-01 through M21-03 are merged. M21-04 is active for portable sampled-I/O,
-acknowledged safe output, and installed software loopback. M21-05 remains the
-separate overload/replay/telemetry/watchdog/conformance closure batch.
+M21-01 through M21-04 are merged. M21-05 is the active implementation
+candidate for overload, logical actions, checkpoint/replay, watchdog identity,
+loopback hooks, and reusable conformance. M21/CAP-M21 remain incomplete until
+its hosted/human gates pass and it merges.
 
 The roadmap converts the [product contract](product_contract.md) into
 dependency-ordered milestones. A milestone is complete only when its exit gates
@@ -43,7 +44,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M18 | Planned | M18-01 offline schemas/tools implemented; named NVIDIA, XDMA, combined, RT1, and optional RT2 campaigns remain |
 | M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
 | M20 | In progress | M20-PRE-01 is merged with deterministic host-independent fuzz, static, dependency, candidate-SBOM/provenance, strict-manifest, offline-fixture, and relocated-package assurance without signing or release; CAP-M20 remains open |
-| M21 | In progress | M21-01 adds the admitted HAL-v2 command-batch model; M21-02 adds existing-lane active dispatch/completion, independent overlap, dependency barriers, and timeout quarantine; M21-03 adds explicit CPU/device cross-rate payloads; sampled I/O, replay, and conformance remain M21-04 through M21-05 |
+| M21 | In progress | M21-01 through M21-04 are merged; M21-05 has an implementation candidate for fixed logical actions, conditional checkpoint state, deterministic active replay, and reusable public-surface conformance, pending hosted/human gates and merge |
 
 ## M0 — Product contract and truth reset
 
@@ -774,7 +775,9 @@ direct dependency slices, independent in-flight overlap, exact release
 tickets, deadline/budget timeout clamping, and late-completion quarantine.
 M21-03 is merged and adds explicit CPU/device cross-rate payload selectors,
 disjoint slot subranges, Runtime-only materialization, and terminal-success
-publication. M21-04 is the active generic sampled-I/O and safe-state loopback
-batch; M21-05 closes overload, replay, and conformance.
+publication. M21-04 is merged with generic sampled I/O, safe states, and the
+installed loopback. M21-05 is the active closure candidate for fixed logical
+actions, conditional checkpoint state, deterministic active replay, loopback
+action hooks, and reusable installed-surface conformance.
 Portable evidence does not qualify physical CUDA, XDMA, DAC/DAQ, HIL, RT1, or
 RT2 behavior.

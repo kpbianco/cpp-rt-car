@@ -1,8 +1,9 @@
 # Real-Time Readiness Gates
 
-M21-04 is portable RT0 only. Fixed-capacity copies and direct indexes add no
-active allocation, blocking mutex, file/network I/O, host-lane vendor call, or
-hidden thread. Loopback evidence does not promote physical or RT readiness.
+M21-05 is portable RT0 only. Fixed action/replay storage and direct indexes add
+no active allocation, blocking mutex, file/network I/O, host-lane vendor call,
+or hidden thread. Deterministic loopback replay does not promote physical or
+RT readiness.
 
 This checklist is a release/qualification gate, not a feature inventory. RTFW
 1.2 has not completed any end-to-end RT2 qualification.
@@ -218,6 +219,12 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - [x] M21-03 adds explicit host-coherent CPU/device payload endpoints,
   disjoint execution-slot subranges, pre-provider input copy, and terminal-
   success-only output publication without a new lane or schema.
-- [ ] M21-04 through M21-05 sampled-I/O, overload/replay, and conformance
-  evidence remains outstanding. Physical
-  CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain separate named gates.
+- [x] M21-04 adds bounded sampled I/O, exact frame policy, acknowledged safe
+  outputs, and the public fixed-capacity HAL-v2 loopback.
+- [x] M21-05 implementation candidate adds fixed logical actions, explicit
+  loss, quiescent conditional checkpoint state, bounded deterministic active
+  replay, exact accounting/identity, loopback hooks, and a public-surface
+  multi-rate conformance fixture without adding an active lane or timing input.
+- [ ] M21/CAP-M21 software completion still requires M21-05 hosted/human gates
+  and merge. Physical CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain
+  separate named gates.

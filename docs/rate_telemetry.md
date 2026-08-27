@@ -1,7 +1,10 @@
 # Rate-action telemetry schema 1
 
-M21-04 adds fixed C++ sampled status counters only. It does not change the
-versioned rate-action or observability schemas; M21-05 owns telemetry closure.
+M21-05 leaves this rate-action schema unchanged and adds a separate C++ mixed-
+rate action schema 1. The new fixed 256-byte record closes device terminal,
+sampled, safety, watchdog/degradation, and stop outcomes; it is documented in
+[determinism_replay.md](determinism_replay.md) because a complete gap-free
+range can also serve the bounded active-replay artifact.
 
 M16-04 adds a C++-only rate-action stream beside the global observability
 surface. Its schema version is 1; global observability remains schema 2 with
@@ -17,6 +20,13 @@ payload and changes no telemetry schema. M21-03 adds fixed C++ cross-rate read
 metadata for producer release/substep, completion status, timestamp domain,
 and timestamp, but no rate-action, global observability, checkpoint, or trace
 schema field.
+
+The M21-05 stream has independent policy, metadata, counters, capacity,
+sequence, and runtime-bound cursor types. Its capacity may be zero: each
+attempt still reserves a sequence and increments the exact drop count. Busy
+slots drop, committed replacement overwrites, and reads report exact gaps.
+Loss never changes dispatch, but makes that transcript replay-ineligible.
+Neither action surface stores sampled payload bytes.
 
 ## Policy and bounds
 

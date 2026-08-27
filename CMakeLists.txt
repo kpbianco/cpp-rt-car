@@ -624,6 +624,8 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/extension_registration.cpp
     rt/src/host_runtime.cpp
     rt/src/memory_policy.cpp
+    rt/src/mixed_rate_actions.cpp
+    rt/src/mixed_rate_replay.cpp
     rt/src/mock_device.cpp
     rt/src/native_platform_preflight.cpp
     rt/src/observability_export.cpp
