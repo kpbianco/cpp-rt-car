@@ -1,5 +1,5 @@
 schema_version: 1
-repository: kpbianco/cpp-rt-car
+repository: tranquilWorks/cpp-rt-car
 product: cpp-rt-car
 profile: assurance
 control_plane:

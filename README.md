@@ -7,8 +7,8 @@ actions, quiescent checkpoints, and deterministic active replay. See
 [`docs/determinism_replay.md`](docs/determinism_replay.md). This is software
 RT0 evidence, not physical HIL.
 
-[![CI](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/ci.yml)
-[![Documentation contract](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml/badge.svg)](https://github.com/kpbianco/cpp-rt-car/actions/workflows/docs-contract.yml)
+[![CI](https://github.com/tranquilWorks/cpp-rt-car/actions/workflows/ci.yml/badge.svg)](https://github.com/tranquilWorks/cpp-rt-car/actions/workflows/ci.yml)
+[![Documentation contract](https://github.com/tranquilWorks/cpp-rt-car/actions/workflows/docs-contract.yml/badge.svg)](https://github.com/tranquilWorks/cpp-rt-car/actions/workflows/docs-contract.yml)
 
 RTFW is a C++20 bounded-resource simulation runtime for hosts that need an
 explicit phase/resource graph, fixed-capacity CPU execution, controlled memory,
