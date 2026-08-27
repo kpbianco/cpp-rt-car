@@ -61,6 +61,8 @@ inline constexpr std::uint64_t plant_period_ns = 100'000'000;
 inline constexpr std::uint64_t sensor_period_ns = 150'000'000;
 inline constexpr std::uint64_t controller_period_ns = 225'000'000;
 inline constexpr std::uint64_t supercycle_ns = 900'000'000;
+inline constexpr std::size_t checkpoint_capacity = 64 * 1024;
+inline constexpr std::size_t replay_artifact_capacity = 128 * 1024;
 
 struct ManualClock final : rt::RuntimeClock {
     std::uint64_t now = 1'000;
@@ -265,7 +267,7 @@ inline MixedRateConformanceResult run_mixed_rate_conformance(
     config.device_buffer_capacity = 1;
     config.device_outstanding_capacity = 8;
     config.device_completion_batch = 8;
-    config.snapshot_max_bytes = 256 * 1024;
+    config.snapshot_max_bytes = detail::checkpoint_capacity;
     config.memory_budget_bytes = 8 * 1024 * 1024;
     if (runtime.configure(config) != rt::Status::ok ||
         runtime.set_rate_execution_policy({64, 9, 2, 2, 64}) !=
@@ -274,7 +276,7 @@ inline MixedRateConformanceResult run_mixed_rate_conformance(
             21,
             128,
             128,
-            512 * 1024,
+            detail::replay_artifact_capacity,
             128,
             rt::MixedRateOverflowPolicy::overwrite_committed,
             true,
@@ -674,7 +676,7 @@ inline MixedRateConformanceResult run_mixed_rate_conformance(
         state.plant_output, plant_status) &&
         plant_status.safety_state ==
             rt::SampledIoSafetyState::startup_acknowledged;
-    std::array<std::byte, 256 * 1024> checkpoint{};
+    std::array<std::byte, detail::checkpoint_capacity> checkpoint{};
     rt::ArtifactWriteResult checkpoint_write;
     if (runtime.write_checkpoint(0, checkpoint, checkpoint_write) !=
         rt::Status::ok) {
@@ -764,7 +766,9 @@ inline MixedRateConformanceResult run_mixed_rate_conformance(
                 1,
                 {},
             };
-            std::array<std::byte, 512 * 1024> replay_artifact{};
+            std::array<
+                std::byte,
+                detail::replay_artifact_capacity> replay_artifact{};
             rt::ArtifactWriteResult replay_write;
             auto replay_status = runtime.write_active_replay_artifact(
                 std::span<const std::byte>(checkpoint).first(
@@ -942,7 +946,9 @@ inline MixedRateConformanceResult run_mixed_rate_conformance(
         1,
         {},
     };
-    std::array<std::byte, 512 * 1024> replay_artifact{};
+    std::array<
+        std::byte,
+        detail::replay_artifact_capacity> replay_artifact{};
     rt::ArtifactWriteResult replay_write;
     auto replay_status = runtime.write_active_replay_artifact(
         std::span<const std::byte>(checkpoint).first(
