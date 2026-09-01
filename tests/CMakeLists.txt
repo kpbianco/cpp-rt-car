@@ -120,6 +120,8 @@ if (SIM_GTEST_AVAILABLE)
         test_loopback_backend.cpp
         test_live_control_mailbox.cpp
         test_live_control_actions.cpp
+        test_live_control_sdk.cpp
+        test_live_control_stress.cpp
         test_mixed_rate_actions.cpp
         test_mixed_rate_replay.cpp
         test_mixed_rate_conformance.cpp
@@ -224,8 +226,18 @@ if (SIM_GTEST_AVAILABLE)
     add_test(
         NAME m22_live_control_mailbox
         COMMAND simcore_tests
-            --gtest_filter=LiveControlMailbox.*:LiveControlActions.*:HostRuntime.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*)
+            --gtest_filter=LiveControlSdk.*:LiveControlStress.*:LiveControlMailbox.*:LiveControlActions.*:HostRuntime.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*)
     set_tests_properties(m22_live_control_mailbox PROPERTIES TIMEOUT 60)
+    add_test(
+        NAME m22_live_control_sdk
+        COMMAND simcore_tests
+            --gtest_filter=LiveControlSdk.*)
+    set_tests_properties(m22_live_control_sdk PROPERTIES TIMEOUT 30)
+    add_test(
+        NAME m22_live_control_stress
+        COMMAND simcore_tests
+            --gtest_filter=LiveControlStress.*)
+    set_tests_properties(m22_live_control_stress PROPERTIES TIMEOUT 120)
     add_test(
         NAME m19_extension_registration
         COMMAND simcore_tests

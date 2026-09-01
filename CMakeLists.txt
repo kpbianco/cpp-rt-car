@@ -1064,6 +1064,7 @@ install(
         rt/include/rt/profile.hpp
         rt/include/rt/runtime.hpp
         rt/include/rt/loopback_backend.hpp
+        rt/include/rt/live_control.hpp
         rt/include/rt/status.hpp
         rt/include/rt/version.hpp
         rt/include/rt/cuda_backend.hpp

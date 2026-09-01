@@ -47,11 +47,16 @@ target_link_libraries(
         rtfw_xdma_backend)
 rtfw_enable_project_warnings(sample_cpu_gpu_fpga_cpu)
 
+add_executable(sample_live_control_typed live_control_typed.cpp)
+target_link_libraries(sample_live_control_typed PRIVATE rtfw_runtime)
+rtfw_enable_project_warnings(sample_live_control_typed)
+
 list(APPEND RTFW_SAMPLE_TEST_TARGETS
     sample_embed_c
     sample_embed_c_static
     sample_embed_cpp
     sample_device_mock
+    sample_live_control_typed
     sample_cpu_gpu_fpga_cpu)
 
 if (RTFW_ENABLE_CUDA)

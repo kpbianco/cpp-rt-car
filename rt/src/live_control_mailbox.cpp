@@ -466,9 +466,12 @@ void hash_target(
         alignment <= live_control_payload_alignment_limit &&
         (alignment & (alignment - 1u)) == 0 &&
         (payload.size() % alignment) == 0;
-    const auto zero_payload_valid =
-        (update.update_kind == LiveControlUpdateKind::clear_fault) ==
-        payload.empty();
+    // The raw M22-01 empty clear-fault form remains valid. M22-04 also permits
+    // a canonical typed clear-fault payload so an application can carry a
+    // fixed fault identity and authorization value through the same envelope
+    // and digest checks as every other typed update.
+    const auto zero_payload_valid = !payload.empty() ||
+        update.update_kind == LiveControlUpdateKind::clear_fault;
     return update.schema_version == live_control_schema_version &&
         update.record_size == sizeof(LiveControlUpdateRecord) &&
         update.mailbox_sequence == 0 &&

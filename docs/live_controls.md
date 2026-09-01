@@ -9,6 +9,33 @@ step transaction, restores the step-entry Runtime generation after execution
 failure, emits a distinct payload-free action stream, checkpoints Runtime-owned
 mailbox/generation state, and replays explicitly retained generations. Payloads
 remain opaque canonical bytes and are never parsed or implicitly transferred.
+M22-04 adds the optional installed `<rt/live_control.hpp>` source layer for
+fixed application-owned typed data/config payloads. It does not replace or
+hide any raw operation. See [live_control_sdk.md](live_control_sdk.md).
+
+## Typed source layer
+
+The M22-04 typed payload begins with one exact 32-byte canonical little-endian
+envelope: `RTLC` magic, envelope version 1, complete encoded byte count,
+positive application type and schema identities, one closed
+`LiveControlUpdateKind`, and two zero reserved words. A positive compile-time
+fixed application body follows. It is ordinary application payload content,
+not a new Runtime checkpoint, replay, action, telemetry, profile, ABI, device,
+extension, or HAL schema.
+
+Applications specialize `LiveControlTypeTraits<T>` and encode individual
+fields; copying a native C++ object representation is outside the contract.
+`LiveControlTypedPayload<T>` remains caller-owned. Host/rate builders fill one
+ordinary raw record and never call Runtime, retry, retarget, advance a producer
+sequence, or own teardown. Decode validates raw kind/extent/digest and the
+complete envelope/body before assigning caller output. The raw empty clear-
+fault form remains valid; a fixed typed clear-fault payload is additive.
+
+Semantic validation and variable-length parsing belong off lane. Runtime
+callbacks may perform only bounded fixed-layout validation/copy: no allocation,
+exceptions, text parsing, authentication, filesystem/network I/O, logging,
+vendor calls, or implicit side effects. Runtime rollback still covers only its
+immutable generation and never application/backend/external/physical effects.
 
 ## Configuration and ownership
 

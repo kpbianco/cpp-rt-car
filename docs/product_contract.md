@@ -5,8 +5,10 @@ fixed-capacity live-control staging substrate; M22-02 adds exact frame/rate
 boundary publication and callback-local immutable views. M22-03 adds bounded
 Runtime-generation rollback, payload-free action telemetry, conditional
 checkpoint state, and exact-boundary replay using an explicit trusted artifact.
-Application-owned plant, vehicle, controller, payload parsing, apply semantics,
-and side-effect rollback remain outside the core. See
+M22-04 adds an optional header-only fixed typed-payload source layer, domain
+sample, package coverage, and deterministic portable stress without hiding the
+raw Runtime API. Application-owned plant, vehicle, variable-length parsing,
+apply semantics, and side-effect rollback remain outside the core. See
 [live_controls.md](live_controls.md); Runtime rollback is not application or
 physical recovery, HIL, or electrical/timing qualification.
 
@@ -129,7 +131,14 @@ checkpoint record, and a distinct bounded replay artifact that embeds unchanged
 checkpoint and execution artifacts. Complete validation precedes restore and
 deterministic backend restrictions remain unchanged. It cannot undo arbitrary
 application, backend, external-process, or physical-device side effects and
-does not complete M22/CAP-M22.
+does not by itself complete M22/CAP-M22. M22-04 adds exactly one optional
+installed C++ header, `rt/live_control.hpp`, with a fixed canonical little-
+endian application envelope, compile-time fixed codecs, caller-owned storage,
+transparent host/rate raw-record builders, and bounded transactional decode.
+The supported sample and deterministic stress/package gates close the portable
+software capability only after hosted and human review pass and the candidate
+merges. No compiled ABI, existing Runtime/artifact/telemetry/profile schema,
+support matrix, release version, or hardware/RT claim changes.
 
 ## Claim policy
 

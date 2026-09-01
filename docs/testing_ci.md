@@ -10,6 +10,17 @@ GCC/Clang/MSVC, ASan/UBSan/TSan,
 determinism, static, package, C ABI, and retained M16/M17/M21 gates remain
 mandatory before merge.
 
+M22-04 focused gates add exact envelope bytes and mutation rejection, caller-
+output transactionality, compile-time codec rejection, transparent host/rate
+builders, typed clear-fault/raw-result behavior, the 65,536-byte maximum typed
+payload, absolute 64-mailbox/256-producer/65,536-record finalization, checked
+1 GiB policy arithmetic without forced physical commitment, one-attempt
+concurrent admission, exact full-occupancy/reclamation/action-loss counts,
+rollback/watchdog orthogonality, 24 fresh lifecycles, eight concurrent isolated
+Runtimes, no-allocation construction/decode, the domain sample, standalone
+header compilation, and installed/relocated package consumption. Assertions
+use finite operation counts, not sleeps or timing tolerances.
+
 M21-05 focused gates cover action-ring bounds/loss, active-artifact parsing and
 mutation rejection, deterministic device-active replay, public loopback logical
 hooks, a multi-rate plant/sensor/controller/actuator fixture, exact accounting,

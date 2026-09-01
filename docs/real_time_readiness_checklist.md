@@ -7,6 +7,12 @@ wait, blocking mutex, file/network I/O, extra application callback, out-of-lane
 vendor call, or hidden thread. This does not qualify producer/commit/rollback
 latency, reverse arbitrary side effects, or establish physical application.
 
+M22-04 adds no Runtime lane or storage. Typed construction and decode are
+fixed-extent, allocation-free, `noexcept` operations over caller-owned spans.
+Callback use is limited to bounded envelope/digest/body validation and whole-
+value copy; variable-length parsing, authentication, logging, file/network I/O,
+and vendor operations remain off lane.
+
 M21-05 is portable RT0 only. Fixed action/replay storage and direct indexes add
 no active allocation, blocking mutex, file/network I/O, host-lane vendor call,
 or hidden thread. Deterministic loopback replay does not promote physical or
@@ -237,7 +243,10 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
   named gates.
 - [x] M22-01 live-control policy and bounded mailbox staging are merged.
 - [x] M22-02 exact-boundary commit is merged with hosted and human gates.
-- [ ] M22-03 Runtime-generation rollback, action, checkpoint, and replay closure
-  remains a candidate until hosted sanitizer, concurrency, package, parser,
-  determinism, and human ownership/API/claim gates pass. Typed SDK/stress
-  closure and all physical/RT gates remain open.
+- [x] M22-03 Runtime-generation rollback, action, checkpoint, and replay closure
+  is merged with hosted and human gates.
+- [ ] M22-04 typed SDK/sample/package/stress closure remains a candidate until
+  hosted sanitizer, concurrency, package, determinism, and human SDK/format/
+  callback/privacy/claim gates pass and the candidate merges. Every physical,
+  HIL, controlled-latency, RT1, RT2, executable/shared-library/Unreal, release,
+  deployment, and production gate remains open.
