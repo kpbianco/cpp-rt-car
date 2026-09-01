@@ -1,9 +1,9 @@
 # RTFW Completion Roadmap
 
-M21-01 through M21-04 are merged. M21-05 is the active implementation
-candidate for overload, logical actions, checkpoint/replay, watchdog identity,
-loopback hooks, and reusable conformance. M21/CAP-M21 remain incomplete until
-its hosted/human gates pass and it merges.
+M21-01 through M21-05 are merged and close the portable M21 software path.
+M22-01 is the active implementation candidate for canonical live-control
+schemas, bounded Runtime-owned mailboxes, generation-safe producers, copied
+payload staging, deterministic inspection, and exact identity/accounting.
 
 The roadmap converts the [product contract](product_contract.md) into
 dependency-ordered milestones. A milestone is complete only when its exit gates
@@ -44,7 +44,8 @@ pass; file presence or a passing smoke test is not sufficient.
 | M18 | Planned | M18-01 offline schemas/tools implemented; named NVIDIA, XDMA, combined, RT1, and optional RT2 campaigns remain |
 | M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
 | M20 | In progress | M20-PRE-01 is merged with deterministic host-independent fuzz, static, dependency, candidate-SBOM/provenance, strict-manifest, offline-fixture, and relocated-package assurance without signing or release; CAP-M20 remains open |
-| M21 | In progress | M21-01 through M21-04 are merged; M21-05 has an implementation candidate for fixed logical actions, conditional checkpoint state, deterministic active replay, and reusable public-surface conformance, pending hosted/human gates and merge |
+| M21 | Complete | M21-01 through M21-05 are merged with fixed logical actions, conditional checkpoint state, deterministic active replay, and reusable public-surface conformance; physical/RT qualification remains separate |
+| M22 | In progress | M22-01 live-control schema and bounded-mailbox staging candidate; boundary commit, rollback/replay/telemetry, typed SDK closure, and physical/RT validation remain later batches |
 
 ## M0 — Product contract and truth reset
 
@@ -776,8 +777,33 @@ tickets, deadline/budget timeout clamping, and late-completion quarantine.
 M21-03 is merged and adds explicit CPU/device cross-rate payload selectors,
 disjoint slot subranges, Runtime-only materialization, and terminal-success
 publication. M21-04 is merged with generic sampled I/O, safe states, and the
-installed loopback. M21-05 is the active closure candidate for fixed logical
-actions, conditional checkpoint state, deterministic active replay, loopback
-action hooks, and reusable installed-surface conformance.
+installed loopback. M21-05 is merged with fixed logical actions, conditional
+checkpoint state, deterministic active replay, loopback action hooks, and
+reusable installed-surface conformance.
 Portable evidence does not qualify physical CUDA, XDMA, DAC/DAQ, HIL, RT1, or
 RT2 behavior.
+
+## M22 — Transactional live controls
+
+M22-01 is the active schema/mailbox-only candidate. It adds an opt-in copied
+policy, fixed mailbox and producer declarations, generation-safe handles,
+canonical frame/rate-target records, bounded copied payload slots, one-attempt
+reject-new admission, deterministic inspection, and exact identity/accounting.
+It deliberately adds no consumer and changes no execution, artifact,
+telemetry, ABI, support, or qualification contract.
+
+Planned dependent batches:
+
+- M22-02 defines deterministic exact-boundary consumption, ordering, and
+  missed/late/replacement semantics.
+- M22-03 adds rollback plus checkpoint/replay/telemetry integration without
+  weakening existing artifact compatibility.
+- M22-04 adds typed SDK helpers, examples, stress closure, and milestone
+  evidence.
+
+Exit gates require bounded nonblocking ownership, no partial publication,
+complete instance/generation isolation, exact memory and compatibility
+identity, unchanged disabled-path behavior, hosted sanitizer/concurrency and
+package compatibility, and human API/claim review. Portable mailbox evidence
+does not establish physical control, HIL, RT1/RT2, Unreal hot reload, release,
+deployment, or production readiness.

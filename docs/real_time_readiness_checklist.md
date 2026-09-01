@@ -1,5 +1,10 @@
 # Real-Time Readiness Gates
 
+M22-01 is portable RT0 staging only. Fixed mailbox/producer/record/payload
+storage and one-attempt atomic claims add no active allocation, blocking mutex,
+file/network I/O, callback/vendor call, or hidden thread. This does not qualify
+producer latency or update application.
+
 M21-05 is portable RT0 only. Fixed action/replay storage and direct indexes add
 no active allocation, blocking mutex, file/network I/O, host-lane vendor call,
 or hidden thread. Deterministic loopback replay does not promote physical or
@@ -221,10 +226,14 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
   success-only output publication without a new lane or schema.
 - [x] M21-04 adds bounded sampled I/O, exact frame policy, acknowledged safe
   outputs, and the public fixed-capacity HAL-v2 loopback.
-- [x] M21-05 implementation candidate adds fixed logical actions, explicit
+- [x] M21-05 merged closure adds fixed logical actions, explicit
   loss, quiescent conditional checkpoint state, bounded deterministic active
   replay, exact accounting/identity, loopback hooks, and a public-surface
   multi-rate conformance fixture without adding an active lane or timing input.
-- [ ] M21/CAP-M21 software completion still requires M21-05 hosted/human gates
-  and merge. Physical CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain
-  separate named gates.
+- [x] M21/CAP-M21 portable software closure passed hosted/human gates and is
+  merged. Physical CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain separate
+  named gates.
+- [ ] M22-01 live-control policy and bounded mailbox staging remain a candidate
+  until hosted sanitizer/concurrency/package gates and human ownership/API/
+  claim review pass and the batch merges. M22 boundary commit, rollback,
+  replay/telemetry, typed SDK closure, and all physical/RT gates remain open.

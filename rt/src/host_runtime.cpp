@@ -8,6 +8,7 @@
 #include "extension_registration.hpp"
 #include "memory_policy.hpp"
 #include "native_platform_preflight.hpp"
+#include "live_control_mailbox.hpp"
 #include "rate_dispatch.hpp"
 #include "mixed_rate_actions.hpp"
 #include "mixed_rate_replay.hpp"
@@ -93,6 +94,7 @@ static_assert(
     "RTFW_BUILD_ID_STRING exceeds the observability identifier capacity");
 
 std::atomic<std::uint32_t> g_next_graph_owner{1};
+std::atomic<std::uint64_t> g_next_live_control_runtime_id{1};
 thread_local const void* g_active_runtime_callback = nullptr;
 
 std::uint32_t next_graph_owner() noexcept {
@@ -104,6 +106,21 @@ std::uint32_t next_graph_owner() noexcept {
             return candidate;
         }
     }
+}
+
+std::uint64_t next_live_control_runtime_id() noexcept {
+    auto candidate =
+        g_next_live_control_runtime_id.load(std::memory_order_relaxed);
+    while (candidate != std::numeric_limits<std::uint64_t>::max()) {
+        if (g_next_live_control_runtime_id.compare_exchange_weak(
+                candidate,
+                candidate + 1,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed)) {
+            return candidate;
+        }
+    }
+    return 0;
 }
 
 bool checked_time_add(
@@ -1470,6 +1487,97 @@ struct Runtime::Impl {
                 mixed_rate_closure_policy.require_deterministic_backends);
             hash_u64(hash, mixed_rate_closure_policy.maximum_actions_per_step);
         }
+        if (live_control_policy_set) {
+            hash_u64(hash, 0x4d32322d6d626f78ull);
+            hash_u64(hash, live_control_schema_version);
+            hash_u64(hash, sizeof(LiveControlPolicy));
+            hash_u64(hash, sizeof(LiveControlMailboxRegistration));
+            hash_u64(hash, sizeof(LiveControlProducerRegistration));
+            hash_u64(hash, sizeof(LiveControlProducerHandle));
+            hash_u64(hash, sizeof(LiveControlUpdateRecord));
+            hash_u64(hash, sizeof(LiveControlMailboxInfo));
+            hash_u64(hash, alignof(LiveControlPolicy));
+            hash_u64(hash, alignof(LiveControlMailboxRegistration));
+            hash_u64(hash, alignof(LiveControlProducerRegistration));
+            hash_u64(hash, alignof(LiveControlProducerHandle));
+            hash_u64(hash, alignof(LiveControlUpdateRecord));
+            hash_u64(hash, alignof(LiveControlMailboxInfo));
+            hash_u64(hash, live_control_payload_canonical_little_endian);
+            hash_u64(hash, live_control_mailbox_capacity_limit);
+            hash_u64(hash, live_control_producer_capacity_limit);
+            hash_u64(hash, live_control_record_capacity_limit);
+            hash_u64(hash, live_control_payload_bytes_limit);
+            hash_u64(hash, live_control_payload_alignment_limit);
+            hash_u64(hash, live_control_total_storage_limit);
+            hash_u64(hash, live_control_policy.policy_identity);
+            hash_u64(hash, live_control_policy.mailbox_capacity);
+            hash_u64(hash, live_control_policy.producer_capacity);
+            hash_u64(hash, live_control_policy.record_capacity);
+            hash_u64(hash, live_control_policy.payload_bytes_per_record);
+            hash_u64(hash, live_control_policy.total_payload_storage_bytes);
+            hash_u64(hash, static_cast<std::uint64_t>(
+                live_control_policy.admission_policy));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                live_control_policy.reset_rule));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlTargetKind::host_frame));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlTargetKind::rate_release));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlUpdateKind::scenario_parameters));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlUpdateKind::controller_parameters));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlUpdateKind::sensor_calibration));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlUpdateKind::fault_configuration));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlUpdateKind::clear_fault));
+            hash_u64(hash, live_control_mailbox_declarations.size());
+            std::uint64_t previous_mailbox = 0;
+            for (std::size_t emitted = 0;
+                 emitted < live_control_mailbox_declarations.size();
+                 ++emitted) {
+                const LiveControlMailboxRegistration* selected = nullptr;
+                for (const auto& candidate :
+                     live_control_mailbox_declarations) {
+                    if (candidate.mailbox_identity > previous_mailbox &&
+                        (!selected || candidate.mailbox_identity <
+                            selected->mailbox_identity)) {
+                        selected = &candidate;
+                    }
+                }
+                if (!selected) {
+                    break;
+                }
+                hash_u64(hash, selected->mailbox_identity);
+                hash_u64(hash, selected->record_capacity);
+                hash_u64(hash, selected->payload_bytes_per_record);
+                previous_mailbox = selected->mailbox_identity;
+            }
+            hash_u64(hash, live_control_producer_declarations.size());
+            std::uint64_t previous_producer = 0;
+            for (std::size_t emitted = 0;
+                 emitted < live_control_producer_declarations.size();
+                 ++emitted) {
+                const LiveControlProducerRegistration* selected = nullptr;
+                for (const auto& candidate :
+                     live_control_producer_declarations) {
+                    if (candidate.producer_identity > previous_producer &&
+                        (!selected || candidate.producer_identity <
+                            selected->producer_identity)) {
+                        selected = &candidate;
+                    }
+                }
+                if (!selected) {
+                    break;
+                }
+                hash_u64(hash, selected->mailbox_identity);
+                hash_u64(hash, selected->producer_identity);
+                hash_u64(hash, selected->first_sequence);
+                previous_producer = selected->producer_identity;
+            }
+        }
         if (!extensions.empty()) {
             hash_u64(hash, 0x4d31392d65787431ull);
             hash_u64(hash, extensions.size());
@@ -1532,24 +1640,31 @@ struct Runtime::Impl {
 
     [[nodiscard]] std::uint64_t compute_config_id() const noexcept {
         const auto base = config_identifier(config);
-        if (extensions.empty()) {
+        if (extensions.empty() && !live_control_policy_set) {
             return base;
         }
         std::uint64_t hash = kFnvOffset;
         hash_u64(hash, base);
-        hash_u64(hash, 0x4d31392d63666731ull);
-        for (const auto& extension_ptr : extensions) {
-            const auto& extension = *extension_ptr;
-            hash_string(hash, identifier_view(extension.name));
-            hash_string(hash, identifier_view(extension.version));
-            hash_u64(hash, extension.negotiated_abi_version);
-            for (std::size_t index = 0;
-                 index < extension.service_count; ++index) {
-                const auto& service = extension.service_descriptors[index];
-                hash_string(hash, std::string_view(service.name));
-                hash_string(hash, std::string_view(service.interface_name));
-                hash_u64(hash, service.interface_version);
+        if (!extensions.empty()) {
+            hash_u64(hash, 0x4d31392d63666731ull);
+            for (const auto& extension_ptr : extensions) {
+                const auto& extension = *extension_ptr;
+                hash_string(hash, identifier_view(extension.name));
+                hash_string(hash, identifier_view(extension.version));
+                hash_u64(hash, extension.negotiated_abi_version);
+                for (std::size_t index = 0;
+                     index < extension.service_count; ++index) {
+                    const auto& service = extension.service_descriptors[index];
+                    hash_string(hash, std::string_view(service.name));
+                    hash_string(hash, std::string_view(service.interface_name));
+                    hash_u64(hash, service.interface_version);
+                }
             }
+        }
+        if (live_control_policy_set) {
+            hash_u64(hash, 0x4d32322d63666731ull);
+            hash_u64(hash, live_control_policy.policy_identity);
+            hash_u64(hash, compute_graph_id());
         }
         return hash;
     }
@@ -5764,6 +5879,9 @@ struct Runtime::Impl {
     bool rate_execution_policy_set = false;
     MixedRateClosurePolicy mixed_rate_closure_policy{};
     bool mixed_rate_closure_policy_set = false;
+    LiveControlPolicy live_control_policy{};
+    bool live_control_policy_set = false;
+    bool live_control_policy_configured = false;
     CpuMemoryPolicy cpu_memory_policy{};
     CpuMemoryPolicyReport cpu_memory_policy_report{};
     bool cpu_memory_policy_report_available = false;
@@ -5803,6 +5921,10 @@ struct Runtime::Impl {
     std::vector<detail::CrossRateChannelSpec> cross_rate_channels;
     detail::CompiledCrossRatePlan compiled_cross_rate_plan;
     std::vector<detail::SampledIoChannelSpec> sampled_io_channels;
+    std::vector<LiveControlMailboxRegistration>
+        live_control_mailbox_declarations;
+    std::vector<LiveControlProducerRegistration>
+        live_control_producer_declarations;
     detail::CompiledSampledIoPlan compiled_sampled_io_plan;
     std::vector<SampledIoChannelStatus> sampled_io_statuses;
     std::vector<ActiveChannelState> active_channel_states;
@@ -5837,6 +5959,7 @@ struct Runtime::Impl {
     std::unique_ptr<detail::RateTelemetryRing> rate_telemetry;
     std::unique_ptr<detail::RateCounters> rate_counters;
     std::unique_ptr<detail::MixedRateActionRing> mixed_rate_actions;
+    std::unique_ptr<detail::LiveControlMailboxSet> live_control_mailboxes;
     std::uint64_t mixed_rate_checkpoint_sequence = 0;
     const detail::ActiveReplayArtifactView* active_replay_view = nullptr;
     std::size_t active_replay_expected_action = 0;
@@ -5890,6 +6013,23 @@ void detail::RuntimeThreadPolicyTestAccess::set_provider(
     if (runtime.impl_ &&
         runtime.impl_->state == RuntimeState::configuring) {
         runtime.impl_->thread_policy = &provider;
+    }
+}
+
+bool detail::RuntimeLiveControlTestAccess::claim(
+    Runtime& runtime,
+    std::uint64_t mailbox_identity) noexcept {
+    return runtime.impl_ && runtime.impl_->live_control_mailboxes &&
+        runtime.impl_->live_control_mailboxes->claim_for_test(
+            mailbox_identity);
+}
+
+void detail::RuntimeLiveControlTestAccess::release(
+    Runtime& runtime,
+    std::uint64_t mailbox_identity) noexcept {
+    if (runtime.impl_ && runtime.impl_->live_control_mailboxes) {
+        runtime.impl_->live_control_mailboxes->release_for_test(
+            mailbox_identity);
     }
 }
 
@@ -6065,6 +6205,59 @@ Status Runtime::set_mixed_rate_closure_policy(
     }
     impl_->mixed_rate_closure_policy = policy;
     impl_->mixed_rate_closure_policy_set = true;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_live_control_policy(
+    const LiveControlPolicy& policy) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring ||
+        impl_->live_control_policy_configured) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control policy is frozen or already set");
+    }
+    const auto reserved_is_zero = std::all_of(
+        policy.reserved.begin(), policy.reserved.end(),
+        [](std::byte value) { return value == std::byte{0}; });
+    const auto header_valid =
+        policy.schema_version == live_control_schema_version &&
+        policy.struct_size == sizeof(LiveControlPolicy) &&
+        policy.admission_policy == LiveControlAdmissionPolicy::reject_new &&
+        policy.reset_rule == LiveControlResetRule::discard_with_runtime &&
+        reserved_is_zero;
+    const auto disabled = policy.policy_identity == 0 &&
+        policy.mailbox_capacity == 0 && policy.producer_capacity == 0 &&
+        policy.record_capacity == 0 &&
+        policy.payload_bytes_per_record == 0 &&
+        policy.total_payload_storage_bytes == 0;
+    const auto enabled = policy.policy_identity != 0 &&
+        policy.mailbox_capacity != 0 &&
+        policy.mailbox_capacity <= live_control_mailbox_capacity_limit &&
+        policy.producer_capacity != 0 &&
+        policy.producer_capacity <= live_control_producer_capacity_limit &&
+        policy.record_capacity != 0 &&
+        policy.record_capacity <= live_control_record_capacity_limit &&
+        policy.payload_bytes_per_record != 0 &&
+        policy.payload_bytes_per_record <= live_control_payload_bytes_limit &&
+        policy.total_payload_storage_bytes != 0 &&
+        policy.total_payload_storage_bytes <= live_control_total_storage_limit &&
+        policy.total_payload_storage_bytes <=
+            std::numeric_limits<std::size_t>::max();
+    if (!header_valid || (!disabled && !enabled)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "live-control policy fields or capacities are invalid");
+    }
+    impl_->live_control_policy = policy;
+    impl_->live_control_policy_set = enabled;
+    impl_->live_control_policy_configured = true;
     impl_->clear_error();
     return Status::ok;
 }
@@ -7956,6 +8149,161 @@ Status Runtime::replace_sampled_io_channel(
     return Status::ok;
 }
 
+Status Runtime::register_live_control_mailbox(
+    const LiveControlMailboxRegistration& registration) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring ||
+        !impl_->live_control_policy_set) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control mailbox registration requires an enabled configuring policy");
+    }
+    const auto reserved_is_zero = std::all_of(
+        registration.reserved.begin(), registration.reserved.end(),
+        [](std::byte value) { return value == std::byte{0}; });
+    if (registration.schema_version != live_control_schema_version ||
+        registration.struct_size != sizeof(LiveControlMailboxRegistration) ||
+        registration.mailbox_identity == 0 ||
+        registration.record_capacity == 0 ||
+        registration.payload_bytes_per_record == 0 ||
+        registration.payload_bytes_per_record >
+            impl_->live_control_policy.payload_bytes_per_record ||
+        !reserved_is_zero) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "live-control mailbox declaration is malformed");
+    }
+    if (impl_->live_control_mailbox_declarations.size() >=
+        impl_->live_control_policy.mailbox_capacity) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "live-control mailbox capacity is exhausted");
+    }
+    if (std::any_of(
+            impl_->live_control_mailbox_declarations.begin(),
+            impl_->live_control_mailbox_declarations.end(),
+            [&](const LiveControlMailboxRegistration& existing) {
+                return existing.mailbox_identity ==
+                    registration.mailbox_identity;
+            })) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "live-control mailbox identity is duplicated");
+    }
+    std::size_t total_records = registration.record_capacity;
+    std::size_t total_payload = 0;
+    if (!detail::checked_multiply(
+            registration.record_capacity,
+            registration.payload_bytes_per_record,
+            total_payload)) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "live-control mailbox storage overflows");
+    }
+    for (const auto& existing :
+         impl_->live_control_mailbox_declarations) {
+        std::size_t existing_payload = 0;
+        if (!detail::checked_add(
+                total_records,
+                existing.record_capacity,
+                total_records) ||
+            !detail::checked_multiply(
+                existing.record_capacity,
+                existing.payload_bytes_per_record,
+                existing_payload) ||
+            !detail::checked_add(
+                total_payload,
+                existing_payload,
+                total_payload)) {
+            return impl_->fail(
+                Status::capacity_exceeded,
+                "live-control mailbox storage overflows");
+        }
+    }
+    if (total_records > impl_->live_control_policy.record_capacity ||
+        total_payload >
+            impl_->live_control_policy.total_payload_storage_bytes) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "live-control mailbox storage exceeds the configured policy");
+    }
+    try {
+        impl_->live_control_mailbox_declarations.push_back(registration);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::register_live_control_producer(
+    const LiveControlProducerRegistration& registration) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring ||
+        !impl_->live_control_policy_set) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control producer registration requires an enabled configuring policy");
+    }
+    if (registration.schema_version != live_control_schema_version ||
+        registration.struct_size != sizeof(LiveControlProducerRegistration) ||
+        registration.mailbox_identity == 0 ||
+        registration.producer_identity == 0 ||
+        registration.first_sequence == 0 ||
+        registration.first_sequence ==
+            std::numeric_limits<std::uint64_t>::max() ||
+        registration.reserved != 0) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "live-control producer declaration is malformed");
+    }
+    if (impl_->live_control_producer_declarations.size() >=
+        impl_->live_control_policy.producer_capacity) {
+        return impl_->fail(
+            Status::capacity_exceeded,
+            "live-control producer capacity is exhausted");
+    }
+    if (std::none_of(
+            impl_->live_control_mailbox_declarations.begin(),
+            impl_->live_control_mailbox_declarations.end(),
+            [&](const LiveControlMailboxRegistration& mailbox) {
+                return mailbox.mailbox_identity ==
+                    registration.mailbox_identity;
+            }) ||
+        std::any_of(
+            impl_->live_control_producer_declarations.begin(),
+            impl_->live_control_producer_declarations.end(),
+            [&](const LiveControlProducerRegistration& existing) {
+                return existing.producer_identity ==
+                    registration.producer_identity;
+            })) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "live-control producer mailbox is missing or identity is duplicated");
+    }
+    try {
+        impl_->live_control_producer_declarations.push_back(registration);
+    } catch (const std::bad_alloc&) {
+        return impl_->fail(Status::resource_exhausted, nullptr);
+    } catch (...) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
 Status Runtime::register_resource(
     std::string_view name,
     ResourceHandle& out_resource) noexcept {
@@ -8327,6 +8675,33 @@ Status Runtime::finalize() noexcept {
         rate_diagnostic);
     if (rate_status != Status::ok) {
         return impl_->fail(rate_status, rate_diagnostic.message);
+    }
+
+    std::unique_ptr<detail::LiveControlMailboxSet> live_control_mailboxes;
+    if (impl_->live_control_policy_set) {
+        const auto live_control_runtime_id =
+            next_live_control_runtime_id();
+        if (live_control_runtime_id == 0) {
+            return impl_->fail(
+                Status::resource_exhausted,
+                "live-control Runtime identity is exhausted");
+        }
+        const char* live_control_diagnostic = nullptr;
+        const auto live_control_status = detail::LiveControlMailboxSet::create(
+            impl_->live_control_policy,
+            live_control_runtime_id,
+            1,
+            impl_->config.memory_budget_bytes,
+            impl_->live_control_mailbox_declarations,
+            impl_->live_control_producer_declarations,
+            compiled_rate_plan.releases,
+            live_control_mailboxes,
+            live_control_diagnostic);
+        if (live_control_status != Status::ok) {
+            return impl_->fail(
+                live_control_status,
+                live_control_diagnostic);
+        }
     }
 
     detail::CompiledDeviceRatePlan compiled_device_rate_plan;
@@ -8843,6 +9218,16 @@ Status Runtime::finalize() noexcept {
     memory_plan.rate_domain_count = compiled_rate_plan.domains.size();
     memory_plan.rate_binding_count = compiled_rate_plan.bindings.size();
     memory_plan.reference_release_count = compiled_rate_plan.releases.size();
+    if (live_control_mailboxes) {
+        memory_plan.live_control_mailbox_count =
+            live_control_mailboxes->mailbox_count();
+        memory_plan.live_control_producer_count =
+            live_control_mailboxes->producer_count();
+        memory_plan.live_control_record_capacity =
+            live_control_mailboxes->record_capacity();
+        memory_plan.live_control_payload_storage_bytes =
+            live_control_mailboxes->payload_storage_bytes();
+    }
     memory_plan.device_rate_phase_count =
         compiled_device_rate_plan.phases.size();
     memory_plan.device_rate_command_count =
@@ -9085,6 +9470,36 @@ Status Runtime::finalize() noexcept {
     plan_valid = plan_valid && add_runtime_array(
         impl_->extensions.size(),
         sizeof(detail::ExtensionRegistrationRecord));
+    std::size_t live_control_mailbox_declaration_bytes = 0;
+    std::size_t live_control_producer_declaration_bytes = 0;
+    plan_valid = plan_valid && detail::checked_multiply(
+        impl_->live_control_mailbox_declarations.capacity(),
+        sizeof(LiveControlMailboxRegistration),
+        live_control_mailbox_declaration_bytes);
+    plan_valid = plan_valid && detail::checked_multiply(
+        impl_->live_control_producer_declarations.capacity(),
+        sizeof(LiveControlProducerRegistration),
+        live_control_producer_declaration_bytes);
+    plan_valid = plan_valid && detail::checked_add(
+        live_control_mailbox_declaration_bytes,
+        live_control_producer_declaration_bytes,
+        memory_plan.live_control_control_bytes);
+    if (live_control_mailboxes) {
+        plan_valid = plan_valid && detail::checked_add(
+            memory_plan.live_control_control_bytes,
+            live_control_mailboxes->control_bytes(),
+            memory_plan.live_control_control_bytes);
+    }
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->live_control_mailbox_declarations.capacity(),
+        sizeof(LiveControlMailboxRegistration));
+    plan_valid = plan_valid && add_runtime_array(
+        impl_->live_control_producer_declarations.capacity(),
+        sizeof(LiveControlProducerRegistration));
+    if (live_control_mailboxes) {
+        plan_valid = plan_valid &&
+            add_runtime_bytes(live_control_mailboxes->control_bytes());
+    }
     for (const auto& callback : impl_->callbacks) {
         const auto object_begin = reinterpret_cast<std::uintptr_t>(&callback);
         const auto object_end = object_begin + sizeof(callback);
@@ -9516,6 +9931,27 @@ Status Runtime::finalize() noexcept {
                 sizeof(detail::ExtensionRegistrationRecord));
         }
         add_runtime_extent(
+            impl_->live_control_mailbox_declarations.data(),
+            impl_->live_control_mailbox_declarations.capacity(),
+            sizeof(LiveControlMailboxRegistration));
+        add_runtime_extent(
+            impl_->live_control_producer_declarations.data(),
+            impl_->live_control_producer_declarations.capacity(),
+            sizeof(LiveControlProducerRegistration));
+        if (live_control_mailboxes) {
+            for (std::size_t index = 0;
+                 index < live_control_mailboxes->extent_count();
+                 ++index) {
+                detail::LiveControlStorageExtent extent;
+                if (!live_control_mailboxes->extent_at(index, extent)) {
+                    return impl_->fail(
+                        Status::internal_error,
+                        "live-control control extent enumeration failed");
+                }
+                add_runtime_extent(extent.data, extent.bytes, 1);
+            }
+        }
+        add_runtime_extent(
             impl_->callbacks.data(),
             impl_->callbacks.capacity(),
             sizeof(Impl::RegisteredCallback));
@@ -9899,6 +10335,7 @@ Status Runtime::finalize() noexcept {
     impl_->rate_telemetry = std::move(rate_telemetry);
     impl_->rate_counters = std::move(rate_counters);
     impl_->mixed_rate_actions = std::move(mixed_rate_actions);
+    impl_->live_control_mailboxes = std::move(live_control_mailboxes);
     impl_->resident_regions = std::move(resident_regions);
     impl_->telemetry = std::move(telemetry);
     impl_->executor = std::move(executor);
@@ -11023,6 +11460,14 @@ Status Runtime::stop() noexcept {
         impl_->state != RuntimeState::finalized) {
         return impl_->fail(Status::invalid_state, "stop requires finalized or running state");
     }
+    if (impl_->live_control_mailboxes) {
+        impl_->live_control_mailboxes->close_admission();
+        if (impl_->live_control_mailboxes->has_active_reservation()) {
+            return impl_->fail(
+                Status::invalid_state,
+                "live-control admission is quiescing; retry checked stop");
+        }
+    }
 
     if (impl_->in_step.load(std::memory_order_acquire) ||
         impl_->in_periodic_run.load(std::memory_order_acquire) ||
@@ -11950,6 +12395,129 @@ bool Runtime::sampled_io_channel_status(
     }
     status = impl_->sampled_io_statuses[index];
     return true;
+}
+
+bool Runtime::live_control_enabled() const noexcept {
+    return impl_ && !impl_->provider_callback_active() &&
+        impl_->live_control_mailboxes != nullptr;
+}
+
+std::size_t Runtime::live_control_mailbox_count() const noexcept {
+    return live_control_enabled()
+        ? impl_->live_control_mailboxes->mailbox_count()
+        : 0;
+}
+
+std::size_t Runtime::live_control_producer_count() const noexcept {
+    return live_control_enabled()
+        ? impl_->live_control_mailboxes->producer_count()
+        : 0;
+}
+
+Status Runtime::live_control_producer_handle(
+    std::uint64_t mailbox_identity,
+    std::uint64_t producer_identity,
+    LiveControlProducerHandle& handle) const noexcept {
+    handle = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (!live_control_enabled()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control handles require a finalized enabled policy");
+    }
+    const auto status = impl_->live_control_mailboxes->producer_handle(
+        mailbox_identity,
+        producer_identity,
+        handle);
+    if (status != Status::ok) {
+        return impl_->fail(
+            status,
+            "live-control producer identity is not registered in the mailbox");
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::stage_live_control_update(
+    LiveControlProducerHandle producer,
+    const LiveControlUpdateRecord& update,
+    std::span<const std::byte> payload,
+    LiveControlAdmissionResult& result) noexcept {
+    result = LiveControlAdmissionResult::invalid;
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (g_active_runtime_callback == impl_.get()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control admission is restricted to non-runtime producer threads");
+    }
+    if (!live_control_enabled()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control admission requires a finalized enabled policy");
+    }
+    result = impl_->live_control_mailboxes->stage(
+        producer,
+        update,
+        payload);
+    return Status::ok;
+}
+
+bool Runtime::live_control_mailbox_info(
+    std::uint64_t mailbox_identity,
+    LiveControlMailboxInfo& info) const noexcept {
+    info = {};
+    return live_control_enabled() &&
+        impl_->live_control_mailboxes->mailbox_info(mailbox_identity, info);
+}
+
+bool Runtime::live_control_record_at(
+    std::uint64_t mailbox_identity,
+    std::uint64_t mailbox_sequence,
+    LiveControlUpdateRecord& record) const noexcept {
+    record = {};
+    return live_control_enabled() &&
+        impl_->live_control_mailboxes->record_at(
+            mailbox_identity,
+            mailbox_sequence,
+            record);
+}
+
+Status Runtime::copy_live_control_payload(
+    std::uint64_t mailbox_identity,
+    std::uint64_t mailbox_sequence,
+    std::span<std::byte> output) const noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (!live_control_enabled()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control payload inspection requires a finalized enabled policy");
+    }
+    const auto status = impl_->live_control_mailboxes->copy_payload(
+        mailbox_identity,
+        mailbox_sequence,
+        output);
+    if (status != Status::ok) {
+        return impl_->fail(
+            status,
+            "live-control payload destination or sequence is invalid");
+    }
+    impl_->clear_error();
+    return Status::ok;
 }
 
 bool Runtime::device_rate_admission_backend_at(

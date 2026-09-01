@@ -1,22 +1,58 @@
 # Handoff
 
-## Active batch: M21-05
+## Active batch: M22-01
 
-Baseline `2821f90fb09dc86820b879bb47a39d8165ff0e0f` is the merged M21-04
-sampled-I/O and loopback path. M21-05 adds only the additive C++ mixed-rate
-closure policy, fixed logical actions, conditional ordinary checkpoint state,
-a separate bounded active-replay artifact, instance-local loopback hooks, and
-a reusable installed-surface conformance fixture. Preserve C ABI v8/70
-exports, every existing artifact/schema byte contract, support matrices,
-CUDA/XDMA candidates, and prior evidence. Do not claim physical I/O,
-electrical correctness, controlled timing, HIL, RT1/RT2, Unreal, release, or
-deployment.
+Baseline `00cc6e48eb11c334a5e04ebd0719899f52d5581b` is the merged M21-05
+portable mixed-rate closure. M22-01 adds only the additive C++ live-control
+policy, copied fixed-capacity mailbox/producer declarations, generation-safe
+producer handles, canonical immutable update records, bounded Runtime-owned
+payload slots, nonblocking admission, deterministic inspection, and exact
+identity/accounting. Preserve C ABI v8/70 exports, every existing artifact
+schema, support matrices, CUDA/XDMA candidates, and prior evidence. Do not
+claim update application, rollback, replay/telemetry integration, executable
+hot reload, physical I/O, HIL, RT1/RT2, Unreal, release, or deployment.
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M21-05 contract is
+RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-01 contract is
 `contracts/active-batch.yaml`, sourced from control revision
-`8bf0d8e7a6563fe88246925b44e2bddc77a457fe`.
+`aeebab5f0140c2ac9161ff88f8fe42749ce42ebc`.
+
+## M22-01 implementation handoff
+
+`LiveControlPolicy` is copied once while configuring. A completely zero-capacity
+policy disables the feature without changing compatibility identity; an
+enabled policy has positive bounded mailbox, producer, record, per-record
+payload, and total storage capacities. Mailboxes and producers are copied
+before finalization. Each producer belongs to one mailbox and receives a
+Runtime-identity/configuration-generation handle only after finalization.
+
+`LiveControlUpdateRecord` is a fixed 128-byte envelope. Host-frame targets use
+only `target_frame_index`; rate targets must repeat one exact compiled
+reference-release index, domain-registration index, phase index, release
+sequence, and substep. Payload size, FNV-1a digest, alignment, canonical
+little-endian flag, enum values, reserved bytes, producer sequence, ownership,
+and generation are structurally validated before a reservation attempt.
+Accepted payloads are copied and unused slot bytes zeroed before release
+publication. Full mailboxes reject new records without overwrite. Contention
+returns `busy`; stale, stopped, exhausted, invalid, full, and accepted remain
+distinct inspectable outcomes.
+
+The admission API is for non-RT producer threads and does not allocate, invoke
+callbacks, call vendors, perform I/O, parse application payloads, or spin for a
+slot. Inspection returns copied records and exact-size payload copies, never an
+internal pointer. `stop()` closes new admission first and requires a checked
+retry if one bounded claim is still active; Runtime remains terminal after
+successful stop. Configuration and finalized mailbox controls are included in
+the existing Runtime-control MemoryPlan row and logical extent ledger. Frozen
+policy/declarations affect graph/config/replay identity; arrivals and payloads
+do not.
+
+There is deliberately no M22-01 consumer. Do not drain a mailbox from `step()`,
+periodic/rate dispatch, device completion, checkpoint, replay, telemetry,
+watchdog, or stop. M22-02 owns exact-boundary commit/ordering, M22-03 owns
+rollback/checkpoint/replay/telemetry, and M22-04 owns typed SDK examples and
+closure. See `docs/live_controls.md` for the full staging contract.
 
 ## M21-05 implementation handoff
 

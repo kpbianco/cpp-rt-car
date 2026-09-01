@@ -16,6 +16,12 @@ cursors are specified in the [rate-action telemetry contract](rate_telemetry.md)
 They do not append global schema-2 event or metric IDs, are not exported by the
 C ABI, and are not checkpoint or replay history.
 
+M22-01 leaves global schema 2, every trace/metric ID, rate-action schema 1,
+and mixed-rate-action schema 1 unchanged. Mailbox occupancy and admission
+outcome counters are available only through the instance-bound C++ mailbox
+inspector; staging emits no global trace, metric, or action. M22-03 owns any
+future telemetry contract.
+
 M21-05 likewise leaves global schema 2 and every existing trace/metric ID
 unchanged. Its additive C++ mixed-rate-action schema is a separate fixed ring
 with its own runtime-bound cursors and loss counters. It carries content

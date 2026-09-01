@@ -1,5 +1,13 @@
 # Compiled Graph Contract
 
+M22-01 leaves the compiled graph and release order unchanged. After the rate
+plan is available, finalization validates copied live-control declarations and
+copies the exact legal rate-release target table into optional mailbox control
+storage. Frozen schema/legal tables, policy, capacities, and sorted declarations
+participate in compatibility identity; staged payloads, arrivals, occupancy,
+counters, Runtime identity, and inspector calls do not. No staged record adds a
+node, edge, release, callback, dependency, or dispatch action.
+
 M21-05 finalization retains M21-04's direct sampled-channel maps and adds a
 copied closure policy, fixed action/replay controls, and conditional checkpoint
 state. Graph/replay identity hashes semantic policy and action/replay rules but

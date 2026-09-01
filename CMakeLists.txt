@@ -623,6 +623,7 @@ set(RTFW_RUNTIME_SOURCES
     rt/src/executor.cpp
     rt/src/extension_registration.cpp
     rt/src/host_runtime.cpp
+    rt/src/live_control_mailbox.cpp
     rt/src/memory_policy.cpp
     rt/src/mixed_rate_actions.cpp
     rt/src/mixed_rate_replay.cpp

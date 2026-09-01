@@ -69,6 +69,15 @@ inline constexpr std::uint32_t checkpoint_schema_version = 1;
 inline constexpr std::uint32_t input_log_schema_version = 1;
 inline constexpr std::size_t replay_identifier_capacity =
     observability_identifier_capacity;
+inline constexpr std::uint32_t live_control_schema_version = 1;
+inline constexpr std::uint32_t live_control_payload_canonical_little_endian = 1;
+inline constexpr std::uint32_t live_control_mailbox_capacity_limit = 64;
+inline constexpr std::uint32_t live_control_producer_capacity_limit = 256;
+inline constexpr std::uint32_t live_control_record_capacity_limit = 65'536;
+inline constexpr std::uint32_t live_control_payload_bytes_limit = 65'536;
+inline constexpr std::uint32_t live_control_payload_alignment_limit = 4'096;
+inline constexpr std::uint64_t live_control_total_storage_limit =
+    std::uint64_t{1} << 30u;
 
 enum class RuntimeState : std::uint8_t {
     configuring,
@@ -201,6 +210,7 @@ enum class TaskResult : std::uint8_t {
 namespace detail {
 class Executor;
 struct RuntimeThreadPolicyTestAccess;
+struct RuntimeLiveControlTestAccess;
 }
 
 class TaskContext;
@@ -1051,6 +1061,169 @@ struct ActiveReplayResult {
     std::span<const std::byte> artifact,
     ActiveReplayMetadata& metadata) noexcept;
 
+// M22-01 is an additive, data-only staging surface. It does not apply,
+// schedule, checkpoint, replay, roll back, or emit telemetry for an update.
+enum class LiveControlAdmissionPolicy : std::uint8_t {
+    reject_new = 1,
+};
+
+enum class LiveControlResetRule : std::uint8_t {
+    discard_with_runtime = 1,
+};
+
+enum class LiveControlTargetKind : std::uint8_t {
+    host_frame = 1,
+    rate_release = 2,
+};
+
+enum class LiveControlUpdateKind : std::uint8_t {
+    scenario_parameters = 1,
+    controller_parameters = 2,
+    sensor_calibration = 3,
+    fault_configuration = 4,
+    clear_fault = 5,
+};
+
+enum class LiveControlAdmissionResult : std::uint8_t {
+    accepted = 1,
+    invalid = 2,
+    full = 3,
+    busy = 4,
+    stale = 5,
+    stopped = 6,
+    exhausted = 7,
+};
+
+struct LiveControlPolicy {
+    std::uint32_t schema_version = live_control_schema_version;
+    std::uint32_t struct_size = sizeof(LiveControlPolicy);
+    std::uint64_t policy_identity = 0;
+    std::uint32_t mailbox_capacity = 0;
+    std::uint32_t producer_capacity = 0;
+    std::uint32_t record_capacity = 0;
+    std::uint32_t payload_bytes_per_record = 0;
+    std::uint64_t total_payload_storage_bytes = 0;
+    LiveControlAdmissionPolicy admission_policy =
+        LiveControlAdmissionPolicy::reject_new;
+    LiveControlResetRule reset_rule =
+        LiveControlResetRule::discard_with_runtime;
+    std::array<std::byte, 14> reserved{};
+};
+
+static_assert(sizeof(LiveControlPolicy) == 56);
+static_assert(alignof(LiveControlPolicy) == 8);
+
+struct LiveControlMailboxRegistration {
+    std::uint32_t schema_version = live_control_schema_version;
+    std::uint32_t struct_size = sizeof(LiveControlMailboxRegistration);
+    std::uint64_t mailbox_identity = 0;
+    std::uint32_t record_capacity = 0;
+    std::uint32_t payload_bytes_per_record = 0;
+    std::array<std::byte, 16> reserved{};
+};
+
+static_assert(sizeof(LiveControlMailboxRegistration) == 40);
+static_assert(alignof(LiveControlMailboxRegistration) == 8);
+
+struct LiveControlProducerRegistration {
+    std::uint32_t schema_version = live_control_schema_version;
+    std::uint32_t struct_size = sizeof(LiveControlProducerRegistration);
+    std::uint64_t mailbox_identity = 0;
+    std::uint64_t producer_identity = 0;
+    std::uint64_t first_sequence = 1;
+    std::uint64_t reserved = 0;
+};
+
+static_assert(sizeof(LiveControlProducerRegistration) == 40);
+static_assert(alignof(LiveControlProducerRegistration) == 8);
+
+struct LiveControlProducerHandle {
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t mailbox_identity = 0;
+    std::uint64_t producer_identity = 0;
+    std::uint32_t producer_index = std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t reserved = 0;
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return runtime_id != 0 && configuration_generation != 0 &&
+            mailbox_identity != 0 && producer_identity != 0 &&
+            producer_index != std::numeric_limits<std::uint32_t>::max() &&
+            reserved == 0;
+    }
+
+    friend constexpr bool operator==(
+        LiveControlProducerHandle,
+        LiveControlProducerHandle) noexcept = default;
+};
+
+static_assert(sizeof(LiveControlProducerHandle) == 40);
+static_assert(alignof(LiveControlProducerHandle) == 8);
+
+struct LiveControlUpdateRecord {
+    std::uint32_t schema_version = live_control_schema_version;
+    std::uint32_t record_size = sizeof(LiveControlUpdateRecord);
+    // Zero on input. Runtime assigns a positive value only to the immutable
+    // copied record after successful reservation and payload copy.
+    std::uint64_t mailbox_sequence = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t mailbox_identity = 0;
+    std::uint64_t producer_identity = 0;
+    std::uint64_t producer_sequence = 0;
+    std::uint64_t target_frame_index = 0;
+    std::uint64_t rate_release_sequence =
+        std::numeric_limits<std::uint64_t>::max();
+    std::uint64_t payload_digest = 0;
+    std::uint32_t reference_release_index =
+        std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t rate_domain_registration_index =
+        std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t phase_index = std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t rate_substep_ordinal =
+        std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t payload_bytes = 0;
+    std::uint32_t payload_alignment = 1;
+    std::uint32_t policy_flags =
+        live_control_payload_canonical_little_endian;
+    LiveControlTargetKind target_kind = LiveControlTargetKind::host_frame;
+    LiveControlUpdateKind update_kind =
+        LiveControlUpdateKind::scenario_parameters;
+    std::array<std::byte, 18> reserved{};
+};
+
+static_assert(sizeof(LiveControlUpdateRecord) == 128);
+static_assert(alignof(LiveControlUpdateRecord) == 8);
+
+struct LiveControlMailboxInfo {
+    std::uint32_t schema_version = live_control_schema_version;
+    std::uint32_t struct_size = sizeof(LiveControlMailboxInfo);
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t policy_identity = 0;
+    std::uint64_t mailbox_identity = 0;
+    std::uint64_t next_mailbox_sequence = 0;
+    std::uint64_t accepted = 0;
+    std::uint64_t invalid = 0;
+    std::uint64_t full = 0;
+    std::uint64_t busy = 0;
+    std::uint64_t stale = 0;
+    std::uint64_t stopped = 0;
+    std::uint64_t exhausted = 0;
+    std::uint32_t record_capacity = 0;
+    std::uint32_t payload_bytes_per_record = 0;
+    std::uint32_t occupancy = 0;
+    std::uint32_t producer_count = 0;
+    std::uint8_t admission_open = 0;
+    std::array<std::byte, 7> reserved{};
+};
+
+static_assert(sizeof(LiveControlMailboxInfo) == 128);
+static_assert(alignof(LiveControlMailboxInfo) == 8);
+
+[[nodiscard]] std::uint64_t live_control_payload_digest(
+    std::span<const std::byte> payload) noexcept;
+
 // M16-01 rate metadata is an additive C++ source API. Periods, deadlines, and
 // budget/WCET estimates are integral nanoseconds and are not schema-7 fields.
 struct RateDomainRegistration {
@@ -1637,6 +1810,14 @@ struct MemoryPlan {
     std::size_t device_rate_dependency_count = 0;
     std::size_t device_rate_execution_slot_count = 0;
     std::size_t device_rate_execution_bytes = 0;
+    // M22-01 copied declarations, fixed mailbox slots/payloads, producer
+    // state, counters, and target inspection state remain inside the existing
+    // runtime-control row and add no provider-backed region.
+    std::size_t live_control_mailbox_count = 0;
+    std::size_t live_control_producer_count = 0;
+    std::size_t live_control_record_capacity = 0;
+    std::size_t live_control_payload_storage_bytes = 0;
+    std::size_t live_control_control_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
@@ -2002,6 +2183,8 @@ public:
         const RateExecutionPolicy& policy) noexcept;
     [[nodiscard]] Status set_mixed_rate_closure_policy(
         const MixedRateClosurePolicy& policy) noexcept;
+    [[nodiscard]] Status set_live_control_policy(
+        const LiveControlPolicy& policy) noexcept;
     [[nodiscard]] Status configure_key(
         std::string_view key,
         std::string_view value) noexcept;
@@ -2072,6 +2255,10 @@ public:
     [[nodiscard]] Status replace_sampled_io_channel(
         CrossRateChannelHandle channel,
         const SampledIoChannelRegistration& registration) noexcept;
+    [[nodiscard]] Status register_live_control_mailbox(
+        const LiveControlMailboxRegistration& registration) noexcept;
+    [[nodiscard]] Status register_live_control_producer(
+        const LiveControlProducerRegistration& registration) noexcept;
     [[nodiscard]] Status register_resource(
         std::string_view name,
         ResourceHandle& out_resource) noexcept;
@@ -2250,6 +2437,29 @@ public:
     [[nodiscard]] bool sampled_io_channel_status(
         CrossRateChannelHandle channel,
         SampledIoChannelStatus& status) const noexcept;
+    [[nodiscard]] bool live_control_enabled() const noexcept;
+    [[nodiscard]] std::size_t live_control_mailbox_count() const noexcept;
+    [[nodiscard]] std::size_t live_control_producer_count() const noexcept;
+    [[nodiscard]] Status live_control_producer_handle(
+        std::uint64_t mailbox_identity,
+        std::uint64_t producer_identity,
+        LiveControlProducerHandle& handle) const noexcept;
+    [[nodiscard]] Status stage_live_control_update(
+        LiveControlProducerHandle producer,
+        const LiveControlUpdateRecord& update,
+        std::span<const std::byte> payload,
+        LiveControlAdmissionResult& result) noexcept;
+    [[nodiscard]] bool live_control_mailbox_info(
+        std::uint64_t mailbox_identity,
+        LiveControlMailboxInfo& info) const noexcept;
+    [[nodiscard]] bool live_control_record_at(
+        std::uint64_t mailbox_identity,
+        std::uint64_t mailbox_sequence,
+        LiveControlUpdateRecord& record) const noexcept;
+    [[nodiscard]] Status copy_live_control_payload(
+        std::uint64_t mailbox_identity,
+        std::uint64_t mailbox_sequence,
+        std::span<std::byte> output) const noexcept;
     // Copies only into an exact-size caller span. Failure leaves output
     // unchanged and no inspector allocates or mutates the frozen plan.
     [[nodiscard]] Status copy_cross_rate_initial_sample(
@@ -2356,6 +2566,7 @@ public:
 
 private:
     friend struct detail::RuntimeThreadPolicyTestAccess;
+    friend struct detail::RuntimeLiveControlTestAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

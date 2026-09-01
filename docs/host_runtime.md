@@ -1,5 +1,11 @@
 # Host Runtime Lifecycle
 
+M22-01 adds configuring-only live-control policy/mailbox/producer declarations,
+finalization-time producer handles, and post-finalization non-RT staging and
+inspection. It does not add a lifecycle state or consume an update. Stop closes
+new live-control claims before the existing quiescence and cleanup checks. See
+[live_controls.md](live_controls.md).
+
 M21-05 records M21-04 startup/failure/shutdown acknowledgements as closed
 mixed-rate actions. Checkpoint export and active replay require a quiescent
 release boundary; active replay prevalidates its full bounded artifact before
@@ -54,6 +60,14 @@ ownership. Checked `stop()` is the recoverable integration path.
 Strict preflight failure leaves the runtime `finalized` without creating a
 runtime thread, so the host can inspect the report or retry after external
 setup.
+
+An enabled live-control surface is immutable after finalization. Producer
+handles are valid only for that Runtime identity and configuration generation.
+Admission is allowed from bounded external producer threads in `finalized` or
+`running`; Runtime callbacks are rejected. The terminal `stopped` instance
+retains published records for inspection but rejects every new claim. Its
+storage is discarded with the Runtime and is never reused by another Runtime
+identity.
 
 M15-03 finalization transactionally acquires active phase-scratch,
 task-scratch, and trace-storage backing in that order. Startup applies and

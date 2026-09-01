@@ -1,16 +1,16 @@
 schema_version: 1
 batch:
-  id: M21-05
-  title: Close mixed-rate overload, replay, telemetry, watchdog, and conformance
-  goal: Add a bounded additive C++ mixed-rate action and replay closure over the merged M21-01 through M21-04 device-rate, payload, sampled-I/O, and loopback path. Integrate optional-device shedding/recovery, terminal device and sampled actions, watchdog/degradation identity, quiescent checkpoint state, deterministic active replay for explicitly deterministic mock/loopback backends, and a reusable three-rate conformance suite while preserving all existing artifact schemas, stable ABIs, physical-I/O boundaries, and portable RT0 claims.
+  id: M22-01
+  title: Add live-control update schemas and bounded mailboxes
+  goal: Add an opt-in additive C++ live-control policy, copied fixed-capacity per-Runtime mailbox declarations, generation-safe producer handles, canonical immutable update envelopes, bounded copied payload slots, structural validation, deterministic inspection, and exact identity/accounting without applying any update to running simulation state. Preserve the merged M21 mixed-rate path, every stable ABI and artifact schema, and the portable RT0 claim boundary while establishing the sole staging substrate that M22-02 will consume at exact frame or rate-release boundaries.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
-    - products/cpp-rt-car/PRD.md#cap-m21--device-rate-and-sampled-io-closure
-    - products/cpp-rt-car/acceptance.yaml#CAP-M21
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-21
-    - products/cpp-rt-car/risk-register.yaml#R-009
-  milestone: products/cpp-rt-car/milestones/M21.md#M21-05--overload-replay-and-conformance-closure
+    - products/cpp-rt-car/PRD.md#cap-m22--transactional-live-controls
+    - products/cpp-rt-car/acceptance.yaml#CAP-M22
+    - products/cpp-rt-car/telemetry-plan.yaml#Q-22
+    - products/cpp-rt-car/risk-register.yaml#R-010
+  milestone: products/cpp-rt-car/milestones/M22.md#M22-01--update-schema-and-bounded-mailboxes
   target_contracts:
     - AGENTS.md
     - contracts/active-batch.yaml
@@ -23,11 +23,8 @@ sources:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/compiled_graph.md
     - docs/host_runtime.md
-    - docs/device_backend.md
-    - docs/hal_v2.md
-    - docs/sampled_io.md
+    - docs/compiled_graph.md
     - docs/memory_plan.md
     - docs/determinism_replay.md
     - docs/rate_telemetry.md
@@ -40,21 +37,19 @@ sources:
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
     - release/rtfw-release-contract.json
-    - docs/evidence/M16-03-2026-08-05.md
-    - docs/evidence/M16-04-2026-08-05.md
-    - docs/evidence/M17-03-2026-08-11.md
     - docs/evidence/M17-06-2026-08-23.md
     - docs/evidence/M20-PRE-01-2026-08-26.md
     - docs/evidence/M21-01-2026-08-26.md
     - docs/evidence/M21-02-2026-08-26.md
     - docs/evidence/M21-03-2026-08-26.md
     - docs/evidence/M21-04-2026-08-27.md
-  baseline_commit: 2821f90fb09dc86820b879bb47a39d8165ff0e0f
+    - docs/evidence/M21-05-2026-08-27.md
+  baseline_commit: 00cc6e48eb11c334a5e04ebd0719899f52d5581b
   control_plane_repository: tranquilWorks/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M21-05.yaml
-  control_plane_revision: 8bf0d8e7a6563fe88246925b44e2bddc77a457fe
+  control_plane_path: products/cpp-rt-car/batches/M22-01.yaml
+  control_plane_revision: aeebab5f0140c2ac9161ff88f8fe42749ce42ebc
 dependencies:
-  - M21-04
+  - M21-05
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -65,57 +60,21 @@ scope:
     - tests/CMakeLists.txt
     - .github/workflows/ci.yml
     - rt/include/rt/runtime.hpp
-    - rt/include/rt/device.hpp
-    - rt/include/rt/loopback_backend.hpp
-    - rt/src/mixed_rate_actions.hpp
-    - rt/src/mixed_rate_actions.cpp
-    - rt/src/mixed_rate_replay.hpp
-    - rt/src/mixed_rate_replay.cpp
-    - rt/src/sampled_io.hpp
-    - rt/src/sampled_io.cpp
-    - rt/src/loopback_backend.cpp
-    - rt/src/cross_rate_data.hpp
-    - rt/src/cross_rate_data.cpp
-    - rt/src/rate_timeline.hpp
-    - rt/src/rate_timeline.cpp
-    - rt/src/rate_dispatch.hpp
-    - rt/src/rate_dispatch.cpp
-    - rt/src/command_batch.hpp
-    - rt/src/command_batch.cpp
-    - rt/src/device_manager.hpp
-    - rt/src/device_manager.cpp
-    - rt/src/heterogeneous_memory.hpp
-    - rt/src/heterogeneous_memory.cpp
-    - rt/src/hal_v2.hpp
-    - rt/src/hal_v2.cpp
+    - rt/src/live_control_mailbox.hpp
+    - rt/src/live_control_mailbox.cpp
     - rt/src/host_runtime.cpp
     - rt/src/resource_policy.hpp
     - rt/src/resource_policy.cpp
-    - tests/mixed_rate_conformance.hpp
-    - tests/test_mixed_rate_actions.cpp
-    - tests/test_mixed_rate_replay.cpp
-    - tests/test_mixed_rate_conformance.cpp
-    - tests/test_sampled_io.cpp
-    - tests/test_loopback_backend.cpp
-    - tests/test_cross_rate_data.cpp
-    - tests/test_rate_timeline.cpp
-    - tests/test_rate_dispatch.cpp
+    - tests/test_live_control_mailbox.cpp
     - tests/test_host_runtime.cpp
-    - tests/test_device_runtime.cpp
-    - tests/test_command_batch.cpp
-    - tests/test_hal_v2.cpp
-    - tests/test_vendor_hal_v2.cpp
-    - tests/test_heterogeneous_memory.cpp
     - tests/test_memory_plan.cpp
-    - tests/test_periodic_runtime.cpp
-    - tests/test_watchdog.cpp
-    - tests/test_trace_noalloc.cpp
-    - tests/test_multiple_instances.cpp
     - tests/test_determinism.cpp
     - tests/test_determinism_replay.cpp
+    - tests/test_multiple_instances.cpp
+    - tests/test_trace_noalloc.cpp
+    - tests/test_periodic_runtime.cpp
     - tests/package_consumer/CMakeLists.txt
-    - tests/package_consumer/mixed_rate_consumer.cpp
-    - tests/package_consumer/loopback_consumer.cpp
+    - tests/package_consumer/live_control_consumer.cpp
     - tests/package_consumer/cpp_consumer.cpp
     - tests/package_consumer/compat_consumer.cpp
     - tests/package_consumer/package_contract.cmake
@@ -129,18 +88,16 @@ scope:
     - docs/product_contract.md
     - docs/architecture.md
     - docs/roadmap.md
-    - docs/compiled_graph.md
     - docs/host_runtime.md
-    - docs/device_backend.md
-    - docs/hal_v2.md
-    - docs/sampled_io.md
+    - docs/compiled_graph.md
+    - docs/live_controls.md
     - docs/memory_plan.md
     - docs/determinism_replay.md
     - docs/rate_telemetry.md
     - docs/observability.md
     - docs/testing_ci.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M21-05-*.md
+    - docs/evidence/M22-01-*.md
   forbidden_paths:
     - abi/
     - rt/include/rt/c_api.h
@@ -152,6 +109,14 @@ scope:
     - rt/include/rt/cuda_backend.hpp
     - rt/include/rt/xdma_backend.hpp
     - rt/src/runtime_profile.cpp
+    - rt/src/rate_timeline.cpp
+    - rt/src/rate_timeline.hpp
+    - rt/src/rate_dispatch.cpp
+    - rt/src/rate_dispatch.hpp
+    - rt/src/mixed_rate_actions.cpp
+    - rt/src/mixed_rate_actions.hpp
+    - rt/src/mixed_rate_replay.cpp
+    - rt/src/mixed_rate_replay.hpp
     - rt/src/rate_telemetry.cpp
     - rt/src/rate_telemetry.hpp
     - rt/src/telemetry.cpp
@@ -159,6 +124,15 @@ scope:
     - rt/src/observability_export.cpp
     - rt/src/snapshot_codec.cpp
     - rt/src/snapshot_codec.hpp
+    - rt/src/device_manager.cpp
+    - rt/src/device_manager.hpp
+    - rt/src/command_batch.cpp
+    - rt/src/command_batch.hpp
+    - rt/src/cross_rate_data.cpp
+    - rt/src/cross_rate_data.hpp
+    - rt/src/sampled_io.cpp
+    - rt/src/sampled_io.hpp
+    - rt/src/loopback_backend.cpp
     - rt/src/mock_device.cpp
     - rt/src/cuda_backend.cpp
     - rt/src/cuda_driver.cpp
@@ -187,15 +161,15 @@ scope:
     - docs/evidence/M18-*.md
     - docs/evidence/M19-*.md
     - docs/evidence/M20-*.md
-    - docs/evidence/M21-01-*.md
-    - docs/evidence/M21-02-*.md
-    - docs/evidence/M21-03-*.md
-    - docs/evidence/M21-04-*.md
+    - docs/evidence/M21-*.md
     - VERSION.txt
     - LICENSE
     - CHANGELOG.md
     - SECURITY.md
     - include/simcore/**
+    - core/include/core/config_hot_reload.hpp
+    - tests/test_config_hot_reload.cpp
+    - tests/test_seqlock_config.cpp
     - rt/include/rt/scheduler.hpp
     - rt/include/rt/fiber_pool.hpp
     - rt/include/rt/plugin_api.h
@@ -203,112 +177,101 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The implementation begins from an initially clean target at exact default-branch commit `2821f90fb09dc86820b879bb47a39d8165ff0e0f`, the merged M21-04 pull request 245. Retained M15 through M21-04 evidence is present and unchanged, governance records M21-04 as merged, and no absent review, physical, RT, replay, release, deployment, or production result is invented.
-  - Mixed-rate closure is an additive C++ configuring-only policy copied and frozen before finalization. It has explicit bounded capacities and byte limits for the new action stream and active-replay transcript, a nonzero host policy/schema identity, a closed overflow policy, and an explicit requirement that every replayed device backend report the existing deterministic-mock capability. Observational action capacity may be zero with exact drops; replay capacities are positive whenever active replay is enabled. It contains no dynamic string, raw address, callback, vendor handle, file path, implicit timing source, or unbounded history.
-  - Existing checkpoint schema 1, input-log schema 1, rate-action schema 1, global observability schema 2, their constants, magic values, record layouts, parser behavior, C ABI operations, and byte-for-byte legacy artifacts remain unchanged. Existing `Runtime::replay()` retains its non-active behavior and active-plan rejection. M21-05 uses a distinct additive C++ mixed-rate action schema 1 and active-replay artifact schema 1 rather than repurposing reserved bytes or silently changing an existing version.
-  - >-
-    Each fixed mixed-rate action record carries schema/record size, monotonic record sequence, runtime and host-policy identity, frame, rate domain/phase/release sequence/substep, logical and nominal release, action/reason/stage, optional/late/shed/degradation/watchdog state, backend/batch/timeline/completion generation, terminal status, timestamp-domain/timestamp, payload and sampled-frame content identity, sampled freshness/held/substitution/safety state, and exact before/after shedding state where applicable. Closed numeric tables and zero reserved fields reject future, foreign, partial, contradictory, or uncorrelated records.
-  - Action publication is generation safe and follows execution ownership. A device release emits no terminal-success record at submission; exactly one terminal action becomes visible only after correlated completion, timeout/cancel/loss/quarantine, declared skip/hold/shed, or safe-state acknowledgement is settled. Late completion cannot rewrite a terminal record. Sampled payload bytes, raw addresses, application signal values, callback pointers, vendor handles, and wall-clock thread identities are never emitted by default.
-  - The new action ring is fixed at finalization and uses direct runtime-bound cursors with exact gap reporting. Capacity zero deterministically drops while reserving sequence; busy slots drop; committed replacement overwrites with exact counters. A slow or malformed reader cannot block, reorder, or change execution. Telemetry loss is explicit and makes a transcript ineligible for replay rather than silently producing incomplete replay evidence.
-  - Optional device domains participate in the exact existing M16 shedding/recovery order and hysteresis. A shed or late-skipped device release invokes no provider or backend, claims no execution slot, publishes no payload, and emits one exact action tied to the corresponding rate-action identity. Recovery affects only the next total-order release. Mandatory device releases are never silently skipped, and supported non-CPU records are not rejected merely because their phase is device-owned.
-  - Device overload is closed at zero, exact, and one-over backend, Runtime outstanding, phase in-flight, completion-ticket, dispatch-record, sampled-ring, and action-ring capacities. It follows only the declared reject, skip, hold, shed, degrade, timeout, cancel, quarantine, safe-output, or fail behavior. It never spills to heap storage, executes a vendor call on an executor, steals another backend's slot, overwrites owned bytes, converts mandatory work to optional, or depends on completion arrival order.
-  - Watchdog and degradation closure records the exact step/release action and before/after level without treating elapsed hosted-CI timing as deterministic input. Normal active replay consumes the recorded logical decision/action transcript and suppresses live watchdog timing as an execution decision; it validates and reproduces the recorded watchdog/degradation transition. Malformed, impossible, out-of-policy, or over-maximum levels reject before state mutation.
-  - A conditional quiescent mixed-rate checkpoint state is appended as one ordinary schema-1 checkpoint state record only when the M21-05 policy is enabled. It captures the canonical active cursor, device/sampled publication correlation, next generation/sequence, sampled safety and selected freshness state, shedding streak/mask, degradation state, and replay-action position required to resume without ambiguity. It contains no in-flight vendor ownership, telemetry history, caller cursor, backend-private token, address, or wall-clock observation. Existing checkpoints without M21-05 remain byte exact.
-  - Checkpoint export and active replay require a quiescent release boundary with no provider callback, active step, periodic run, submitted ticket, pending safe transition, cleanup-pending owner, or uncertain completion. Complete validation of every application, rate, mixed-rate, sampled, replay, identity, extent, checksum, reserved, and ordering field occurs before any registered state, cross-rate store, safety state, shedding state, or action cursor changes. Failure is transactional and retryable.
-  - >-
-    The new active-replay artifact is fixed-width little-endian and bounded by copied record/byte capacities and the existing 1 GiB absolute safety ceiling. It binds runtime/build/workload, determinism tier, graph/replay/state schema, M21-05 policy, checkpoint frame, first/last frame, nominal epoch, ordered input payloads, ordered rate/device/sampled/safe/watchdog actions, per-record content checksums, and a whole-artifact checksum. Parsers allocate nothing from encoded lengths, reject truncation/trailing bytes/overflow/gaps/duplicates/foreign identity before restore, and expose allocation-free inspection metadata.
-  - Active replay accepts only a compatible quiescent checkpoint, a complete gap-free transcript, and device backends whose frozen existing capabilities report `deterministic_mock == 1`. It restores transactionally, invokes the input callback once per frame, drives the exact recorded nominal release and legal rate/device decisions without consulting completion arrival order or live watchdog time, re-executes the deterministic mock/loopback provider path, and compares every generated action, payload/frame digest, sampled metadata, safety transition, status, and final registered-state hash. The first mismatch fails closed with exact progress; earlier completed replay frames are not rolled back.
-  - Non-deterministic or physical backends cannot enter active replay. Their fixed action records and payload/frame digests may be retained as explicitly recorded boundary evidence, but M21-05 does not infer deterministic physical input, regenerate physical samples, replay a vendor driver, or qualify a device. No default telemetry surface stores sampled payload bytes; any application input payload supplied to the bounded replay artifact remains caller-owned explicit replay data under the existing trust boundary.
-  - Terminal error, submission rejection, timeout, cancellation, loss, late quarantine, skipped/shed work, sampled stale/underrun/overrun, callback failure, watchdog transition, safe-output failure, stop, and retryable cleanup each have one closed action result. No failed or uncertain action publishes a device input or success, no late completion mutates a recycled generation, and replay reproduces or rejects the same action rather than normalizing it to success.
-  - The public loopback remains the portable deterministic backend and gains only bounded hooks needed to reset, inspect, and reproduce its declared logical action sequence. Fault injection identity is copied or explicitly supplied; it cannot depend on sleep timing, process state, a hidden thread, a global singleton, or mutable data shared between Runtime instances. Existing standalone HAL-v2 lifecycle behavior remains unchanged when M21-05 is disabled.
-  - One reusable mixed-rate conformance fixture uses only public installed-package surfaces and runs CPU plant, device sensor loopback, CPU controller, and device actuator across at least three distinct harmonic and non-harmonic rates. It covers first cycle, steady state, supercycle/wrap, equal-time ordering, sample-and-hold age, optional device shedding/recovery, backpressure, watchdog/degradation, timeout/cancel/loss/quarantine, stale/under/overrun, safe startup/failure/shutdown, checkpoint, replay, reset/restart, and final state/action/payload identity.
-  - The conformance fixture is table-driven and reusable by the repository tests and an installed relocated consumer without private headers or repository-only data. It uses a manual logical clock and bounded deterministic fault script, not network, subprocess, filesystem transport, sleep-based timing, physical hardware, vendor SDKs, or controlled-host thresholds. Every scenario states whether it is static, unit, simulated-protocol, package, sanitizer, or manual evidence.
-  - Sequence, generation, action, artifact, and slot exhaustion fail before zero, wrap, or reuse can become ambiguous. Safe-state work remains isolated from active generations. A producer cannot overwrite backend/consumer-owned bytes; retirement occurs only after exact terminal completion and all compiled consumers settle. Two Runtime/loopback/conformance instances share no mutable global state and may execute concurrently under ThreadSanitizer.
-  - Action emission, action comparison, replay-decision selection, checkpoint synchronization, sampled selection, payload digesting, slot claim/retirement, watchdog/degradation application, and conformance execution use checked integer arithmetic and bounded direct-index work. Running paths allocate no ordinary heap, take no blocking mutex, perform no file/network I/O, create no thread, scan no full configuring registry, wait for no unbounded operation, retry no unbounded sequence, and invoke no vendor function on executor/host lanes.
-  - Failed finalization or startup publishes no partial M21-05 policy, action ring, replay state, device release, sampled payload, or safety claim and remains retryable through existing replacement/cleanup rules. Successful finalization counts policy copies, action controls/slots/counters, replay/checkpoint state, digest staging, conformance/runtime controls, and retention exactly once in existing `MemoryPlan` categories and `planned_bytes`; caller artifacts, borrowed registered buffers, backend-private bytes, and telemetry output buffers are not double-counted.
-  - Graph/config/replay identity includes every semantic M21-05 policy version, legal action table, deterministic-backend requirement, checkpoint state shape, transcript format, device/sampled descriptor, safe-state rule, and replay decision rule that can change execution. It excludes action-ring capacity when observational only, caller cursor position, post-configuration payload bytes, raw addresses, callback pointers, wall-clock measurements, thread IDs, completion arrival order, and fault timing. Equivalent registration order canonicalizes as already contracted.
-  - Existing reference-only and CPU-only M16 plans, rate-action schema-1 telemetry, ordinary M17/HAL-v2 backends, adapted device-ABI-v1 backends, M21-02 channel-free dispatch, M21-03 non-sampled payloads, M21-04 sampled loopback without closure enabled, checkpoint/input-log schema-1 artifacts, legacy replay, CUDA/XDMA candidates, package consumers, repeated start/checked-stop, and two Runtime instances retain prior behavior and byte-compatible artifacts.
-  - M21-05 closes CAP-M21's portable software semantics only. It adds no vendor DAC/DAQ/CAN/IIO adapter, physical trigger/sample-clock or electrical scaling result, external-process CIL transport, benchmark threshold, CUDA physics, transactional live control, hot reload, golden demo, Unreal, support/qualification promotion, signing, publication, release, deployment, or production behavior. M18 remains the sole physical and RT qualification plane.
-  - Stable C ABI v8 with exactly 70 exports and frozen fingerprint `0xd0e7a5a14bf35f97`, SONAME 8, device ABI v1, extension ABI v1, HAL core v2 and extension-v1 tables, Runtime status numeric values, runtime-profile schema 7 and 25 keys, checkpoint/input-log/rate-action/observability schemas, release 1.2.1, installed target/header/alias inventory, support matrices, qualification state, and Apache-2.0 remain unchanged. No new installed header is required; additive C++ types remain in the existing runtime/loopback headers.
-  - Target governance, current state, handoff, replay/rate/sampled/device/observability documentation, release digest ledger, and retained `docs/evidence/M21-05-<date>.md` state exact implementation and evidence. Focused and full local verification, mandatory hosted CI, and human ownership, replay-transactionality, concurrency, boundedness, compatibility, and claim review pass before merge. M21 and CAP-M21 may be marked software-complete only after this batch merges; physical and RT gates remain explicitly incomplete.
+  - The implementation begins from an initially clean target at exact default-branch commit `00cc6e48eb11c334a5e04ebd0719899f52d5581b`, the merged M21-05 pull request 246. Retained M15 through M21-05 evidence is present and unchanged, M21/CAP-M21 portable software closure is recorded truthfully, and no absent physical, RT, Unreal, signing, release, deployment, or production result is invented.
+  - An additive C++ live-control policy is copied only while configuring and frozen at finalization. It declares positive bounded mailbox, producer, record, per-record payload, and total payload-storage capacities when enabled; a nonzero schema/policy identity; one closed admission policy for this batch (`reject_new`); and explicit absolute byte ceilings with checked multiplication. Capacity zero disables the complete surface and preserves pre-M22 identity, accounting, artifacts, and behavior.
+  - Public descriptors use fixed-width fields and closed numeric tables for schema/version, record size, mailbox and producer identity, runtime/configuration generation, target kind, target frame or rate-domain/phase/release sequence, update kind, producer sequence, canonical payload size/digest, policy flags, and zero reserved fields. They contain no dynamic string, raw address, callback, function pointer, vendor handle, file path, authentication secret, wall-clock source, or borrowed payload span after admission.
+  - M22-01 supports exact target identities for a host frame or one already compiled active rate release. Structural validation rejects zero, overflowed, future, foreign, stale, wrong-kind, noncanonical, contradictory, or out-of-plan targets before reserving a slot. It does not decide missed-target, late-acceptance, replacement, or boundary ordering semantics; those remain M22-02 work and no update is described as scheduled or committed in this batch.
+  - Producers are pre-registered while configuring and receive Runtime-instance-bound generation-safe handles after successful finalization. A producer belongs to exactly one mailbox and has one positive bounded identity and monotonic sequence domain. Foreign Runtime handles, stale finalization/restart generations, duplicate identities, exhausted sequences, and cross-mailbox submissions fail without changing mailbox state.
+  - Every admitted update copies its canonical payload bytes into one preallocated Runtime-owned slot before publication. The payload length and digest cover exactly the copied bytes; unused slot bytes are zeroed or never observable; caller mutation after return cannot change the record; and no accepted record retains a borrowed pointer. Zero-byte payloads are legal only for explicitly declared update kinds whose structural contract permits them.
+  - Structural validation is complete before slot publication and includes descriptor size/version/reserved fields, closed enums and flags, producer ownership/generation/sequence, exact target identity, payload extent, alignment where declared, canonical byte-order requirements, digest agreement, and checked offsets. M22-01 performs no application-specific parsing, semantic controller/calibration validation, signature verification, authorization callback, filesystem/network I/O, or executable-code loading.
+  - Mailbox admission is a bounded nonblocking multi-producer operation over finalization-time storage. One successful reservation assigns an exact monotonic mailbox sequence; publication becomes visible only after the complete descriptor and payload copy; a consumer or inspector never observes a partially published slot. Contention returns an explicit bounded `busy` result rather than taking a blocking mutex, spinning without a fixed bound, allocating, or falling back to an unbounded queue.
+  - Exact zero, one, full, one-over, busy-reservation, producer-capacity, record-capacity, payload-capacity, total-byte, sequence, generation, and checked-arithmetic boundaries are closed. A full mailbox deterministically rejects the new record in this batch; it does not overwrite, replace, coalesce, evict, or mutate an already published record. Accepted, invalid, full, busy, stale, stopped, and exhausted outcomes are distinct and inspectable.
+  - Runtime exposes bounded read-only mailbox and record inspection sufficient to prove copied identities, payload digest, sequence, occupancy, rejects, and storage accounting. Inspection is Runtime-instance-bound, cannot mutate ownership or advance execution, reports unpublished/busy slots as unavailable, and does not return raw internal storage addresses or default payload contents. Any explicit payload-copy inspection requires a caller-sized destination and exact extent checks.
+  - M22-01 adds no running consumer and applies no update to scenario, controller, calibration, fault, sampled-I/O, rate, graph, callback, device, state registry, or backend behavior. `step()`, periodic execution, active mixed-rate dispatch, checkpoint, replay, telemetry, watchdog, stop, and restart do not drain, interpret, publish, roll back, or emit an action for staged records. M22-02 owns boundary consumption and ordering; M22-03 owns rollback, checkpoint, replay, and telemetry.
+  - Admission is permitted only through the explicit non-RT producer API and never from executor workers, backend lanes, the host frame owner, watchdog, completion poller, or telemetry drain. It performs bounded validation and copy work, creates no thread, invokes no callback or vendor function, and does not claim to be safe for signal handlers, interrupt context, or an unbounded number of concurrent producers.
+  - Stop begins a generation transition that rejects new reservations, waits only through the existing bounded ownership rules, and leaves no partially published slot. Restart/finalization invalidates old producer handles and resets mailbox sequence/storage/counters according to one documented rule; M22-01 never silently reuses a stale slot or carries a staged update into a different runtime/configuration generation.
+  - Configuration, finalization, replacement, failed finalization, producer registration, admission, inspection, stop, restart, and destruction are isolated per Runtime. Two Runtime instances may use identical logical producer/mailbox/update identities without sharing mutable global state, accepting each other's handles, payload slots, counters, or generations.
+  - Sequence and generation exhaustion fail before zero, wrap, ABA reuse, or ambiguous ordering. Reservation tickets cannot make a failed copy appear published, and a producer failure cannot permanently consume capacity without an explicit bounded rejected/tombstone state that inspection and later M22 consumption can distinguish.
+  - Successful finalization accounts for copied policy and producer declarations, mailbox controls, slot descriptors, payload storage, atomics/counters, and inspection state exactly once in existing `MemoryPlan` categories and `planned_bytes`. Caller source bytes and output buffers are excluded. Checked size/alignment arithmetic rejects before allocation or partial policy publication, and failed finalization remains retryable.
+  - Graph/config/replay compatibility identity includes every frozen M22-01 policy, capacity, schema, legal update/target table, producer/mailbox declaration, admission rule, and reset rule that can change compatibility. It excludes post-finalization payload bytes, arrival order, current occupancy/counters, caller addresses, thread identity, wall-clock timing, and inspector cursor position. Individual updates do not change the finalized graph identity merely by being staged.
+  - The existing standalone `core::ConfigHotReloader`, experimental SimCore seqlock, filesystem polling tests, extension loader, and any Unreal hot-reload mechanism are not reused, promoted, or modified. The supported M22 path is Runtime-integrated, data-only, fixed-capacity, instance-local, and free of repository-private filesystem state.
+  - Default construction and positional aggregate/source compatibility, CPU-only and mixed-rate M16/M21 execution, deterministic mock/loopback replay, sampled safe outputs, ordinary M17/HAL-v2 backends, device-ABI-v1 adaptation, multiple Runtime instances, no-allocation checks, checked cleanup, package relocation, and legacy artifacts retain their exact pre-M22 behavior when the policy is disabled.
+  - Stable C ABI v8 with exactly 70 exports and fingerprint `0xd0e7a5a14bf35f97`, SONAME 8, device ABI v1, extension ABI v1, HAL tables, Runtime status values, runtime-profile schema 7/25 keys, checkpoint/input-log/rate-action/mixed-rate-action/active-replay/observability schemas, release 1.2.1, installed target/header/alias inventory, support matrices, qualification state, Apache-2.0 license, and prior retained evidence remain unchanged.
+  - Target governance, current state, handoff, component contracts, release digest ledger, static-analysis manifest, and retained `docs/evidence/M22-01-<date>.md` state the exact schema/mailbox-only boundary. Focused and full local verification, mandatory hosted CI, and human API, ownership, concurrency, capacity, identity/accounting, compatibility, and claim review pass before merge. M22 and CAP-M22 remain incomplete after this batch.
 validation:
   local:
     - git status --short --branch
-    - test "$(git rev-parse HEAD)" = "2821f90fb09dc86820b879bb47a39d8165ff0e0f"
-    - git merge-base --is-ancestor 2821f90fb09dc86820b879bb47a39d8165ff0e0f HEAD
-    - test -f docs/evidence/M21-04-2026-08-27.md
+    - test "$(git rev-parse HEAD)" = "00cc6e48eb11c334a5e04ebd0719899f52d5581b"
+    - git merge-base --is-ancestor 00cc6e48eb11c334a5e04ebd0719899f52d5581b HEAD
+    - test -f docs/evidence/M21-05-2026-08-27.md
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='MixedRateActions.*:MixedRateReplay.*:MixedRateConformance.*:RateDispatch.*Device*:RateDispatch.*Replay*:SampledIo.*Replay*:SampledIo.*Overload*:LoopbackBackend.*Replay*:HostRuntime.*Watchdog*:DeviceRuntime.*Rate*:DeterminismReplay.*Active*:MemoryPlan.*MixedRate*:TraceNoAlloc.*MixedRate*:MultipleInstances.*MixedRate*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm21_mixed_rate|mixed_rate_consumer|package_consumer'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='LiveControlMailbox.*:HostRuntime.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*'
+    - ctest --test-dir build/agent-full --output-on-failure -R 'm22_live_control_mailbox|package_consumer'
     - ./scripts/agent-verify.sh full
-    - ./scripts/verify-portable-assurance.sh --build-dir build/portable-assurance --source-commit "$(git rev-parse HEAD)" all
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
     - git diff --check
-    - git diff --name-only 2821f90fb09dc86820b879bb47a39d8165ff0e0f
+    - git diff --name-only 00cc6e48eb11c334a5e04ebd0719899f52d5581b
   focused_tests_to_add:
-    - transactional M21-05 policy validation for versions, capacities, byte bounds, overflow policy, deterministic-backend requirement, duplicate setup, finalization correction/retry, and unchanged disabled path
-    - fixed mixed-rate action schema numeric tables, reserved fields, metadata, counters, runtime-bound cursors, capacity zero/exact/one-over, drop/overwrite/gap behavior, malformed/foreign cursors, and noninterference with dispatch
-    - exact action correlation for CPU/device releases, submit/terminal completion, error, timeout, cancel, loss, quarantine, skip, hold, optional shed/recover, sampled stale/under/overrun, startup/failure/shutdown safety, watchdog, degradation, and checked stop
-    - optional device shedding/recovery order and hysteresis across equal-time CPU/device releases, proving no provider/backend call or slot/payload claim while shed and no mandatory-device omission
-    - overload at every Runtime/backend/phase/ticket/dispatch/ring/action capacity boundary, including independent-device progress without head-of-line blocking and exact failure/ownership retention
-    - conditional mixed-rate checkpoint state round trip, canonical bytes, application/rate/device/sampled/safety/shedding/degradation/action position, complete prevalidation, correction/retry, and byte-exact legacy checkpoint preservation
-    - active-replay artifact construction, allocation-free inspection, exact nominal/action transcript, checksums, bounds, truncation/trailing/overflow/gap/duplicate/foreign identity rejection, short-output reporting, and deterministic artifact bytes
-    - active replay from a quiescent checkpoint through deterministic mock and loopback backends across normal, late, shed/recover, watchdog/degrade, timeout/cancel/loss, stale/under/overrun, and safe transitions with exact action/payload/final-state equality
-    - rejection of non-deterministic/physical backends, incomplete or lossy telemetry, in-flight or cleanup-pending checkpoints, impossible actions, mismatched payload digests, live watchdog dependence, and replay reentrancy without partial restore
-    - post-restore failure semantics for input callback, provider callback, backend result, action mismatch, and final-state mismatch, preserving exact processed-frame reporting and retry from the original checkpoint
-    - reusable harmonic/non-harmonic three-rate plant-sensor-controller-actuator conformance table covering supercycle/wrap, equal time, freshness, backpressure, faults, reset/restart, safe lifecycle, checkpoint/replay, and multiple instances
-    - no ordinary allocation, blocking mutex, hidden thread, file/network I/O, unbounded wait/retry/scan, or executor-lane vendor call during action emission, active dispatch, checkpoint synchronization, and replay execution
-    - ThreadSanitizer coverage of action publication/reading, optional device shed/recover versus completion, safe transition versus active completion, timeout/cancel/late completion, checkpoint/replay exclusion, stop/retry, and two Runtime/loopback instances
-    - unchanged checkpoint/input-log schema-1 bytes and inspectors, legacy replay, CPU-only M16, ordinary M17/HAL-v2, M21-02 channel-free, M21-03 payload-only, M21-04 closure-disabled loopback, CUDA/XDMA candidates, C ABI/package inventory, and prior evidence
+    - additive live-control types, disabled defaults, configuring-only copied policy, producer/mailbox registration, finalization-time handles, and source compatibility in direct, add_subdirectory, installed, and compatibility consumers
+    - fixed descriptor size/alignment/defaults, closed enum/flag tables, zero reserved fields, canonical target identity, payload extent/digest, and deterministic structural validation diagnostics
+    - exact frame and compiled rate-release target acceptance plus rejection of foreign, stale, wrong-kind, missing, overflowed, noncanonical, contradictory, and out-of-plan references
+    - payload copy ownership, caller-mutation isolation, exact digest and zero-length rules, short/long destination inspection, unused-byte non-observability, and no retained caller address
+    - independent bounded multi-producer stress at zero, one, exact, full, one-over, busy, producer, payload, total-byte, sequence, generation, and arithmetic capacities without partial publication or overwrite
+    - exact accepted/invalid/full/busy/stale/stopped/exhausted results, monotonic mailbox and producer sequences, complete publication visibility, deterministic counters, and abandoned-reservation handling
+    - failed-finalize correction/retry, stop during producer activity, restart generation invalidation/reset, repeated lifecycle, destruction, and two-runtime handle/storage/counter isolation under ThreadSanitizer
+    - graph/config/replay identity sensitivity for frozen mailbox semantics with exclusion of staged payload/arrival/occupancy state and exact MemoryPlan/control-ledger reconciliation
+    - proof that step, periodic, mixed-rate dispatch, device completion, sampled I/O, checkpoint, replay, telemetry, watchdog, and stop apply no staged update and produce no M22 action in this batch
+    - full M16/M17/M21 execution, deterministic replay, package inventory, exact C ABI, artifact-schema, support-matrix, release-contract, and disabled-path regression coverage
   required_ci:
-    - Documentation contract workflow including truthful M21-05 portable deterministic-mock replay/conformance claims, frozen existing artifact schemas and C ABI, unchanged installed inventory/support matrices, release contract, and exact static source manifest
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of mixed-rate action admission, overload, checkpoint, active replay parsing/execution, sampled safety, watchdog/degradation, conformance, capacity, and compatibility
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical action/artifact/checkpoint/conformance results and passing installed mixed-rate consumers
-    - Unified executor GCC ThreadSanitizer job covering device action publication, shedding/recovery, completion/timeout/cancel/quarantine, sampled ownership, safe transition, checkpoint/replay exclusion, concurrent stop, late completion, cursors, and two Runtime instances without races
-    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged prior checkpoint/input-log fixtures plus byte-identical mixed-rate replay artifacts, ordered action digests, selected generations, payload checksums, sampled metadata, shed/recover, watchdog/degradation, safety state, and final state for the integer loopback fixture
-    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, loopback and mixed-rate conformance consumers, and unchanged default installed inventory
-    - Clang 14 portable static/fuzz/artifact assurance includes every compiled new runtime source and bounded malformed mixed-rate artifact mutations; blocking dependency review, candidate SBOM/provenance, autotune, scaling, and existing package relocation remain green
-    - Existing M7 replay/checkpoint, M16 rate/action/cross-rate/no-allocation, M17 memory/batch/timeline/vendor, and M21-01 through M21-04 gates all pass; no physical-device, controlled-timing, electrical, performance-threshold, Unreal, release, or deployment workflow is authorized
+    - Documentation contract workflow including truthful M22-01 staging-only claims, unchanged runtime/artifact schemas and stable ABIs, exact SDK inventory/support matrices, release contract, and static source manifest
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of descriptors, structural validation, ownership, capacity, arithmetic, publication, lifecycle, identity, accounting, and compatibility
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical fixed record layout, validation, sequence, capacity, identity, and package-consumer results
+    - Unified executor GCC ThreadSanitizer job covering concurrent registered producers, full/busy/stop races, publication visibility, stale handles, restart, and two Runtime instances without races
+    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged existing fixtures, stable finalized M22 policy identity, and explicit exclusion of post-finalization arrival order and payload bytes
+    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and the new live-control installed consumer
+    - Clang 14 portable static/fuzz/artifact assurance includes every compiled M22-01 source and malformed descriptor/extent mutations; blocking dependency review, SBOM/provenance, autotune, scaling, and package relocation remain green
+    - Existing M7 replay/checkpoint, M16 rate, M17 HAL/device, M21 mixed-rate/payload/sampled/replay, no-allocation, sanitizer, and multiple-instance gates all pass; no update commit, hardware, controlled timing, Unreal, release, or deployment workflow is authorized
   manual:
-    - Human review must confirm the new schemas are distinct and versioned, existing artifact bytes and legacy replay remain exact, every action is correlated once to immutable release/completion identity, optional device shedding cannot omit mandatory work, and overload cannot overwrite an owned slot or depend on arrival order.
-    - The reviewer must confirm complete artifact/checkpoint validation precedes mutation, active replay accepts only deterministic mock/loopback backends and a gap-free transcript, watchdog/degradation is transcript-driven rather than live-time inferred, sampled/safe state restores without a false acknowledgement, and post-start failures report exact partial progress.
-    - The reviewer must confirm the conformance suite is reusable through installed public surfaces, all running operations remain bounded and allocation-free where contracted, and no simulated action, payload digest, replay, hosted timing, or loopback result is described as physical DAC/DAQ/CAN/IIO/XDMA/CUDA, HIL, RT1, or RT2 evidence.
+    - Human review must confirm the additive public API has one copied canonical update envelope, exact per-Runtime ownership/generation, fixed payload storage, bounded producer admission, complete-before-visible publication, explicit contention/full/exhaustion results, and no callback, parsing, I/O, or hidden dynamic storage.
+    - The reviewer must confirm M22-01 never applies, schedules, rolls back, checkpoints, replays, or emits telemetry for an update; does not reuse the filesystem helper or experimental seqlock; and does not describe staging, hosted concurrency, or deterministic inspection as exact-boundary commit, production hot reload, RT1/RT2, hardware, or Unreal evidence.
 risk:
   class: high
   hazards:
-    - an action record published before terminal ownership settles can make a failed, stale, late, or wrong-generation device result appear successful or replayable
-    - extending an existing artifact or telemetry schema in place can silently corrupt legacy compatibility or cause old consumers to reinterpret reserved bytes
-    - optional shedding, device completion, safe output, watchdog, and stop can race and produce arrival-order-dependent actions or recycle an owned slot
-    - replaying from live wall-clock or completion timing can diverge across hosts while appearing deterministic
-    - restoring sampled metadata, safety state, generation, or action position incompletely can publish stale bytes, duplicate work, or claim an unacknowledged safe state
-    - lossy telemetry can be mistaken for a complete replay transcript unless gaps and drops fail closed
-    - deterministic fake-driver success or recorded physical boundary metadata can be mislabeled as physical timing, electrical correctness, vendor compatibility, HIL, or RT qualification
+    - a descriptor or payload published before its copy is complete can expose torn configuration bytes to the later boundary consumer
+    - a stale producer handle or missing Runtime/configuration generation can apply an update to the wrong instance or restart generation
+    - an unbounded retry loop, mutex, heap fallback, producer registry scan, or caller-owned payload can violate the RT-adjacent boundedness contract
+    - concurrent reservation failure can leak a slot, create a sequence gap that looks accepted, or make mailbox fullness arrival-order dependent without an explicit result
+    - ambiguous frame/rate-release target fields can force M22-02 to guess late, missed, replacement, or ordering semantics
+    - including staged payload or arrival state in finalized graph identity can make compatibility depend on scheduling; excluding frozen policy can admit incompatible replay/checkpoint state later
+    - reusing the existing filesystem hot-reload helper or SimCore seqlock can silently promote experimental, allocating, sleep-based, or repository-private behavior into the supported Runtime
+    - schema/mailbox scaffolding can be mislabeled as transactional apply, rollback, replay, production live control, executable hot reload, or safety/RT qualification
   stop_conditions:
-    - the exact target baseline is unavailable, dirty, or lacks merged M21-04 evidence, terminal-only sampled publication, and acknowledged safe-output behavior
-    - implementation requires changing stable C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL versions, Runtime status values, runtime-profile schema 7, existing checkpoint/input-log/rate-action/observability layouts, release version, license, installed inventory, support matrices, qualification state, or prior evidence
-    - a complete distinct bounded action/replay schema cannot represent nominal release, device terminal outcome, sampled content identity, shedding/recovery, watchdog/degradation, safe state, and exact gaps without arrival-order or live-time dependence
-    - optional device shedding cannot reuse the existing immutable total order and hysteresis without silently skipping mandatory work, invoking a provider while shed, or changing prior CPU semantics
-    - quiescent checkpoint state cannot restore active cursor, device/sampled generation, safety, shedding, degradation, and replay position transactionally without including in-flight vendor ownership or backend-private state
-    - active replay cannot reject nondeterministic backends, validate all inputs before restore, reproduce deterministic mock/loopback actions, or fail on the first transcript/content/state mismatch with exact progress
-    - implementation requires sampled payload bytes in default telemetry, a vendor adapter, physical clock/trigger/electrical behavior, external-process transport, benchmark thresholds, M22 live controls, M23 benchmarks, M24 CUDA physics, M26 golden demo, hot reload, Unreal, signing, publication, release, deployment, or production access
-    - credible validation requires timing sleeps/tolerances, physical CUDA/XDMA/DAC/DAQ/CAN/IIO hardware, privileged or controlled hosts, secrets, signing keys, or a qualification/promotion decision
+    - the exact target baseline is unavailable, dirty, or lacks merged M21-05 retained evidence and stable portable mixed-rate closure
+    - implementation requires changing C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL tables, Runtime status values, runtime-profile schema, existing artifact/telemetry schemas, installed inventory, support matrices, qualification state, release version, license, or prior evidence
+    - one fixed canonical envelope cannot represent exact runtime/configuration generation, frame or rate-release target, update kind, producer sequence, payload extent, and digest without a pointer, dynamic string, or unbounded payload
+    - concurrent producer admission cannot remain fixed-capacity, complete-before-visible, nonblocking with bounded attempts, generation safe, exactly accounted, and isolated per Runtime
+    - target validation would require parsing application payloads, invoking user/authentication callbacks, reading files/network, loading executable code, consulting wall-clock timing, or mutating running state
+    - implementation requires M22-02 boundary commit/late/replacement behavior, M22-03 rollback/checkpoint/replay/telemetry, M22-04 typed examples/stress closure, M23 benchmarks, M24 CUDA physics, M25 SDK work, M26 golden demo, Unreal, signing, publication, release, deployment, or production access
+    - credible validation requires timing sleeps/tolerances, physical CUDA/XDMA/DAC/DAQ/CAN/IIO hardware, privileged or controlled hosts, secrets, signing keys, or a support/qualification/promotion decision
     - any required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
-    - target contracts at the exact baseline contradict this additive portable closure or repair would require weakening deterministic, sanitizer, no-allocation, compatibility, artifact-parser, package, or release gates
+    - target contracts at the exact baseline contradict the schema/mailbox-only vertical or repair would require weakening deterministic, sanitizer, no-allocation, compatibility, parser, package, or release gates
 rollback:
-  strategy: Revert the additive M21-05 policy and public C++ types, mixed-rate action/replay sources, conditional checkpoint record, host-runtime action/replay integration, loopback deterministic replay hooks, reusable conformance fixture and installed consumer, tests/CI, documentation, governance synchronization, release-contract digest updates, and M21-05 evidence as one batch. Restore the merged M21-04 sampled-I/O/loopback behavior, including unchanged legacy artifact schemas and active replay rejection, while preserving all M21-01 through M21-04 execution and safety semantics.
+  strategy: Revert the additive live-control policy, descriptors, producer/mailbox handles, Runtime-owned fixed slots and payload storage, structural validator and inspection API, identity/accounting integration, tests/CI, documentation, governance synchronization, release-contract digest updates, and M22-01 evidence as one batch. Restore the exact merged M21-05 behavior; no update was ever applied, no checkpoint/replay/telemetry schema or persistent data was migrated, and no physical, support, release, or deployment state was created.
+  data_migration: none
+  release_action: Do not publish a release, promote a support or qualification tuple, alter hardware/RT records, or mark M22/CAP-M22 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M21-05-<date>.md
+    - docs/evidence/M22-01-<date>.md
     - exact control and target baselines, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - copied M21-05 policy, fixed action/replay schema layouts and numeric tables, capacities, overflow/loss behavior, deterministic-backend admission, checkpoint state shape, identity inputs/exclusions, and disabled-path compatibility
-    - exact rate/device/sampled/safe/watchdog action correlation across execute, submit, terminal success/error, timeout, cancel, loss, quarantine, skip, hold, shed/recover, stale, underrun, overrun, degradation, failure, stop, late completion, and retry
-    - canonical checkpoint and active-replay artifact bytes, parser mutation/boundary results, prevalidation transactionality, gap/drop rejection, payload/action/final-state comparisons, partial-progress semantics, and legacy artifact byte-preservation results
-    - reusable harmonic/non-harmonic three-rate conformance matrix results for first/steady/wrap, equal-time order, freshness, backpressure, overload, faults, reset/restart, safe lifecycle, checkpoint/replay, and multiple instances
-    - no-allocation/direct-index/bounded-copy evidence, ThreadSanitizer ownership results, exact MemoryPlan reconciliation, package/relocation results, and unchanged prior execution
-    - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, HAL/extension contracts, existing artifact/runtime schemas, installed target/header/alias inventory, support/qualification, license, and prior-evidence preservation results
-    - residual risks and every unperformed physical sampled-input replay, vendor DAC/DAQ/CAN/IIO/XDMA/CUDA, controlled trigger/clock/electrical/calibration, performance, endurance, HIL, field, RT1, RT2, live-control, benchmark, CUDA-physics, golden-demo, Unreal, signing, publication, release, deployment, and production validation
-  claim_boundary: Evidence may establish bounded mixed CPU/device overload actions, exact optional-device shedding/recovery and terminal correlation, distinct versioned action/active-replay artifacts, transactional quiescent checkpoint restore, deterministic replay for the declared portable mock/loopback backend, watchdog/degradation transcript handling, reusable installed-package conformance, and portable RT0 static/unit/property/sanitizer behavior only. Recorded physical boundary metadata is not deterministic physical replay. No result establishes physical sample-clock or trigger accuracy, electrical scaling or calibration correctness, DAC/DAQ/CAN/IIO/XDMA/CUDA compatibility, HIL, controlled latency, RT1, RT2, Unreal integration, support promotion, signing, publication, release, deployment, or production readiness.
+    - public policy/descriptor/handle shapes with fixed sizes, closed tables, defaults, capacities, target identity, generation, payload extent/digest, reserved fields, and deferred behavior
+    - producer/mailbox ownership, reservation/publication state machine, exact accepted/rejected sequences and counters, capacity/contention/exhaustion results, copied payload ownership, and lifecycle/reset behavior
+    - structural validation matrix for every malformed, foreign, stale, wrong-kind, noncanonical, overflowed, contradictory, and out-of-plan descriptor/payload combination
+    - identity comparisons and MemoryPlan/control-ledger reconciliation for every frozen semantic field, plus exclusion of staged payload/arrival/occupancy state and unchanged disabled-path identities
+    - proof of zero update application, callback/parser/authentication/file/network/vendor action, unchanged step/periodic/mixed-rate/checkpoint/replay/telemetry behavior, two-runtime isolation, retryable failure, and post-start no-allocation results
+    - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, HAL/extension contracts, existing artifact/runtime schemas, installed package/header/alias inventory, support/qualification, license, and prior-evidence preservation results
+    - residual risks and every unperformed M22-02 commit, M22-03 rollback/replay/checkpoint/telemetry, M22-04 SDK/stress, executable/Unreal hot reload, physical hardware, controlled timing, HIL, RT1, RT2, signing, publication, release, deployment, and production validation
+  claim_boundary: Evidence may establish additive C++ live-control schemas, fixed-capacity per-Runtime producer/mailbox ownership, canonical copied payload staging, generation-safe bounded nonblocking admission, deterministic inspection, exact identity/accounting, package compatibility, and portable RT0 static/unit/property/sanitizer behavior only. It does not establish exact-boundary update application, late/missed/replacement semantics, rollback, checkpoint/replay/telemetry integration, executable or Unreal hot reload, physical control, HIL, controlled latency, RT1, RT2, support promotion, signing, publication, release, deployment, or production readiness.
