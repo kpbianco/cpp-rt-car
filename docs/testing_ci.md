@@ -1,5 +1,14 @@
 # Testing and CI Evidence
 
+M22-01 focused gates cover additive fixed layouts/defaults, copied configuring
+policy/declarations, exact frame/rate targets, generation-safe handles,
+payload ownership/digest/extent, one-attempt contention, full/reject-new and
+sequence exhaustion, stop closure, Runtime isolation, identity exclusion of
+arrivals, exact accounting, unchanged execution/artifacts/telemetry, and a
+relocated installed consumer. Hosted GCC/Clang/MSVC, ASan/UBSan/TSan,
+determinism, static, package, C ABI, and retained M16/M17/M21 gates remain
+mandatory before merge.
+
 M21-05 focused gates cover action-ring bounds/loss, active-artifact parsing and
 mutation rejection, deterministic device-active replay, public loopback logical
 hooks, a multi-rate plant/sensor/controller/actuator fixture, exact accounting,
@@ -94,6 +103,14 @@ release, deploy, or qualify hardware/RT behavior.
   one reusable public-header conformance flow at 100/150/225 ms plus a 450 ms
   observer. The fixture is also compiled and run as a package consumer.
   Physical timing, vendor I/O, and RT qualification remain outside it.
+- M22-01 tests cover disabled and exact-capacity policy paths, fixed descriptor
+  layout, copied registrations, exact host/rate targets, canonical payload
+  digest and copy isolation, short/long inspection rejection, full/no-
+  overwrite behavior, stopped/stale/exhausted outcomes, callback rejection,
+  Runtime isolation, frozen identity sensitivity, arrival exclusion, exact
+  MemoryPlan/control-ledger accounting, and installed consumer use. Concurrent
+  busy/stop stress and sanitizer behavior remain mandatory hosted gates; no
+  test may describe staged bytes as committed state.
 - Allocation instrumentation observes no heap allocation during the first
   frame of a representative compiled graph (the M2 topology gate) and during
   64 complete M4 target-path frames under each executor policy with independent

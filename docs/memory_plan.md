@@ -1,5 +1,13 @@
 # Finalized Memory and Overload Contract
 
+M22-01 adds no provider region. Copied live-control declarations, mailbox and
+producer controls, atomics/counters, immutable record slots, payload strides,
+and copied rate-target identities are counted exactly once in the existing
+Runtime-control row and logical extent ledger. `MemoryPlan` appends mailbox,
+producer, total-record, payload-storage, and complete live-control-control byte
+fields. Disabled policies report zeros. Admission and inspection use only this
+finalization-time storage and caller-owned output spans.
+
 M21-05 action slots/counters, replay controls, digest staging, and conditional
 mixed-rate checkpoint state are included exactly once inside
 `rate_plan_bytes` and `runtime_control_bytes`. The plan exposes their exact

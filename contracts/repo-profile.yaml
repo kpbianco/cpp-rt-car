@@ -6,8 +6,8 @@ control_plane:
   repository: tranquilWorks/portfolio-control
   profile_path: profiles/assurance.yaml
   product_path: products/cpp-rt-car
-  source_revision: 6d5653b45181cd34850628d5967f65237402da5a  # pragma: allowlist secret
-audited_baseline: c5220de1ccfceca4d1584c3df5e0ddb17da171eb
+  source_revision: aeebab5f0140c2ac9161ff88f8fe42749ce42ebc  # pragma: allowlist secret
+audited_baseline: 00cc6e48eb11c334a5e04ebd0719899f52d5581b
 autonomy:
   level: 2
   allowed_when_explicitly_requested:

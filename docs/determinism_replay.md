@@ -1,5 +1,12 @@
 # Determinism, Checkpoints, and Replay
 
+M22-01 preserves checkpoint, input-log, mixed-rate-action, and active-replay
+artifact bytes. Frozen live-control policy/declarations affect graph/config/
+replay compatibility identity, but staged records, payloads, arrival order,
+occupancy, counters, and inspection do not. No checkpoint or replay path reads,
+writes, restores, drains, or compares a live-control mailbox in this batch;
+M22-03 owns that integration.
+
 M21-05 preserves checkpoint and input-log schema 1 byte-for-byte and adds a
 distinct additive active-replay schema 1 for mixed-rate execution. A closure-
 enabled checkpoint conditionally carries one ordinary mixed-rate state record;

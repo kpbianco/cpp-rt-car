@@ -93,6 +93,7 @@ HASHED_CONTRACT_PATHS = {
     "docs/hal_v2.md",
     "docs/heterogeneous_memory.md",
     "docs/host_runtime.md",
+    "docs/live_controls.md",
     "docs/limp_mode.md",
     "docs/memory_plan.md",
     "docs/observability.md",
@@ -162,6 +163,8 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/heterogeneous_memory.cpp",
     "rt/src/heterogeneous_memory.hpp",
     "rt/src/host_runtime.cpp",
+    "rt/src/live_control_mailbox.cpp",
+    "rt/src/live_control_mailbox.hpp",
     "rt/src/loopback_backend.cpp",
     "rt/src/memory_policy.cpp",
     "rt/src/memory_policy.hpp",
@@ -206,6 +209,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/package_consumer/compat_consumer.cpp",
     "tests/package_consumer/cpp_consumer.cpp",
     "tests/package_consumer/loopback_consumer.cpp",
+    "tests/package_consumer/live_control_consumer.cpp",
     "tests/package_consumer/mixed_rate_consumer.cpp",
     "tests/package_consumer/cuda_consumer.cpp",
     "tests/package_consumer/cuda_driver_consumer.cpp",
@@ -246,6 +250,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_mixed_rate_conformance.cpp",
     "tests/test_mixed_rate_replay.cpp",
     "tests/test_loopback_backend.cpp",
+    "tests/test_live_control_mailbox.cpp",
     "tests/test_periodic_runtime.cpp",
     "tests/test_rate_dispatch.cpp",
     "tests/test_rate_telemetry.cpp",
@@ -1774,6 +1779,63 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     ):
         if token not in ci:
             errors.append(f"M19-01 CI: missing {token!r}")
+
+    live_control_source = load_text(
+        root, "rt/src/live_control_mailbox.cpp", errors
+    )
+    live_control_test = load_text(
+        root, "tests/test_live_control_mailbox.cpp", errors
+    )
+    live_control_doc = load_text(root, "docs/live_controls.md", errors)
+    package_cmake = load_text(
+        root, "tests/package_consumer/CMakeLists.txt", errors
+    )
+    root_cmake = load_text(root, "CMakeLists.txt", errors)
+    static_sources = load_text(
+        root, "tools/static_analysis_sources.txt", errors
+    )
+    for token in (
+        "struct LiveControlPolicy",
+        "struct LiveControlUpdateRecord",
+        "struct LiveControlProducerHandle",
+        "stage_live_control_update(",
+        "copy_live_control_payload(",
+    ):
+        if token not in runtime_header:
+            errors.append(f"M22-01 public contract: missing {token!r}")
+    for token in (
+        "LiveControlMailboxSet::stage",
+        "reservation.test_and_set",
+        "live_control_payload_digest",
+        "std::memory_order_release",
+    ):
+        if token not in live_control_source:
+            errors.append(f"M22-01 mailbox source: missing {token!r}")
+    for token in (
+        "OneAttemptContentionReturnsBusyWithoutPublication",
+        "ConcurrentProducersPublishOnlyCompleteDenseRecords",
+        "HandlesAndStorageAreIsolatedPerRuntime",
+        "FrozenPolicyChangesIdentityButArrivalsDoNot",
+    ):
+        if token not in live_control_test:
+            errors.append(f"M22-01 tests: missing {token!r}")
+    for phrase in (
+        "data-only",
+        "no staged update is scheduled",
+        "M22-02",
+        "Runtime-owned",
+    ):
+        if phrase.lower() not in live_control_doc.lower():
+            errors.append(f"M22-01 documentation: missing {phrase!r}")
+    for token, text in (
+        ("rt/src/live_control_mailbox.cpp", root_cmake),
+        ("m22_live_control_mailbox", tests_cmake),
+        ("rtfw_consumer_live_control", package_cmake),
+        ("m22_live_control_mailbox", ci),
+        ("rt/src/live_control_mailbox.cpp", static_sources),
+    ):
+        if token not in text:
+            errors.append(f"M22-01 integration: missing {token!r}")
 
     return errors
 

@@ -1,11 +1,11 @@
 # RTFW Product Contract
 
-M21-05 closes the portable mixed-rate software path with bounded logical
-actions, quiescent checkpoint state, deterministic active replay, and a
-reusable public-surface conformance fixture. Application-owned plant, vehicle,
-and controller models remain outside the core. See
-[determinism_replay.md](determinism_replay.md); loopback success is not
-physical HIL or electrical/timing qualification.
+M21-05 closes the portable mixed-rate software path. M22-01 adds only an
+opt-in fixed-capacity live-control staging substrate with Runtime-owned payload
+copies and no update consumer. Application-owned plant, vehicle, controller,
+and update semantics remain outside the core. See
+[live_controls.md](live_controls.md); staging is not update application,
+physical HIL, or electrical/timing qualification.
 
 Status: accepted contract for the supported 1.x portable runtime
 
@@ -110,8 +110,13 @@ deterministic loopback. M21-05 adds a configuring-only closure policy, fixed
 mixed-rate actions, conditional schema-1 checkpoint state, and a distinct
 bounded active-replay schema for deterministic mock/loopback backends. It does
 not alter an existing stable ABI or schema and does not promote physical, HIL,
-support, qualification, or release claims. M21 and CAP-M21 remain incomplete
-until the implementation candidate passes hosted/human gates and merges.
+support, qualification, or release claims. M21 and CAP-M21 are complete in
+merged portable target history. M22-01 adds a configuring-only bounded
+live-control policy, copied mailbox/producer declarations, generation-safe
+handles, fixed canonical records, copied payload slots, nonblocking
+reject-new admission, read-only inspection, and conditional identity and
+Runtime-control accounting. It does not consume or apply an update; M22 and
+CAP-M22 remain incomplete.
 
 ## Claim policy
 

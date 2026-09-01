@@ -118,6 +118,7 @@ if (SIM_GTEST_AVAILABLE)
         test_rate_timeline.cpp
         test_sampled_io.cpp
         test_loopback_backend.cpp
+        test_live_control_mailbox.cpp
         test_mixed_rate_actions.cpp
         test_mixed_rate_replay.cpp
         test_mixed_rate_conformance.cpp
@@ -219,6 +220,11 @@ if (SIM_GTEST_AVAILABLE)
     # Keep a finite guard while allowing slower Debug and contended CI hosts to
     # finish the assertions instead of terminating the process at 180 seconds.
     set_tests_properties(simcore_all PROPERTIES TIMEOUT 300)
+    add_test(
+        NAME m22_live_control_mailbox
+        COMMAND simcore_tests
+            --gtest_filter=LiveControlMailbox.*:HostRuntime.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*)
+    set_tests_properties(m22_live_control_mailbox PROPERTIES TIMEOUT 60)
     add_test(
         NAME m19_extension_registration
         COMMAND simcore_tests

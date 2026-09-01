@@ -1,6 +1,12 @@
 # Architecture
 
-M21-05 closes the existing M21 transport without adding an execution lane:
+M21-05 closes the existing M21 transport without adding an execution lane.
+M22-01 adds a separate data-only live-control staging surface: copied policy
+and declarations, fixed Runtime-owned records/payloads, one-attempt producer
+admission, and read-only inspection. It adds no consumer or execution lane.
+See [live_controls.md](live_controls.md).
+
+The merged M21 closure remains:
 sampled descriptor, validated fixed frame, cross-rate snapshot/device slot,
 terminal completion, then one closed logical action. Conditional checkpoint
 state and the separate active-replay artifact preserve exact logical decisions
@@ -64,6 +70,15 @@ gap-free transcript. Replay prevalidates the complete artifact, restores once,
 drives recorded logical choices, re-runs deterministic providers/backends, and
 compares every generated action and content identity. It never treats physical
 arrival order or live watchdog time as replay input.
+
+M22-01 finalization constructs one optional `LiveControlMailboxSet` after the
+rate plan is compiled and before Runtime state is published. The set copies
+compiled release identities, owns fixed mailbox/producer/slot/payload storage,
+and contributes exact logical control extents. External producers address one
+pre-registered producer directly through a Runtime-generation handle. A
+release-store publishes only a complete descriptor and copied payload; no
+executor, backend, watchdog, telemetry, checkpoint, or replay path reads the
+mailbox in this batch.
 
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval

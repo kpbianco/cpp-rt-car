@@ -1,7 +1,7 @@
 # Current state
 
-Last audited: 2026-08-27
-Batch baseline: `2821f90fb09dc86820b879bb47a39d8165ff0e0f`
+Last audited: 2026-09-01
+Batch baseline: `00cc6e48eb11c334a5e04ebd0719899f52d5581b`
 
 ## Product state
 
@@ -24,10 +24,36 @@ Batch baseline: `2821f90fb09dc86820b879bb47a39d8165ff0e0f`
   schemas and tools remain proposal-only and unpromoted. M19-01 adds extension
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
   current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
-  and M21-04 are merged. M21-05 is the active approved overload, action,
-  checkpoint/replay, and reusable-conformance closure batch.
+  and M21-04 are merged. M21-05 is merged at the audited baseline and closes
+  the portable M21 software path. M22-01 is the active approved live-control
+  schema and bounded-mailbox batch; M22/CAP-M22 remain incomplete.
 
-## M21-05 mixed-rate closure candidate
+## M22-01 live-control staging candidate
+
+M22-01 adds an opt-in additive C++ policy with positive bounded mailbox,
+producer, record, per-record payload, and total copied-payload capacities.
+Configuration copies fixed mailbox and producer declarations. Successful
+finalization allocates all slots and payload storage, binds producer handles
+to one Runtime identity and configuration generation, validates exact compiled
+rate-release targets, and includes the frozen policy/declarations in graph,
+configuration, replay, and exact Runtime-control accounting.
+
+Admission is an explicit non-RT producer operation. It performs one bounded
+reservation attempt, copies canonical payload bytes before release
+publication, and returns distinct accepted, invalid, full, busy, stale,
+stopped, or exhausted outcomes. Read-only inspection exposes copied records,
+counters, occupancy, and exact-size payload copying without an internal
+address. Stop closes admission before existing cleanup ownership is processed.
+
+This batch has no consumer. Staged bytes do not change `step()`, periodic or
+mixed-rate execution, sampled I/O, devices, checkpoints, replay, telemetry,
+watchdog, or state. M22-02 owns exact-boundary commit and ordering; M22-03 owns
+rollback/checkpoint/replay/telemetry; M22-04 owns typed SDK examples and
+closure. Portable tests are RT0 evidence only. Hosted CI and human API,
+ownership, concurrency, compatibility, and claim review remain mandatory
+before merge.
+
+## M21-05 mixed-rate closure
 
 M21-05 copies and freezes an optional C++ closure policy before finalization.
 It preallocates a fixed 256-byte action-record ring with runtime-bound cursors,
@@ -53,9 +79,9 @@ A table-driven public-header conformance fixture runs CPU plant, device sensor,
 CPU controller, device actuator, and observer work across three distinct rate
 periods, sampled hold behavior, acknowledged safety, checkpoint, and exact
 active replay. Local strict compilation, 9 focused tests, a 91-test impacted
-suite, and direct package-consumer execution pass. All five hosted workflows
-and the 24-job main CI matrix pass; human review and merge remain required.
-M21 and CAP-M21 remain incomplete until this candidate merges.
+suite, and direct package-consumer execution passed. All five hosted workflows,
+the 24-job main CI matrix, and human review passed before merge. M21 and
+CAP-M21 are portable-software complete in merged target history.
 Physical/vendor I/O, HIL, RT1, and RT2 remain unclaimed.
 
 ## M21-04 sampled I/O and loopback
