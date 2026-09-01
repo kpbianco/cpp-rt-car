@@ -3355,7 +3355,7 @@ Status LiveControlMailboxSet::write_replay_artifact(
         closure.retained_generation_count - first_generation,
         [](void* opaque,
            std::size_t index,
-           LiveControlRetainedGenerationView& output) noexcept {
+           LiveControlRetainedGenerationView& descriptor) noexcept {
             auto& reader = *static_cast<ReaderContext*>(opaque);
             const auto resolved = reader.first_generation + index;
             if (resolved >=
@@ -3364,15 +3364,15 @@ Status LiveControlMailboxSet::write_replay_artifact(
             }
             const auto& generation =
                 reader.impl->closure->retained_generations[resolved];
-            output.target = generation.target;
-            output.generation_identity = generation.generation_identity;
-            output.prior_generation_identity =
+            descriptor.target = generation.target;
+            descriptor.generation_identity = generation.generation_identity;
+            descriptor.prior_generation_identity =
                 generation.prior_generation_identity;
-            output.first_action_sequence = generation.first_action_sequence;
-            output.record_count = generation.record_count;
-            output.payload_bytes = generation.payload_bytes;
-            output.terminal_status = generation.terminal_status;
-            output.settled = generation.settled;
+            descriptor.first_action_sequence = generation.first_action_sequence;
+            descriptor.record_count = generation.record_count;
+            descriptor.payload_bytes = generation.payload_bytes;
+            descriptor.terminal_status = generation.terminal_status;
+            descriptor.settled = generation.settled;
             return true;
         },
         [](void* opaque,
