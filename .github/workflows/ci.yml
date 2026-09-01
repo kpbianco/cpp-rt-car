@@ -136,6 +136,17 @@ jobs:
           scripts/verify-portable-assurance.sh all \
             --build-dir "$RUNNER_TEMP/rtfw-portable-assurance" \
             --source-commit "${{ github.sha }}"
+      - name: Fuzz live-control replay parser
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          cmake --build "$RUNNER_TEMP/rtfw-portable-assurance/fuzz" \
+            --target live_control_replay_fuzz --parallel 2
+          "$RUNNER_TEMP/rtfw-portable-assurance/fuzz/tests/live_control_replay_fuzz" \
+            -runs=20000 -seed=424242 -max_len=65536 -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="$RUNNER_TEMP/rtfw-portable-assurance/fuzz-artifacts/"
       - name: Retain candidate verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

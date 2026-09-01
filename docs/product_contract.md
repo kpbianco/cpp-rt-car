@@ -2,11 +2,13 @@
 
 M21-05 closes the portable mixed-rate software path. M22-01 adds the
 fixed-capacity live-control staging substrate; M22-02 adds exact frame/rate
-boundary publication and callback-local immutable views. Application-owned
-plant, vehicle, controller, payload parsing, and apply semantics remain outside
-the core. See [live_controls.md](live_controls.md); boundary publication is not
-transactional recovery,
-physical HIL, or electrical/timing qualification.
+boundary publication and callback-local immutable views. M22-03 adds bounded
+Runtime-generation rollback, payload-free action telemetry, conditional
+checkpoint state, and exact-boundary replay using an explicit trusted artifact.
+Application-owned plant, vehicle, controller, payload parsing, apply semantics,
+and side-effect rollback remain outside the core. See
+[live_controls.md](live_controls.md); Runtime rollback is not application or
+physical recovery, HIL, or electrical/timing qualification.
 
 Status: accepted contract for the supported 1.x portable runtime
 
@@ -120,7 +122,14 @@ Runtime-control accounting. It does not consume or apply an update; M22 and
 CAP-M22 remain incomplete. M22-02 adds exact host-frame and active compiled
 rate-release close, deterministic replacement/order, copied immutable
 callback generations, terminal slot reuse, and fixed inspection. It does not
-parse payloads or add rollback, checkpoint/replay, or telemetry integration.
+parse payloads. M22-03 adds one configuring-only closure policy, a third
+preallocated rollback generation, provisional step settlement, a separate
+fixed 256-byte action schema, one conditional `rtfw.live-control` ordinary
+checkpoint record, and a distinct bounded replay artifact that embeds unchanged
+checkpoint and execution artifacts. Complete validation precedes restore and
+deterministic backend restrictions remain unchanged. It cannot undo arbitrary
+application, backend, external-process, or physical-device side effects and
+does not complete M22/CAP-M22.
 
 ## Claim policy
 

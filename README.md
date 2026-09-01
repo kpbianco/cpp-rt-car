@@ -2,7 +2,9 @@
 
 Portable hosts can use the additive `<rt/runtime.hpp>` live-control policy and
 bounded mailboxes to publish copied canonical update bytes at exact frame/rate
-boundaries through callback-local immutable views; see
+boundaries through callback-local immutable views. The M22-03 candidate adds
+Runtime-generation rollback, payload-free action records, conditional
+checkpoint state, and explicit bounded replay artifacts; see
 [`docs/live_controls.md`](docs/live_controls.md). Portable mixed-rate
 users can combine `<rt/runtime.hpp>` with the installed
 `<rt/loopback_backend.hpp>` for fixed-capacity sampled I/O, closed logical
@@ -39,7 +41,7 @@ versioned observability/replay, and asynchronous device integration.
 | CPU/memory policy model | M15 complete | Additive bounded C++ reports retain twelve stable memory identities, reconcile exact logical control extents, observe live runtime-owned stacks, accept declared-only external/backend facts, and preserve retryable reverse cleanup; the provider still backs only phase scratch, task scratch, and trace storage |
 | Multi-rate simulation | M16 complete in merged history | Bounded domains/reference order, exact cross-rate selection/storage, opt-in mandatory admission, optional CPU dispatch and hysteretic recovery, canonical policy state, and separate rate-action telemetry |
 | Mixed-rate device and sampled-I/O closure | M21 complete in merged history | M21-01 through M21-05 join admission, concurrent dispatch, cross-rate payloads, sampled frames, safe outputs, public HAL-v2 loopback, fixed mixed-rate actions, conditional checkpoint state, and bounded active replay for explicitly deterministic backends. Hardware, HIL, and RT qualification remain separate. |
-| Live-control boundary commit | M22-02 implementation candidate | M22-01 bounded staging plus exact frame/rate close, deterministic order/replacement, copied immutable callback generations, terminal slot reclamation, and fixed inspection. Payload parsing, rollback, checkpoint/replay integration, and telemetry remain deferred. |
+| Transactional live controls | M22-03 implementation candidate | M22-01/M22-02 staging and exact-boundary publication plus step-entry Runtime-generation rollback, fixed payload-free actions, conditional checkpoint state, and bounded exact-generation replay. Application/backend/physical side-effect rollback, typed SDK closure, and physical/RT validation remain deferred. |
 | HAL v2 command/timeline, memory/topology, and device ABI v1 compatibility | M17-06 portable path merged; qualification incomplete | Runtime seeds the exact native command-capability input header and retains whole-record validation. Actual CUDA/XDMA candidates register together through canonical Runtime, and one portable CPU-to-simulated-CUDA-to-host-stage-to-simulated-XDMA-to-CPU sample uses separate backend-local timelines and fixed storage. This is simulated protocol, not hardware qualification. |
 | Qualification schemas and proposals | M18-01 offline tooling; no tuple qualified | Version-1 plan, record, review, and proposal schemas with bounded artifact/digest/threshold/trial validation and deterministic proposal-only output; synthetic fixtures cannot promote support |
 | Extension registration | M19-01 implemented; M19 incomplete | Installed size-versioned C ABI v1 plus transactional C++ Runtime registration, device-v1 compatibility, host-control services, checked stop and detach; direct entry pointers only, with no loader or Unreal lifecycle |

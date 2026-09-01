@@ -1,8 +1,10 @@
 # Rate-action telemetry schema 1
 
-M22-02 leaves both rate-action and mixed-rate-action streams unchanged. Exact
-active-rate boundary close emits no action or metric; fixed commit/status
-inspection is instance-local. M22-03 owns action correlation and telemetry.
+M22-03 leaves both rate-action and mixed-rate-action streams unchanged. It adds
+a third, separate C++ live-control action schema 1 with fixed 256-byte records,
+its own capacity/counters/runtime-bound cursor, and exact gaps. Those records
+carry targets, identities, digests, and closed results but never payload bytes;
+the stream is not added to global schema-2 export.
 
 M21-05 leaves this rate-action schema unchanged and adds a separate C++ mixed-
 rate action schema 1. The new fixed 256-byte record closes device terminal,

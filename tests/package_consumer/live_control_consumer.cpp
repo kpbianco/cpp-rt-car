@@ -5,6 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 
+static_assert(sizeof(rt::LiveControlClosurePolicy) == 72);
+static_assert(sizeof(rt::LiveControlActionRecord) == 256);
+static_assert(alignof(rt::LiveControlActionRecord) == 8);
+
 struct Probe {
     std::uint64_t generation = 0;
     std::byte first{};
@@ -37,6 +41,12 @@ int main() {
     policy.total_payload_storage_bytes = 4;
     if (runtime.set_live_control_policy(policy) != rt::Status::ok) {
         return 2;
+    }
+    rt::LiveControlClosurePolicy closure;
+    closure.policy_identity = 0x4d323203;
+    closure.action_capacity = 8;
+    if (runtime.set_live_control_closure_policy(closure) != rt::Status::ok) {
+        return 11;
     }
 
     rt::LiveControlMailboxRegistration mailbox;
@@ -98,6 +108,19 @@ int main() {
         commit.generation_identity != probe.generation ||
         commit.committed != 1 || commit.staged_occupancy != 0) {
         return 9;
+    }
+    std::array<rt::LiveControlActionRecord, 4> actions{};
+    rt::LiveControlActionCursor cursor;
+    rt::LiveControlActionReadResult read;
+    if (!runtime.live_control_closure_enabled() ||
+        runtime.read_live_control_actions(cursor, actions, read) !=
+            rt::Status::ok ||
+        read.records_read != 3 || read.lost_records != 0 ||
+        actions[0].action != rt::LiveControlActionId::admission ||
+        actions[1].action !=
+            rt::LiveControlActionId::provisional_publication ||
+        actions[2].action != rt::LiveControlActionId::committed) {
+        return 12;
     }
     return runtime.stop() == rt::Status::ok ? 0 : 10;
 }

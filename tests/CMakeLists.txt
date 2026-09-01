@@ -119,6 +119,7 @@ if (SIM_GTEST_AVAILABLE)
         test_sampled_io.cpp
         test_loopback_backend.cpp
         test_live_control_mailbox.cpp
+        test_live_control_actions.cpp
         test_mixed_rate_actions.cpp
         test_mixed_rate_replay.cpp
         test_mixed_rate_conformance.cpp
@@ -223,7 +224,7 @@ if (SIM_GTEST_AVAILABLE)
     add_test(
         NAME m22_live_control_mailbox
         COMMAND simcore_tests
-            --gtest_filter=LiveControlMailbox.*:HostRuntime.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*)
+            --gtest_filter=LiveControlMailbox.*:LiveControlActions.*:HostRuntime.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*)
     set_tests_properties(m22_live_control_mailbox PROPERTIES TIMEOUT 60)
     add_test(
         NAME m19_extension_registration
@@ -453,6 +454,16 @@ if (SIM_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         runtime_profile_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(
         runtime_profile_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+
+    add_executable(
+        live_control_replay_fuzz fuzz_live_control_replay.cpp)
+    target_link_libraries(live_control_replay_fuzz PRIVATE rtfw_runtime)
+    target_compile_options(
+        live_control_replay_fuzz
+        PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_options(
+        live_control_replay_fuzz
+        PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
 # Portable M10 XDMA state-machine tests do not require GoogleTest, vendor

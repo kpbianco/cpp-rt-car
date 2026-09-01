@@ -34,6 +34,18 @@ rt::CallbackResult noop_callback(
     return rt::CallbackResult::ok;
 }
 
+rt::CallbackResult failing_callback(
+    void*,
+    const rt::CallbackContext&) {
+    return rt::CallbackResult::error;
+}
+
+rt::CallbackResult noop_replay_input(
+    void*,
+    const rt::ReplayInputView&) {
+    return rt::CallbackResult::ok;
+}
+
 struct GenerationProbe {
     std::size_t calls = 0;
     std::uint64_t generation_identity = 0;
@@ -73,6 +85,13 @@ rt::CallbackResult capture_generation_callback(
     return rt::CallbackResult::ok;
 }
 
+rt::CallbackResult capture_generation_then_fail_callback(
+    void* user_data,
+    const rt::CallbackContext& context) {
+    (void)capture_generation_callback(user_data, context);
+    return rt::CallbackResult::error;
+}
+
 struct ReentrantAdmissionProbe {
     rt::Runtime* runtime = nullptr;
     rt::LiveControlProducerHandle handle{};
@@ -108,6 +127,21 @@ rt::LiveControlPolicy policy(
     value.payload_bytes_per_record = payload_bytes;
     value.total_payload_storage_bytes =
         static_cast<std::uint64_t>(record_capacity) * payload_bytes;
+    return value;
+}
+
+rt::LiveControlClosurePolicy closure_policy(bool replay = false) {
+    rt::LiveControlClosurePolicy value;
+    value.policy_identity = 0x4d323203;
+    value.action_capacity = 128;
+    if (replay) {
+        value.retained_generation_capacity = 16;
+        value.retained_record_capacity = 32;
+        value.retained_payload_bytes = 1'024;
+        value.replay_record_capacity = 128;
+        value.replay_max_bytes = 64 * 1'024;
+        value.replay_enabled = true;
+    }
     return value;
 }
 
@@ -250,6 +284,13 @@ TEST(LiveControlMailbox, PublicLayoutAndDisabledPathRemainAdditive) {
         rt::Status::ok);
     EXPECT_EQ(
         explicit_disabled.set_live_control_policy(disabled),
+        rt::Status::invalid_state);
+    const rt::LiveControlClosurePolicy disabled_closure;
+    ASSERT_EQ(
+        explicit_disabled.set_live_control_closure_policy(disabled_closure),
+        rt::Status::ok);
+    EXPECT_EQ(
+        explicit_disabled.set_live_control_closure_policy(disabled_closure),
         rt::Status::invalid_state);
     ASSERT_EQ(explicit_disabled.finalize(), rt::Status::ok);
     const auto disabled_metadata = compatibility_ids(explicit_disabled);
@@ -1125,4 +1166,373 @@ TEST(LiveControlMailbox, FrozenPolicyChangesIdentityButArrivalsDoNot) {
     EXPECT_NE(changed_sequence_ids.config, declaration_ids.config);
     EXPECT_NE(changed_sequence_ids.graph, declaration_ids.graph);
     EXPECT_NE(changed_sequence_ids.replay, declaration_ids.replay);
+}
+
+TEST(LiveControlMailbox, ClosureSettlesSuccessWithCanonicalActions) {
+    rt::Runtime runtime;
+    GenerationProbe probe;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"capture", &capture_generation_callback, &probe}),
+        rt::Status::ok);
+    configure_live_control(runtime, 1, 8);
+    ASSERT_EQ(
+        runtime.set_live_control_closure_policy(closure_policy()),
+        rt::Status::ok);
+    const auto handle = finalized_handle(runtime);
+    EXPECT_TRUE(runtime.live_control_closure_enabled());
+    rt::MemoryPlan plan;
+    ASSERT_TRUE(runtime.memory_plan(plan));
+    EXPECT_EQ(plan.live_control_action_capacity, 128u);
+    EXPECT_GT(plan.live_control_action_storage_bytes, 0u);
+    EXPECT_GT(plan.live_control_closure_control_bytes,
+              plan.live_control_action_storage_bytes);
+    EXPECT_GT(plan.live_control_checkpoint_state_bytes, 0u);
+
+    const std::array payload{std::byte{0x41}};
+    const auto update = host_update(handle, 1, payload, 7);
+    rt::LiveControlAdmissionResult admission;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, update, payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.step({7, std::chrono::nanoseconds{1'000}}),
+        rt::Status::ok);
+
+    rt::LiveControlRecordStatusInfo status;
+    ASSERT_TRUE(runtime.live_control_record_status(kMailbox, 1, status));
+    EXPECT_EQ(status.status, rt::LiveControlRecordStatus::committed);
+    EXPECT_EQ(status.generation_identity, probe.generation_identity);
+
+    std::array<rt::LiveControlActionRecord, 8> actions{};
+    rt::LiveControlActionCursor cursor;
+    rt::LiveControlActionReadResult read;
+    ASSERT_EQ(
+        runtime.read_live_control_actions(cursor, actions, read),
+        rt::Status::ok);
+    ASSERT_EQ(read.records_read, 3u);
+    EXPECT_EQ(actions[0].action, rt::LiveControlActionId::admission);
+    EXPECT_EQ(
+        actions[1].action,
+        rt::LiveControlActionId::provisional_publication);
+    EXPECT_EQ(actions[2].action, rt::LiveControlActionId::committed);
+    EXPECT_EQ(actions[2].record_status,
+              rt::LiveControlRecordStatus::committed);
+    EXPECT_EQ(actions[2].payload_digest,
+              rt::live_control_payload_digest(payload));
+    EXPECT_EQ(read.lost_records, 0u);
+    EXPECT_EQ(read.metadata.records_dropped, 0u);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(LiveControlMailbox, CallbackFailureRestoresPriorGenerationAndRollsBack) {
+    rt::Runtime runtime;
+    ASSERT_EQ(
+        runtime.register_callback({"fail", &failing_callback, nullptr}),
+        rt::Status::ok);
+    configure_live_control(runtime, 1, 8);
+    ASSERT_EQ(
+        runtime.set_live_control_closure_policy(closure_policy()),
+        rt::Status::ok);
+    const auto handle = finalized_handle(runtime);
+    const std::array payload{std::byte{0x51}};
+    const auto update = host_update(handle, 1, payload, 7);
+    rt::LiveControlAdmissionResult admission;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, update, payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    EXPECT_EQ(
+        runtime.step({7, std::chrono::nanoseconds{1'000}}),
+        rt::Status::callback_failed);
+
+    rt::LiveControlCommitInfo commit;
+    ASSERT_TRUE(runtime.live_control_commit_info(commit));
+    EXPECT_EQ(commit.generation_identity, 0u);
+    EXPECT_EQ(commit.survivor_count, 0u);
+    EXPECT_EQ(commit.committed, 0u);
+    EXPECT_EQ(commit.staged_occupancy, 0u);
+    rt::LiveControlRecordStatusInfo status;
+    ASSERT_TRUE(runtime.live_control_record_status(kMailbox, 1, status));
+    EXPECT_EQ(status.status, rt::LiveControlRecordStatus::rolled_back);
+
+    std::array<rt::LiveControlActionRecord, 8> actions{};
+    rt::LiveControlActionCursor cursor;
+    rt::LiveControlActionReadResult read;
+    ASSERT_EQ(
+        runtime.read_live_control_actions(cursor, actions, read),
+        rt::Status::ok);
+    ASSERT_EQ(read.records_read, 3u);
+    EXPECT_EQ(actions[2].action, rt::LiveControlActionId::rolled_back);
+    EXPECT_EQ(actions[2].result, rt::LiveControlActionResult::rolled_back);
+    EXPECT_EQ(
+        actions[2].terminal_status,
+        static_cast<std::int32_t>(rt::Status::callback_failed));
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(LiveControlMailbox, CheckpointRoundTripRetiresHandlesWithoutPartialRestore) {
+    rt::Runtime runtime;
+    configure_live_control(runtime, 2, 8);
+    ASSERT_EQ(
+        runtime.set_live_control_closure_policy(closure_policy()),
+        rt::Status::ok);
+    const auto old_handle = finalized_handle(runtime);
+    const std::array first_payload{std::byte{0x61}, std::byte{0x62}};
+    const auto first = host_update(old_handle, 1, first_payload, 7);
+    rt::LiveControlAdmissionResult admission;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            old_handle, first, first_payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    const auto checkpoint = checkpoint_artifact(runtime);
+
+    const std::array second_payload{std::byte{0x71}};
+    const auto second = host_update(old_handle, 2, second_payload, 8);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            old_handle, second, second_payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    auto corrupt = checkpoint;
+    corrupt.back() ^= std::byte{1};
+    EXPECT_EQ(
+        runtime.restore_checkpoint(corrupt),
+        rt::Status::invalid_artifact);
+    rt::LiveControlUpdateRecord retained;
+    EXPECT_TRUE(runtime.live_control_record_at(kMailbox, 2, retained));
+
+    ASSERT_EQ(runtime.restore_checkpoint(checkpoint), rt::Status::ok);
+    EXPECT_FALSE(runtime.live_control_record_at(kMailbox, 2, retained));
+    ASSERT_TRUE(runtime.live_control_record_at(kMailbox, 1, retained));
+    EXPECT_NE(retained.configuration_generation,
+              old_handle.configuration_generation);
+    std::array<std::byte, 2> copied{};
+    ASSERT_EQ(
+        runtime.copy_live_control_payload(kMailbox, 1, copied),
+        rt::Status::ok);
+    EXPECT_EQ(copied, first_payload);
+
+    auto stale_update = host_update(old_handle, 2, second_payload, 8);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            old_handle, stale_update, second_payload, admission),
+        rt::Status::ok);
+    EXPECT_EQ(admission, rt::LiveControlAdmissionResult::stale);
+    rt::LiveControlProducerHandle current_handle;
+    ASSERT_EQ(
+        runtime.live_control_producer_handle(
+            kMailbox, kProducer, current_handle),
+        rt::Status::ok);
+    const auto resumed = host_update(current_handle, 2, second_payload, 8);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            current_handle, resumed, second_payload, admission),
+        rt::Status::ok);
+    EXPECT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+}
+
+TEST(LiveControlMailbox, OrdinaryReplayInjectsExactRetainedGeneration) {
+    rt::Runtime runtime;
+    GenerationProbe probe;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"capture", &capture_generation_callback, &probe}),
+        rt::Status::ok);
+    configure_live_control(runtime, 1, 8);
+    ASSERT_EQ(
+        runtime.set_live_control_closure_policy(closure_policy(true)),
+        rt::Status::ok);
+    const auto handle = finalized_handle(runtime);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    const auto checkpoint = checkpoint_artifact(runtime);
+
+    // The producer admission deliberately occurs after the checkpoint.
+    // Replay must reconstruct it from the validated action/journal range and
+    // must not depend on the external producer running a second time.
+    const std::array payload{std::byte{0x7a}};
+    const auto update = host_update(handle, 1, payload, 7);
+    rt::LiveControlAdmissionResult admission;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, update, payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+
+    const std::array<rt::ReplayInputRecord, 1> inputs{
+        rt::ReplayInputRecord{
+            {7, std::chrono::nanoseconds{1'000}}, 1, {}}};
+    std::vector<std::byte> input_log(4'096);
+    rt::ArtifactWriteResult input_write;
+    ASSERT_EQ(
+        runtime.write_input_log(inputs, input_log, input_write),
+        rt::Status::ok);
+    input_log.resize(input_write.bytes_written);
+
+    ASSERT_EQ(
+        runtime.step({7, std::chrono::nanoseconds{1'000}}),
+        rt::Status::ok);
+    const auto expected_generation = probe.generation_identity;
+    ASSERT_NE(expected_generation, 0u);
+
+    std::array<std::byte, 1> short_output{std::byte{0x5a}};
+    rt::ArtifactWriteResult short_write;
+    EXPECT_EQ(
+        runtime.write_live_control_replay_artifact(
+            checkpoint,
+            input_log,
+            rt::LiveControlNestedArtifactKind::input_log,
+            short_output,
+            short_write),
+        rt::Status::capacity_exceeded);
+    EXPECT_EQ(short_output.front(), std::byte{0x5a});
+    ASSERT_GT(short_write.required_bytes, short_output.size());
+    std::vector<std::byte> artifact(short_write.required_bytes);
+    rt::ArtifactWriteResult write;
+    ASSERT_EQ(
+        runtime.write_live_control_replay_artifact(
+            checkpoint,
+            input_log,
+            rt::LiveControlNestedArtifactKind::input_log,
+            artifact,
+            write),
+        rt::Status::ok);
+    artifact.resize(write.bytes_written);
+
+    rt::LiveControlReplayMetadata inspected;
+    ASSERT_EQ(
+        rt::inspect_live_control_replay_artifact(artifact, inspected),
+        rt::Status::ok);
+    EXPECT_EQ(inspected.nested_kind,
+              rt::LiveControlNestedArtifactKind::input_log);
+    EXPECT_EQ(inspected.retained_generation_count, 1u);
+    EXPECT_EQ(inspected.retained_record_count, 1u);
+    const auto artifact_checksum = inspected.artifact_checksum;
+    auto corrupt = artifact;
+    corrupt[corrupt.size() / 2] ^= std::byte{1};
+    EXPECT_EQ(
+        rt::inspect_live_control_replay_artifact(corrupt, inspected),
+        rt::Status::invalid_artifact);
+
+    rt::LiveControlReplayResult replay;
+    ASSERT_EQ(
+        runtime.replay_live_control(
+            artifact, &noop_replay_input, nullptr, &replay),
+        rt::Status::ok);
+    EXPECT_EQ(replay.frames_replayed, 1u);
+    EXPECT_EQ(replay.generations_compared, 1u);
+    EXPECT_EQ(replay.mismatch_status, rt::Status::ok);
+    EXPECT_EQ(probe.generation_identity, expected_generation);
+    rt::LiveControlRecordStatusInfo status;
+    ASSERT_TRUE(runtime.live_control_record_status(kMailbox, 1, status));
+    EXPECT_EQ(status.status, rt::LiveControlRecordStatus::committed);
+    std::array<rt::LiveControlActionRecord, 8> replay_actions{};
+    rt::LiveControlActionCursor replay_cursor;
+    rt::LiveControlActionReadResult replay_read;
+    ASSERT_EQ(
+        runtime.read_live_control_actions(
+            replay_cursor, replay_actions, replay_read),
+        rt::Status::ok);
+    ASSERT_EQ(replay_read.records_read, 1u);
+    EXPECT_EQ(replay_read.lost_records, 4u);
+    EXPECT_EQ(
+        replay_actions[0].action,
+        rt::LiveControlActionId::replay_verified);
+    EXPECT_EQ(
+        replay_actions[0].replay_correlation,
+        artifact_checksum);
+    rt::LiveControlProducerHandle resumed_handle;
+    ASSERT_EQ(
+        runtime.live_control_producer_handle(
+            kMailbox, kProducer, resumed_handle),
+        rt::Status::ok);
+    const auto resumed = host_update(resumed_handle, 2, payload, 8);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            resumed_handle, resumed, payload, admission),
+        rt::Status::ok);
+    EXPECT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(LiveControlMailbox, ReplayMatchesRecordedRollbackBeforeReturningFailure) {
+    rt::Runtime runtime;
+    GenerationProbe probe;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"capture-fail", &capture_generation_then_fail_callback, &probe}),
+        rt::Status::ok);
+    configure_live_control(runtime, 1, 8);
+    ASSERT_EQ(
+        runtime.set_live_control_closure_policy(closure_policy(true)),
+        rt::Status::ok);
+    const auto handle = finalized_handle(runtime);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    const auto checkpoint = checkpoint_artifact(runtime);
+
+    const std::array payload{std::byte{0x3a}};
+    const auto update = host_update(handle, 1, payload, 11);
+    rt::LiveControlAdmissionResult admission;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, update, payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    const std::array<rt::ReplayInputRecord, 1> inputs{
+        rt::ReplayInputRecord{
+            {11, std::chrono::nanoseconds{1'000}}, 1, {}}};
+    std::vector<std::byte> input_log(4'096);
+    rt::ArtifactWriteResult input_write;
+    ASSERT_EQ(
+        runtime.write_input_log(inputs, input_log, input_write),
+        rt::Status::ok);
+    input_log.resize(input_write.bytes_written);
+
+    ASSERT_EQ(
+        runtime.step({11, std::chrono::nanoseconds{1'000}}),
+        rt::Status::callback_failed);
+    rt::LiveControlRecordStatusInfo record_status;
+    ASSERT_TRUE(runtime.live_control_record_status(
+        kMailbox, 1, record_status));
+    EXPECT_EQ(
+        record_status.status,
+        rt::LiveControlRecordStatus::rolled_back);
+
+    std::vector<std::byte> artifact(64 * 1'024);
+    rt::ArtifactWriteResult write;
+    ASSERT_EQ(
+        runtime.write_live_control_replay_artifact(
+            checkpoint,
+            input_log,
+            rt::LiveControlNestedArtifactKind::input_log,
+            artifact,
+            write),
+        rt::Status::ok);
+    artifact.resize(write.bytes_written);
+    rt::LiveControlReplayResult replay;
+    EXPECT_EQ(
+        runtime.replay_live_control(
+            artifact, &noop_replay_input, nullptr, &replay),
+        rt::Status::callback_failed);
+    EXPECT_EQ(replay.mismatch_status, rt::Status::callback_failed);
+    EXPECT_EQ(replay.mismatch_action_sequence, 0u);
+    EXPECT_EQ(replay.mismatch_target.kind,
+              rt::LiveControlTargetKind::host_frame);
+    EXPECT_EQ(replay.mismatch_target.frame_index, 11u);
+    EXPECT_NE(replay.mismatch_generation_identity, 0u);
+    EXPECT_EQ(replay.generations_compared, 1u);
+    EXPECT_EQ(replay.frames_replayed, 0u);
+    EXPECT_EQ(probe.calls, 2u);
+    ASSERT_TRUE(runtime.live_control_record_status(
+        kMailbox, 1, record_status));
+    EXPECT_EQ(
+        record_status.status,
+        rt::LiveControlRecordStatus::rolled_back);
+    EXPECT_EQ(runtime.stop(), rt::Status::ok);
 }

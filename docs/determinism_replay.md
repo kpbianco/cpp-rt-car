@@ -1,12 +1,25 @@
 # Determinism, Checkpoints, and Replay
 
-M22-02 preserves checkpoint, input-log, mixed-rate-action, and active-replay
-artifact bytes. Frozen live-control policy/declarations affect graph/config/
-replay compatibility identity, but staged records, payloads, arrival order,
-occupancy, counters, current generations, and inspection do not. Exact target,
-canonical survivor identities, and payload digests produce the callback
-generation identity, but no checkpoint or replay path reads, writes, restores,
-or compares a live-control generation. M22-03 owns that integration.
+M22-03 preserves checkpoint codec, input-log, mixed-rate-action, and active-
+replay schemas and bytes. Closure-disabled checkpoints retain the exact M22-02
+path. Closure-enabled checkpoints append one ordinary fixed
+`rtfw.live-control` state record that captures Runtime-owned active/staged
+records, payloads, slot state, boundary cursors, mailbox/producer sequences,
+and the next action position. Restore fully validates before mutation, binds
+records to the current Runtime with a new configuration generation, and retires
+old producer handles.
+
+The distinct live-control replay schema 1 embeds that unchanged checkpoint and
+one unchanged input-log or active-replay artifact, plus a complete payload-free
+action transcript and explicitly retained survivor records/payloads. Parsing is
+allocation-free and bounded; exact section and whole checksums, identities,
+ordering, generation/rollback chains, and payload digests are validated before
+restore. Replay restores once, injects immutable generations at exact targets,
+executes the unchanged nested path, and compares actions plus final registered
+application state. Divergence reports the exact frame, boundary target, action
+sequence, and generation identity. External producer timing, live clocks,
+physical arrivals, application-side-effect rollback, and vendor-driver replay
+are not deterministic inputs.
 
 M21-05 preserves checkpoint and input-log schema 1 byte-for-byte and adds a
 distinct additive active-replay schema 1 for mixed-rate execution. A closure-

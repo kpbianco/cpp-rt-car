@@ -1809,6 +1809,90 @@ TEST(TraceNoAlloc, ExtensionExecuteInspectStopAndDetachDoNotAllocate) {
     EXPECT_EQ(allocation_count(), 0u);
 }
 
+TEST(TraceNoAlloc, LiveControlAdmissionSettlementInspectionAndStopDoNotAllocate) {
+    rt::Runtime runtime;
+    std::array<std::uint32_t, 2> execution{};
+    std::size_t execution_count = 0;
+    RuntimeAllocationProbe probe{1, &execution, &execution_count};
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"live-control", &record_runtime_phase, &probe}),
+        rt::Status::ok);
+    rt::LiveControlPolicy policy;
+    policy.policy_identity = 0x4d323201;
+    policy.mailbox_capacity = 1;
+    policy.producer_capacity = 1;
+    policy.record_capacity = 1;
+    policy.payload_bytes_per_record = 8;
+    policy.total_payload_storage_bytes = 8;
+    ASSERT_EQ(runtime.set_live_control_policy(policy), rt::Status::ok);
+    rt::LiveControlClosurePolicy closure;
+    closure.policy_identity = 0x4d323203;
+    closure.action_capacity = 8;
+    ASSERT_EQ(
+        runtime.set_live_control_closure_policy(closure),
+        rt::Status::ok);
+    rt::LiveControlMailboxRegistration mailbox;
+    mailbox.mailbox_identity = 101;
+    mailbox.record_capacity = 1;
+    mailbox.payload_bytes_per_record = 8;
+    ASSERT_EQ(
+        runtime.register_live_control_mailbox(mailbox),
+        rt::Status::ok);
+    rt::LiveControlProducerRegistration producer;
+    producer.mailbox_identity = 101;
+    producer.producer_identity = 202;
+    ASSERT_EQ(
+        runtime.register_live_control_producer(producer),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    rt::LiveControlProducerHandle handle;
+    ASSERT_EQ(
+        runtime.live_control_producer_handle(101, 202, handle),
+        rt::Status::ok);
+    const std::array payload{std::byte{0x44}};
+    rt::LiveControlUpdateRecord update;
+    update.runtime_id = handle.runtime_id;
+    update.configuration_generation = handle.configuration_generation;
+    update.mailbox_identity = handle.mailbox_identity;
+    update.producer_identity = handle.producer_identity;
+    update.producer_sequence = 1;
+    update.target_frame_index = 7;
+    update.payload_bytes = payload.size();
+    update.payload_digest = rt::live_control_payload_digest(payload);
+
+    rt::LiveControlAdmissionResult admission =
+        rt::LiveControlAdmissionResult::invalid;
+    rt::Status stage_status = rt::Status::internal_error;
+    rt::Status step_status = rt::Status::internal_error;
+    rt::Status read_status = rt::Status::internal_error;
+    rt::Status stop_status = rt::Status::internal_error;
+    std::array<rt::LiveControlActionRecord, 4> actions{};
+    rt::LiveControlActionCursor cursor;
+    rt::LiveControlActionReadResult read;
+    std::size_t allocations = 0;
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    {
+        AllocationGuard guard;
+        stage_status = runtime.stage_live_control_update(
+            handle, update, payload, admission);
+        step_status = runtime.step(
+            {7, std::chrono::nanoseconds{1'000}});
+        read_status = runtime.read_live_control_actions(
+            cursor, actions, read);
+        stop_status = runtime.stop();
+        allocations = allocation_count();
+    }
+    EXPECT_EQ(stage_status, rt::Status::ok);
+    EXPECT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    EXPECT_EQ(step_status, rt::Status::ok);
+    EXPECT_EQ(read_status, rt::Status::ok);
+    EXPECT_EQ(read.records_read, 3u);
+    EXPECT_EQ(stop_status, rt::Status::ok);
+    EXPECT_EQ(execution_count, 1u);
+    EXPECT_EQ(allocations, 0u);
+}
+
 TEST(ExtensionRegistration, AllocationFailurePublishesNothingAndRecovers) {
     rt::Runtime runtime;
     rt::RuntimeConfig config;

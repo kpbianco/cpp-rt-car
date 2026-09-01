@@ -11,6 +11,14 @@ in that subtotal. Disabled policies report zeros. Admission, boundary close,
 callback views, and inspection use only finalization-time storage and
 caller-owned output spans.
 
+M22-03 closure accounting adds the copied semantic policy, action controls and
+fixed slots, a third complete rollback generation, provisional source records,
+retained generation/record/payload storage, replay controls, and fixed
+conditional-checkpoint scratch exactly once to `runtime_control_bytes` and the
+logical extent ledger. Observational capacities do not alter semantic identity
+when replay is disabled. Caller checkpoint/replay buffers and registered
+application state remain borrowed and excluded.
+
 M21-05 action slots/counters, replay controls, digest staging, and conditional
 mixed-rate checkpoint state are included exactly once inside
 `rate_plan_bytes` and `runtime_control_bytes`. The plan exposes their exact

@@ -78,6 +78,14 @@ inline constexpr std::uint32_t live_control_payload_bytes_limit = 65'536;
 inline constexpr std::uint32_t live_control_payload_alignment_limit = 4'096;
 inline constexpr std::uint64_t live_control_total_storage_limit =
     std::uint64_t{1} << 30u;
+inline constexpr std::uint32_t live_control_action_schema_version = 1;
+inline constexpr std::uint32_t live_control_replay_schema_version = 1;
+inline constexpr std::size_t live_control_action_capacity_limit =
+    live_control_record_capacity_limit * 4u;
+inline constexpr std::size_t live_control_retained_generation_capacity_limit =
+    reference_release_capacity;
+inline constexpr std::size_t live_control_replay_absolute_max_bytes =
+    std::size_t{1} << 30u;
 
 enum class RuntimeState : std::uint8_t {
     configuring,
@@ -1108,6 +1116,7 @@ enum class LiveControlRecordStatus : std::uint8_t {
     replaced = 3,
     missed = 4,
     stopped = 5,
+    rolled_back = 6,
 };
 
 struct LiveControlBoundaryTarget {
@@ -1312,6 +1321,203 @@ struct LiveControlMailboxInfo {
 
 static_assert(sizeof(LiveControlMailboxInfo) == 128);
 static_assert(alignof(LiveControlMailboxInfo) == 8);
+
+// M22-03 is a distinct additive C++ closure. Existing checkpoint, input-log,
+// rate-action, mixed-rate-action, active-replay, and observability schemas are
+// not extended in place.
+enum class LiveControlRollbackRule : std::uint8_t {
+    restore_step_entry_generation = 1,
+};
+
+struct LiveControlClosurePolicy {
+    std::uint32_t schema_version = live_control_action_schema_version;
+    std::uint32_t struct_size = sizeof(LiveControlClosurePolicy);
+    std::uint64_t policy_identity = 0;
+    std::size_t action_capacity = 0;
+    std::size_t retained_generation_capacity = 0;
+    std::size_t retained_record_capacity = 0;
+    std::size_t retained_payload_bytes = 0;
+    std::size_t replay_record_capacity = 0;
+    std::size_t replay_max_bytes = 0;
+    LiveControlRollbackRule rollback_rule =
+        LiveControlRollbackRule::restore_step_entry_generation;
+    bool replay_enabled = false;
+    std::array<std::byte, 6> reserved{};
+};
+
+static_assert(sizeof(LiveControlClosurePolicy) == 72);
+static_assert(alignof(LiveControlClosurePolicy) == 8);
+
+enum class LiveControlActionId : std::uint8_t {
+    admission = 1,
+    boundary_empty = 2,
+    provisional_publication = 3,
+    committed = 4,
+    replaced = 5,
+    missed = 6,
+    stopped = 7,
+    rolled_back = 8,
+    checkpointed = 9,
+    replay_verified = 10,
+};
+
+enum class LiveControlActionStage : std::uint8_t {
+    attempt = 1,
+    provisional = 2,
+    terminal = 3,
+    checkpoint = 4,
+    replay = 5,
+};
+
+enum class LiveControlActionReason : std::uint8_t {
+    normal = 1,
+    invalid = 2,
+    full = 3,
+    busy = 4,
+    stale = 5,
+    stopped = 6,
+    exhausted = 7,
+    missed = 8,
+    replaced = 9,
+    execution_failed = 10,
+    checkpoint = 11,
+    replay = 12,
+};
+
+enum class LiveControlActionResult : std::uint8_t {
+    accepted = 1,
+    rejected = 2,
+    published = 3,
+    settled = 4,
+    rolled_back = 5,
+    verified = 6,
+};
+
+// Fixed schema-1 action record. It carries only bounded identities and
+// digests. Payload bytes, addresses, callbacks, vendor handles, wall-clock
+// observations, and producer thread identities are deliberately absent.
+struct LiveControlActionRecord {
+    std::uint32_t schema_version = live_control_action_schema_version;
+    std::uint32_t record_size = sizeof(LiveControlActionRecord);
+    std::uint64_t sequence = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t policy_identity = 0;
+    LiveControlBoundaryTarget target{};
+    std::uint64_t mailbox_identity = 0;
+    std::uint64_t producer_identity = 0;
+    std::uint64_t mailbox_sequence = 0;
+    std::uint64_t producer_sequence = 0;
+    std::uint64_t payload_digest = 0;
+    std::uint64_t generation_identity = 0;
+    std::uint64_t prior_generation_identity = 0;
+    std::uint64_t checkpoint_correlation = 0;
+    std::uint64_t replay_correlation = 0;
+    std::uint32_t payload_bytes = 0;
+    std::uint32_t survivor_count = 0;
+    std::uint32_t replaced_count = 0;
+    std::int32_t terminal_status = static_cast<std::int32_t>(Status::ok);
+    LiveControlUpdateKind update_kind =
+        LiveControlUpdateKind::scenario_parameters;
+    LiveControlAdmissionResult admission_result =
+        LiveControlAdmissionResult::accepted;
+    LiveControlRecordStatus record_status = LiveControlRecordStatus::staged;
+    LiveControlActionId action = LiveControlActionId::admission;
+    LiveControlActionStage stage = LiveControlActionStage::attempt;
+    LiveControlActionReason reason = LiveControlActionReason::normal;
+    LiveControlActionResult result = LiveControlActionResult::accepted;
+    bool replay_eligible = false;
+    std::array<std::byte, 80> reserved{};
+};
+
+static_assert(sizeof(LiveControlActionRecord) == 256);
+static_assert(alignof(LiveControlActionRecord) == 8);
+
+struct LiveControlActionMetadata {
+    std::uint32_t schema_version = live_control_action_schema_version;
+    std::uint32_t record_size = sizeof(LiveControlActionRecord);
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t policy_identity = 0;
+    std::uint64_t capacity = 0;
+    std::uint64_t next_sequence = 0;
+    std::uint64_t records_emitted = 0;
+    std::uint64_t records_overwritten = 0;
+    std::uint64_t records_dropped = 0;
+    std::uint64_t retained_generation_count = 0;
+    bool replay_eligible = false;
+    std::array<std::byte, 7> reserved{};
+};
+
+struct LiveControlActionCursor {
+    std::uint32_t schema_version = live_control_action_schema_version;
+    std::uint32_t reserved32 = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t next_sequence = 0;
+};
+
+struct LiveControlActionReadResult {
+    LiveControlActionMetadata metadata{};
+    std::uint64_t first_sequence = 0;
+    std::uint64_t next_sequence = 0;
+    std::size_t records_read = 0;
+    std::uint64_t lost_records = 0;
+    std::uint64_t remaining_sequence_count = 0;
+};
+
+enum class LiveControlNestedArtifactKind : std::uint8_t {
+    input_log = 1,
+    active_replay = 2,
+};
+
+struct LiveControlReplayMetadata {
+    std::uint32_t schema_version = live_control_replay_schema_version;
+    std::uint32_t header_size = 0;
+    std::uint64_t total_bytes = 0;
+    std::uint64_t artifact_checksum = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t config_id = 0;
+    std::uint64_t replay_id = 0;
+    std::uint64_t graph_id = 0;
+    std::uint64_t state_schema_id = 0;
+    std::uint64_t policy_identity = 0;
+    std::uint64_t final_state_hash = 0;
+    std::uint64_t checkpoint_bytes = 0;
+    std::uint64_t nested_artifact_bytes = 0;
+    std::uint64_t first_action_sequence = 0;
+    std::uint64_t last_action_sequence = 0;
+    std::uint32_t action_record_count = 0;
+    std::uint32_t retained_generation_count = 0;
+    std::uint32_t retained_record_count = 0;
+    std::uint32_t retained_payload_bytes = 0;
+    LiveControlNestedArtifactKind nested_kind =
+        LiveControlNestedArtifactKind::input_log;
+    DeterminismTier determinism_tier = DeterminismTier::unspecified;
+    std::array<std::byte, 6> reserved{};
+    std::array<char, replay_identifier_capacity> build_id{};
+    std::array<char, replay_identifier_capacity> workload_id{};
+};
+
+struct LiveControlReplayResult {
+    std::uint64_t checkpoint_frame_index = 0;
+    std::uint64_t first_frame_index = 0;
+    std::uint64_t last_frame_index = 0;
+    std::uint64_t mismatch_frame_index = 0;
+    LiveControlBoundaryTarget mismatch_target{};
+    std::uint64_t mismatch_action_sequence = 0;
+    std::uint64_t mismatch_generation_identity = 0;
+    std::size_t frames_replayed = 0;
+    std::size_t actions_compared = 0;
+    std::size_t generations_compared = 0;
+    std::uint64_t final_state_hash = 0;
+    Status mismatch_status = Status::ok;
+};
+
+[[nodiscard]] Status inspect_live_control_replay_artifact(
+    std::span<const std::byte> artifact,
+    LiveControlReplayMetadata& metadata) noexcept;
 
 [[nodiscard]] std::uint64_t live_control_payload_digest(
     std::span<const std::byte> payload) noexcept;
@@ -1910,6 +2116,13 @@ struct MemoryPlan {
     std::size_t live_control_record_capacity = 0;
     std::size_t live_control_payload_storage_bytes = 0;
     std::size_t live_control_control_bytes = 0;
+    std::size_t live_control_action_capacity = 0;
+    std::size_t live_control_action_storage_bytes = 0;
+    std::size_t live_control_retained_generation_capacity = 0;
+    std::size_t live_control_retained_record_capacity = 0;
+    std::size_t live_control_retained_payload_storage_bytes = 0;
+    std::size_t live_control_closure_control_bytes = 0;
+    std::size_t live_control_checkpoint_state_bytes = 0;
 };
 
 inline constexpr std::uint32_t cpu_memory_policy_schema_version = 1;
@@ -2277,6 +2490,8 @@ public:
         const MixedRateClosurePolicy& policy) noexcept;
     [[nodiscard]] Status set_live_control_policy(
         const LiveControlPolicy& policy) noexcept;
+    [[nodiscard]] Status set_live_control_closure_policy(
+        const LiveControlClosurePolicy& policy) noexcept;
     [[nodiscard]] Status configure_key(
         std::string_view key,
         std::string_view value) noexcept;
@@ -2558,6 +2773,13 @@ public:
         std::uint64_t mailbox_identity,
         std::uint64_t mailbox_sequence,
         LiveControlRecordStatusInfo& info) const noexcept;
+    [[nodiscard]] bool live_control_closure_enabled() const noexcept;
+    [[nodiscard]] Status live_control_action_metadata(
+        LiveControlActionMetadata& metadata) noexcept;
+    [[nodiscard]] Status read_live_control_actions(
+        LiveControlActionCursor& cursor,
+        std::span<LiveControlActionRecord> output,
+        LiveControlActionReadResult& result) noexcept;
     // Copies only into an exact-size caller span. Failure leaves output
     // unchanged and no inspector allocates or mutates the frozen plan.
     [[nodiscard]] Status copy_cross_rate_initial_sample(
@@ -2653,6 +2875,17 @@ public:
         ReplayInputCallback input_callback,
         void* input_user_data = nullptr,
         ActiveReplayResult* result = nullptr) noexcept;
+    [[nodiscard]] Status write_live_control_replay_artifact(
+        std::span<const std::byte> checkpoint,
+        std::span<const std::byte> nested_artifact,
+        LiveControlNestedArtifactKind nested_kind,
+        std::span<std::byte> output,
+        ArtifactWriteResult& result) noexcept;
+    [[nodiscard]] Status replay_live_control(
+        std::span<const std::byte> artifact,
+        ReplayInputCallback input_callback,
+        void* input_user_data = nullptr,
+        LiveControlReplayResult* result = nullptr) noexcept;
     [[nodiscard]] Status registered_state_hash(
         std::uint64_t& hash) noexcept;
 

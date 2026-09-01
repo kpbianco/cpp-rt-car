@@ -1,9 +1,9 @@
 # RTFW Completion Roadmap
 
 M21-01 through M21-05 are merged and close the portable M21 software path.
-M22-01 is merged. M22-02 is the active implementation candidate for exact
-frame/rate boundary close, deterministic replacement/order, immutable
-generation publication, terminal reclamation, and fixed commit inspection.
+M22-01 and M22-02 are merged. M22-03 is the active implementation candidate
+for Runtime-generation rollback, payload-free actions, conditional checkpoint
+state, and bounded exact-boundary replay.
 
 The roadmap converts the [product contract](product_contract.md) into
 dependency-ordered milestones. A milestone is complete only when its exit gates
@@ -45,7 +45,7 @@ pass; file presence or a passing smoke test is not sufficient.
 | M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
 | M20 | In progress | M20-PRE-01 is merged with deterministic host-independent fuzz, static, dependency, candidate-SBOM/provenance, strict-manifest, offline-fixture, and relocated-package assurance without signing or release; CAP-M20 remains open |
 | M21 | Complete | M21-01 through M21-05 are merged with fixed logical actions, conditional checkpoint state, deterministic active replay, and reusable public-surface conformance; physical/RT qualification remains separate |
-| M22 | In progress | M22-01 staging merged; M22-02 exact-boundary commit candidate; rollback/replay/telemetry, typed SDK closure, and physical/RT validation remain later batches |
+| M22 | In progress | M22-01 staging and M22-02 exact-boundary commit merged; M22-03 rollback/checkpoint/replay/actions candidate; typed SDK closure and physical/RT validation remain later batches |
 
 ## M0 — Product contract and truth reset
 
@@ -789,7 +789,7 @@ M22-01 is merged. It adds an opt-in copied
 policy, fixed mailbox and producer declarations, generation-safe handles,
 canonical frame/rate-target records, bounded copied payload slots, one-attempt
 reject-new admission, deterministic inspection, and exact identity/accounting.
-M22-02 is the active candidate. It adds exact frame/rate close, canonical
+M22-02 is merged. It adds exact frame/rate close, canonical
 ordering and replacement, atomic immutable generations, terminal slot reuse,
 callback-local views, and fixed commit/status inspection without changing an
 artifact, telemetry, stable ABI, support, or qualification contract.
@@ -797,9 +797,11 @@ artifact, telemetry, stable ABI, support, or qualification contract.
 Planned dependent batches:
 
 - M22-02 defines deterministic exact-boundary consumption, ordering, and
-  missed/late/replacement semantics (active candidate).
-- M22-03 adds rollback plus checkpoint/replay/telemetry integration without
-  weakening existing artifact compatibility.
+  missed/late/replacement semantics (merged).
+- M22-03 adds bounded Runtime-generation rollback, a distinct payload-free
+  action stream, conditional checkpoint state, and a separate live-control
+  replay artifact without weakening existing artifact compatibility (active
+  candidate).
 - M22-04 adds typed SDK helpers, examples, stress closure, and milestone
   evidence.
 
