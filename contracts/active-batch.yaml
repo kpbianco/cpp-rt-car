@@ -1,8 +1,8 @@
 schema_version: 1
 batch:
-  id: M22-01
-  title: Add live-control update schemas and bounded mailboxes
-  goal: Add an opt-in additive C++ live-control policy, copied fixed-capacity per-Runtime mailbox declarations, generation-safe producer handles, canonical immutable update envelopes, bounded copied payload slots, structural validation, deterministic inspection, and exact identity/accounting without applying any update to running simulation state. Preserve the merged M21 mixed-rate path, every stable ABI and artifact schema, and the portable RT0 claim boundary while establishing the sole staging substrate that M22-02 will consume at exact frame or rate-release boundaries.
+  id: M22-02
+  title: Commit live controls at exact frame and rate-release boundaries
+  goal: Consume the merged M22-01 per-Runtime mailboxes without parsing payloads on execution lanes, close each host-frame or active rate-release target exactly once, publish one immutable generation atomically before the target callbacks observe it, define deterministic cross-mailbox ordering plus late, missed, replacement, overflow, and stop behavior, reclaim bounded staging capacity safely, and expose fixed-size commit inspection. Preserve every stable ABI and existing artifact schema while deferring rollback, checkpoint, replay, telemetry, typed SDK helpers, and milestone closure to M22-03 and M22-04.
 sources:
   product: products/cpp-rt-car/product.yaml
   requirements:
@@ -10,7 +10,7 @@ sources:
     - products/cpp-rt-car/acceptance.yaml#CAP-M22
     - products/cpp-rt-car/telemetry-plan.yaml#Q-22
     - products/cpp-rt-car/risk-register.yaml#R-010
-  milestone: products/cpp-rt-car/milestones/M22.md#M22-01--update-schema-and-bounded-mailboxes
+  milestone: products/cpp-rt-car/milestones/M22.md#M22-02--frame-and-release-boundary-commit
   target_contracts:
     - AGENTS.md
     - contracts/active-batch.yaml
@@ -25,6 +25,7 @@ sources:
     - docs/roadmap.md
     - docs/host_runtime.md
     - docs/compiled_graph.md
+    - docs/live_controls.md
     - docs/memory_plan.md
     - docs/determinism_replay.md
     - docs/rate_telemetry.md
@@ -37,19 +38,13 @@ sources:
     - docs/cuda_support_matrix.json
     - docs/xdma_support_matrix.json
     - release/rtfw-release-contract.json
-    - docs/evidence/M17-06-2026-08-23.md
-    - docs/evidence/M20-PRE-01-2026-08-26.md
-    - docs/evidence/M21-01-2026-08-26.md
-    - docs/evidence/M21-02-2026-08-26.md
-    - docs/evidence/M21-03-2026-08-26.md
-    - docs/evidence/M21-04-2026-08-27.md
-    - docs/evidence/M21-05-2026-08-27.md
-  baseline_commit: 00cc6e48eb11c334a5e04ebd0719899f52d5581b
+    - docs/evidence/M22-01-2026-09-01.md
+  baseline_commit: 201decf9384220d713ff90f7eb12ac3ecc4ebc49
   control_plane_repository: tranquilWorks/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M22-01.yaml
-  control_plane_revision: aeebab5f0140c2ac9161ff88f8fe42749ce42ebc
+  control_plane_path: products/cpp-rt-car/batches/M22-02.yaml
+  control_plane_revision: 499512aee4e2ca1c2ca74c5f3bd5e7d66b5b1987
 dependencies:
-  - M21-05
+  - M22-01
 scope:
   allowed_paths:
     - .portfolio-harness.json
@@ -73,6 +68,8 @@ scope:
     - tests/test_multiple_instances.cpp
     - tests/test_trace_noalloc.cpp
     - tests/test_periodic_runtime.cpp
+    - tests/test_rate_dispatch.cpp
+    - tests/test_active_mixed_rate.cpp
     - tests/package_consumer/CMakeLists.txt
     - tests/package_consumer/live_control_consumer.cpp
     - tests/package_consumer/cpp_consumer.cpp
@@ -97,7 +94,7 @@ scope:
     - docs/observability.md
     - docs/testing_ci.md
     - docs/real_time_readiness_checklist.md
-    - docs/evidence/M22-01-*.md
+    - docs/evidence/M22-02-*.md
   forbidden_paths:
     - abi/
     - rt/include/rt/c_api.h
@@ -109,10 +106,6 @@ scope:
     - rt/include/rt/cuda_backend.hpp
     - rt/include/rt/xdma_backend.hpp
     - rt/src/runtime_profile.cpp
-    - rt/src/rate_timeline.cpp
-    - rt/src/rate_timeline.hpp
-    - rt/src/rate_dispatch.cpp
-    - rt/src/rate_dispatch.hpp
     - rt/src/mixed_rate_actions.cpp
     - rt/src/mixed_rate_actions.hpp
     - rt/src/mixed_rate_replay.cpp
@@ -162,6 +155,7 @@ scope:
     - docs/evidence/M19-*.md
     - docs/evidence/M20-*.md
     - docs/evidence/M21-*.md
+    - docs/evidence/M22-01-*.md
     - VERSION.txt
     - LICENSE
     - CHANGELOG.md
@@ -177,101 +171,100 @@ scope:
     - rt/src/fiber_pool.cpp
     - rt/src/plugin_manager.cpp
 acceptance:
-  - The implementation begins from an initially clean target at exact default-branch commit `00cc6e48eb11c334a5e04ebd0719899f52d5581b`, the merged M21-05 pull request 246. Retained M15 through M21-05 evidence is present and unchanged, M21/CAP-M21 portable software closure is recorded truthfully, and no absent physical, RT, Unreal, signing, release, deployment, or production result is invented.
-  - An additive C++ live-control policy is copied only while configuring and frozen at finalization. It declares positive bounded mailbox, producer, record, per-record payload, and total payload-storage capacities when enabled; a nonzero schema/policy identity; one closed admission policy for this batch (`reject_new`); and explicit absolute byte ceilings with checked multiplication. Capacity zero disables the complete surface and preserves pre-M22 identity, accounting, artifacts, and behavior.
-  - Public descriptors use fixed-width fields and closed numeric tables for schema/version, record size, mailbox and producer identity, runtime/configuration generation, target kind, target frame or rate-domain/phase/release sequence, update kind, producer sequence, canonical payload size/digest, policy flags, and zero reserved fields. They contain no dynamic string, raw address, callback, function pointer, vendor handle, file path, authentication secret, wall-clock source, or borrowed payload span after admission.
-  - M22-01 supports exact target identities for a host frame or one already compiled active rate release. Structural validation rejects zero, overflowed, future, foreign, stale, wrong-kind, noncanonical, contradictory, or out-of-plan targets before reserving a slot. It does not decide missed-target, late-acceptance, replacement, or boundary ordering semantics; those remain M22-02 work and no update is described as scheduled or committed in this batch.
-  - Producers are pre-registered while configuring and receive Runtime-instance-bound generation-safe handles after successful finalization. A producer belongs to exactly one mailbox and has one positive bounded identity and monotonic sequence domain. Foreign Runtime handles, stale finalization/restart generations, duplicate identities, exhausted sequences, and cross-mailbox submissions fail without changing mailbox state.
-  - Every admitted update copies its canonical payload bytes into one preallocated Runtime-owned slot before publication. The payload length and digest cover exactly the copied bytes; unused slot bytes are zeroed or never observable; caller mutation after return cannot change the record; and no accepted record retains a borrowed pointer. Zero-byte payloads are legal only for explicitly declared update kinds whose structural contract permits them.
-  - Structural validation is complete before slot publication and includes descriptor size/version/reserved fields, closed enums and flags, producer ownership/generation/sequence, exact target identity, payload extent, alignment where declared, canonical byte-order requirements, digest agreement, and checked offsets. M22-01 performs no application-specific parsing, semantic controller/calibration validation, signature verification, authorization callback, filesystem/network I/O, or executable-code loading.
-  - Mailbox admission is a bounded nonblocking multi-producer operation over finalization-time storage. One successful reservation assigns an exact monotonic mailbox sequence; publication becomes visible only after the complete descriptor and payload copy; a consumer or inspector never observes a partially published slot. Contention returns an explicit bounded `busy` result rather than taking a blocking mutex, spinning without a fixed bound, allocating, or falling back to an unbounded queue.
-  - Exact zero, one, full, one-over, busy-reservation, producer-capacity, record-capacity, payload-capacity, total-byte, sequence, generation, and checked-arithmetic boundaries are closed. A full mailbox deterministically rejects the new record in this batch; it does not overwrite, replace, coalesce, evict, or mutate an already published record. Accepted, invalid, full, busy, stale, stopped, and exhausted outcomes are distinct and inspectable.
-  - Runtime exposes bounded read-only mailbox and record inspection sufficient to prove copied identities, payload digest, sequence, occupancy, rejects, and storage accounting. Inspection is Runtime-instance-bound, cannot mutate ownership or advance execution, reports unpublished/busy slots as unavailable, and does not return raw internal storage addresses or default payload contents. Any explicit payload-copy inspection requires a caller-sized destination and exact extent checks.
-  - M22-01 adds no running consumer and applies no update to scenario, controller, calibration, fault, sampled-I/O, rate, graph, callback, device, state registry, or backend behavior. `step()`, periodic execution, active mixed-rate dispatch, checkpoint, replay, telemetry, watchdog, stop, and restart do not drain, interpret, publish, roll back, or emit an action for staged records. M22-02 owns boundary consumption and ordering; M22-03 owns rollback, checkpoint, replay, and telemetry.
-  - Admission is permitted only through the explicit non-RT producer API and never from executor workers, backend lanes, the host frame owner, watchdog, completion poller, or telemetry drain. It performs bounded validation and copy work, creates no thread, invokes no callback or vendor function, and does not claim to be safe for signal handlers, interrupt context, or an unbounded number of concurrent producers.
-  - Stop begins a generation transition that rejects new reservations, waits only through the existing bounded ownership rules, and leaves no partially published slot. Restart/finalization invalidates old producer handles and resets mailbox sequence/storage/counters according to one documented rule; M22-01 never silently reuses a stale slot or carries a staged update into a different runtime/configuration generation.
-  - Configuration, finalization, replacement, failed finalization, producer registration, admission, inspection, stop, restart, and destruction are isolated per Runtime. Two Runtime instances may use identical logical producer/mailbox/update identities without sharing mutable global state, accepting each other's handles, payload slots, counters, or generations.
-  - Sequence and generation exhaustion fail before zero, wrap, ABA reuse, or ambiguous ordering. Reservation tickets cannot make a failed copy appear published, and a producer failure cannot permanently consume capacity without an explicit bounded rejected/tombstone state that inspection and later M22 consumption can distinguish.
-  - Successful finalization accounts for copied policy and producer declarations, mailbox controls, slot descriptors, payload storage, atomics/counters, and inspection state exactly once in existing `MemoryPlan` categories and `planned_bytes`. Caller source bytes and output buffers are excluded. Checked size/alignment arithmetic rejects before allocation or partial policy publication, and failed finalization remains retryable.
-  - Graph/config/replay compatibility identity includes every frozen M22-01 policy, capacity, schema, legal update/target table, producer/mailbox declaration, admission rule, and reset rule that can change compatibility. It excludes post-finalization payload bytes, arrival order, current occupancy/counters, caller addresses, thread identity, wall-clock timing, and inspector cursor position. Individual updates do not change the finalized graph identity merely by being staged.
-  - The existing standalone `core::ConfigHotReloader`, experimental SimCore seqlock, filesystem polling tests, extension loader, and any Unreal hot-reload mechanism are not reused, promoted, or modified. The supported M22 path is Runtime-integrated, data-only, fixed-capacity, instance-local, and free of repository-private filesystem state.
-  - Default construction and positional aggregate/source compatibility, CPU-only and mixed-rate M16/M21 execution, deterministic mock/loopback replay, sampled safe outputs, ordinary M17/HAL-v2 backends, device-ABI-v1 adaptation, multiple Runtime instances, no-allocation checks, checked cleanup, package relocation, and legacy artifacts retain their exact pre-M22 behavior when the policy is disabled.
+  - The implementation begins from an initially clean target at exact default-branch commit `201decf9384220d713ff90f7eb12ac3ecc4ebc49`, merged target pull request 247. The retained M22-01 evidence and its fixed schema, copied payload, ownership, capacity, identity, accounting, and staging-only claim remain present and unchanged; no absent final control-plane, physical, RT, Unreal, signing, release, deployment, or production result is invented.
+  - M22-02 consumes only complete M22-01 records and their Runtime-owned canonical payload bytes. It may add fixed-width additive C++ commit policy, immutable boundary-view, result, and inspection types, but it does not change the existing 128-byte update record, reinterpret reserved bytes, retain caller storage, accept executable code, or add application payload parsing, authentication, authorization, filesystem/network I/O, vendor calls, or unbounded callbacks to an execution lane.
+  - Every enabled Runtime closes each host-frame target exactly once immediately before any callback for that frame, and closes each active compiled rate-release target exactly once immediately before the first callback or device dispatch belonging to that release. The boundary cursor is monotonic, generation-bound, and independent per Runtime; disabled live controls preserve the exact pre-M22 execution order and identity.
+  - Boundary eligibility has one race-complete rule. A record published with release ordering before the boundary owner atomically closes its exact target is eligible; a producer still copying or publishing after closure cannot become visible at that boundary and receives or records an explicit late/missed result without a partial slot. The frame owner never waits for, spins on, locks against, or executes producer work.
+  - The boundary owner performs one bounded scan over finalization-time storage, validates only frozen structural identity, and constructs the complete candidate set in preallocated Runtime-owned memory. It allocates no memory, creates no thread, parses no payload, performs no I/O, invokes no producer or application callback, calls no backend/vendor operation, and uses no unbounded mutex, retry, queue, or container growth.
+  - Eligible records at one boundary use a documented platform-independent total order of target kind and exact compiled target identity, then mailbox identity ascending, then mailbox sequence ascending. Arrival timing, producer thread identity, slot reuse, addresses, hash-table order, and operating-system scheduling cannot break ties or change the committed order.
+  - Replacement is closed and local. At one exact boundary, later records in the canonical order replace earlier records only when mailbox identity and update kind are both equal; replaced records never appear in the published generation. Different mailboxes or update kinds remain distinct ordered members. Replacement neither mutates an already published earlier generation nor crosses a Runtime, configuration generation, frame, or rate release.
+  - Publication is atomic and complete-before-visible. The frame owner prepares one immutable generation in inactive preallocated storage, copies or indexes only Runtime-owned immutable records, computes a stable nonzero generation identity over exact target plus ordered surviving record identities and payload digests, then releases one generation pointer/index. A callback observes either the entire previous generation or the entire new generation, never a torn descriptor, mixed payload, half replacement, or partially advanced count.
+  - Host-frame callbacks receive the newly published host-frame generation through one bounded read-only callback-local view. Active CPU/device rate callbacks and device batch construction receive the generation for their exact release without changing backend ownership or moving payload bytes to a backend implicitly. Views expose fixed record metadata and exact bounded payload spans only for the callback lifetime, cannot mutate Runtime storage, and cannot be retained safely after the callback returns.
+  - A boundary with no surviving record still closes deterministically and leaves the prior committed data generation unchanged while advancing only the boundary cursor and bounded result accounting. A record for a future target remains staged and cannot leak into an earlier callback. A record discovered after its target is past is rejected as missed and never applied at the next frame or release.
+  - Staging capacity is reusable only after a slot has reached a terminal committed, replaced, missed, or stopped state and no published generation or active callback view references it. Reclamation uses fixed-capacity generation/slot state with no ABA reuse, overwrite of a live payload, sequence reset, dynamic allocation, or unbounded scan. Full continues to reject new admission until safely reclaimable capacity exists.
+  - Commit inspection is Runtime-instance-bound, fixed-size, and read-only. It reports the latest published generation identity, target, ordered survivor count, committed/replaced/missed/stopped counters, staged occupancy, and exact terminal status for records still retained by the bounded inspection window. It returns no raw internal address, does not advance a cursor, and documents that reclaimed per-record history belongs to M22-03 action telemetry rather than an unbounded in-memory ledger.
+  - Stop atomically closes future boundaries and new admission before cleanup. A boundary already owned by an active `step()` either publishes one whole generation under the existing step/stop ownership rule or the stop attempt returns the existing retryable state; no stop path applies a future record, blocks on a producer, reopens a closed target, or carries committed/staged state into another Runtime generation.
+  - Existing callback failure semantics remain unchanged. M22-02 does not roll back a generation after a callback, device submission, watchdog, or later phase failure and does not claim transactional recovery; it preserves enough bounded immutable identity for M22-03 to add explicit apply-failure rollback, canonical action records, checkpoint, replay, and telemetry without guessing ordering.
+  - Host-frame and active rate-release commit behavior is deterministic for the same canonical admitted records and target identities. Graph/config/replay compatibility identity includes frozen commit policy, ordering, replacement, late/missed, reclamation, and view layout semantics, but excludes runtime arrivals, payload contents, current generation, counters, slot state, callback addresses, thread scheduling, and wall-clock time.
+  - Successful finalization accounts exactly once for inactive/active generation storage, ordered candidate indexes, slot terminal state, boundary cursors, commit counters, and inspection state in existing `MemoryPlan` categories and `planned_bytes`. Checked size/alignment arithmetic rejects before allocation or partial publication; failed finalization remains retryable and the M22-01 disabled identity/accounting path remains byte-for-byte unchanged.
+  - Multiple Runtime instances and repeated construction/destruction remain isolated. Identical logical targets, mailbox/update identities, generations, and payloads in two instances cannot share boundary cursors, slot ownership, views, counters, or committed storage, and a stale view or handle cannot resolve into a new Runtime/configuration generation.
+  - Default construction and positional aggregate/source compatibility, CPU-only and M21 mixed-rate dispatch, deterministic mock/loopback behavior, sampled safe outputs, ordinary M17/HAL-v2 backends, device-ABI-v1 adaptation, checkpoint/replay artifacts, observability, watchdog, no-allocation checks, package relocation, and legacy artifacts retain their exact behavior when live controls are disabled or no record targets the current boundary.
   - Stable C ABI v8 with exactly 70 exports and fingerprint `0xd0e7a5a14bf35f97`, SONAME 8, device ABI v1, extension ABI v1, HAL tables, Runtime status values, runtime-profile schema 7/25 keys, checkpoint/input-log/rate-action/mixed-rate-action/active-replay/observability schemas, release 1.2.1, installed target/header/alias inventory, support matrices, qualification state, Apache-2.0 license, and prior retained evidence remain unchanged.
-  - Target governance, current state, handoff, component contracts, release digest ledger, static-analysis manifest, and retained `docs/evidence/M22-01-<date>.md` state the exact schema/mailbox-only boundary. Focused and full local verification, mandatory hosted CI, and human API, ownership, concurrency, capacity, identity/accounting, compatibility, and claim review pass before merge. M22 and CAP-M22 remain incomplete after this batch.
+  - Target governance, current state, handoff, component contracts, release digest ledger, static-analysis manifest, and retained `docs/evidence/M22-02-<date>.md` state the exact boundary-commit-only claim. Focused and full local verification, mandatory hosted CI, and human API, ordering, race, atomicity, lifetime, accounting, compatibility, and claim review pass before merge. M22 and CAP-M22 remain incomplete after this batch.
 validation:
   local:
     - git status --short --branch
-    - test "$(git rev-parse HEAD)" = "00cc6e48eb11c334a5e04ebd0719899f52d5581b"
-    - git merge-base --is-ancestor 00cc6e48eb11c334a5e04ebd0719899f52d5581b HEAD
-    - test -f docs/evidence/M21-05-2026-08-27.md
+    - test "$(git rev-parse HEAD)" = "201decf9384220d713ff90f7eb12ac3ecc4ebc49"
+    - git merge-base --is-ancestor 201decf9384220d713ff90f7eb12ac3ecc4ebc49 HEAD
+    - test -f docs/evidence/M22-01-2026-09-01.md
     - ./scripts/agent-verify.sh contract
     - ./scripts/agent-verify.sh quick
     - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
     - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='LiveControlMailbox.*:HostRuntime.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*'
+    - ./build/agent-full/tests/simcore_tests --gtest_filter='LiveControlMailbox.*:HostRuntime.*LiveControl*:RateDispatch.*LiveControl*:ActiveMixedRate.*LiveControl*:MemoryPlan.*LiveControl*:Determinism.*LiveControl*:DeterminismReplay.*LiveControl*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*'
     - ctest --test-dir build/agent-full --output-on-failure -R 'm22_live_control_mailbox|package_consumer'
     - ./scripts/agent-verify.sh full
     - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
     - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
     - git diff --check
-    - git diff --name-only 00cc6e48eb11c334a5e04ebd0719899f52d5581b
+    - git diff --name-only 201decf9384220d713ff90f7eb12ac3ecc4ebc49
   focused_tests_to_add:
-    - additive live-control types, disabled defaults, configuring-only copied policy, producer/mailbox registration, finalization-time handles, and source compatibility in direct, add_subdirectory, installed, and compatibility consumers
-    - fixed descriptor size/alignment/defaults, closed enum/flag tables, zero reserved fields, canonical target identity, payload extent/digest, and deterministic structural validation diagnostics
-    - exact frame and compiled rate-release target acceptance plus rejection of foreign, stale, wrong-kind, missing, overflowed, noncanonical, contradictory, and out-of-plan references
-    - payload copy ownership, caller-mutation isolation, exact digest and zero-length rules, short/long destination inspection, unused-byte non-observability, and no retained caller address
-    - independent bounded multi-producer stress at zero, one, exact, full, one-over, busy, producer, payload, total-byte, sequence, generation, and arithmetic capacities without partial publication or overwrite
-    - exact accepted/invalid/full/busy/stale/stopped/exhausted results, monotonic mailbox and producer sequences, complete publication visibility, deterministic counters, and abandoned-reservation handling
-    - failed-finalize correction/retry, stop during producer activity, restart generation invalidation/reset, repeated lifecycle, destruction, and two-runtime handle/storage/counter isolation under ThreadSanitizer
-    - graph/config/replay identity sensitivity for frozen mailbox semantics with exclusion of staged payload/arrival/occupancy state and exact MemoryPlan/control-ledger reconciliation
-    - proof that step, periodic, mixed-rate dispatch, device completion, sampled I/O, checkpoint, replay, telemetry, watchdog, and stop apply no staged update and produce no M22 action in this batch
-    - full M16/M17/M21 execution, deterministic replay, package inventory, exact C ABI, artifact-schema, support-matrix, release-contract, and disabled-path regression coverage
+    - exact host-frame closure before callbacks and exact active CPU/device rate-release closure before dispatch, including zero-record boundaries, future targets, substeps, simultaneous releases, and disabled/no-target regression
+    - publication-versus-closure races at every copy/slot/generation state proving one whole accepted commit or one explicit late/missed terminal result without waiting, tearing, next-boundary leakage, or double close
+    - canonical cross-mailbox ordering independent of registration, producer scheduling, slot position, addresses, compiler, and operating system, plus exact same-mailbox/update-kind replacement and nonreplacement boundaries
+    - atomic inactive-to-active generation publication, stable identity, complete payload visibility, callback-local view extent/lifetime, host/rate view isolation, and no mutation or retention of internal storage
+    - bounded terminal-state reclamation at zero, one, exact full, repeated wraparound, future-record holes, replacement, missed, stop, active view, sequence/generation exhaustion, and checked-arithmetic limits without ABA or overwrite
+    - commit inspection counters/status/window behavior, unavailable reclaimed history, output preservation, malformed identity rejection, and separation from deferred M22-03 action telemetry
+    - callback/device/watchdog failure, stop during boundary ownership, stop during producer copy, repeated lifecycle, failed-finalize correction/retry, and two-Runtime generation/view/counter isolation under ThreadSanitizer
+    - graph/config/replay identity sensitivity for frozen commit semantics, exclusion of arrival/payload/current state, and exact MemoryPlan/control-ledger reconciliation including active/inactive storage
+    - proof that commit performs no parsing, authentication, authorization callback, producer callback, file/network I/O, vendor call, allocation, thread creation, unbounded retry, rollback, checkpoint, replay, telemetry emission, or support promotion
+    - full M16/M17/M21 execution, deterministic replay, package inventory, exact C ABI, artifact-schema, support-matrix, release-contract, static-manifest, and disabled-path regression coverage
   required_ci:
-    - Documentation contract workflow including truthful M22-01 staging-only claims, unchanged runtime/artifact schemas and stable ABIs, exact SDK inventory/support matrices, release contract, and static source manifest
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of descriptors, structural validation, ownership, capacity, arithmetic, publication, lifecycle, identity, accounting, and compatibility
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical fixed record layout, validation, sequence, capacity, identity, and package-consumer results
-    - Unified executor GCC ThreadSanitizer job covering concurrent registered producers, full/busy/stop races, publication visibility, stale handles, restart, and two Runtime instances without races
-    - Determinism GCC/Clang FMA-on/off and artifact exchange proving unchanged existing fixtures, stable finalized M22 policy identity, and explicit exclusion of post-finalization arrival order and payload bytes
-    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and the new live-control installed consumer
-    - Clang 14 portable static/fuzz/artifact assurance includes every compiled M22-01 source and malformed descriptor/extent mutations; blocking dependency review, SBOM/provenance, autotune, scaling, and package relocation remain green
-    - Existing M7 replay/checkpoint, M16 rate, M17 HAL/device, M21 mixed-rate/payload/sampled/replay, no-allocation, sanitizer, and multiple-instance gates all pass; no update commit, hardware, controlled timing, Unreal, release, or deployment workflow is authorized
+    - Documentation contract workflow including truthful M22-02 boundary-commit-only claims, unchanged stable ABIs/artifact schemas/SDK inventory/support matrices, release contract, and complete static source manifest
+    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of boundary closure, ordering, replacement, generation publication, reclamation, lifecycle, identity, accounting, and compatibility
+    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix producing identical fixed layouts, boundary order, generation identity, replacement, missed, reclamation, and installed-consumer results
+    - Unified executor GCC ThreadSanitizer job covering producer/publication/closure races, callback views, full/reclamation/stop races, stale handles/views, repeated lifecycle, and two Runtime instances without data races
+    - Determinism GCC/Clang FMA-on/off and artifact exchange proving canonical commit order and generation identities for the same accepted record set while all existing replay/checkpoint fixtures and schemas remain unchanged
+    - C and C++ embedding, add_subdirectory, installed-package, archive relocation, SDK header self-containment, compatibility aliases, exact 70-export C ABI consumers, and live-control callback-view consumer coverage
+    - Clang 14 portable static/fuzz/artifact assurance includes every compiled M22-02 source and malformed boundary/view/state mutations; blocking dependency review, SBOM/provenance, autotune, scaling, and package relocation remain green
+    - Existing M7 replay/checkpoint, M16 rate, M17 HAL/device, M21 mixed-rate/payload/sampled/replay, M22-01 staging, no-allocation, sanitizer, watchdog, and multiple-instance gates all pass; no rollback/replay/telemetry, hardware, controlled timing, Unreal, release, or deployment workflow is authorized
   manual:
-    - Human review must confirm the additive public API has one copied canonical update envelope, exact per-Runtime ownership/generation, fixed payload storage, bounded producer admission, complete-before-visible publication, explicit contention/full/exhaustion results, and no callback, parsing, I/O, or hidden dynamic storage.
-    - The reviewer must confirm M22-01 never applies, schedules, rolls back, checkpoints, replays, or emits telemetry for an update; does not reuse the filesystem helper or experimental seqlock; and does not describe staging, hosted concurrency, or deterministic inspection as exact-boundary commit, production hot reload, RT1/RT2, hardware, or Unreal evidence.
+    - Human review must confirm exact frame/rate closure, the publication race linearization point, canonical total order, replacement key, immutable active/inactive generation switch, bounded reclamation, callback-view lifetime, no producer wait, and exact per-Runtime identity/accounting.
+    - The reviewer must confirm M22-02 adds no payload parser/authentication/application callback on an execution lane, no rollback/checkpoint/replay/telemetry schema, no executable or Unreal hot reload, and no physical, HIL, RT1/RT2, support, release, deployment, or production claim.
 risk:
   class: high
   hazards:
-    - a descriptor or payload published before its copy is complete can expose torn configuration bytes to the later boundary consumer
-    - a stale producer handle or missing Runtime/configuration generation can apply an update to the wrong instance or restart generation
-    - an unbounded retry loop, mutex, heap fallback, producer registry scan, or caller-owned payload can violate the RT-adjacent boundedness contract
-    - concurrent reservation failure can leak a slot, create a sequence gap that looks accepted, or make mailbox fullness arrival-order dependent without an explicit result
-    - ambiguous frame/rate-release target fields can force M22-02 to guess late, missed, replacement, or ordering semantics
-    - including staged payload or arrival state in finalized graph identity can make compatibility depend on scheduling; excluding frozen policy can admit incompatible replay/checkpoint state later
-    - reusing the existing filesystem hot-reload helper or SimCore seqlock can silently promote experimental, allocating, sleep-based, or repository-private behavior into the supported Runtime
-    - schema/mailbox scaffolding can be mislabeled as transactional apply, rollback, replay, production live control, executable hot reload, or safety/RT qualification
+    - a producer publishing across target closure can create a late update that appears at the next boundary or a torn record at the declared boundary
+    - nondeterministic cross-mailbox scan order or ambiguous replacement keys can make callback-visible configuration depend on producer scheduling or container layout
+    - reusing a slot while an active generation or callback view references it can expose overwritten payload bytes or an ABA-valid stale view
+    - waiting on an off-lane producer, parsing payloads, invoking callbacks, or growing containers at the boundary can violate bounded execution and deadlock stop
+    - committing a generation before all survivors and payload identities are complete can expose mixed old/new configuration
+    - folding rollback, replay, checkpoint, or telemetry into this batch can freeze an incomplete artifact contract and obscure apply-failure semantics reserved for M22-03
+    - exact-boundary portable unit evidence can be mislabeled as controlled latency, physical control, RT1/RT2, executable hot reload, or production qualification
   stop_conditions:
-    - the exact target baseline is unavailable, dirty, or lacks merged M21-05 retained evidence and stable portable mixed-rate closure
-    - implementation requires changing C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL tables, Runtime status values, runtime-profile schema, existing artifact/telemetry schemas, installed inventory, support matrices, qualification state, release version, license, or prior evidence
-    - one fixed canonical envelope cannot represent exact runtime/configuration generation, frame or rate-release target, update kind, producer sequence, payload extent, and digest without a pointer, dynamic string, or unbounded payload
-    - concurrent producer admission cannot remain fixed-capacity, complete-before-visible, nonblocking with bounded attempts, generation safe, exactly accounted, and isolated per Runtime
-    - target validation would require parsing application payloads, invoking user/authentication callbacks, reading files/network, loading executable code, consulting wall-clock timing, or mutating running state
-    - implementation requires M22-02 boundary commit/late/replacement behavior, M22-03 rollback/checkpoint/replay/telemetry, M22-04 typed examples/stress closure, M23 benchmarks, M24 CUDA physics, M25 SDK work, M26 golden demo, Unreal, signing, publication, release, deployment, or production access
-    - credible validation requires timing sleeps/tolerances, physical CUDA/XDMA/DAC/DAQ/CAN/IIO hardware, privileged or controlled hosts, secrets, signing keys, or a support/qualification/promotion decision
+    - the exact target baseline is unavailable, dirty, lacks merged M22-01 evidence, or differs from merged pull request 247
+    - implementation requires changing the M22-01 update-record size/meaning, C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL tables, Runtime status values, existing artifact/telemetry schemas, installed inventory, support matrices, release version, license, or prior evidence
+    - exact boundary closure cannot linearize against concurrent publication without waiting for an off-lane producer, spinning without a fixed bound, dropping a complete eligible record, or letting a late record appear at a later target
+    - canonical ordering, replacement, generation publication, and reclamation cannot remain allocation-free, fixed-capacity, instance-local, no-ABA, and exactly accounted
+    - callback-visible payload access would require application parsing, borrowed caller storage, a mutable/raw internal address, a lifetime beyond the callback, or an implicit backend/vendor transfer
+    - implementation requires M22-03 rollback/checkpoint/replay/telemetry, M22-04 typed SDK/stress closure, M23 benchmarks, M24 CUDA physics, M25 SDK work, M26 golden demo, Unreal, signing, publication, release, deployment, production access, or a support/qualification decision
+    - credible validation requires timing sleeps/tolerances, physical CUDA/XDMA/DAC/DAQ/CAN/IIO hardware, privileged or controlled hosts, secrets, signing keys, or manufactured hardware/RT evidence
     - any required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
-    - target contracts at the exact baseline contradict the schema/mailbox-only vertical or repair would require weakening deterministic, sanitizer, no-allocation, compatibility, parser, package, or release gates
+    - target contracts at the exact baseline contradict the boundary-commit vertical or repair would require weakening deterministic, sanitizer, no-allocation, compatibility, package, parser, or release gates
 rollback:
-  strategy: Revert the additive live-control policy, descriptors, producer/mailbox handles, Runtime-owned fixed slots and payload storage, structural validator and inspection API, identity/accounting integration, tests/CI, documentation, governance synchronization, release-contract digest updates, and M22-01 evidence as one batch. Restore the exact merged M21-05 behavior; no update was ever applied, no checkpoint/replay/telemetry schema or persistent data was migrated, and no physical, support, release, or deployment state was created.
+  strategy: Revert the additive commit policy/view/inspection surface, exact boundary cursors, publication linearization, canonical ordering/replacement, active/inactive immutable generation storage, terminal slot state/reclamation, host/rate callback integration, identity/accounting changes, tests/CI, documentation, governance synchronization, release-contract digest updates, and M22-02 evidence as one batch. Restore merged M22-01 staging-only behavior; no checkpoint/replay/telemetry schema, persistent data, physical state, support matrix, release, or deployment was migrated.
   data_migration: none
   release_action: Do not publish a release, promote a support or qualification tuple, alter hardware/RT records, or mark M22/CAP-M22 complete from this batch.
 evidence:
   output:
-    - docs/evidence/M22-01-<date>.md
+    - docs/evidence/M22-02-<date>.md
     - exact control and target baselines, changed files, commands, exit codes, focused test counts, required CI run/check identifiers, and human review result
-    - public policy/descriptor/handle shapes with fixed sizes, closed tables, defaults, capacities, target identity, generation, payload extent/digest, reserved fields, and deferred behavior
-    - producer/mailbox ownership, reservation/publication state machine, exact accepted/rejected sequences and counters, capacity/contention/exhaustion results, copied payload ownership, and lifecycle/reset behavior
-    - structural validation matrix for every malformed, foreign, stale, wrong-kind, noncanonical, overflowed, contradictory, and out-of-plan descriptor/payload combination
-    - identity comparisons and MemoryPlan/control-ledger reconciliation for every frozen semantic field, plus exclusion of staged payload/arrival/occupancy state and unchanged disabled-path identities
-    - proof of zero update application, callback/parser/authentication/file/network/vendor action, unchanged step/periodic/mixed-rate/checkpoint/replay/telemetry behavior, two-runtime isolation, retryable failure, and post-start no-allocation results
+    - public commit policy/view/result/inspection shapes with fixed sizes, closed tables, defaults, target identities, lifetimes, replacement key, terminal states, and deferred behavior
+    - exact publication-versus-closure state machine and linearization points for complete, copying, future, late, missed, replaced, stopped, full, reclaimed, exhausted, and unavailable records
+    - canonical ordering and generation-identity fixtures across mailbox registration/arrival permutations, compilers, platforms, frame targets, simultaneous rate releases, and repeated capacity reuse
+    - atomicity, callback-view lifetime, active/inactive storage, terminal reclamation, no-ABA, two-runtime isolation, stop/failure, retryable finalization, and post-start no-allocation results
+    - identity comparisons and MemoryPlan/control-ledger reconciliation for every frozen commit semantic field plus exact exclusion of arrival, payload, current generation, counters, slots, addresses, scheduling, and wall-clock state
+    - proof of no payload parsing/authentication/authorization callback, producer wait, file/network/vendor action, rollback, checkpoint, replay, telemetry schema/action emission, or implicit backend transfer
     - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, HAL/extension contracts, existing artifact/runtime schemas, installed package/header/alias inventory, support/qualification, license, and prior-evidence preservation results
-    - residual risks and every unperformed M22-02 commit, M22-03 rollback/replay/checkpoint/telemetry, M22-04 SDK/stress, executable/Unreal hot reload, physical hardware, controlled timing, HIL, RT1, RT2, signing, publication, release, deployment, and production validation
-  claim_boundary: Evidence may establish additive C++ live-control schemas, fixed-capacity per-Runtime producer/mailbox ownership, canonical copied payload staging, generation-safe bounded nonblocking admission, deterministic inspection, exact identity/accounting, package compatibility, and portable RT0 static/unit/property/sanitizer behavior only. It does not establish exact-boundary update application, late/missed/replacement semantics, rollback, checkpoint/replay/telemetry integration, executable or Unreal hot reload, physical control, HIL, controlled latency, RT1, RT2, support promotion, signing, publication, release, deployment, or production readiness.
+    - residual risks and every unperformed M22-03 rollback/replay/checkpoint/telemetry, M22-04 SDK/stress, executable/Unreal hot reload, physical hardware, controlled timing, HIL, RT1, RT2, signing, publication, release, deployment, and production validation
+  claim_boundary: Evidence may establish portable RT0 exact host-frame and active rate-release live-control publication, deterministic ordering/replacement, bounded late/missed/stop behavior, atomic immutable callback-visible generations, fixed-capacity reclamation, deterministic inspection, identity/accounting, package compatibility, and sanitizer/no-allocation behavior only. It does not establish apply-failure rollback, checkpoint/replay/telemetry integration, typed domain SDK semantics, executable or Unreal hot reload, physical control, HIL, controlled latency, RT1, RT2, support promotion, signing, publication, release, deployment, or production readiness.

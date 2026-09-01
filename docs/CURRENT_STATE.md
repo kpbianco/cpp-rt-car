@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-09-01
-Batch baseline: `00cc6e48eb11c334a5e04ebd0719899f52d5581b`
+Batch baseline: `201decf9384220d713ff90f7eb12ac3ecc4ebc49`
 
 ## Product state
 
@@ -25,12 +25,12 @@ Batch baseline: `00cc6e48eb11c334a5e04ebd0719899f52d5581b`
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
   current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
   and M21-04 are merged. M21-05 is merged at the audited baseline and closes
-  the portable M21 software path. M22-01 is the active approved live-control
-  schema and bounded-mailbox batch; M22/CAP-M22 remain incomplete.
+  the portable M21 software path. M22-01 is merged. M22-02 is the active
+  exact-boundary commit candidate; M22/CAP-M22 remain incomplete.
 
-## M22-01 live-control staging candidate
+## M22-02 live-control boundary-commit candidate
 
-M22-01 adds an opt-in additive C++ policy with positive bounded mailbox,
+M22-01 added an opt-in additive C++ policy with positive bounded mailbox,
 producer, record, per-record payload, and total copied-payload capacities.
 Configuration copies fixed mailbox and producer declarations. Successful
 finalization allocates all slots and payload storage, binds producer handles
@@ -38,16 +38,21 @@ to one Runtime identity and configuration generation, validates exact compiled
 rate-release targets, and includes the frozen policy/declarations in graph,
 configuration, replay, and exact Runtime-control accounting.
 
-Admission is an explicit non-RT producer operation. It performs one bounded
+Admission remains an explicit non-RT producer operation. It performs one bounded
 reservation attempt, copies canonical payload bytes before release
 publication, and returns distinct accepted, invalid, full, busy, stale,
-stopped, or exhausted outcomes. Read-only inspection exposes copied records,
+stopped, exhausted, or missed outcomes. M22-02 closes host-frame and exact
+compiled rate-release targets before their callbacks, sorts complete records
+by mailbox identity and mailbox sequence, applies same-mailbox/update-kind
+replacement, and atomically publishes one copied immutable generation.
+Read-only inspection exposes copied records,
 counters, occupancy, and exact-size payload copying without an internal
 address. Stop closes admission before existing cleanup ownership is processed.
 
-This batch has no consumer. Staged bytes do not change `step()`, periodic or
-mixed-rate execution, sampled I/O, devices, checkpoints, replay, telemetry,
-watchdog, or state. M22-02 owns exact-boundary commit and ordering; M22-03 owns
+Callbacks receive a nullable callback-lifetime view of fixed record metadata
+and host payload spans. No payload is parsed or transferred to a backend
+implicitly. Checkpoint, replay, telemetry, watchdog, sampled-I/O, and state
+schemas remain unchanged. M22-03 owns
 rollback/checkpoint/replay/telemetry; M22-04 owns typed SDK examples and
 closure. Portable tests are RT0 evidence only. Hosted CI and human API,
 ownership, concurrency, compatibility, and claim review remain mandatory

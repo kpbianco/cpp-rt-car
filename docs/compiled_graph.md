@@ -5,8 +5,10 @@ plan is available, finalization validates copied live-control declarations and
 copies the exact legal rate-release target table into optional mailbox control
 storage. Frozen schema/legal tables, policy, capacities, and sorted declarations
 participate in compatibility identity; staged payloads, arrivals, occupancy,
-counters, Runtime identity, and inspector calls do not. No staged record adds a
-node, edge, release, callback, dependency, or dispatch action.
+counters, Runtime identity, and inspector calls do not. M22-02 additionally
+hashes its frozen exact-close, order, replacement, missed, reclamation, and view
+semantics. It closes immediately before existing dispatch and adds no node,
+edge, release, callback, dependency, or dispatch action.
 
 M21-05 finalization retains M21-04's direct sampled-channel maps and adds a
 copied closure policy, fixed action/replay controls, and conditional checkpoint

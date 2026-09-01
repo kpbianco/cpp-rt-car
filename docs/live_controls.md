@@ -1,9 +1,12 @@
-# Live-control staging contract
+# Live-control boundary-commit contract
 
-M22-01 provides an additive C++ staging substrate inside `rt::Runtime`. It is
-data-only: no staged update is scheduled, interpreted, applied, checkpointed,
-replayed, rolled back, or emitted as telemetry in this batch. Exact-boundary
-consumption and ordering belong to M22-02.
+M22-01 provides the additive C++ staging substrate inside `rt::Runtime`.
+That retained M22-01 surface is data-only: no staged update is scheduled by
+admission itself.
+M22-02 consumes those complete records at exact host-frame and active compiled
+rate-release boundaries. Payloads remain opaque canonical bytes: M22-02 orders,
+copies, and exposes them through a callback-local immutable view, but does not
+interpret, roll back, checkpoint, replay, or emit them as telemetry.
 
 ## Configuration and ownership
 
@@ -55,9 +58,9 @@ A host-frame target supplies a finite frame index and leaves all rate fields at
 their invalid sentinels. A rate target leaves the frame field at its sentinel
 and exactly repeats one finalization-time reference release: reference index,
 rate-domain registration index, phase index, domain release sequence, and
-substep ordinal. M22-01 validates structural membership only. Whether a target
-is late, missed, replaceable, or ordered before another update is deliberately
-undefined until M22-02.
+substep ordinal. This is one exact occurrence in the compiled reference
+supercycle, not a recurring template. M22-02 marks a record missed after that
+occurrence closes; it never retargets the record to a later supercycle.
 
 The closed update kinds are scenario parameters, controller parameters, sensor
 calibration, fault configuration, and clear fault. Only clear fault permits an
@@ -75,12 +78,14 @@ The mailbox uses one atomic claim attempt; contention returns `busy` without a
 mutex, wait, retry loop, allocation, alternate queue, or overwrite.
 
 After a successful claim, Runtime rechecks admission and producer sequence,
-then checks fixed capacity. It copies the payload into the selected
-Runtime-owned stride, zeroes unused bytes, writes the immutable record, and
-publishes the slot with release ordering. Only then does it advance occupancy,
-mailbox sequence, producer sequence, and the accepted counter. Inspectors use
-acquire ordering and never expose an unpublished slot. A failed copy cannot
-publish because fixed validated byte copies do not invoke user code or allocate.
+then claims either an unused slot or one terminal slot that is not under
+inspection. It copies the payload into the selected Runtime-owned stride,
+zeroes unused bytes, writes the immutable record, and publishes the slot with
+release ordering. Only then does it advance mailbox and producer sequences.
+The boundary close and final publish use atomic state transitions: a producer
+that wins publication before close is eligible, while a producer still writing
+at close records `missed` after its complete copy. Neither side waits for the
+other and no partial slot becomes visible.
 
 Outcomes are distinct:
 
@@ -93,53 +98,83 @@ Outcomes are distinct:
 | `stale` | Handle ownership/generation or expected producer sequence disagreed. |
 | `stopped` | Stop had closed new admission. |
 | `exhausted` | A producer or mailbox sequence reached its no-wrap sentinel. |
+| `missed` | The complete record's exact target had already closed. |
 
 Foreign Runtime handles fail before touching a local mailbox. Structural
-rejection and full/busy/stopped/exhausted outcomes do not consume a record or
-advance either sequence. Mailbox counters and occupancy are read-only
-inspection state; a full mailbox uses reject-new semantics and never evicts,
-coalesces, replaces, or mutates a published record.
+rejection and full/busy outcomes do not consume a record or advance either
+sequence. A complete post-copy `missed` or `stopped` record does consume its
+assigned monotonic sequences and remains inspectable until bounded reuse.
+Full remains reject-new while no unused or safely reclaimable terminal slot is
+available.
+
+## Exact boundary close and immutable generations
+
+Immediately before any callback for a host frame, Runtime atomically advances
+that instance's monotonic frame cursor and scans every fixed slot once. Active
+rate execution similarly closes one exact finalization-time reference release
+immediately before its first CPU or device callback. Earlier closed targets are
+terminally missed, future targets remain staged, and an empty boundary leaves
+the prior data generation unchanged.
+
+Current-boundary candidates are sorted by target identity, mailbox identity,
+then mailbox sequence. Since one close has one exact target, the effective
+cross-mailbox order is mailbox identity ascending and mailbox sequence
+ascending. Within that order a later record replaces an earlier record only
+for the same mailbox identity and update kind. The boundary copies survivors
+and payloads into the inactive preallocated generation, hashes the exact target
+plus ordered record identities and payload digests to a nonzero identity, and
+release-publishes the complete generation. It then terminalizes source slots as
+`committed` or `replaced`; no published generation references a mailbox slot.
+
+`CallbackContext::live_control` and `DeviceCallbackContext::live_control` are
+nullable callback-lifetime views. They contain copied fixed record metadata and
+read-only payload spans. They must not be retained after callback return.
+Device callbacks receive host spans only; Runtime performs no implicit backend
+transfer or vendor operation.
 
 ## Inspection, identity, and accounting
 
-Runtime exposes mailbox counts, one fixed mailbox-info snapshot, immutable
+Runtime exposes mailbox counts, one fixed mailbox-info snapshot, retained
 record lookup by mailbox sequence, and exact-size copying into caller-owned
-payload storage. Inspection returns no raw internal address, does not advance
-execution or a consumer cursor, and leaves caller output unchanged when the
-requested sequence is unavailable or the payload destination has the wrong
-extent.
+payload storage. `LiveControlCommitInfo` reports the latest published identity
+and target, survivor count, terminal counters, and staged occupancy.
+`LiveControlRecordStatusInfo` reports staged, committed, replaced, missed, or
+stopped for a retained record. Reclaimed history is unavailable; M22-03 owns
+the future action ledger. Inspection does not advance execution or a cursor and
+leaves caller output unchanged when the requested record is unavailable.
 
-Frozen schema/legal tables, policy, capacities, admission/reset rules, and
-sorted mailbox/producer declarations participate in graph, configuration, and
-replay compatibility identity. Runtime identity, caller addresses, staged
-payload bytes, arrival order, occupancy, counters, and inspection calls do not.
+Frozen schema/legal tables, policy, capacities, admission/reset rules, sorted
+declarations, exact-boundary ordering, replacement, missed, reclamation, and
+view-layout semantics participate in graph, configuration, and replay
+compatibility identity. Runtime identity, caller addresses, payload contents,
+arrivals, current generation, occupancy, counters, and inspection calls do not.
 
 `MemoryPlan` reports mailbox/producer counts, total record capacity, exact
 payload bytes, and the complete live-control heap contribution. Policy and
 declaration storage, mailbox controls, atomics/counters, immutable record
-slots, payload slots, producer state, and copied compiled-rate targets are
-included once in `runtime_control_bytes`, `planned_bytes`, and the exact logical
-control-extent ledger. No provider-backed memory region or execution lane is
-added.
+slots, payload slots, producer state, copied compiled-rate targets, candidate
+indexes, terminal state, boundary cursors, inspection state, and both immutable
+generation record/payload stores are included once in `runtime_control_bytes`,
+`planned_bytes`, and the exact logical control-extent ledger. No
+provider-backed memory region or execution lane is added.
 
 ## Lifecycle and deferred behavior
 
 Admission may occur after finalization, before or during running execution,
 from bounded external producer threads. It is not signal-handler or interrupt
-safe. `step()`, `run_periodic()`, active mixed-rate dispatch, sampled I/O,
-device completion, checkpoint, replay, telemetry, watchdog, and state registry
-paths never inspect or consume staged slots. Staging therefore cannot change
-callback behavior, artifacts, mixed-rate actions, or existing telemetry.
+safe. `step()` and active mixed-rate dispatch close boundaries and expose only
+the immutable generation view. Sampled I/O, device completion, checkpoint,
+replay, telemetry, watchdog, and state registry formats remain unchanged.
 
 `stop()` closes admission before checking active execution and existing cleanup
 ownership. A producer that already won the claim may finish its bounded copy;
 the first stop attempt reports `invalid_state` and must be retried after that
-claim quiesces. A new claim observes stopped. Published records remain
-inspectable until the terminal Runtime is destroyed and never carry into
-another Runtime generation.
+claim quiesces. A new claim observes stopped. Once execution is quiescent,
+remaining staged records become terminal `stopped`. Retained records never
+carry into another Runtime generation.
 
-This establishes portable RT0 schema, ownership, bounded-admission, copied-
-payload, identity, accounting, and inspection behavior only. It is not
-evidence for transactional application, rollback, physical control, HIL,
+This establishes portable RT0 schema, ownership, bounded admission, exact
+boundary publication, copied payload, identity, accounting, and inspection
+behavior only. It is not evidence for rollback, physical control, HIL,
 controlled latency, RT1/RT2, executable or Unreal hot reload, support
 promotion, release, deployment, or production readiness.

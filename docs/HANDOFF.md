@@ -1,24 +1,23 @@
 # Handoff
 
-## Active batch: M22-01
+## Active batch: M22-02
 
-Baseline `00cc6e48eb11c334a5e04ebd0719899f52d5581b` is the merged M21-05
-portable mixed-rate closure. M22-01 adds only the additive C++ live-control
-policy, copied fixed-capacity mailbox/producer declarations, generation-safe
-producer handles, canonical immutable update records, bounded Runtime-owned
-payload slots, nonblocking admission, deterministic inspection, and exact
-identity/accounting. Preserve C ABI v8/70 exports, every existing artifact
+Baseline `201decf9384220d713ff90f7eb12ac3ecc4ebc49` is merged M22-01.
+M22-02 consumes its complete slots at exact host-frame and active compiled
+rate-release boundaries, publishes copied immutable generations, reclaims
+terminal slots, and adds fixed commit/status inspection. Preserve C ABI v8/70
+exports, every existing artifact
 schema, support matrices, CUDA/XDMA candidates, and prior evidence. Do not
-claim update application, rollback, replay/telemetry integration, executable
+claim payload interpretation, rollback, replay/telemetry integration, executable
 hot reload, physical I/O, HIL, RT1/RT2, Unreal, release, or deployment.
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-01 contract is
+RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-02 contract is
 `contracts/active-batch.yaml`, sourced from control revision
-`aeebab5f0140c2ac9161ff88f8fe42749ce42ebc`.
+`499512aee4e2ca1c2ca74c5f3bd5e7d66b5b1987`.
 
-## M22-01 implementation handoff
+## M22-02 implementation handoff
 
 `LiveControlPolicy` is copied once while configuring. A completely zero-capacity
 policy disables the feature without changing compatibility identity; an
@@ -48,11 +47,19 @@ the existing Runtime-control MemoryPlan row and logical extent ledger. Frozen
 policy/declarations affect graph/config/replay identity; arrivals and payloads
 do not.
 
-There is deliberately no M22-01 consumer. Do not drain a mailbox from `step()`,
-periodic/rate dispatch, device completion, checkpoint, replay, telemetry,
-watchdog, or stop. M22-02 owns exact-boundary commit/ordering, M22-03 owns
-rollback/checkpoint/replay/telemetry, and M22-04 owns typed SDK examples and
-closure. See `docs/live_controls.md` for the full staging contract.
+The frame owner closes one monotonically increasing frame target before graph
+dispatch. Active rate dispatch closes one exact finalization-time reference
+release before its callback. It never waits on a producer: atomic slot state
+decides eligible versus missed. Candidates sort by mailbox identity then
+mailbox sequence; later same-mailbox/update-kind records replace earlier ones.
+Survivors are copied to the inactive generation, hashed with their target and
+identities, and release-published before callbacks receive a read-only view.
+
+Terminal committed, replaced, missed, and stopped slots are reusable only
+outside bounded inspectors; generations own independent record/payload copies,
+so callbacks never reference reclaimable slots. M22-03 owns rollback,
+checkpoint/replay, and action telemetry. M22-04 owns typed SDK examples and
+closure. See `docs/live_controls.md` for the complete contract.
 
 ## M21-05 implementation handoff
 

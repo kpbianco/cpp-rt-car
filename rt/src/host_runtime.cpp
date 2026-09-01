@@ -1496,6 +1496,24 @@ struct Runtime::Impl {
             hash_u64(hash, sizeof(LiveControlProducerHandle));
             hash_u64(hash, sizeof(LiveControlUpdateRecord));
             hash_u64(hash, sizeof(LiveControlMailboxInfo));
+            hash_u64(hash, 0x4d32322d636d7432ull);
+            hash_u64(hash, sizeof(LiveControlBoundaryTarget));
+            hash_u64(hash, sizeof(LiveControlRecordView));
+            hash_u64(hash, sizeof(LiveControlGenerationView));
+            hash_u64(hash, sizeof(LiveControlCommitInfo));
+            hash_u64(hash, sizeof(LiveControlRecordStatusInfo));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlRecordStatus::committed));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlRecordStatus::replaced));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlRecordStatus::missed));
+            hash_u64(hash, static_cast<std::uint64_t>(
+                LiveControlRecordStatus::stopped));
+            // Frozen M22-02 semantics: exact-target close, mailbox/sequence
+            // order, mailbox+kind replacement, reject-late, terminal reuse,
+            // and callback-lifetime immutable views.
+            hash_u64(hash, 0x010101010101ull);
             hash_u64(hash, alignof(LiveControlPolicy));
             hash_u64(hash, alignof(LiveControlMailboxRegistration));
             hash_u64(hash, alignof(LiveControlProducerRegistration));
@@ -4714,6 +4732,11 @@ struct Runtime::Impl {
                 &Impl::publish_active_channel,
                 &Impl::copy_active_channel,
             };
+            if (live_control_mailboxes) {
+                (void)live_control_mailboxes->close_rate_release(
+                    reference_index,
+                    domain_release_sequence);
+            }
             active_device_ticket = {};
             active_device_payload_slot = 0;
             if (release.phase_kind == RatePhaseKind::device) {
@@ -5566,6 +5589,14 @@ struct Runtime::Impl {
             output.rate.executed_reference_records);
         output.rate.stale_reads =
             active_stale_reads.load(std::memory_order_acquire);
+        if (live_control_mailboxes) {
+            live_control_mailboxes->expire_rate_releases_before(
+                execution_status == Status::ok ||
+                        (execution_status == Status::capacity_exceeded &&
+                         !active_faulted)
+                    ? end_ns
+                    : active_logical_release_ns);
+        }
         if (execution_status == Status::ok ||
             (execution_status == Status::capacity_exceeded &&
              !active_faulted)) {
@@ -5633,6 +5664,9 @@ struct Runtime::Impl {
                         invalid_reference_release_index
                     ? &self.active_rate_view
                     : nullptr,
+                self.live_control_mailboxes
+                    ? self.live_control_mailboxes->active_generation_view()
+                    : nullptr,
             };
             try {
                 result = callback.callback(
@@ -5654,6 +5688,9 @@ struct Runtime::Impl {
                 self.active_reference_index !=
                         invalid_reference_release_index
                     ? &self.active_rate_view
+                    : nullptr,
+                self.live_control_mailboxes
+                    ? self.live_control_mailboxes->active_generation_view()
                     : nullptr,
             };
             auto submission = make_device_submission();
@@ -5686,6 +5723,9 @@ struct Runtime::Impl {
                 self.active_reference_index !=
                         invalid_reference_release_index
                     ? &self.active_rate_view
+                    : nullptr,
+                self.live_control_mailboxes
+                    ? self.live_control_mailboxes->active_generation_view()
                     : nullptr,
             };
             DeviceCommandBatch batch;
@@ -10990,6 +11030,10 @@ Status Runtime::step(
         output.start_ns,
         frame.frame_index);
 
+    if (impl_->live_control_mailboxes) {
+        (void)impl_->live_control_mailboxes->close_host_frame(
+            frame.frame_index);
+    }
     impl_->active_frame = &frame;
     std::size_t failed_phase = impl_->callbacks.size();
     auto execution_status = impl_->rate_execution_policy_set
@@ -11486,6 +11530,9 @@ Status Runtime::stop() noexcept {
             Status::invalid_state,
             "extension stop requested; retry checked stop after active "
             "execution quiesces");
+    }
+    if (impl_->live_control_mailboxes) {
+        impl_->live_control_mailboxes->terminalize_staged_on_stop();
     }
 
     Status sampled_io_safe_status = Status::ok;
@@ -12518,6 +12565,23 @@ Status Runtime::copy_live_control_payload(
     }
     impl_->clear_error();
     return Status::ok;
+}
+
+bool Runtime::live_control_commit_info(
+    LiveControlCommitInfo& info) const noexcept {
+    return live_control_enabled() &&
+        impl_->live_control_mailboxes->commit_info(info);
+}
+
+bool Runtime::live_control_record_status(
+    std::uint64_t mailbox_identity,
+    std::uint64_t mailbox_sequence,
+    LiveControlRecordStatusInfo& info) const noexcept {
+    return live_control_enabled() &&
+        impl_->live_control_mailboxes->record_status(
+            mailbox_identity,
+            mailbox_sequence,
+            info);
 }
 
 bool Runtime::device_rate_admission_backend_at(

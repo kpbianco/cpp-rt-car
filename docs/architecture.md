@@ -1,9 +1,10 @@
 # Architecture
 
 M21-05 closes the existing M21 transport without adding an execution lane.
-M22-01 adds a separate data-only live-control staging surface: copied policy
-and declarations, fixed Runtime-owned records/payloads, one-attempt producer
-admission, and read-only inspection. It adds no consumer or execution lane.
+M22-01 adds the separate data-only live-control staging surface. M22-02 adds a
+bounded frame-owner scan, deterministic replacement/order, inactive/active
+immutable generation storage, callback-local views, terminal slot reclamation,
+and fixed inspection. It adds no lane, payload parser, or backend transfer.
 See [live_controls.md](live_controls.md).
 
 The merged M21 closure remains:
@@ -76,9 +77,11 @@ rate plan is compiled and before Runtime state is published. The set copies
 compiled release identities, owns fixed mailbox/producer/slot/payload storage,
 and contributes exact logical control extents. External producers address one
 pre-registered producer directly through a Runtime-generation handle. A
-release-store publishes only a complete descriptor and copied payload; no
-executor, backend, watchdog, telemetry, checkpoint, or replay path reads the
-mailbox in this batch.
+release-store publishes only a complete descriptor and copied payload. M22-02
+adds fixed candidate and double-generation stores. The frame owner closes one
+exact target without waiting on producers, copies canonical survivors into the
+inactive generation, and publishes it before existing callbacks. No backend,
+watchdog, telemetry, checkpoint, or replay format consumes the payload.
 
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval
