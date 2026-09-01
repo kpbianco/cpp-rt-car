@@ -1,11 +1,12 @@
 # Handoff
 
-## Active batch: M22-03
+## Active batch: M22-04
 
-Baseline `0311064cc44d6ec0add7f88e0789d7437e72e819` contains merged M22-01
-staging and M22-02 exact-boundary publication. M22-03 adds step-transaction
-Runtime-generation rollback, a fixed payload-free action stream, conditional
-ordinary checkpoint state, and a distinct bounded live-control replay artifact.
+Baseline `0bf54966be63817969468c69c5cd183ad66ab358` contains merged M22-01 through
+M22-03 staging, exact-boundary publication, Runtime-generation rollback,
+payload-free actions, conditional checkpoint state, and bounded replay.
+M22-04 adds the optional header-only typed source SDK, compiling data/config
+sample, exact package inventory delta, and deterministic stress closure.
 Preserve C ABI v8/70 exports, every existing artifact schema, support matrices,
 CUDA/XDMA candidates, and prior evidence. Do not claim reversal of arbitrary
 application/backend/physical side effects, executable hot reload, physical I/O,
@@ -13,9 +14,43 @@ HIL, RT1/RT2, Unreal, release, or deployment.
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-03 contract is
+RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-04 contract is
 `contracts/active-batch.yaml`, sourced from control revision
-`03c010b266a47890a3721d864a3c0e10a36e8adf`.
+`1b1c6fe0628ce57bda3be988bfbcbeb9107460f9`.
+
+## M22-04 implementation handoff
+
+Include `<rt/live_control.hpp>` only when the typed helper is wanted. Specialize
+`rt::LiveControlTypeTraits<T>` with positive application type/schema identities,
+one closed update kind, a positive fixed encoded extent, and fixed-span
+`noexcept` validate/encode/decode functions. The SDK requires a standard-layout,
+trivially-copyable, nothrow output type; codecs still must explicitly encode
+fields and must not copy native object representation, padding, pointers,
+dynamic containers, borrowed views, paths, handles, callbacks, or clocks.
+
+`LiveControlTypedPayload<T>` is caller-owned. The host/rate builders validate
+before assigning the raw output record and preserve the exact producer handle,
+sequence, target fields, alignment, canonical flag, extent, and digest. They do
+not call Runtime. The caller invokes `stage_live_control_update` directly and
+owns every returned `Status`, `LiveControlAdmissionResult`, retry/correction,
+sequence, lifetime, and checked-stop decision. Decode validates raw kind and
+extent, digest, the complete 32-byte envelope, type/schema identity, and the
+fixed body before assigning output.
+
+Semantic validation and all variable-length text/config parsing remain off
+Runtime lanes. A callback may only perform bounded fixed-layout decode/copy;
+it must not allocate, throw, log, authenticate, access files/networks, call a
+vendor, or attribute application/backend/physical side-effect rollback to
+Runtime. The raw M22-01 through M22-03 API remains directly usable, including
+the empty clear-fault form; a typed clear-fault envelope is additive.
+
+The sample and stress suite cover the approved domain types, exact host/rate
+targets, commit/replacement/rollback/action inspection, absolute limits,
+maximum payload, concurrency/loss, repeated lifecycle, multiple instances,
+package relocation, and checked teardown. See `docs/live_control_sdk.md` and
+`docs/live_controls.md`. This is portable RT0 data/config behavior only, not
+executable/shared-library/Unreal reload, physical control, HIL, controlled
+latency, RT1/RT2, release, deployment, or production evidence.
 
 ## M22-03 implementation handoff
 

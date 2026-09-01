@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <rt/cuda_backend.hpp>
+#include <rt/live_control.hpp>
 #include <rt/runtime.hpp>
 #include <rt/mock_device.hpp>
 #include <simcore/bintrace.hpp>
@@ -14,6 +15,51 @@
 #include <cstdlib>
 #include <new>
 #include <span>
+
+namespace trace_live_control {
+
+struct Payload {
+    std::uint32_t mode = 0;
+    std::uint64_t seed = 0;
+
+    friend bool operator==(Payload, Payload) noexcept = default;
+};
+
+} // namespace trace_live_control
+
+namespace rt {
+
+template <>
+struct LiveControlTypeTraits<trace_live_control::Payload> {
+    static constexpr std::uint32_t application_type_identity = 0x4e4f'414cu;
+    static constexpr std::uint32_t application_schema_version = 1;
+    static constexpr LiveControlUpdateKind update_kind =
+        LiveControlUpdateKind::scenario_parameters;
+    static constexpr std::size_t encoded_extent = 12;
+
+    static bool validate(const trace_live_control::Payload& value) noexcept {
+        return value.mode != 0 && value.seed != 0;
+    }
+    static bool encode(
+        const trace_live_control::Payload& value,
+        std::span<std::byte, encoded_extent> output) noexcept {
+        return store_u32_le(output, 0, value.mode) &&
+            store_u64_le(output, 4, value.seed);
+    }
+    static bool decode(
+        std::span<const std::byte, encoded_extent> input,
+        trace_live_control::Payload& output) noexcept {
+        trace_live_control::Payload candidate;
+        if (!load_u32_le(input, 0, candidate.mode) ||
+            !load_u64_le(input, 4, candidate.seed)) {
+            return false;
+        }
+        output = candidate;
+        return true;
+    }
+};
+
+} // namespace rt
 
 extern "C" rtfw_status RTFW_EXTENSION_CALL rtfw_extension_entry_v1(
     const rtfw_extension_host_api_v1*, rtfw_extension_descriptor_v1*);
@@ -1823,8 +1869,9 @@ TEST(TraceNoAlloc, LiveControlAdmissionSettlementInspectionAndStopDoNotAllocate)
     policy.mailbox_capacity = 1;
     policy.producer_capacity = 1;
     policy.record_capacity = 1;
-    policy.payload_bytes_per_record = 8;
-    policy.total_payload_storage_bytes = 8;
+    policy.payload_bytes_per_record = static_cast<std::uint32_t>(
+        rt::live_control_typed_payload_extent<trace_live_control::Payload>);
+    policy.total_payload_storage_bytes = policy.payload_bytes_per_record;
     ASSERT_EQ(runtime.set_live_control_policy(policy), rt::Status::ok);
     rt::LiveControlClosurePolicy closure;
     closure.policy_identity = 0x4d323203;
@@ -1835,7 +1882,7 @@ TEST(TraceNoAlloc, LiveControlAdmissionSettlementInspectionAndStopDoNotAllocate)
     rt::LiveControlMailboxRegistration mailbox;
     mailbox.mailbox_identity = 101;
     mailbox.record_capacity = 1;
-    mailbox.payload_bytes_per_record = 8;
+    mailbox.payload_bytes_per_record = policy.payload_bytes_per_record;
     ASSERT_EQ(
         runtime.register_live_control_mailbox(mailbox),
         rt::Status::ok);
@@ -1850,17 +1897,15 @@ TEST(TraceNoAlloc, LiveControlAdmissionSettlementInspectionAndStopDoNotAllocate)
     ASSERT_EQ(
         runtime.live_control_producer_handle(101, 202, handle),
         rt::Status::ok);
-    const std::array payload{std::byte{0x44}};
+    const trace_live_control::Payload source{3, 0x1122'3344u};
+    rt::LiveControlTypedPayload<trace_live_control::Payload> payload{};
     rt::LiveControlUpdateRecord update;
-    update.runtime_id = handle.runtime_id;
-    update.configuration_generation = handle.configuration_generation;
-    update.mailbox_identity = handle.mailbox_identity;
-    update.producer_identity = handle.producer_identity;
-    update.producer_sequence = 1;
-    update.target_frame_index = 7;
-    update.payload_bytes = static_cast<std::uint32_t>(payload.size());
-    update.payload_digest = rt::live_control_payload_digest(payload);
+    trace_live_control::Payload decoded;
 
+    rt::LiveControlTypedStatus build_status =
+        rt::LiveControlTypedStatus::invalid_argument;
+    rt::LiveControlTypedStatus decode_status =
+        rt::LiveControlTypedStatus::invalid_argument;
     rt::LiveControlAdmissionResult admission =
         rt::LiveControlAdmissionResult::invalid;
     rt::Status stage_status = rt::Status::internal_error;
@@ -1874,6 +1919,10 @@ TEST(TraceNoAlloc, LiveControlAdmissionSettlementInspectionAndStopDoNotAllocate)
     ASSERT_EQ(runtime.start(), rt::Status::ok);
     {
         AllocationGuard guard;
+        build_status = rt::make_live_control_host_update(
+            handle, 1, 7, source, payload, update);
+        decode_status = rt::decode_live_control_typed_payload(
+            update, payload, decoded);
         stage_status = runtime.stage_live_control_update(
             handle, update, payload, admission);
         step_status = runtime.step(
@@ -1883,6 +1932,9 @@ TEST(TraceNoAlloc, LiveControlAdmissionSettlementInspectionAndStopDoNotAllocate)
         stop_status = runtime.stop();
         allocations = allocation_count();
     }
+    EXPECT_EQ(build_status, rt::LiveControlTypedStatus::ok);
+    EXPECT_EQ(decode_status, rt::LiveControlTypedStatus::ok);
+    EXPECT_EQ(decoded, source);
     EXPECT_EQ(stage_status, rt::Status::ok);
     EXPECT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
     EXPECT_EQ(step_status, rt::Status::ok);

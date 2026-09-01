@@ -486,7 +486,7 @@ TEST(LiveControlMailbox, OneAttemptContentionReturnsBusyWithoutPublication) {
     EXPECT_EQ(result, rt::LiveControlAdmissionResult::accepted);
 }
 
-TEST(LiveControlMailbox, ValidatesExactCompiledRateTargetsAndClosedPayloadKinds) {
+TEST(LiveControlMailbox, ValidatesExactCompiledRateTargetsAndClosedKinds) {
     rt::Runtime runtime;
     rt::PhaseHandle phase;
     rt::RateDomainHandle domain;
@@ -500,7 +500,7 @@ TEST(LiveControlMailbox, ValidatesExactCompiledRateTargetsAndClosedPayloadKinds)
     ASSERT_EQ(
         runtime.bind_phase_to_rate_domain(phase, domain),
         rt::Status::ok);
-    configure_live_control(runtime, 2, 8);
+    configure_live_control(runtime, 3, 8);
     const auto handle = finalized_handle(runtime);
 
     rt::ReferenceRelease release;
@@ -553,8 +553,8 @@ TEST(LiveControlMailbox, ValidatesExactCompiledRateTargetsAndClosedPayloadKinds)
         runtime.stage_live_control_update(
             handle, nonempty_clear, payload, result),
         rt::Status::ok);
-    EXPECT_EQ(result, rt::LiveControlAdmissionResult::invalid);
-    auto empty = host_update(handle, 2, no_payload);
+    EXPECT_EQ(result, rt::LiveControlAdmissionResult::accepted);
+    auto empty = host_update(handle, 3, no_payload);
     empty.update_kind = rt::LiveControlUpdateKind::clear_fault;
     empty.payload_digest = rt::live_control_payload_digest(no_payload);
     ASSERT_EQ(

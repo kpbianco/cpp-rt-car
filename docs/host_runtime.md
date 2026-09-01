@@ -10,6 +10,13 @@ before the existing quiescence and cleanup checks, then terminalizes staged
 slots. See
 [live_controls.md](live_controls.md).
 
+M22-04's typed helpers do not change lifecycle ownership. They build a raw
+record in caller-owned storage and never call Runtime, retry admission, select
+a later target, advance a sequence, or stop from a destructor. The caller must
+inspect the unchanged raw admission result and perform checked stop. Typed
+callback decode is bounded fixed-layout validation/copy only; semantic parsing
+of variable-length configuration remains an off-lane operation.
+
 M21-05 records M21-04 startup/failure/shutdown acknowledgements as closed
 mixed-rate actions. Checkpoint export and active replay require a quiescent
 release boundary; active replay prevalidates its full bounded artifact before

@@ -9,6 +9,13 @@ and the next action position. Restore fully validates before mutation, binds
 records to the current Runtime with a new configuration generation, and retires
 old producer handles.
 
+M22-04 typed payloads are application content inside those unchanged retained
+payload sections. Their separate 32-byte `RTLC` envelope and fixed body use
+canonical little-endian field encoding and the existing raw payload digest.
+No checkpoint, input-log, action, replay, observability, profile, ABI, or HAL
+schema is extended. Native object representation, padding, addresses, implicit
+clocks, and host endianness are never replay identity.
+
 The distinct live-control replay schema 1 embeds that unchanged checkpoint and
 one unchanged input-log or active-replay artifact, plus a complete payload-free
 action transcript and explicitly retained survivor records/payloads. Parsing is

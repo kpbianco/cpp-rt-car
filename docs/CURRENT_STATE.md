@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-09-01
-Batch baseline: `0311064cc44d6ec0add7f88e0789d7437e72e819`
+Batch baseline: `0bf54966be63817969468c69c5cd183ad66ab358`
 
 ## Product state
 
@@ -16,7 +16,8 @@ Batch baseline: `0311064cc44d6ec0add7f88e0789d7437e72e819`
 - The installed target inventory, 1.x aliases, support matrices, and
   Apache-2.0 license are unchanged. The retained M19 addition is
   `rt/extension_abi.h`; M21-04 adds exactly the additive C++ header
-  `rt/loopback_backend.hpp`.
+  `rt/loopback_backend.hpp`. M22-04 adds exactly the optional header-only C++
+  source API `rt/live_control.hpp`.
 - M14, M14.1, M15, and M16 are complete. M17-01 through M17-04 and the
   M17-06 portable discovery/composition repair are merged. M17 and CAP-M17
   remain incomplete because named physical CUDA/XDMA, combined-hardware, RT,
@@ -25,11 +26,11 @@ Batch baseline: `0311064cc44d6ec0add7f88e0789d7437e72e819`
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
   current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
   and M21-04 are merged. M21-05 is merged at the audited baseline and closes
-  the portable M21 software path. M22-01 and M22-02 are merged. M22-03 is the
-  active rollback/checkpoint/replay/action candidate; M22/CAP-M22 remain
-  incomplete.
+  the portable M21 software path. M22-01 through M22-03 are merged. M22-04 is
+  the active typed-SDK and stress-closure candidate; M22/CAP-M22 remain
+  incomplete until hosted and human gates pass and the candidate merges.
 
-## M22-03 live-control transactional-closure candidate
+## M22-04 typed live-control SDK and stress candidate
 
 M22-01 added an opt-in additive C++ policy with positive bounded mailbox,
 producer, record, per-record payload, and total copied-payload capacities.
@@ -58,7 +59,7 @@ step succeeds; any later step failure restores that Runtime-owned generation
 and terminalizes the source slots as rolled back. This does not reverse
 application, backend, external-process, or physical-device side effects.
 
-The candidate adds a separate fixed 256-byte payload-free action schema and
+M22-03 adds a separate fixed 256-byte payload-free action schema and
 runtime-bound gap-reporting cursors. Closure-enabled ordinary checkpoints add
 one `rtfw.live-control` schema-1 state record while closure-disabled checkpoint
 bytes remain unchanged. A distinct bounded live-control replay artifact embeds
@@ -66,10 +67,26 @@ one unchanged checkpoint and one unchanged input-log or active-replay artifact,
 plus correlated actions and explicitly retained generation payload bytes.
 Replay fully validates before restore and injects immutable generations at
 their exact boundaries; deterministic backend restrictions remain in force.
-Every prior artifact, observability, rate-action, mixed-rate-action, stable ABI,
-and package schema remains unchanged. M22-04 owns typed SDK examples and stress
-closure. Portable tests are RT0 evidence only, and hosted CI plus human API,
-ownership, concurrency, compatibility, and claim review remain mandatory.
+Every prior artifact, observability, rate-action, mixed-rate-action, and stable
+ABI schema remains unchanged. M22-04 adds one installed header-only source API,
+`rt/live_control.hpp`. Its 32-byte `RTLC` envelope has fixed little-endian
+magic/version/extent/type/schema/kind/reserved fields followed by a positive
+compile-time fixed body. Application specializations provide bounded
+`noexcept` validate/encode/decode operations; builders write caller-owned
+storage and one raw `LiveControlUpdateRecord` but do not stage, retry, retarget,
+advance a sequence, or own checked teardown.
+
+The supported sample provides fixed scenario, controller-gain, sensor-
+calibration, and fault-configuration types, exact host and compiled-rate
+targets, raw empty clear-fault compatibility, whole-value callback decode,
+replacement/commit/rollback actions, and checked stop. Deterministic tests
+cover absolute 64-mailbox/256-producer/65,536-record limits, the 65,536-byte
+typed payload boundary, checked 1 GiB policy arithmetic without 1 GiB physical
+commitment, one-attempt concurrent admission, representative full occupancy,
+action loss/replay disqualification, watchdog/rollback interaction, repeated
+lifecycle, and concurrent Runtime isolation. Portable tests are RT0 evidence
+only; hosted CI and human SDK/format/callback/concurrency/compatibility/privacy/
+claim review remain mandatory before M22/CAP-M22 can be called complete.
 
 ## M21-05 mixed-rate closure
 

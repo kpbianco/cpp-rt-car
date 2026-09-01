@@ -8,6 +8,11 @@ and fixed inspection. M22-03 adds a third step-entry generation, provisional
 slot ownership, a direct-index action ring, retained replay journal, fixed
 checkpoint scratch, and exact-boundary replay injection. It adds no lane,
 payload parser, implicit backend transfer, or telemetry exporter.
+M22-04 adds only a header-instantiated source layer above the public raw record:
+caller storage holds a fixed canonical envelope/body, compile-time application
+codecs perform bounded field encoding, and builders return an ordinary
+`LiveControlUpdateRecord`. No Runtime object, lane, provider region, registry,
+global cursor, compiled symbol, or destructor operation is added.
 See [live_controls.md](live_controls.md).
 
 The merged M21 closure remains:
@@ -90,6 +95,13 @@ only an explicit caller-requested replay artifact carries retained survivor
 payloads. Closure-enabled checkpoint state and replay controls are conditional,
 preallocated, and included in the existing Runtime-control ledger. No backend
 or watchdog interprets a live-control payload.
+
+Callbacks may decode an M22-04 envelope only as fixed-work validation and copy.
+Variable-length parsing, authentication, file/network access, logging, dynamic
+allocation, and vendor calls remain application control-plane work outside the
+Runtime lane. The helper never stages implicitly, retries, retargets, advances
+a producer sequence, or extends Runtime rollback to application/backend/
+physical side effects.
 
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval

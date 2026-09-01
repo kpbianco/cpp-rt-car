@@ -60,7 +60,7 @@ jobs:
           ASAN_OPTIONS: abort_on_error=1:detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           GTEST_DEATH_TEST_STYLE: threadsafe
-          GTEST_FILTER: DeterminismIntegration.*:DeterminismReplay.*:LiveControlMailbox.FrozenPolicyChangesIdentityButArrivalsDoNot
+          GTEST_FILTER: DeterminismIntegration.*:DeterminismReplay.*:LiveControlMailbox.FrozenPolicyChangesIdentityButArrivalsDoNot:LiveControlSdk.CanonicalEnvelopeHasExactLittleEndianLayout
         run: |
           ctest --test-dir build -C ${BUILD_TYPE} --output-on-failure \
             -R 'simcore_all|m17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu'
@@ -261,16 +261,16 @@ jobs:
                      rtfw_host_adapter_tests \
                      rtfw_xdma_backend_tests \
                      rtfw_cpu_gpu_fpga_cpu_sample_tests \
-                     sample_cpu_gpu_fpga_cpu \
+                     sample_cpu_gpu_fpga_cpu sample_live_control_typed \
             -- -j2
       - name: Run executor ThreadSanitizer gate
         env:
-          GTEST_FILTER: ExtensionAbi.*:ExtensionRegistration.*:ExtensionLifecycle.*:UnifiedExecutor.*:CommandBatch.*:CrossRateData.*:RateTimeline.*:RateDispatch.*:RateShedding.*:RateTelemetry.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:TraceNoAlloc.*:MemoryPolicy.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:HeterogeneousMemory.*:HalV2.*:VendorHalV2.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*Graph*:CudaBackend.*HalV2*:XdmaBackend.*Control*:XdmaBackend.*Event*-ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover:ThreadPolicy.LinuxAppliesAndReadsBackAvailableNativeFields
+          GTEST_FILTER: LiveControlSdk.*:LiveControlStress.*:LiveControlMailbox.*:LiveControlActions.*:ExtensionAbi.*:ExtensionRegistration.*:ExtensionLifecycle.*:UnifiedExecutor.*:CommandBatch.*:CrossRateData.*:RateTimeline.*:RateDispatch.*:RateShedding.*:RateTelemetry.*:CompiledGraph.*Rate*:HostRuntime.*Rate*:TraceNoAlloc.*:MemoryPolicy.*:ThreadPolicy.*:CpuMemoryPolicy.*:MemoryPlan.*:PeriodicRuntime.*:PlatformPreflight.*:Observability.*:DeterminismReplay.*:HeterogeneousMemory.*:HalV2.*:VendorHalV2.*:DeviceRuntime.*:DeviceMock.*:CudaBackend.*Graph*:CudaBackend.*HalV2*:XdmaBackend.*Control*:XdmaBackend.*Event*-ThreadPolicy.StrictFailuresRollbackWithoutCallbacksAndCanRecover:ThreadPolicy.LinuxAppliesAndReadsBackAvailableNativeFields
           TSAN_OPTIONS: halt_on_error=1
         run: |
           ctest --test-dir build-tsan \
             --output-on-failure \
-            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_command_batch_timeline|m17_hal_v2_compatibility|m17_heterogeneous_memory_topology|m17_cuda_graph|m17_xdma_control|m17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|m19_extension_registration|m22_live_control_mailbox|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
+            -R 'simcore_all|m15_accounting_closure|m15_stack_lifecycle|m15_cross_category_rollback|m16_rate_timeline|m16_rate_dispatch|m16_shedding_telemetry|m16_cross_rate_data|m17_command_batch_timeline|m17_hal_v2_compatibility|m17_heterogeneous_memory_topology|m17_cuda_graph|m17_xdma_control|m17_cpu_gpu_fpga_cpu_sample|sample_cpu_gpu_fpga_cpu|sample_live_control_typed|m19_extension_registration|m22_live_control_mailbox|m22_live_control_sdk|m22_live_control_stress|thread_policy_rollback|thread_policy_recovery|host_adapter|xdma_backend'
 
   build-windows:
     runs-on: windows-2022

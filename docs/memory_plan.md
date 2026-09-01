@@ -19,6 +19,12 @@ logical extent ledger. Observational capacities do not alter semantic identity
 when replay is disabled. Caller checkpoint/replay buffers and registered
 application state remain borrowed and excluded.
 
+M22-04 adds no Runtime allocation, MemoryPlan field, provider region, lane,
+registry, or hidden storage. `LiveControlTypedPayload<T>` is caller-owned
+compile-time fixed storage and the header-only builders/decoder use only their
+arguments and bounded automatic scalar state. The existing raw Runtime copies
+the resulting bytes into the already-accounted M22 mailbox/generation storage.
+
 M21-05 action slots/counters, replay controls, digest staging, and conditional
 mixed-rate checkpoint state are included exactly once inside
 `rate_plan_bytes` and `runtime_control_bytes`. The plan exposes their exact

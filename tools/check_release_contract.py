@@ -94,6 +94,7 @@ HASHED_CONTRACT_PATHS = {
     "docs/heterogeneous_memory.md",
     "docs/host_runtime.md",
     "docs/live_controls.md",
+    "docs/live_control_sdk.md",
     "docs/limp_mode.md",
     "docs/memory_plan.md",
     "docs/observability.md",
@@ -135,6 +136,7 @@ HASHED_CONTRACT_PATHS = {
     "rt/include/rt/extension_abi.h",
     "rt/include/rt/graph.hpp",
     "rt/include/rt/loopback_backend.hpp",
+    "rt/include/rt/live_control.hpp",
     "rt/include/rt/mock_device.hpp",
     "rt/include/rt/observability_export.hpp",
     "rt/include/rt/profile.hpp",
@@ -199,6 +201,7 @@ HASHED_CONTRACT_PATHS = {
     "samples/CMakeLists.txt",
     "samples/cpu_gpu_fpga_cpu.cpp",
     "samples/embed_cpp/mini_app.cpp",
+    "samples/live_control_typed.cpp",
     "scripts/verify-portable-assurance.sh",
     "src/runtime_profile_demo.cpp",
     "tests/CMakeLists.txt",
@@ -215,6 +218,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/package_consumer/cpp_consumer.cpp",
     "tests/package_consumer/loopback_consumer.cpp",
     "tests/package_consumer/live_control_consumer.cpp",
+    "tests/package_consumer/live_control_sdk_consumer.cpp",
     "tests/package_consumer/mixed_rate_consumer.cpp",
     "tests/package_consumer/cuda_consumer.cpp",
     "tests/package_consumer/cuda_driver_consumer.cpp",
@@ -257,6 +261,8 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_loopback_backend.cpp",
     "tests/test_live_control_actions.cpp",
     "tests/test_live_control_mailbox.cpp",
+    "tests/test_live_control_sdk.cpp",
+    "tests/test_live_control_stress.cpp",
     "tests/test_periodic_runtime.cpp",
     "tests/test_rate_dispatch.cpp",
     "tests/test_rate_telemetry.cpp",
@@ -586,6 +592,7 @@ def validate_release_contract(
         "entrypoints": [
             "rt/include/rt/runtime.hpp",
             "rt/include/rt/profile.hpp",
+            "rt/include/rt/live_control.hpp",
         ],
         "preferred_target": "rtfw::runtime",
         "compatibility_target": "rtfw::simcore_rt",
@@ -627,6 +634,7 @@ def validate_release_contract(
         "rt/extension_abi.h",
         "rt/graph.hpp",
         "rt/loopback_backend.hpp",
+        "rt/live_control.hpp",
         "rt/mock_device.hpp",
         "rt/observability_export.hpp",
         "rt/profile.hpp",
@@ -1622,6 +1630,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
         "runtime",
         "cpp_runtime",
         "rtfw_consumer_profile",
+        "rtfw_consumer_live_control_sdk",
         "cuda_backend",
         "xdma_backend",
         "rtfw::c_shared",
@@ -1665,6 +1674,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     )
     for token in (
         "expected_headers",
+        "rt/live_control.hpp",
         "INTERFACE_COMPILE_OPTIONS",
         "INTERFACE_COMPILE_DEFINITIONS",
         "cxx_std_20",
@@ -1796,6 +1806,7 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     package_cmake = load_text(
         root, "tests/package_consumer/CMakeLists.txt", errors
     )
+    samples_cmake = load_text(root, "samples/CMakeLists.txt", errors)
     root_cmake = load_text(root, "CMakeLists.txt", errors)
     static_sources = load_text(
         root, "tools/static_analysis_sources.txt", errors
@@ -1926,6 +1937,107 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     ):
         if token not in text:
             errors.append(f"M22-03 integration: missing {token!r}")
+
+    live_control_sdk_header = load_text(
+        root, "rt/include/rt/live_control.hpp", errors
+    )
+    live_control_sdk_test = load_text(
+        root, "tests/test_live_control_sdk.cpp", errors
+    )
+    live_control_stress_test = load_text(
+        root, "tests/test_live_control_stress.cpp", errors
+    )
+    live_control_sample = load_text(
+        root, "samples/live_control_typed.cpp", errors
+    )
+    live_control_sdk_consumer = load_text(
+        root, "tests/package_consumer/live_control_sdk_consumer.cpp", errors
+    )
+    live_control_sdk_doc = load_text(
+        root, "docs/live_control_sdk.md", errors
+    )
+    trace_noalloc_test = load_text(
+        root, "tests/test_trace_noalloc.cpp", errors
+    )
+    for token in (
+        "live_control_typed_envelope_magic",
+        "struct LiveControlTypeTraits",
+        "concept LiveControlFixedType",
+        "make_live_control_host_update(",
+        "decode_live_control_typed_payload(",
+        "make_live_control_host_update(",
+        "make_live_control_rate_update(",
+    ):
+        if token not in live_control_sdk_header:
+            errors.append(f"M22-04 typed SDK: missing {token!r}")
+    for token in (
+        "CanonicalEnvelopeHasExactLittleEndianLayout",
+        "DecodeRejectsMutationsWithoutPartiallyChangingOutput",
+        "BuildersPreserveExactHandleSequenceTargetAndRawStatus",
+        "TypedClearFaultKeepsRawAdmissionResultVisible",
+    ):
+        if token not in live_control_sdk_test:
+            errors.append(f"M22-04 SDK tests: missing {token!r}")
+    for token in (
+        "AbsoluteConfigurationAndPayloadBoundariesAreExact",
+        "ConcurrentFullOccupancyReclaimsWithExactLossCounts",
+        "CallbackRollbackRemainsOrthogonalToWatchdogPolicy",
+        "RepeatedLifecycleAndConcurrentRuntimesStayIsolated",
+    ):
+        if token not in live_control_stress_test:
+            errors.append(f"M22-04 stress tests: missing {token!r}")
+    for token in (
+        "ScenarioParameters",
+        "ControllerGains",
+        "SensorCalibration",
+        "FaultConfiguration",
+        "make_live_control_host_update(",
+        "make_live_control_rate_update(",
+    ):
+        if token not in live_control_sample:
+            errors.append(f"M22-04 sample: missing {token!r}")
+    for token in (
+        "LiveControlTypeTraits<consumer::Scenario>",
+        "make_live_control_host_update(",
+        "make_live_control_rate_update(",
+        "decode_live_control_typed_payload(",
+        "read_live_control_actions(",
+    ):
+        if token not in live_control_sdk_consumer:
+            errors.append(f"M22-04 package consumer: missing {token!r}")
+    for phrase in (
+        "header-only",
+        "little-endian",
+        "caller-owned",
+        "never retry",
+        "variable-length",
+        "Runtime generation",
+        "clear-fault",
+    ):
+        if phrase.lower() not in live_control_sdk_doc.lower():
+            errors.append(f"M22-04 SDK documentation: missing {phrase!r}")
+    for token in (
+        "make_live_control_host_update(",
+        "decode_live_control_typed_payload(",
+        "AllocationGuard",
+    ):
+        if token not in trace_noalloc_test:
+            errors.append(f"M22-04 no-allocation test: missing {token!r}")
+    for token, text in (
+        ("rt/include/rt/live_control.hpp", root_cmake),
+        ("test_live_control_sdk.cpp", tests_cmake),
+        ("test_live_control_stress.cpp", tests_cmake),
+        ("m22_live_control_sdk", tests_cmake),
+        ("m22_live_control_stress", tests_cmake),
+        ("sample_live_control_typed", samples_cmake),
+        ("sample_live_control_typed", ci),
+        ("LiveControlSdk.*:LiveControlStress.*", ci),
+        ("LiveControlSdk.CanonicalEnvelopeHasExactLittleEndianLayout", ci),
+        ("rtfw_consumer_live_control_sdk", package_cmake),
+        ("rt/live_control.hpp", package_contract),
+    ):
+        if token not in text:
+            errors.append(f"M22-04 integration: missing {token!r}")
 
     return errors
 

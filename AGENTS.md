@@ -4,8 +4,8 @@ RTFW is an assurance-profile C++20 bounded simulation runtime. The supported
 portable product is release 1.2.1 at RT0 with stable C ABI v8, SONAME 8, device
 ABI v1, and Apache-2.0. M14, M14.1, M15, M16, and the portable M17 software
 path through M17-06 are complete, while hardware/RT qualification remains
-incomplete. M20-PRE-01, M21-01 through M21-05, and M22-01 through M22-02 are
-merged. M22-03 is the active approved batch.
+incomplete. M20-PRE-01, M21-01 through M21-05, and M22-01 through M22-03 are
+merged. M22-04 is the active approved batch.
 M16-01 supplies the exact reference timeline, M16-02 adds deterministic
 CPU-only cross-rate channel selection and bounded SPSC stores, and M16-03 adds
 opt-in mandatory admission, dispatch, transfer, and late actions. M16-04 adds
@@ -52,8 +52,10 @@ canonical replacement/order, immutable generation publication, callback-local
 views, terminal reclamation, and fixed inspection. It does not roll back,
 checkpoint, replay, or emit action telemetry. M22-03 owns bounded Runtime-
 generation rollback, payload-free action telemetry, conditional checkpoint
-state, and explicit trusted-payload replay artifacts. M22-04 owns typed SDK
-examples, stress closure, and CAP-M22 completion.
+state, and explicit trusted-payload replay artifacts. M22-04 adds the optional
+header-only fixed typed-payload SDK, compiling data/config examples, package
+coverage, and deterministic capacity/concurrency/lifecycle stress. It changes
+no compiled ABI or Runtime schema and is the portable CAP-M22 closure batch.
 
 ## Read before nontrivial work
 
