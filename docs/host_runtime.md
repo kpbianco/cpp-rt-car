@@ -1,9 +1,10 @@
 # Host Runtime Lifecycle
 
-M22-01 adds configuring-only live-control policy/mailbox/producer declarations,
-finalization-time producer handles, and post-finalization non-RT staging and
-inspection. It does not add a lifecycle state or consume an update. Stop closes
-new live-control claims before the existing quiescence and cleanup checks. See
+M22-01 adds live-control configuration and staging. M22-02 closes each host
+frame before graph callbacks and each active compiled rate release before its
+first CPU/device callback, then exposes one complete immutable generation.
+It adds no lifecycle state. Stop closes new claims and future boundaries before
+the existing quiescence and cleanup checks, then terminalizes staged slots. See
 [live_controls.md](live_controls.md).
 
 M21-05 records M21-04 startup/failure/shutdown acknowledgements as closed

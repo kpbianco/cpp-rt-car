@@ -52,8 +52,23 @@ public:
         std::uint64_t mailbox_identity,
         std::uint64_t mailbox_sequence,
         std::span<std::byte> output) const noexcept;
+    [[nodiscard]] const LiveControlGenerationView* close_host_frame(
+        std::uint64_t frame_index) noexcept;
+    [[nodiscard]] const LiveControlGenerationView* close_rate_release(
+        std::size_t reference_release_index,
+        std::uint64_t release_sequence) noexcept;
+    [[nodiscard]] const LiveControlGenerationView*
+    active_generation_view() const noexcept;
+    void expire_rate_releases_before(std::uint64_t logical_time_ns) noexcept;
+    [[nodiscard]] bool commit_info(
+        LiveControlCommitInfo& info) const noexcept;
+    [[nodiscard]] bool record_status(
+        std::uint64_t mailbox_identity,
+        std::uint64_t mailbox_sequence,
+        LiveControlRecordStatusInfo& info) const noexcept;
 
     void close_admission() noexcept;
+    void terminalize_staged_on_stop() noexcept;
     [[nodiscard]] bool has_active_reservation() const noexcept;
 
     [[nodiscard]] std::size_t mailbox_count() const noexcept;

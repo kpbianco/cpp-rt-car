@@ -536,6 +536,8 @@ public:
     CopyOperation copy_operation_ = nullptr;
 };
 
+struct LiveControlGenerationView;
+
 struct CallbackContext {
     const HostFrameContext& frame;
     // Valid only for this phase callback. Each phase owns a distinct block so
@@ -550,6 +552,10 @@ struct CallbackContext {
     // Non-null only for an active CPU rate callback. Appended for source
     // compatibility with the pre-M16-03 aggregate prefix.
     const RateReleaseView* rate_release = nullptr;
+    // Runtime-owned immutable generation. Valid only for this callback.
+    // Payload bytes remain host memory and are never transferred to a device
+    // implicitly.
+    const LiveControlGenerationView* live_control = nullptr;
 };
 
 using FrameCallback = CallbackResult (*)(void*, const CallbackContext&);
@@ -571,6 +577,7 @@ struct DeviceCallbackContext {
     // Non-null only for an active admitted device-rate command provider.
     // Appended for source compatibility with the pre-M21-02 aggregate prefix.
     const RateReleaseView* rate_release = nullptr;
+    const LiveControlGenerationView* live_control = nullptr;
 };
 
 using DeviceCommandCallback = CallbackResult (*)(
@@ -1092,7 +1099,34 @@ enum class LiveControlAdmissionResult : std::uint8_t {
     stale = 5,
     stopped = 6,
     exhausted = 7,
+    missed = 8,
 };
+
+enum class LiveControlRecordStatus : std::uint8_t {
+    staged = 1,
+    committed = 2,
+    replaced = 3,
+    missed = 4,
+    stopped = 5,
+};
+
+struct LiveControlBoundaryTarget {
+    std::uint64_t frame_index = std::numeric_limits<std::uint64_t>::max();
+    std::uint64_t rate_release_sequence =
+        std::numeric_limits<std::uint64_t>::max();
+    std::uint32_t reference_release_index =
+        std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t rate_domain_registration_index =
+        std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t phase_index = std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t rate_substep_ordinal =
+        std::numeric_limits<std::uint32_t>::max();
+    LiveControlTargetKind kind = LiveControlTargetKind::host_frame;
+    std::array<std::byte, 7> reserved{};
+};
+
+static_assert(sizeof(LiveControlBoundaryTarget) == 40);
+static_assert(alignof(LiveControlBoundaryTarget) == 8);
 
 struct LiveControlPolicy {
     std::uint32_t schema_version = live_control_schema_version;
@@ -1194,6 +1228,64 @@ struct LiveControlUpdateRecord {
 
 static_assert(sizeof(LiveControlUpdateRecord) == 128);
 static_assert(alignof(LiveControlUpdateRecord) == 8);
+
+struct LiveControlRecordView {
+    LiveControlUpdateRecord record{};
+    std::span<const std::byte> payload{};
+};
+
+static_assert(sizeof(LiveControlRecordView) == 144);
+static_assert(alignof(LiveControlRecordView) == 8);
+
+struct LiveControlGenerationView {
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t generation_identity = 0;
+    LiveControlBoundaryTarget target{};
+    std::span<const LiveControlRecordView> records{};
+};
+
+static_assert(sizeof(LiveControlGenerationView) == 80);
+static_assert(alignof(LiveControlGenerationView) == 8);
+
+struct LiveControlCommitInfo {
+    std::uint32_t struct_size = sizeof(LiveControlCommitInfo);
+    std::uint32_t survivor_count = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t generation_identity = 0;
+    LiveControlBoundaryTarget target{};
+    std::uint64_t committed = 0;
+    std::uint64_t replaced = 0;
+    std::uint64_t missed = 0;
+    std::uint64_t stopped = 0;
+    std::uint32_t staged_occupancy = 0;
+    std::uint32_t reserved32 = 0;
+    std::array<std::uint64_t, 2> reserved{};
+};
+
+static_assert(sizeof(LiveControlCommitInfo) == 128);
+static_assert(alignof(LiveControlCommitInfo) == 8);
+
+struct LiveControlRecordStatusInfo {
+    std::uint32_t struct_size = sizeof(LiveControlRecordStatusInfo);
+    std::uint32_t reserved32 = 0;
+    std::uint64_t runtime_id = 0;
+    std::uint64_t configuration_generation = 0;
+    std::uint64_t mailbox_identity = 0;
+    std::uint64_t mailbox_sequence = 0;
+    std::uint64_t producer_identity = 0;
+    std::uint64_t producer_sequence = 0;
+    std::uint64_t generation_identity = 0;
+    LiveControlRecordStatus status = LiveControlRecordStatus::staged;
+    LiveControlUpdateKind update_kind =
+        LiveControlUpdateKind::scenario_parameters;
+    LiveControlTargetKind target_kind = LiveControlTargetKind::host_frame;
+    std::array<std::byte, 13> reserved{};
+};
+
+static_assert(sizeof(LiveControlRecordStatusInfo) == 80);
+static_assert(alignof(LiveControlRecordStatusInfo) == 8);
 
 struct LiveControlMailboxInfo {
     std::uint32_t schema_version = live_control_schema_version;
@@ -2460,6 +2552,12 @@ public:
         std::uint64_t mailbox_identity,
         std::uint64_t mailbox_sequence,
         std::span<std::byte> output) const noexcept;
+    [[nodiscard]] bool live_control_commit_info(
+        LiveControlCommitInfo& info) const noexcept;
+    [[nodiscard]] bool live_control_record_status(
+        std::uint64_t mailbox_identity,
+        std::uint64_t mailbox_sequence,
+        LiveControlRecordStatusInfo& info) const noexcept;
     // Copies only into an exact-size caller span. Failure leaves output
     // unchanged and no inspector allocates or mutates the frozen plan.
     [[nodiscard]] Status copy_cross_rate_initial_sample(

@@ -1,10 +1,11 @@
 # RTFW Product Contract
 
-M21-05 closes the portable mixed-rate software path. M22-01 adds only an
-opt-in fixed-capacity live-control staging substrate with Runtime-owned payload
-copies and no update consumer. Application-owned plant, vehicle, controller,
-and update semantics remain outside the core. See
-[live_controls.md](live_controls.md); staging is not update application,
+M21-05 closes the portable mixed-rate software path. M22-01 adds the
+fixed-capacity live-control staging substrate; M22-02 adds exact frame/rate
+boundary publication and callback-local immutable views. Application-owned
+plant, vehicle, controller, payload parsing, and apply semantics remain outside
+the core. See [live_controls.md](live_controls.md); boundary publication is not
+transactional recovery,
 physical HIL, or electrical/timing qualification.
 
 Status: accepted contract for the supported 1.x portable runtime
@@ -116,7 +117,10 @@ live-control policy, copied mailbox/producer declarations, generation-safe
 handles, fixed canonical records, copied payload slots, nonblocking
 reject-new admission, read-only inspection, and conditional identity and
 Runtime-control accounting. It does not consume or apply an update; M22 and
-CAP-M22 remain incomplete.
+CAP-M22 remain incomplete. M22-02 adds exact host-frame and active compiled
+rate-release close, deterministic replacement/order, copied immutable
+callback generations, terminal slot reuse, and fixed inspection. It does not
+parse payloads or add rollback, checkpoint/replay, or telemetry integration.
 
 ## Claim policy
 

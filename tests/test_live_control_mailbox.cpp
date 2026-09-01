@@ -20,9 +20,56 @@ namespace {
 constexpr std::uint64_t kMailbox = 101;
 constexpr std::uint64_t kProducer = 202;
 
+struct ManualClock final : rt::RuntimeClock {
+    std::uint64_t now_ns() noexcept override { return 1'000; }
+    rt::Status sleep_until_ns(std::uint64_t) noexcept override {
+        return rt::Status::ok;
+    }
+    bool supports_absolute_sleep() const noexcept override { return true; }
+};
+
 rt::CallbackResult noop_callback(
     void*,
     const rt::CallbackContext&) {
+    return rt::CallbackResult::ok;
+}
+
+struct GenerationProbe {
+    std::size_t calls = 0;
+    std::uint64_t generation_identity = 0;
+    rt::LiveControlBoundaryTarget target{};
+    std::size_t record_count = 0;
+    std::array<std::uint64_t, 4> mailbox_sequences{};
+    std::array<std::uint64_t, 4> mailbox_identities{};
+    std::array<rt::LiveControlUpdateKind, 4> update_kinds{};
+    std::array<std::byte, 4> first_payload_bytes{};
+};
+
+rt::CallbackResult capture_generation_callback(
+    void* user_data,
+    const rt::CallbackContext& context) {
+    auto& probe = *static_cast<GenerationProbe*>(user_data);
+    ++probe.calls;
+    probe.generation_identity = 0;
+    probe.record_count = 0;
+    if (!context.live_control) {
+        return rt::CallbackResult::ok;
+    }
+    probe.generation_identity = context.live_control->generation_identity;
+    probe.target = context.live_control->target;
+    probe.record_count = context.live_control->records.size();
+    for (std::size_t index = 0;
+         index < context.live_control->records.size() &&
+             index < probe.mailbox_sequences.size();
+         ++index) {
+        const auto& record = context.live_control->records[index];
+        probe.mailbox_sequences[index] = record.record.mailbox_sequence;
+        probe.mailbox_identities[index] = record.record.mailbox_identity;
+        probe.update_kinds[index] = record.record.update_kind;
+        probe.first_payload_bytes[index] = record.payload.empty()
+            ? std::byte{0}
+            : record.payload.front();
+    }
     return rt::CallbackResult::ok;
 }
 
@@ -174,6 +221,9 @@ TEST(LiveControlMailbox, PublicLayoutAndDisabledPathRemainAdditive) {
     EXPECT_EQ(sizeof(rt::LiveControlProducerHandle), 40u);
     EXPECT_EQ(sizeof(rt::LiveControlUpdateRecord), 128u);
     EXPECT_EQ(sizeof(rt::LiveControlMailboxInfo), 128u);
+    EXPECT_EQ(sizeof(rt::LiveControlBoundaryTarget), 40u);
+    EXPECT_EQ(sizeof(rt::LiveControlCommitInfo), 128u);
+    EXPECT_EQ(sizeof(rt::LiveControlRecordStatusInfo), 80u);
     EXPECT_EQ(alignof(rt::LiveControlPolicy), 8u);
     EXPECT_EQ(alignof(rt::LiveControlMailboxRegistration), 8u);
     EXPECT_EQ(alignof(rt::LiveControlProducerRegistration), 8u);
@@ -273,6 +323,18 @@ TEST(LiveControlMailbox, ConfigurationCopiesAndClosesEveryCapacityBoundary) {
     EXPECT_EQ(
         plan.planned_bytes,
         baseline_plan.planned_bytes + plan.live_control_control_bytes);
+
+    rt::Runtime wider_payload;
+    configure_live_control(wider_payload, 2, 16);
+    (void)finalized_handle(wider_payload);
+    rt::MemoryPlan wider_plan;
+    ASSERT_TRUE(wider_payload.memory_plan(wider_plan));
+    // Eight additional bytes in each of two slots are present once in
+    // staging and once in each inactive/active generation store.
+    EXPECT_EQ(
+        wider_plan.live_control_control_bytes -
+            plan.live_control_control_bytes,
+        48u);
 }
 
 TEST(LiveControlMailbox, FailedBudgetFinalizationIsTransactionalAndRetryable) {
@@ -460,7 +522,7 @@ TEST(LiveControlMailbox, ValidatesExactCompiledRateTargetsAndClosedPayloadKinds)
     EXPECT_EQ(result, rt::LiveControlAdmissionResult::accepted);
 }
 
-TEST(LiveControlMailbox, StopClosesAdmissionWithoutApplyingStagedRecords) {
+TEST(LiveControlMailbox, PastTargetsBecomeMissedAndStopClosesAdmission) {
     rt::Runtime runtime;
     configure_live_control(runtime, 2, 8);
     const auto handle = finalized_handle(runtime);
@@ -483,6 +545,10 @@ TEST(LiveControlMailbox, StopClosesAdmissionWithoutApplyingStagedRecords) {
         rt::Status::ok);
     EXPECT_EQ(step.callbacks_executed, 0u);
     EXPECT_TRUE(runtime.live_control_record_at(kMailbox, 1, update));
+    rt::LiveControlRecordStatusInfo record_status;
+    ASSERT_TRUE(runtime.live_control_record_status(
+        kMailbox, 1, record_status));
+    EXPECT_EQ(record_status.status, rt::LiveControlRecordStatus::missed);
     const auto after = metadata(runtime);
     EXPECT_EQ(after.config_id, before.config_id);
 
@@ -497,7 +563,7 @@ TEST(LiveControlMailbox, StopClosesAdmissionWithoutApplyingStagedRecords) {
     ASSERT_TRUE(runtime.live_control_mailbox_info(kMailbox, info));
     EXPECT_FALSE(info.admission_open);
     EXPECT_EQ(info.stopped, 1u);
-    EXPECT_EQ(info.occupancy, 1u);
+    EXPECT_EQ(info.occupancy, 0u);
 }
 
 TEST(LiveControlMailbox, RuntimeCallbacksCannotUseTheProducerAdmissionApi) {
@@ -561,19 +627,18 @@ TEST(LiveControlMailbox, StopRaceEitherCompletesOrRejectsOneWholeRecord) {
     rt::LiveControlMailboxInfo info;
     ASSERT_TRUE(runtime.live_control_mailbox_info(kMailbox, info));
     EXPECT_FALSE(info.admission_open);
-    if (result == rt::LiveControlAdmissionResult::accepted) {
-        EXPECT_EQ(info.occupancy, 1u);
-        rt::LiveControlUpdateRecord record;
-        ASSERT_TRUE(runtime.live_control_record_at(kMailbox, 1, record));
+    EXPECT_EQ(info.occupancy, 0u);
+    rt::LiveControlUpdateRecord record;
+    if (runtime.live_control_record_at(kMailbox, 1, record)) {
         std::vector<std::byte> copied(payload.size());
         ASSERT_EQ(
             runtime.copy_live_control_payload(kMailbox, 1, copied),
             rt::Status::ok);
         EXPECT_EQ(copied, payload);
-    } else {
-        EXPECT_EQ(info.occupancy, 0u);
-        rt::LiveControlUpdateRecord record;
-        EXPECT_FALSE(runtime.live_control_record_at(kMailbox, 1, record));
+        rt::LiveControlRecordStatusInfo status;
+        ASSERT_TRUE(runtime.live_control_record_status(
+            kMailbox, 1, status));
+        EXPECT_EQ(status.status, rt::LiveControlRecordStatus::stopped);
     }
 }
 
@@ -694,6 +759,249 @@ TEST(LiveControlMailbox, ConcurrentProducersPublishOnlyCompleteDenseRecords) {
             rt::live_control_payload_digest(copied),
             record.payload_digest);
     }
+}
+
+TEST(LiveControlMailbox, BoundaryPublishesCanonicalReplacementAndReusesSlots) {
+    rt::Runtime runtime;
+    GenerationProbe probe;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"capture", &capture_generation_callback, &probe}),
+        rt::Status::ok);
+    configure_live_control(runtime, 3, 8);
+    const auto handle = finalized_handle(runtime);
+    const std::array first_payload{std::byte{0x11}};
+    const std::array second_payload{std::byte{0x22}};
+    const std::array third_payload{std::byte{0x33}};
+    auto first = host_update(handle, 1, first_payload, 7);
+    auto second = host_update(handle, 2, second_payload, 7);
+    second.update_kind = rt::LiveControlUpdateKind::controller_parameters;
+    auto third = host_update(handle, 3, third_payload, 7);
+    rt::LiveControlAdmissionResult result;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, first, first_payload, result),
+        rt::Status::ok);
+    ASSERT_EQ(result, rt::LiveControlAdmissionResult::accepted);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, second, second_payload, result),
+        rt::Status::ok);
+    ASSERT_EQ(result, rt::LiveControlAdmissionResult::accepted);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, third, third_payload, result),
+        rt::Status::ok);
+    ASSERT_EQ(result, rt::LiveControlAdmissionResult::accepted);
+
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.step(rt::HostFrameContext{
+            7, std::chrono::nanoseconds{1'000}, std::nullopt}),
+        rt::Status::ok);
+    ASSERT_NE(probe.generation_identity, 0u);
+    EXPECT_EQ(probe.generation_identity, 0xd2ccc254bb8102daull);
+    EXPECT_EQ(probe.target.kind, rt::LiveControlTargetKind::host_frame);
+    EXPECT_EQ(probe.target.frame_index, 7u);
+    ASSERT_EQ(probe.record_count, 2u);
+    EXPECT_EQ(probe.mailbox_sequences[0], 2u);
+    EXPECT_EQ(probe.mailbox_sequences[1], 3u);
+    EXPECT_EQ(
+        probe.update_kinds[0],
+        rt::LiveControlUpdateKind::controller_parameters);
+    EXPECT_EQ(
+        probe.update_kinds[1],
+        rt::LiveControlUpdateKind::scenario_parameters);
+    EXPECT_EQ(probe.first_payload_bytes[0], std::byte{0x22});
+    EXPECT_EQ(probe.first_payload_bytes[1], std::byte{0x33});
+
+    rt::LiveControlCommitInfo commit;
+    ASSERT_TRUE(runtime.live_control_commit_info(commit));
+    EXPECT_EQ(commit.generation_identity, probe.generation_identity);
+    EXPECT_EQ(commit.survivor_count, 2u);
+    EXPECT_EQ(commit.committed, 2u);
+    EXPECT_EQ(commit.replaced, 1u);
+    EXPECT_EQ(commit.staged_occupancy, 0u);
+    for (std::uint64_t sequence = 1; sequence <= 3; ++sequence) {
+        rt::LiveControlRecordStatusInfo status;
+        ASSERT_TRUE(runtime.live_control_record_status(
+            kMailbox, sequence, status));
+        EXPECT_EQ(
+            status.status,
+            sequence == 1
+                ? rt::LiveControlRecordStatus::replaced
+                : rt::LiveControlRecordStatus::committed);
+        EXPECT_EQ(status.generation_identity, commit.generation_identity);
+    }
+
+    const std::array fourth_payload{std::byte{0x44}};
+    const auto fourth = host_update(handle, 4, fourth_payload, 8);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, fourth, fourth_payload, result),
+        rt::Status::ok);
+    ASSERT_EQ(result, rt::LiveControlAdmissionResult::accepted);
+    rt::LiveControlRecordStatusInfo reclaimed;
+    reclaimed.runtime_id = 0xfeed;
+    EXPECT_FALSE(runtime.live_control_record_status(
+        kMailbox, 1, reclaimed));
+    EXPECT_EQ(reclaimed.runtime_id, 0xfeedu);
+    ASSERT_EQ(
+        runtime.step(rt::HostFrameContext{
+            8, std::chrono::nanoseconds{1'000}, std::nullopt}),
+        rt::Status::ok);
+    ASSERT_EQ(probe.record_count, 1u);
+    EXPECT_EQ(probe.mailbox_sequences[0], 4u);
+    const auto fourth_generation = probe.generation_identity;
+    ASSERT_EQ(
+        runtime.step(rt::HostFrameContext{
+            9, std::chrono::nanoseconds{1'000}, std::nullopt}),
+        rt::Status::ok);
+    EXPECT_EQ(probe.generation_identity, fourth_generation);
+    EXPECT_EQ(probe.target.frame_index, 8u);
+
+    const std::array late_payload{std::byte{0x55}};
+    const auto late = host_update(handle, 5, late_payload, 8);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, late, late_payload, result),
+        rt::Status::ok);
+    EXPECT_EQ(result, rt::LiveControlAdmissionResult::missed);
+    rt::LiveControlRecordStatusInfo late_status;
+    ASSERT_TRUE(runtime.live_control_record_status(
+        kMailbox, 5, late_status));
+    EXPECT_EQ(late_status.status, rt::LiveControlRecordStatus::missed);
+    ASSERT_TRUE(runtime.live_control_commit_info(commit));
+    EXPECT_EQ(commit.missed, 1u);
+    EXPECT_EQ(commit.staged_occupancy, 0u);
+    ASSERT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(LiveControlMailbox, BoundaryOrderIgnoresRegistrationAndArrivalOrder) {
+    rt::Runtime runtime;
+    GenerationProbe probe;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"capture", &capture_generation_callback, &probe}),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.set_live_control_policy(policy(2, 2, 2, 8)),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_live_control_mailbox(mailbox(kMailbox + 1, 1, 8)),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_live_control_mailbox(mailbox(kMailbox, 1, 8)),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_live_control_producer(
+            producer(kMailbox + 1, kProducer + 1)),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.register_live_control_producer(
+            producer(kMailbox, kProducer)),
+        rt::Status::ok);
+    ASSERT_EQ(runtime.finalize(), rt::Status::ok);
+    rt::LiveControlProducerHandle high_handle;
+    rt::LiveControlProducerHandle low_handle;
+    ASSERT_EQ(
+        runtime.live_control_producer_handle(
+            kMailbox + 1, kProducer + 1, high_handle),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.live_control_producer_handle(
+            kMailbox, kProducer, low_handle),
+        rt::Status::ok);
+    const std::array high_payload{std::byte{0x72}};
+    const std::array low_payload{std::byte{0x71}};
+    const auto high = host_update(high_handle, 1, high_payload, 7);
+    const auto low = host_update(low_handle, 1, low_payload, 7);
+    rt::LiveControlAdmissionResult admission;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            high_handle, high, high_payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            low_handle, low, low_payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    ASSERT_EQ(
+        runtime.step({7, std::chrono::nanoseconds{1'000}}),
+        rt::Status::ok);
+    ASSERT_EQ(probe.record_count, 2u);
+    EXPECT_EQ(probe.mailbox_identities[0], kMailbox);
+    EXPECT_EQ(probe.mailbox_identities[1], kMailbox + 1);
+    EXPECT_EQ(probe.first_payload_bytes[0], std::byte{0x71});
+    EXPECT_EQ(probe.first_payload_bytes[1], std::byte{0x72});
+    ASSERT_EQ(runtime.stop(), rt::Status::ok);
+}
+
+TEST(LiveControlMailbox, ActiveRateReleasePublishesBeforeItsCallback) {
+    ManualClock clock;
+    rt::Runtime runtime(clock);
+    GenerationProbe probe;
+    ASSERT_EQ(runtime.set_rate_execution_policy({4}), rt::Status::ok);
+    rt::PhaseHandle phase;
+    ASSERT_EQ(
+        runtime.register_callback(
+            {"rate-capture", &capture_generation_callback, &probe}, phase),
+        rt::Status::ok);
+    rt::RateDomainRegistration domain_registration;
+    domain_registration.name = "control-rate";
+    domain_registration.period_ns = 100;
+    domain_registration.relative_deadline_ns = 100;
+    domain_registration.budget_wcet_ns = 10;
+    domain_registration.late_action = rt::RateLateAction::fail;
+    rt::RateDomainHandle domain;
+    ASSERT_EQ(
+        runtime.register_rate_domain(domain_registration, domain),
+        rt::Status::ok);
+    ASSERT_EQ(
+        runtime.bind_phase_to_rate_domain(phase, domain),
+        rt::Status::ok);
+    configure_live_control(runtime, 1, 8);
+    const auto handle = finalized_handle(runtime);
+    rt::ReferenceRelease release;
+    ASSERT_TRUE(runtime.reference_release_at(0, release));
+
+    const std::array payload{std::byte{0x6a}};
+    auto update = host_update(handle, 1, payload);
+    update.target_kind = rt::LiveControlTargetKind::rate_release;
+    update.target_frame_index = std::numeric_limits<std::uint64_t>::max();
+    update.reference_release_index = 0;
+    update.rate_domain_registration_index =
+        static_cast<std::uint32_t>(release.domain_registration_index);
+    update.phase_index = release.phase.index();
+    update.rate_substep_ordinal = release.substep_ordinal;
+    update.rate_release_sequence = release.domain_release_sequence;
+    rt::LiveControlAdmissionResult admission;
+    ASSERT_EQ(
+        runtime.stage_live_control_update(
+            handle, update, payload, admission),
+        rt::Status::ok);
+    ASSERT_EQ(admission, rt::LiveControlAdmissionResult::accepted);
+
+    ASSERT_EQ(runtime.start(), rt::Status::ok);
+    rt::StepResult result;
+    ASSERT_EQ(
+        runtime.step(
+            {42, std::chrono::nanoseconds{100}, std::nullopt, 1'000},
+            &result),
+        rt::Status::ok);
+    EXPECT_EQ(result.callbacks_executed, 1u);
+    EXPECT_EQ(probe.calls, 1u);
+    EXPECT_NE(probe.generation_identity, 0u);
+    EXPECT_EQ(probe.target.kind, rt::LiveControlTargetKind::rate_release);
+    EXPECT_EQ(probe.target.reference_release_index, 0u);
+    EXPECT_EQ(
+        probe.target.rate_release_sequence,
+        release.domain_release_sequence);
+    ASSERT_EQ(probe.record_count, 1u);
+    EXPECT_EQ(probe.first_payload_bytes[0], std::byte{0x6a});
+    ASSERT_EQ(runtime.stop(), rt::Status::ok);
 }
 
 TEST(LiveControlMailbox, ExhaustionPrecedesWrapAndDoesNotPublish) {

@@ -1,11 +1,11 @@
 # Testing and CI Evidence
 
-M22-01 focused gates cover additive fixed layouts/defaults, copied configuring
-policy/declarations, exact frame/rate targets, generation-safe handles,
-payload ownership/digest/extent, one-attempt contention, full/reject-new and
-sequence exhaustion, stop closure, Runtime isolation, identity exclusion of
-arrivals, exact accounting, unchanged execution/artifacts/telemetry, and a
-relocated installed consumer. Hosted GCC/Clang/MSVC, ASan/UBSan/TSan,
+M22-02 focused gates retain M22-01 staging coverage and add exact frame/rate
+close before callbacks, zero/future/missed targets, publication races,
+canonical cross-mailbox order, same-mailbox/update-kind replacement, atomic
+generation identity/payload visibility, terminal reuse, fixed inspection,
+stop/failure behavior, instance isolation, and exact accounting. Hosted
+GCC/Clang/MSVC, ASan/UBSan/TSan,
 determinism, static, package, C ABI, and retained M16/M17/M21 gates remain
 mandatory before merge.
 

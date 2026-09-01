@@ -1,9 +1,8 @@
 # Rate-action telemetry schema 1
 
-M22-01 leaves both rate-action and mixed-rate-action streams unchanged. A
-staged live-control record emits no action or metric, and rate dispatch never
-drains a mailbox. Exact-boundary commit and any later action correlation are
-deferred to M22-02/M22-03.
+M22-02 leaves both rate-action and mixed-rate-action streams unchanged. Exact
+active-rate boundary close emits no action or metric; fixed commit/status
+inspection is instance-local. M22-03 owns action correlation and telemetry.
 
 M21-05 leaves this rate-action schema unchanged and adds a separate C++ mixed-
 rate action schema 1. The new fixed 256-byte record closes device terminal,

@@ -1,9 +1,10 @@
 # Real-Time Readiness Gates
 
-M22-01 is portable RT0 staging only. Fixed mailbox/producer/record/payload
-storage and one-attempt atomic claims add no active allocation, blocking mutex,
-file/network I/O, callback/vendor call, or hidden thread. This does not qualify
-producer latency or update application.
+M22-02 is portable RT0 boundary-commit behavior only. Fixed mailbox, candidate,
+terminal, and double-generation storage plus one bounded frame-owner scan add
+no active allocation, producer wait, blocking mutex, file/network I/O,
+application callback, vendor call, or hidden thread. This does not qualify
+producer/commit latency or physical update application.
 
 M21-05 is portable RT0 only. Fixed action/replay storage and direct indexes add
 no active allocation, blocking mutex, file/network I/O, host-lane vendor call,
@@ -233,7 +234,7 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
 - [x] M21/CAP-M21 portable software closure passed hosted/human gates and is
   merged. Physical CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain separate
   named gates.
-- [ ] M22-01 live-control policy and bounded mailbox staging remain a candidate
-  until hosted sanitizer/concurrency/package gates and human ownership/API/
-  claim review pass and the batch merges. M22 boundary commit, rollback,
+- [x] M22-01 live-control policy and bounded mailbox staging are merged.
+- [ ] M22-02 exact-boundary commit remains a candidate until hosted sanitizer,
+  concurrency, package, and human ownership/API/claim gates pass. Rollback,
   replay/telemetry, typed SDK closure, and all physical/RT gates remain open.
