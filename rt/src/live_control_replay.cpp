@@ -372,9 +372,9 @@ Status encode_live_control_replay_artifact(
     std::memcpy(bytes.data() + 296, metadata.workload_id.data(),
                 metadata.workload_id.size());
     std::copy(checkpoint.begin(), checkpoint.end(),
-              bytes.begin() + checkpoint_offset);
+              bytes.data() + checkpoint_offset);
     std::copy(nested_artifact.begin(), nested_artifact.end(),
-              bytes.begin() + nested_offset);
+              bytes.data() + nested_offset);
     for (std::size_t index = 0; index < action_count; ++index) {
         LiveControlActionRecord action;
         const auto sequence = first_action_sequence + index;
@@ -440,7 +440,7 @@ Status encode_live_control_replay_artifact(
             (void)store_u32(bytes, record_descriptor + 136,
                             static_cast<std::uint32_t>(payload.size()));
             std::copy(payload.begin(), payload.end(),
-                      bytes.begin() + payload_offset + global_payload);
+                      bytes.data() + payload_offset + global_payload);
             auto record_hash = kFnvOffset;
             hash_bytes(record_hash, bytes.subspan(record_descriptor, 144));
             hash_bytes(record_hash, payload);
