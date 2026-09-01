@@ -1,10 +1,13 @@
 # Host Runtime Lifecycle
 
-M22-01 adds live-control configuration and staging. M22-02 closes each host
-frame before graph callbacks and each active compiled rate release before its
-first CPU/device callback, then exposes one complete immutable generation.
-It adds no lifecycle state. Stop closes new claims and future boundaries before
-the existing quiescence and cleanup checks, then terminalizes staged slots. See
+M22-01 adds live-control configuration and staging, and M22-02 closes each host
+frame or active compiled rate release before its callbacks. M22-03 optionally
+wraps every step in a preallocated Runtime-generation transaction, settles
+provisional records only after execution succeeds, and restores the step-entry
+generation on failure. Checkpoint, restore, and live replay require one
+fail-fast all-mailbox host claim. Stop closes new claims and future boundaries
+before the existing quiescence and cleanup checks, then terminalizes staged
+slots. See
 [live_controls.md](live_controls.md).
 
 M21-05 records M21-04 startup/failure/shutdown acknowledgements as closed
@@ -45,7 +48,7 @@ independent support matrices and evidence gates.
 | `configuring` | typed configuration, optional host-executor or memory-provider attachment, graph/state/device/rate registration and declarations | `configuring` |
 | `configuring` | `finalize()` | `finalized` |
 | `finalized` | `start()`, preflight, and create configured runtime-owned lanes or bind the already-running host team | `running` |
-| `running` | `step(frame)` or synchronous `replay(checkpoint, input_log)` | `running` |
+| `running` | `step(frame)`, synchronous `replay(checkpoint, input_log)`, or closure-enabled `replay_live_control(artifact)` | `running` |
 | `running` | `run_periodic(config)` | `running` |
 | `finalized` or `running` | `stop()` and all device/lane/stack/memory cleanup succeeds | `stopped` |
 | `finalized` or `running` | `stop()` and device/lane/stack/memory cleanup fails | public state unchanged; execution and mutation gated |
@@ -69,6 +72,13 @@ Admission is allowed from bounded external producer threads in `finalized` or
 retains published records for inspection but rejects every new claim. Its
 storage is discarded with the Runtime and is never reused by another Runtime
 identity.
+
+When the M22-03 closure is enabled, nested/concurrent step, periodic, replay,
+checkpoint, restore, and stop ownership cannot share the step transaction.
+The transaction restores only Runtime-owned immutable generation/mailbox
+state. User callbacks and backends may already have produced side effects;
+applications remain responsible for canonical payload validation and their own
+registered-state or external transaction strategy.
 
 M15-03 finalization transactionally acquires active phase-scratch,
 task-scratch, and trace-storage backing in that order. Startup applies and

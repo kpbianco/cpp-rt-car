@@ -16,11 +16,14 @@ cursors are specified in the [rate-action telemetry contract](rate_telemetry.md)
 They do not append global schema-2 event or metric IDs, are not exported by the
 C ABI, and are not checkpoint or replay history.
 
-M22-02 leaves global schema 2, every trace/metric ID, rate-action schema 1,
-and mixed-rate-action schema 1 unchanged. Mailbox occupancy and admission
-outcome counters plus commit/status state are available only through
-instance-bound C++ inspectors; staging and boundary commit emit no global
-trace, metric, or action. M22-03 owns any future telemetry contract.
+M22-03 leaves global schema 2, every trace/metric ID, rate-action schema 1, and
+mixed-rate-action schema 1 unchanged. It adds a distinct C++ live-control
+action schema 1: fixed 256-byte payload-free records, one finalized direct-
+index ring, exact loss/overwrite counters, and runtime-bound gap-reporting
+cursors. Actions carry only fixed identities, targets, digests, counts, and
+closed outcomes. Payload bytes appear only in an explicit caller-requested
+replay artifact and never in global trace, metrics, JSON, or background
+transport.
 
 M21-05 likewise leaves global schema 2 and every existing trace/metric ID
 unchanged. Its additive C++ mixed-rate-action schema is a separate fixed ring

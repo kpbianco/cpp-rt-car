@@ -1,23 +1,23 @@
 # Handoff
 
-## Active batch: M22-02
+## Active batch: M22-03
 
-Baseline `201decf9384220d713ff90f7eb12ac3ecc4ebc49` is merged M22-01.
-M22-02 consumes its complete slots at exact host-frame and active compiled
-rate-release boundaries, publishes copied immutable generations, reclaims
-terminal slots, and adds fixed commit/status inspection. Preserve C ABI v8/70
-exports, every existing artifact
-schema, support matrices, CUDA/XDMA candidates, and prior evidence. Do not
-claim payload interpretation, rollback, replay/telemetry integration, executable
-hot reload, physical I/O, HIL, RT1/RT2, Unreal, release, or deployment.
+Baseline `0311064cc44d6ec0add7f88e0789d7437e72e819` contains merged M22-01
+staging and M22-02 exact-boundary publication. M22-03 adds step-transaction
+Runtime-generation rollback, a fixed payload-free action stream, conditional
+ordinary checkpoint state, and a distinct bounded live-control replay artifact.
+Preserve C ABI v8/70 exports, every existing artifact schema, support matrices,
+CUDA/XDMA candidates, and prior evidence. Do not claim reversal of arbitrary
+application/backend/physical side effects, executable hot reload, physical I/O,
+HIL, RT1/RT2, Unreal, release, or deployment.
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-02 contract is
+RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-03 contract is
 `contracts/active-batch.yaml`, sourced from control revision
-`499512aee4e2ca1c2ca74c5f3bd5e7d66b5b1987`.
+`03c010b266a47890a3721d864a3c0e10a36e8adf`.
 
-## M22-02 implementation handoff
+## M22-03 implementation handoff
 
 `LiveControlPolicy` is copied once while configuring. A completely zero-capacity
 policy disables the feature without changing compatibility identity; an
@@ -57,9 +57,28 @@ identities, and release-published before callbacks receive a read-only view.
 
 Terminal committed, replaced, missed, and stopped slots are reusable only
 outside bounded inspectors; generations own independent record/payload copies,
-so callbacks never reference reclaimable slots. M22-03 owns rollback,
-checkpoint/replay, and action telemetry. M22-04 owns typed SDK examples and
-closure. See `docs/live_controls.md` for the complete contract.
+so callbacks never reference reclaimable slots.
+
+`LiveControlClosurePolicy` is copied once while configuring. The all-zero
+policy preserves the exact M22-02 path. An enabled policy freezes a semantic
+identity, action capacity, rollback rule, retention limits, artifact bounds,
+and optional replay. `step()` snapshots the current immutable generation into
+a third preallocated store. Exact-boundary publications remain provisional;
+success commits/replaces source slots, while any non-success step result
+restores the complete prior Runtime generation and marks the provisional source
+slots rolled back without allocation, waiting, callback, or fallible cleanup.
+
+The fixed action ring carries identities, targets, digests, counts, and closed
+outcomes but never payload bytes. Loss and cursor gaps are explicit and make a
+range replay-ineligible. Checkpoints conditionally append one fixed
+`rtfw.live-control` record and restore current Runtime identities while retiring
+old producer handles. The separate replay artifact contains the unchanged
+checkpoint and nested execution artifact plus a complete correlated action
+range and explicitly trusted retained survivor payloads. Inspection allocates
+nothing, complete validation precedes restore, and replay injects only exact
+immutable generations. Runtime rollback does not undo application, backend,
+external-process, or physical-device effects. M22-04 owns typed SDK examples
+and stress closure. See `docs/live_controls.md` for the complete contract.
 
 ## M21-05 implementation handoff
 

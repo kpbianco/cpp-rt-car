@@ -1,12 +1,14 @@
-# Live-control boundary-commit contract
+# Transactional live-control contract
 
 M22-01 provides the additive C++ staging substrate inside `rt::Runtime`.
 That retained M22-01 surface is data-only: no staged update is scheduled by
 admission itself.
 M22-02 consumes those complete records at exact host-frame and active compiled
-rate-release boundaries. Payloads remain opaque canonical bytes: M22-02 orders,
-copies, and exposes them through a callback-local immutable view, but does not
-interpret, roll back, checkpoint, replay, or emit them as telemetry.
+rate-release boundaries. M22-03 optionally settles those publications as one
+step transaction, restores the step-entry Runtime generation after execution
+failure, emits a distinct payload-free action stream, checkpoints Runtime-owned
+mailbox/generation state, and replays explicitly retained generations. Payloads
+remain opaque canonical bytes and are never parsed or implicitly transferred.
 
 ## Configuration and ownership
 
@@ -123,8 +125,11 @@ ascending. Within that order a later record replaces an earlier record only
 for the same mailbox identity and update kind. The boundary copies survivors
 and payloads into the inactive preallocated generation, hashes the exact target
 plus ordered record identities and payload digests to a nonzero identity, and
-release-publishes the complete generation. It then terminalizes source slots as
-`committed` or `replaced`; no published generation references a mailbox slot.
+release-publishes the complete generation. With closure disabled it then
+terminalizes source slots as `committed` or `replaced`, preserving the exact
+M22-02 path. With closure enabled the slots remain `boundary_owned` and
+nonreclaimable until the owning step settles; no published generation
+references a mailbox slot.
 
 `CallbackContext::live_control` and `DeviceCallbackContext::live_control` are
 nullable callback-lifetime views. They contain copied fixed record metadata and
@@ -132,16 +137,97 @@ read-only payload spans. They must not be retained after callback return.
 Device callbacks receive host spans only; Runtime performs no implicit backend
 transfer or vendor operation.
 
+## Step transaction and rollback
+
+`LiveControlClosurePolicy` is copied once while configuring. An all-zero policy
+disables M22-03 without changing M22-02 execution, identity, memory, checkpoint,
+telemetry, or package behavior. An enabled policy has one positive semantic
+identity, the single `restore_step_entry_generation` rollback rule, a fixed
+action capacity, fixed generation-journal record/payload capacities, fixed
+artifact record/byte limits, and explicit replay enable.
+
+At `step()` entry Runtime copies the currently active immutable generation into
+a third preallocated generation store and opens one transaction. Every host or
+active-rate publication in that step remains provisional. A successful step
+terminalizes source slots as committed/replaced in canonical order and retains
+the latest generation. Any non-success result after publication atomically
+release-restores the step-entry generation, marks every provisional source slot
+rolled back, and completes the transaction without allocation, waiting,
+callback, vendor operation, or fallible copy. Nested step, periodic, replay,
+checkpoint, restore, stop, or a second transaction cannot share this owner.
+
+Rollback covers only Runtime-owned immutable generation, mailbox, action, and
+checkpoint state. It cannot reverse state already mutated by an application
+callback, backend, external process, or physical device. Applications remain
+responsible for payload validation and their own registered-state/external
+transaction boundary.
+
+## Actions and retained generations
+
+`LiveControlActionRecord` schema 1 is fixed at 256 bytes/alignment 8 and uses
+closed action, stage, reason, and result tables. Its monotonic sequence binds
+Runtime/configuration/policy identity, exact target, applicable mailbox and
+producer sequences, update kind, payload digest/byte count, generation chain,
+survivor/replacement counts, admission/record/terminal result, and exact
+checkpoint/replay correlations. It contains no payload bytes, address,
+callback, vendor handle, path, clock sample, or producer-thread identity.
+
+The finalized direct-index ring records admission outcomes, empty/provisional
+boundaries, committed, replaced, missed, stopped, rolled-back, checkpointed,
+and replay results. A zero-capacity or contended slot causes an explicit drop;
+reuse reports overwrite; runtime-bound cursors report exact gaps. Loss,
+sequence exhaustion, or incomplete retention makes the affected transcript
+replay-ineligible but does not block admission or execution.
+
+Replay retention is a separate fixed journal. It copies only exact ordered
+survivor records and payload bytes already published by M22-02. Default action,
+trace, metric, and JSON paths remain payload-free. Retained payload bytes cross
+the existing artifact trust boundary only when the caller explicitly requests
+a live-control replay artifact.
+
+## Checkpoint and replay
+
+Closure-enabled ordinary schema-1 checkpoints append exactly one fixed
+`rtfw.live-control` state record. It captures active/staged generation records
+and payloads, source-slot terminal state, mailbox/producer sequences and
+counters, boundary/rate cursors, and the next action position. Closure-disabled
+checkpoints remain byte-identical. Export and restore make one bounded
+all-mailbox/control claim, never wait for a producer, fully validate before
+mutation, and restore artifact-local records under the current Runtime identity
+and a new configuration generation. Existing producer handles become stale;
+the current handle inspector resumes the restored producer sequence.
+
+The distinct little-endian live-control replay artifact schema 1 embeds one
+unchanged compatible checkpoint and exactly one unchanged input-log schema-1 or
+active-replay schema-1 artifact. It also carries a complete gap-free action
+range, retained generation descriptors, explicit ordered records/payloads,
+section checksums, and a whole checksum under copied record/byte bounds and the
+1 GiB absolute ceiling. A short output reports the exact required size and
+writes nothing.
+
+Inspection and Runtime replay validate complete extents, identities, reserved
+fields, ordering, generation/rollback chain, record replacement, payload
+digests, checksums, and nested artifacts before restore. Replay restores the
+checkpoint once, bypasses external producer timing, injects only validated
+immutable generations at their exact frame/rate boundaries, executes the
+unchanged nested path, and compares terminal status, progress, and final
+registered application state. On divergence the result reports the exact
+frame, boundary target, action sequence, and generation identity reached. It
+preserves the existing deterministic-mock backend restriction and never claims
+to reproduce physical arrivals, arbitrary application side effects, or a
+vendor driver.
+
 ## Inspection, identity, and accounting
 
 Runtime exposes mailbox counts, one fixed mailbox-info snapshot, retained
 record lookup by mailbox sequence, and exact-size copying into caller-owned
 payload storage. `LiveControlCommitInfo` reports the latest published identity
 and target, survivor count, terminal counters, and staged occupancy.
-`LiveControlRecordStatusInfo` reports staged, committed, replaced, missed, or
-stopped for a retained record. Reclaimed history is unavailable; M22-03 owns
-the future action ledger. Inspection does not advance execution or a cursor and
-leaves caller output unchanged when the requested record is unavailable.
+`LiveControlRecordStatusInfo` reports staged, committed, replaced, missed,
+stopped, or rolled back for a retained record. Reclaimed record history is
+unavailable; the separate action cursor owns bounded outcome history.
+Inspection does not advance execution and leaves caller output unchanged when
+the requested record is unavailable.
 
 Frozen schema/legal tables, policy, capacities, admission/reset rules, sorted
 declarations, exact-boundary ordering, replacement, missed, reclamation, and
@@ -153,9 +239,11 @@ arrivals, current generation, occupancy, counters, and inspection calls do not.
 payload bytes, and the complete live-control heap contribution. Policy and
 declaration storage, mailbox controls, atomics/counters, immutable record
 slots, payload slots, producer state, copied compiled-rate targets, candidate
-indexes, terminal state, boundary cursors, inspection state, and both immutable
-generation record/payload stores are included once in `runtime_control_bytes`,
-`planned_bytes`, and the exact logical control-extent ledger. No
+indexes, terminal state, boundary cursors, inspection state, two publication
+generations, the third rollback generation, provisional records, action slots/
+counters, retention storage, and fixed checkpoint scratch are included once in
+`runtime_control_bytes`, `planned_bytes`, and the exact logical control-extent
+ledger. Caller-owned replay artifacts are excluded. No
 provider-backed memory region or execution lane is added.
 
 ## Lifecycle and deferred behavior
@@ -163,8 +251,9 @@ provider-backed memory region or execution lane is added.
 Admission may occur after finalization, before or during running execution,
 from bounded external producer threads. It is not signal-handler or interrupt
 safe. `step()` and active mixed-rate dispatch close boundaries and expose only
-the immutable generation view. Sampled I/O, device completion, checkpoint,
-replay, telemetry, watchdog, and state registry formats remain unchanged.
+the immutable generation view. Existing sampled-I/O, device completion,
+checkpoint codec, input-log, active-replay, rate/mixed-rate action, global
+telemetry, watchdog, and stable state registry formats remain unchanged.
 
 `stop()` closes admission before checking active execution and existing cleanup
 ownership. A producer that already won the claim may finish its bounded copy;
@@ -173,8 +262,9 @@ claim quiesces. A new claim observes stopped. Once execution is quiescent,
 remaining staged records become terminal `stopped`. Retained records never
 carry into another Runtime generation.
 
-This establishes portable RT0 schema, ownership, bounded admission, exact
-boundary publication, copied payload, identity, accounting, and inspection
-behavior only. It is not evidence for rollback, physical control, HIL,
-controlled latency, RT1/RT2, executable or Unreal hot reload, support
-promotion, release, deployment, or production readiness.
+This establishes portable RT0 Runtime-generation rollback, payload-free action
+telemetry, conditional Runtime-owned checkpoint state, and explicit trusted-
+artifact generation replay in addition to staging and exact publication. It is
+not evidence for arbitrary application/backend/physical side-effect rollback,
+physical control, HIL, controlled latency, RT1/RT2, executable or Unreal hot
+reload, support promotion, release, deployment, or production readiness.

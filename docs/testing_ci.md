@@ -1,10 +1,11 @@
 # Testing and CI Evidence
 
-M22-02 focused gates retain M22-01 staging coverage and add exact frame/rate
-close before callbacks, zero/future/missed targets, publication races,
-canonical cross-mailbox order, same-mailbox/update-kind replacement, atomic
-generation identity/payload visibility, terminal reuse, fixed inspection,
-stop/failure behavior, instance isolation, and exact accounting. Hosted
+M22-03 focused gates retain M22-01/M22-02 staging and boundary coverage and add
+fixed action layouts/tables/ring loss, success settlement, callback-failure
+Runtime-generation rollback, rolled-back slot ownership, conditional checkpoint
+round trip and stale-handle retirement, bounded replay construction/inspection,
+checksum mutation rejection, exact host-frame generation injection, short-
+output behavior, package consumption, and strict source compilation. Hosted
 GCC/Clang/MSVC, ASan/UBSan/TSan,
 determinism, static, package, C ABI, and retained M16/M17/M21 gates remain
 mandatory before merge.

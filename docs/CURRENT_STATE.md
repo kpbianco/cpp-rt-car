@@ -1,7 +1,7 @@
 # Current state
 
 Last audited: 2026-09-01
-Batch baseline: `201decf9384220d713ff90f7eb12ac3ecc4ebc49`
+Batch baseline: `0311064cc44d6ec0add7f88e0789d7437e72e819`
 
 ## Product state
 
@@ -25,10 +25,11 @@ Batch baseline: `201decf9384220d713ff90f7eb12ac3ecc4ebc49`
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
   current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
   and M21-04 are merged. M21-05 is merged at the audited baseline and closes
-  the portable M21 software path. M22-01 is merged. M22-02 is the active
-  exact-boundary commit candidate; M22/CAP-M22 remain incomplete.
+  the portable M21 software path. M22-01 and M22-02 are merged. M22-03 is the
+  active rollback/checkpoint/replay/action candidate; M22/CAP-M22 remain
+  incomplete.
 
-## M22-02 live-control boundary-commit candidate
+## M22-03 live-control transactional-closure candidate
 
 M22-01 added an opt-in additive C++ policy with positive bounded mailbox,
 producer, record, per-record payload, and total copied-payload capacities.
@@ -45,18 +46,30 @@ stopped, exhausted, or missed outcomes. M22-02 closes host-frame and exact
 compiled rate-release targets before their callbacks, sorts complete records
 by mailbox identity and mailbox sequence, applies same-mailbox/update-kind
 replacement, and atomically publishes one copied immutable generation.
-Read-only inspection exposes copied records,
-counters, occupancy, and exact-size payload copying without an internal
-address. Stop closes admission before existing cleanup ownership is processed.
+Read-only inspection exposes copied records, counters, occupancy, and
+exact-size payload copying without an internal address. Stop closes admission
+before existing cleanup ownership is processed.
 
 Callbacks receive a nullable callback-lifetime view of fixed record metadata
 and host payload spans. No payload is parsed or transferred to a backend
-implicitly. Checkpoint, replay, telemetry, watchdog, sampled-I/O, and state
-schemas remain unchanged. M22-03 owns
-rollback/checkpoint/replay/telemetry; M22-04 owns typed SDK examples and
-closure. Portable tests are RT0 evidence only. Hosted CI and human API,
-ownership, concurrency, compatibility, and claim review remain mandatory
-before merge.
+implicitly. M22-03 captures the step-entry immutable generation in a third
+preallocated store. Boundary records remain provisional until the complete
+step succeeds; any later step failure restores that Runtime-owned generation
+and terminalizes the source slots as rolled back. This does not reverse
+application, backend, external-process, or physical-device side effects.
+
+The candidate adds a separate fixed 256-byte payload-free action schema and
+runtime-bound gap-reporting cursors. Closure-enabled ordinary checkpoints add
+one `rtfw.live-control` schema-1 state record while closure-disabled checkpoint
+bytes remain unchanged. A distinct bounded live-control replay artifact embeds
+one unchanged checkpoint and one unchanged input-log or active-replay artifact,
+plus correlated actions and explicitly retained generation payload bytes.
+Replay fully validates before restore and injects immutable generations at
+their exact boundaries; deterministic backend restrictions remain in force.
+Every prior artifact, observability, rate-action, mixed-rate-action, stable ABI,
+and package schema remains unchanged. M22-04 owns typed SDK examples and stress
+closure. Portable tests are RT0 evidence only, and hosted CI plus human API,
+ownership, concurrency, compatibility, and claim review remain mandatory.
 
 ## M21-05 mixed-rate closure
 

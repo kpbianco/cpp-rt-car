@@ -9,6 +9,7 @@
 #include "memory_policy.hpp"
 #include "native_platform_preflight.hpp"
 #include "live_control_mailbox.hpp"
+#include "live_control_replay.hpp"
 #include "rate_dispatch.hpp"
 #include "mixed_rate_actions.hpp"
 #include "mixed_rate_replay.hpp"
@@ -75,6 +76,8 @@ constexpr std::string_view kRateDispatchStateName = "rtfw.rate-dispatch";
 constexpr std::uint32_t kRateDispatchStateSchema = 1;
 constexpr std::string_view kMixedRateStateName = "rtfw.mixed-rate";
 constexpr std::uint32_t kMixedRateStateSchema = 1;
+constexpr std::string_view kLiveControlStateName = "rtfw.live-control";
+constexpr std::uint32_t kLiveControlStateSchema = 1;
 constexpr std::uint64_t kMixedRateStateMagic = 0x31535441524d4652ull;
 constexpr std::size_t kMixedRateStateHeaderBytes = 128;
 constexpr std::size_t kMixedRateSampledStateBytes = 64;
@@ -1595,6 +1598,42 @@ struct Runtime::Impl {
                 hash_u64(hash, selected->first_sequence);
                 previous_producer = selected->producer_identity;
             }
+            if (live_control_closure_policy_set) {
+                hash_u64(hash, 0x4d32322d636c7333ull);
+                hash_u64(hash, live_control_action_schema_version);
+                hash_u64(hash, live_control_replay_schema_version);
+                hash_u64(hash, sizeof(LiveControlClosurePolicy));
+                hash_u64(hash, sizeof(LiveControlActionRecord));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    live_control_closure_policy.rollback_rule));
+                hash_u64(hash, live_control_closure_policy.policy_identity);
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    LiveControlActionId::admission));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    LiveControlActionId::replay_verified));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    LiveControlActionReason::normal));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    LiveControlActionReason::replay));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    LiveControlActionResult::accepted));
+                hash_u64(hash, static_cast<std::uint64_t>(
+                    LiveControlActionResult::verified));
+                hash_u64(hash,
+                    live_control_closure_policy.replay_enabled ? 1u : 0u);
+                if (live_control_closure_policy.replay_enabled) {
+                    hash_u64(hash,
+                        live_control_closure_policy.retained_generation_capacity);
+                    hash_u64(hash,
+                        live_control_closure_policy.retained_record_capacity);
+                    hash_u64(hash,
+                        live_control_closure_policy.retained_payload_bytes);
+                    hash_u64(hash,
+                        live_control_closure_policy.replay_record_capacity);
+                    hash_u64(hash,
+                        live_control_closure_policy.replay_max_bytes);
+                }
+            }
         }
         if (!extensions.empty()) {
             hash_u64(hash, 0x4d31392d65787431ull);
@@ -1652,6 +1691,13 @@ struct Runtime::Impl {
             hash_string(hash, kMixedRateStateName);
             hash_u64(hash, kMixedRateStateSchema);
             hash_u64(hash, mixed_rate_checkpoint_state.size());
+        }
+        if (live_control_closure_policy_set) {
+            hash_string(hash, kLiveControlStateName);
+            hash_u64(hash, kLiveControlStateSchema);
+            hash_u64(hash, live_control_mailboxes
+                ? live_control_mailboxes->checkpoint_state_size()
+                : 0);
         }
         return hash;
     }
@@ -1723,7 +1769,8 @@ struct Runtime::Impl {
 
     [[nodiscard]] std::size_t checkpoint_state_count() const noexcept {
         return states.size() + (rate_execution_policy_set ? 1u : 0u) +
-            (mixed_rate_closure_policy_set ? 1u : 0u);
+            (mixed_rate_closure_policy_set ? 1u : 0u) +
+            (live_control_closure_policy_set ? 1u : 0u);
     }
 
     void sync_active_checkpoint_state() noexcept {
@@ -2359,10 +2406,50 @@ struct Runtime::Impl {
             output.payload = self.mixed_rate_checkpoint_state;
             return true;
         }
+        const auto live_control_index = mixed_index +
+            (self.mixed_rate_closure_policy_set ? 1u : 0u);
+        std::span<const std::byte> live_control_state;
+        if (self.live_control_closure_policy_set &&
+            index == live_control_index && self.live_control_mailboxes &&
+            self.live_control_mailboxes->sync_checkpoint_state(
+                live_control_state)) {
+            output.name = kLiveControlStateName;
+            output.schema_version = kLiveControlStateSchema;
+            output.payload = live_control_state;
+            return true;
+        }
         {
             output = {};
             return false;
         }
+    }
+
+    [[nodiscard]] std::uint64_t registered_application_state_hash()
+        const noexcept {
+        std::uint64_t hash = kFnvOffset;
+        const auto append = [&hash](std::span<const std::byte> bytes) {
+            for (const auto value : bytes) {
+                hash ^= static_cast<std::uint8_t>(value);
+                hash *= kFnvPrime;
+            }
+        };
+        for (const auto& registered_state : states) {
+            std::array<
+                std::byte,
+                detail::checkpoint_record_header_size> header{};
+            const auto name = identifier_view(registered_state.name);
+            std::memcpy(header.data(), name.data(), name.size());
+            store_u32_le(header, 64, registered_state.schema_version);
+            store_u64_le(header, 72, registered_state.storage.size());
+            store_u64_le(
+                header,
+                80,
+                detail::artifact_checksum(
+                    std::as_bytes(registered_state.storage)));
+            append(header);
+            append(std::as_bytes(registered_state.storage));
+        }
+        return hash;
     }
 
     [[nodiscard]] std::uint64_t state_hash() noexcept {
@@ -2434,6 +2521,26 @@ struct Runtime::Impl {
                 detail::artifact_checksum(mixed_rate_checkpoint_state));
             append(header);
             append(mixed_rate_checkpoint_state);
+        }
+        std::span<const std::byte> live_control_state;
+        if (live_control_closure_policy_set && live_control_mailboxes &&
+            live_control_mailboxes->sync_checkpoint_state(
+                live_control_state)) {
+            std::array<
+                std::byte,
+                detail::checkpoint_record_header_size> header{};
+            std::memcpy(
+                header.data(),
+                kLiveControlStateName.data(),
+                kLiveControlStateName.size());
+            store_u32_le(header, 64, kLiveControlStateSchema);
+            store_u64_le(header, 72, live_control_state.size());
+            store_u64_le(
+                header,
+                80,
+                detail::artifact_checksum(live_control_state));
+            append(header);
+            append(live_control_state);
         }
         return hash;
     }
@@ -5922,6 +6029,9 @@ struct Runtime::Impl {
     LiveControlPolicy live_control_policy{};
     bool live_control_policy_set = false;
     bool live_control_policy_configured = false;
+    LiveControlClosurePolicy live_control_closure_policy{};
+    bool live_control_closure_policy_set = false;
+    bool live_control_closure_policy_configured = false;
     CpuMemoryPolicy cpu_memory_policy{};
     CpuMemoryPolicyReport cpu_memory_policy_report{};
     bool cpu_memory_policy_report_available = false;
@@ -6298,6 +6408,65 @@ Status Runtime::set_live_control_policy(
     impl_->live_control_policy = policy;
     impl_->live_control_policy_set = enabled;
     impl_->live_control_policy_configured = true;
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::set_live_control_closure_policy(
+    const LiveControlClosurePolicy& policy) noexcept {
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::configuring ||
+        impl_->live_control_closure_policy_configured) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control closure policy is frozen or already set");
+    }
+    const auto reserved_is_zero = std::all_of(
+        policy.reserved.begin(), policy.reserved.end(),
+        [](std::byte value) { return value == std::byte{0}; });
+    const auto header_valid =
+        policy.schema_version == live_control_action_schema_version &&
+        policy.struct_size == sizeof(LiveControlClosurePolicy) &&
+        policy.rollback_rule ==
+            LiveControlRollbackRule::restore_step_entry_generation &&
+        reserved_is_zero;
+    const auto disabled = policy.policy_identity == 0 &&
+        policy.action_capacity == 0 &&
+        policy.retained_generation_capacity == 0 &&
+        policy.retained_record_capacity == 0 &&
+        policy.retained_payload_bytes == 0 &&
+        policy.replay_record_capacity == 0 &&
+        policy.replay_max_bytes == 0 && !policy.replay_enabled;
+    const auto enabled = policy.policy_identity != 0 &&
+        policy.action_capacity <= live_control_action_capacity_limit &&
+        policy.retained_generation_capacity <=
+            live_control_retained_generation_capacity_limit &&
+        policy.retained_record_capacity <=
+            live_control_record_capacity_limit &&
+        policy.retained_payload_bytes <= live_control_total_storage_limit &&
+        policy.replay_record_capacity <=
+            live_control_record_capacity_limit &&
+        policy.replay_max_bytes <=
+            live_control_replay_absolute_max_bytes &&
+        (!policy.replay_enabled ||
+         (policy.retained_generation_capacity != 0 &&
+          policy.retained_record_capacity != 0 &&
+          policy.retained_payload_bytes != 0 &&
+          policy.replay_record_capacity != 0 &&
+          policy.replay_max_bytes != 0));
+    if (!header_valid || (!disabled && !enabled)) {
+        return impl_->fail(
+            Status::invalid_argument,
+            "live-control closure fields or capacities are invalid");
+    }
+    impl_->live_control_closure_policy = policy;
+    impl_->live_control_closure_policy_set = enabled;
+    impl_->live_control_closure_policy_configured = true;
     impl_->clear_error();
     return Status::ok;
 }
@@ -8653,6 +8822,13 @@ Status Runtime::finalize() noexcept {
                 Status::invalid_config,
                 "active replay requires deterministic mock/loopback backends");
         }
+        if (impl_->live_control_closure_policy_set &&
+            impl_->live_control_closure_policy.replay_enabled &&
+            backend.capabilities.deterministic_mock == 0) {
+            return impl_->fail(
+                Status::invalid_config,
+                "live-control replay requires deterministic mock/loopback backends");
+        }
         std::size_t buffer_count = 0;
         for (const auto& buffer : impl_->device_buffers) {
             buffer_count +=
@@ -8718,6 +8894,12 @@ Status Runtime::finalize() noexcept {
     }
 
     std::unique_ptr<detail::LiveControlMailboxSet> live_control_mailboxes;
+    if (impl_->live_control_closure_policy_set &&
+        !impl_->live_control_policy_set) {
+        return impl_->fail(
+            Status::invalid_config,
+            "live-control closure requires an enabled mailbox policy");
+    }
     if (impl_->live_control_policy_set) {
         const auto live_control_runtime_id =
             next_live_control_runtime_id();
@@ -8729,6 +8911,8 @@ Status Runtime::finalize() noexcept {
         const char* live_control_diagnostic = nullptr;
         const auto live_control_status = detail::LiveControlMailboxSet::create(
             impl_->live_control_policy,
+            impl_->live_control_closure_policy,
+            impl_->live_control_closure_policy_set,
             live_control_runtime_id,
             1,
             impl_->config.memory_budget_bytes,
@@ -9144,6 +9328,18 @@ Status Runtime::finalize() noexcept {
                 Status::invalid_config,
                 "application state name collides with the active rate state record");
         }
+        if (impl_->mixed_rate_closure_policy_set &&
+            identifier_view(state.name) == kMixedRateStateName) {
+            return impl_->fail(
+                Status::invalid_config,
+                "application state name collides with the mixed-rate state record");
+        }
+        if (impl_->live_control_closure_policy_set &&
+            identifier_view(state.name) == kLiveControlStateName) {
+            return impl_->fail(
+                Status::invalid_config,
+                "application state name collides with the live-control state record");
+        }
         if (!detail::checked_artifact_add(
                 registered_state_bytes,
                 state.storage.size(),
@@ -9171,14 +9367,25 @@ Status Runtime::finalize() noexcept {
     std::size_t checkpoint_record_bytes = 0;
     std::size_t checkpoint_required_bytes = 0;
     const auto checkpoint_state_count = impl_->states.size() +
-        (impl_->rate_execution_policy_set ? std::size_t{1} : 0);
+        (impl_->rate_execution_policy_set ? std::size_t{1} : 0) +
+        (impl_->mixed_rate_closure_policy_set ? std::size_t{1} : 0) +
+        (impl_->live_control_closure_policy_set ? std::size_t{1} : 0);
     std::size_t checkpoint_payload_bytes = registered_state_bytes;
     if ((impl_->rate_execution_policy_set &&
-         (impl_->states.size() >= kMaxRegisteredStates ||
-          !detail::checked_artifact_add(
-              checkpoint_payload_bytes,
-              active_checkpoint_state.size(),
-              checkpoint_payload_bytes))) ||
+         !detail::checked_artifact_add(
+             checkpoint_payload_bytes,
+             active_checkpoint_state.size(),
+             checkpoint_payload_bytes)) ||
+        (impl_->mixed_rate_closure_policy_set &&
+         !detail::checked_artifact_add(
+             checkpoint_payload_bytes,
+             mixed_rate_checkpoint_state.size(),
+             checkpoint_payload_bytes)) ||
+        (impl_->live_control_closure_policy_set &&
+         !detail::checked_artifact_add(
+             checkpoint_payload_bytes,
+             live_control_mailboxes->checkpoint_state_size(),
+             checkpoint_payload_bytes)) ||
         checkpoint_state_count > kMaxRegisteredStates) {
         return impl_->fail(
             Status::invalid_config,
@@ -9267,6 +9474,20 @@ Status Runtime::finalize() noexcept {
             live_control_mailboxes->record_capacity();
         memory_plan.live_control_payload_storage_bytes =
             live_control_mailboxes->payload_storage_bytes();
+        memory_plan.live_control_action_capacity =
+            live_control_mailboxes->action_capacity();
+        memory_plan.live_control_action_storage_bytes =
+            live_control_mailboxes->action_storage_bytes();
+        memory_plan.live_control_retained_generation_capacity =
+            live_control_mailboxes->retained_generation_capacity();
+        memory_plan.live_control_retained_record_capacity =
+            live_control_mailboxes->retained_record_capacity();
+        memory_plan.live_control_retained_payload_storage_bytes =
+            live_control_mailboxes->retained_payload_storage_bytes();
+        memory_plan.live_control_closure_control_bytes =
+            live_control_mailboxes->closure_control_bytes();
+        memory_plan.live_control_checkpoint_state_bytes =
+            live_control_mailboxes->checkpoint_state_size();
     }
     memory_plan.device_rate_phase_count =
         compiled_device_rate_plan.phases.size();
@@ -9538,7 +9759,9 @@ Status Runtime::finalize() noexcept {
         sizeof(LiveControlProducerRegistration));
     if (live_control_mailboxes) {
         plan_valid = plan_valid &&
-            add_runtime_bytes(live_control_mailboxes->control_bytes());
+            add_runtime_bytes(live_control_mailboxes->control_bytes()) &&
+            add_runtime_bytes(
+                live_control_mailboxes->closure_control_bytes());
     }
     for (const auto& callback : impl_->callbacks) {
         const auto object_begin = reinterpret_cast<std::uintptr_t>(&callback);
@@ -11002,6 +11225,22 @@ Status Runtime::step(
         ~StepGuard() { flag.store(false, std::memory_order_release); }
     } guard(impl_->in_step);
 
+    if (impl_->live_control_mailboxes &&
+        !impl_->live_control_mailboxes->begin_step_transaction()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control step transaction is already active");
+    }
+    struct LiveControlTransactionGuard {
+        detail::LiveControlMailboxSet* mailboxes = nullptr;
+        Status status = Status::internal_error;
+        ~LiveControlTransactionGuard() {
+            if (mailboxes) {
+                mailboxes->settle_step_transaction(status);
+            }
+        }
+    } live_control_transaction{impl_->live_control_mailboxes.get()};
+
     impl_->clear_error();
     output.start_ns = impl_->clock_now();
     std::uint64_t watchdog_token = 0;
@@ -11168,6 +11407,8 @@ Status Runtime::step(
         execution_status,
         output.finish_ns,
         frame.frame_index);
+
+    live_control_transaction.status = execution_status;
 
     if (execution_status == Status::callback_failed &&
         failed_phase < impl_->callbacks.size()) {
@@ -12516,6 +12757,10 @@ Status Runtime::stage_live_control_update(
         producer,
         update,
         payload);
+    impl_->live_control_mailboxes->record_admission(
+        producer,
+        update,
+        result);
     return Status::ok;
 }
 
@@ -12582,6 +12827,58 @@ bool Runtime::live_control_record_status(
             mailbox_identity,
             mailbox_sequence,
             info);
+}
+
+bool Runtime::live_control_closure_enabled() const noexcept {
+    return live_control_enabled() && impl_->live_control_closure_policy_set;
+}
+
+Status Runtime::live_control_action_metadata(
+    LiveControlActionMetadata& metadata) noexcept {
+    metadata = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (!live_control_closure_enabled()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control action metadata requires enabled closure");
+    }
+    if (!impl_->live_control_mailboxes->action_metadata(metadata)) {
+        return impl_->fail(Status::internal_error, nullptr);
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::read_live_control_actions(
+    LiveControlActionCursor& cursor,
+    std::span<LiveControlActionRecord> output,
+    LiveControlActionReadResult& result) noexcept {
+    result = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (!live_control_closure_enabled()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control action reading requires enabled closure");
+    }
+    const auto status = impl_->live_control_mailboxes->read_actions(
+        cursor,
+        output,
+        result);
+    if (status != Status::ok) {
+        return impl_->fail(status, "live-control action cursor is invalid");
+    }
+    impl_->clear_error();
+    return Status::ok;
 }
 
 bool Runtime::device_rate_admission_backend_at(
@@ -13270,6 +13567,16 @@ Status Runtime::checkpoint_size(
             Status::internal_error,
             "finalized mixed-rate checkpoint size overflowed");
     }
+    if (impl_->live_control_closure_policy_set &&
+        (!impl_->live_control_mailboxes ||
+         !detail::checked_artifact_add(
+             payload_bytes,
+             impl_->live_control_mailboxes->checkpoint_state_size(),
+             payload_bytes))) {
+        return impl_->fail(
+            Status::internal_error,
+            "finalized live-control checkpoint size overflowed");
+    }
     if (!detail::checked_artifact_add(
             detail::checkpoint_header_size,
             record_bytes,
@@ -13322,6 +13629,28 @@ Status Runtime::write_checkpoint(
             Status::invalid_state,
             "mixed-rate checkpoint requires a quiescent release boundary");
     }
+    const bool live_control_claim_already_held =
+        impl_->live_control_closure_policy_set &&
+        impl_->live_control_mailboxes->host_claimed();
+    if (impl_->live_control_closure_policy_set &&
+        !live_control_claim_already_held &&
+        !impl_->live_control_mailboxes->claim_all()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control checkpoint claim is busy; retry");
+    }
+    struct LiveControlCheckpointClaimGuard {
+        detail::LiveControlMailboxSet* mailboxes = nullptr;
+        ~LiveControlCheckpointClaimGuard() {
+            if (mailboxes) {
+                mailboxes->release_all();
+            }
+        }
+    } live_control_claim{
+        impl_->live_control_closure_policy_set &&
+                !live_control_claim_already_held
+            ? impl_->live_control_mailboxes.get()
+            : nullptr};
     const auto output_bytes =
         std::span<const std::byte>(output.data(), output.size());
     for (const auto& state : impl_->states) {
@@ -13360,6 +13689,9 @@ Status Runtime::write_checkpoint(
             status == Status::capacity_exceeded
                 ? "checkpoint output buffer is too small"
                 : "checkpoint encoding failed");
+    }
+    if (impl_->live_control_closure_policy_set) {
+        impl_->live_control_mailboxes->record_checkpoint(result.checksum);
     }
     impl_->clear_error();
     return Status::ok;
@@ -13400,6 +13732,28 @@ Status Runtime::restore_checkpoint(
             Status::invalid_state,
             "checkpoint restore cannot run during execution");
     }
+    const bool live_control_restore_claim_already_held =
+        impl_->live_control_closure_policy_set &&
+        impl_->live_control_mailboxes->host_claimed();
+    if (impl_->live_control_closure_policy_set &&
+        !live_control_restore_claim_already_held &&
+        !impl_->live_control_mailboxes->claim_all()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control restore claim is busy; retry");
+    }
+    struct LiveControlRestoreClaimGuard {
+        detail::LiveControlMailboxSet* mailboxes = nullptr;
+        ~LiveControlRestoreClaimGuard() {
+            if (mailboxes) {
+                mailboxes->release_all();
+            }
+        }
+    } live_control_claim{
+        impl_->live_control_closure_policy_set &&
+                !live_control_restore_claim_already_held
+            ? impl_->live_control_mailboxes.get()
+            : nullptr};
     for (const auto& state : impl_->states) {
         if (byte_spans_overlap(
                 checkpoint,
@@ -13489,6 +13843,21 @@ Status Runtime::restore_checkpoint(
             Status::incompatible_artifact,
             "mixed-rate checkpoint state is malformed or incompatible");
     }
+    detail::CheckpointRecordView live_control_record;
+    if (impl_->live_control_closure_policy_set &&
+        (!detail::next_checkpoint_record(
+             checkpoint,
+             parsed,
+             cursor,
+             live_control_record) ||
+         live_control_record.name != kLiveControlStateName ||
+         live_control_record.schema_version != kLiveControlStateSchema ||
+         !impl_->live_control_mailboxes->validate_checkpoint_state(
+             live_control_record.payload))) {
+        return impl_->fail(
+            Status::incompatible_artifact,
+            "live-control checkpoint state is malformed or incompatible");
+    }
 
     // Rebuild internal active stores before application bytes. Semantic
     // validation above makes this operation infallible; retaining the checked
@@ -13501,6 +13870,13 @@ Status Runtime::restore_checkpoint(
     }
     if (impl_->mixed_rate_closure_policy_set) {
         impl_->apply_mixed_rate_checkpoint_state(mixed_record.payload);
+    }
+    if (impl_->live_control_closure_policy_set &&
+        !impl_->live_control_mailboxes->restore_checkpoint_state(
+            live_control_record.payload)) {
+        return impl_->fail(
+            Status::internal_error,
+            "live-control checkpoint store rebuild failed");
     }
 
     // The second pass cannot fail: the complete source and every destination
@@ -14195,6 +14571,453 @@ Status Runtime::replay_active(
             Status::incompatible_artifact,
             "active replay final registered state does not match");
     }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::write_live_control_replay_artifact(
+    std::span<const std::byte> checkpoint,
+    std::span<const std::byte> nested_artifact,
+    LiveControlNestedArtifactKind nested_kind,
+    std::span<std::byte> output,
+    ArtifactWriteResult& result) noexcept {
+    result = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state == RuntimeState::configuring ||
+        !live_control_closure_enabled() ||
+        !impl_->live_control_closure_policy.replay_enabled) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control replay artifact construction is not enabled");
+    }
+    if (impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire) ||
+        impl_->stop_pending || impl_->lane_cleanup_pending) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control replay artifact requires quiescent host control");
+    }
+    CheckpointMetadata checkpoint_metadata;
+    const auto checkpoint_status = detail::parse_checkpoint_artifact(
+        checkpoint,
+        impl_->config.snapshot_max_bytes,
+        impl_->checkpoint_state_count(),
+        checkpoint_metadata);
+    if (checkpoint_status != Status::ok ||
+        checkpoint_metadata.replay_id != impl_->replay_id ||
+        checkpoint_metadata.graph_id != impl_->graph_id ||
+        checkpoint_metadata.state_schema_id != impl_->state_schema_id ||
+        checkpoint_metadata.workload_id != impl_->observability.workload_id) {
+        return impl_->fail(
+            checkpoint_status == Status::ok
+                ? Status::incompatible_artifact
+                : checkpoint_status,
+            "live-control replay checkpoint is malformed or foreign");
+    }
+    if (nested_kind == LiveControlNestedArtifactKind::input_log) {
+        InputLogMetadata nested_metadata;
+        if (inspect_input_log_artifact(
+                nested_artifact, nested_metadata) != Status::ok ||
+            impl_->rate_execution_policy_set ||
+            nested_metadata.replay_id != impl_->replay_id ||
+            nested_metadata.state_schema_id != impl_->state_schema_id ||
+            nested_metadata.workload_id != impl_->observability.workload_id) {
+            return impl_->fail(
+                Status::incompatible_artifact,
+                "nested input log is malformed or incompatible");
+        }
+    } else if (nested_kind ==
+                   LiveControlNestedArtifactKind::active_replay) {
+        ActiveReplayMetadata nested_metadata;
+        detail::ActiveReplayArtifactView nested_view;
+        if (inspect_active_replay_artifact(
+                nested_artifact, nested_metadata) != Status::ok ||
+            detail::parse_active_replay_artifact(
+                nested_artifact,
+                impl_->mixed_rate_closure_policy.active_replay_max_bytes,
+                nested_view) != Status::ok ||
+            nested_view.checkpoint.size() != checkpoint.size() ||
+            !std::equal(
+                nested_view.checkpoint.begin(),
+                nested_view.checkpoint.end(),
+                checkpoint.begin()) ||
+            !impl_->mixed_rate_closure_policy_set ||
+            !impl_->mixed_rate_closure_policy.active_replay_enabled ||
+            nested_metadata.replay_id != impl_->replay_id ||
+            nested_metadata.graph_id != impl_->graph_id ||
+            nested_metadata.state_schema_id != impl_->state_schema_id ||
+            nested_metadata.workload_id != impl_->observability.workload_id) {
+            return impl_->fail(
+                Status::incompatible_artifact,
+                "nested active replay artifact is malformed or incompatible");
+        }
+    } else {
+        return impl_->fail(
+            Status::invalid_argument,
+            "live-control nested artifact kind is unsupported");
+    }
+    detail::CheckpointRecordCursor cursor;
+    detail::CheckpointRecordView record;
+    bool found_live_control = false;
+    for (std::size_t index = 0;
+         index < checkpoint_metadata.state_count;
+         ++index) {
+        if (!detail::next_checkpoint_record(
+                checkpoint,
+                checkpoint_metadata,
+                cursor,
+                record)) {
+            return impl_->fail(
+                Status::invalid_artifact,
+                "live-control checkpoint record traversal failed");
+        }
+        if (record.name == kLiveControlStateName) {
+            found_live_control = true;
+            break;
+        }
+    }
+    std::uint64_t first_action_sequence = 0;
+    if (!found_live_control ||
+        record.schema_version != kLiveControlStateSchema ||
+        !impl_->live_control_mailboxes->checkpoint_action_sequence(
+            record.payload, first_action_sequence)) {
+        return impl_->fail(
+            Status::incompatible_artifact,
+            "checkpoint lacks compatible live-control correlation state");
+    }
+    if (!impl_->live_control_mailboxes->claim_all()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control replay artifact claim is busy; retry");
+    }
+    struct ClaimGuard {
+        detail::LiveControlMailboxSet* mailboxes;
+        ~ClaimGuard() { mailboxes->release_all(); }
+    } claim{impl_->live_control_mailboxes.get()};
+    LiveControlReplayMetadata metadata;
+    metadata.runtime_id = impl_->live_control_mailboxes->runtime_id();
+    metadata.configuration_generation =
+        impl_->live_control_mailboxes->configuration_generation();
+    metadata.config_id = impl_->observability.config_id;
+    metadata.replay_id = impl_->replay_id;
+    metadata.graph_id = impl_->graph_id;
+    metadata.state_schema_id = impl_->state_schema_id;
+    metadata.policy_identity =
+        impl_->live_control_closure_policy.policy_identity;
+    metadata.final_state_hash = impl_->registered_application_state_hash();
+    metadata.nested_kind = nested_kind;
+    metadata.determinism_tier = impl_->config.determinism_tier;
+    metadata.build_id = impl_->observability.build_id;
+    metadata.workload_id = impl_->observability.workload_id;
+    const auto status = impl_->live_control_mailboxes->write_replay_artifact(
+        metadata,
+        checkpoint,
+        nested_artifact,
+        first_action_sequence,
+        output,
+        result);
+    if (status != Status::ok) {
+        return impl_->fail(
+            status,
+            status == Status::capacity_exceeded
+                ? "live-control replay output is too small or exceeds its bound"
+                : "live-control replay transcript is incomplete or invalid");
+    }
+    impl_->clear_error();
+    return Status::ok;
+}
+
+Status Runtime::replay_live_control(
+    std::span<const std::byte> artifact,
+    ReplayInputCallback input_callback,
+    void* input_user_data,
+    LiveControlReplayResult* result) noexcept {
+    LiveControlReplayResult local_result;
+    auto& output = result ? *result : local_result;
+    output = {};
+    if (!impl_) {
+        return Status::internal_error;
+    }
+    if (impl_->provider_callback_active()) {
+        return Status::invalid_state;
+    }
+    if (impl_->state != RuntimeState::running ||
+        !live_control_closure_enabled() ||
+        !impl_->live_control_closure_policy.replay_enabled) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control replay requires a running replay-enabled runtime");
+    }
+    if (impl_->stop_pending || impl_->lane_cleanup_pending ||
+        impl_->in_step.load(std::memory_order_acquire) ||
+        impl_->in_periodic_run.load(std::memory_order_acquire) ||
+        impl_->in_replay.load(std::memory_order_acquire)) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control replay requires non-reentrant quiescent host control");
+    }
+    detail::LiveControlReplayArtifactView view;
+    const auto parse_status = detail::parse_live_control_replay_artifact(
+        artifact,
+        impl_->live_control_closure_policy.replay_max_bytes,
+        view);
+    if (parse_status != Status::ok) {
+        return impl_->fail(
+            parse_status,
+            "live-control replay artifact validation failed before restore");
+    }
+    if (view.metadata.config_id != impl_->observability.config_id ||
+        view.metadata.replay_id != impl_->replay_id ||
+        view.metadata.graph_id != impl_->graph_id ||
+        view.metadata.state_schema_id != impl_->state_schema_id ||
+        view.metadata.policy_identity !=
+            impl_->live_control_closure_policy.policy_identity ||
+        view.metadata.determinism_tier != impl_->config.determinism_tier ||
+        view.metadata.build_id != impl_->observability.build_id ||
+        view.metadata.workload_id != impl_->observability.workload_id ||
+        view.metadata.action_record_count >
+            impl_->live_control_closure_policy.replay_record_capacity ||
+        view.metadata.retained_generation_count >
+            impl_->live_control_closure_policy.retained_generation_capacity ||
+        view.metadata.retained_record_count >
+            impl_->live_control_closure_policy.retained_record_capacity ||
+        view.metadata.retained_payload_bytes >
+            impl_->live_control_closure_policy.retained_payload_bytes) {
+        return impl_->fail(
+            Status::incompatible_artifact,
+            "live-control replay identity or frozen bounds do not match");
+    }
+    for (const auto& state : impl_->states) {
+        if (byte_spans_overlap(artifact, std::as_bytes(state.storage))) {
+            return impl_->fail(
+                Status::invalid_argument,
+                "live-control replay artifact cannot overlap registered state");
+        }
+    }
+    if (!impl_->live_control_mailboxes->validate_replay_artifact(view)) {
+        return impl_->fail(
+            Status::incompatible_artifact,
+            "live-control replay topology or checkpoint state is incompatible");
+    }
+    if (!impl_->live_control_mailboxes->claim_all()) {
+        return impl_->fail(
+            Status::invalid_state,
+            "live-control replay claim is busy; retry");
+    }
+    struct ReplayMailboxGuard {
+        detail::LiveControlMailboxSet& mailboxes;
+        bool replay_begun = false;
+        ~ReplayMailboxGuard() {
+            if (replay_begun) {
+                mailboxes.end_replay();
+            }
+            mailboxes.release_all();
+        }
+    } mailbox_guard{*impl_->live_control_mailboxes};
+
+    Status nested_status = Status::ok;
+    if (view.metadata.nested_kind ==
+        LiveControlNestedArtifactKind::input_log) {
+        CheckpointMetadata checkpoint_metadata;
+        InputLogMetadata input_metadata;
+        if (detail::parse_checkpoint_artifact(
+                view.checkpoint,
+                impl_->config.snapshot_max_bytes,
+                impl_->checkpoint_state_count(),
+                checkpoint_metadata) != Status::ok ||
+            detail::parse_input_log_artifact(
+                view.nested_artifact,
+                impl_->config.input_log_max_bytes,
+                impl_->config.replay_input_capacity,
+                input_metadata) != Status::ok ||
+            (input_metadata.record_count != 0 && !input_callback)) {
+            return impl_->fail(
+                Status::invalid_artifact,
+                "nested ordinary replay artifacts are incompatible");
+        }
+        const auto restore_status = restore_checkpoint(view.checkpoint, nullptr);
+        if (restore_status != Status::ok) {
+            return restore_status;
+        }
+        if (!impl_->live_control_mailboxes->begin_replay(view)) {
+            return impl_->fail(
+                Status::incompatible_artifact,
+                "live-control replay state exceeds finalized storage");
+        }
+        mailbox_guard.replay_begun = true;
+        impl_->live_control_mailboxes->apply_replay_history();
+        if (impl_->live_control_mailboxes->replay_mismatch_status() !=
+                Status::ok) {
+            return impl_->fail(
+                Status::incompatible_artifact,
+                "validated live-control admission history is incompatible");
+        }
+        bool expected = false;
+        if (!impl_->in_replay.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            return impl_->fail(Status::invalid_state, "replay is already active");
+        }
+        struct InReplayGuard {
+            std::atomic<bool>& flag;
+            ~InReplayGuard() { flag.store(false, std::memory_order_release); }
+        } in_replay_guard{impl_->in_replay};
+        output.checkpoint_frame_index =
+            checkpoint_metadata.checkpoint_frame_index;
+        output.first_frame_index = input_metadata.first_frame_index;
+        output.last_frame_index = input_metadata.last_frame_index;
+        detail::InputLogRecordCursor cursor;
+        for (std::size_t index = 0; index < input_metadata.record_count;
+             ++index) {
+            detail::InputLogRecordView record;
+            if (!detail::next_input_log_record(
+                    view.nested_artifact,
+                    input_metadata,
+                    cursor,
+                    record)) {
+                nested_status = Status::invalid_artifact;
+                break;
+            }
+            CallbackResult callback_result = CallbackResult::error;
+            try {
+                callback_result = input_callback(
+                    input_user_data,
+                    ReplayInputView{
+                        record.frame, record.input_type, record.payload});
+            } catch (...) {
+                callback_result = CallbackResult::error;
+            }
+            if (callback_result != CallbackResult::ok) {
+                nested_status = Status::callback_failed;
+                break;
+            }
+            struct DispatchGuard {
+                std::atomic<bool>& flag;
+                explicit DispatchGuard(std::atomic<bool>& value) : flag(value) {
+                    flag.store(true, std::memory_order_release);
+                }
+                ~DispatchGuard() { flag.store(false, std::memory_order_release); }
+            } dispatch_guard(impl_->replay_dispatch);
+            nested_status = step(record.frame);
+            if (nested_status != Status::ok) {
+                output.mismatch_frame_index = record.frame.frame_index;
+                break;
+            }
+            ++output.frames_replayed;
+        }
+    } else {
+        detail::ActiveReplayArtifactView nested_view;
+        if (!input_callback ||
+            detail::parse_active_replay_artifact(
+                view.nested_artifact,
+                impl_->mixed_rate_closure_policy.active_replay_max_bytes,
+                nested_view) != Status::ok ||
+            nested_view.checkpoint.size() != view.checkpoint.size() ||
+            !std::equal(
+                nested_view.checkpoint.begin(),
+                nested_view.checkpoint.end(),
+                view.checkpoint.begin())) {
+            return impl_->fail(
+                Status::incompatible_artifact,
+                "nested active replay checkpoint is not the outer checkpoint");
+        }
+        if (!impl_->live_control_mailboxes->begin_replay(view)) {
+            return impl_->fail(
+                Status::incompatible_artifact,
+                "live-control replay state exceeds finalized storage");
+        }
+        mailbox_guard.replay_begun = true;
+        ActiveReplayResult active_result;
+        nested_status = replay_active(
+            view.nested_artifact,
+            input_callback,
+            input_user_data,
+            &active_result);
+        output.checkpoint_frame_index =
+            active_result.replay.checkpoint_frame_index;
+        output.first_frame_index = active_result.replay.first_frame_index;
+        output.last_frame_index = active_result.replay.last_frame_index;
+        output.frames_replayed = active_result.replay.frames_replayed;
+        output.mismatch_action_sequence = active_result.mismatch_sequence;
+    }
+    if (mailbox_guard.replay_begun) {
+        impl_->live_control_mailboxes->end_replay();
+        mailbox_guard.replay_begun = false;
+    }
+    output.actions_compared = view.metadata.action_record_count;
+    output.generations_compared =
+        impl_->live_control_mailboxes->replay_generations_compared();
+    const auto live_mismatch =
+        impl_->live_control_mailboxes->replay_mismatch_status();
+    const auto live_mismatch_sequence =
+        impl_->live_control_mailboxes->replay_mismatch_action_sequence();
+    if (live_mismatch_sequence != 0) {
+        output.mismatch_action_sequence = live_mismatch_sequence;
+        if (live_mismatch_sequence >=
+                view.metadata.first_action_sequence &&
+            live_mismatch_sequence <=
+                view.metadata.last_action_sequence) {
+            LiveControlActionRecord action;
+            const auto index = static_cast<std::size_t>(
+                live_mismatch_sequence -
+                view.metadata.first_action_sequence);
+            if (detail::live_control_replay_action_at(view, index, action)) {
+                output.mismatch_target = action.target;
+                output.mismatch_generation_identity =
+                    action.generation_identity;
+            }
+        }
+    }
+    if (live_mismatch != Status::ok) {
+        nested_status = live_mismatch;
+    }
+    output.final_state_hash = impl_->registered_application_state_hash();
+    if (live_mismatch == Status::ok &&
+        view.metadata.final_state_hash != 0 &&
+        output.final_state_hash != view.metadata.final_state_hash) {
+        nested_status = Status::invalid_artifact;
+    }
+    if (nested_status != Status::ok &&
+        output.mismatch_generation_identity == 0 &&
+        view.metadata.retained_generation_count != 0 &&
+        (output.generations_compared != 0 ||
+         live_mismatch != Status::ok)) {
+        const auto index = std::min(
+            output.generations_compared,
+            static_cast<std::size_t>(
+                view.metadata.retained_generation_count - 1));
+        detail::LiveControlRetainedGenerationView generation;
+        if (detail::live_control_replay_generation_at(
+                view, index, generation)) {
+            output.mismatch_target = generation.target;
+            output.mismatch_generation_identity =
+                generation.generation_identity;
+        }
+    }
+    if (nested_status != Status::ok &&
+        output.mismatch_target.kind ==
+            LiveControlTargetKind::host_frame &&
+        output.mismatch_target.frame_index !=
+            std::numeric_limits<std::uint64_t>::max()) {
+        output.mismatch_frame_index =
+            output.mismatch_target.frame_index;
+    }
+    output.mismatch_status = nested_status;
+    if (nested_status != Status::ok) {
+        return impl_->fail(
+            nested_status,
+            "live-control replay diverged from the validated transcript");
+    }
+    impl_->live_control_mailboxes->record_replay_verified(
+        view.metadata.artifact_checksum);
     impl_->clear_error();
     return Status::ok;
 }

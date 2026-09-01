@@ -163,8 +163,12 @@ HASHED_CONTRACT_PATHS = {
     "rt/src/heterogeneous_memory.cpp",
     "rt/src/heterogeneous_memory.hpp",
     "rt/src/host_runtime.cpp",
+    "rt/src/live_control_actions.cpp",
+    "rt/src/live_control_actions.hpp",
     "rt/src/live_control_mailbox.cpp",
     "rt/src/live_control_mailbox.hpp",
+    "rt/src/live_control_replay.cpp",
+    "rt/src/live_control_replay.hpp",
     "rt/src/loopback_backend.cpp",
     "rt/src/memory_policy.cpp",
     "rt/src/memory_policy.hpp",
@@ -200,6 +204,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/CMakeLists.txt",
     "tests/extension_fixture.c",
     "tests/extension_fixture_bad.c",
+    "tests/fuzz_live_control_replay.cpp",
     "tests/add_subdirectory_consumer/CMakeLists.txt",
     "tests/add_subdirectory_consumer/main.cpp",
     "tests/package_consumer/CMakeLists.txt",
@@ -250,6 +255,7 @@ HASHED_CONTRACT_PATHS = {
     "tests/test_mixed_rate_conformance.cpp",
     "tests/test_mixed_rate_replay.cpp",
     "tests/test_loopback_backend.cpp",
+    "tests/test_live_control_actions.cpp",
     "tests/test_live_control_mailbox.cpp",
     "tests/test_periodic_runtime.cpp",
     "tests/test_rate_dispatch.cpp",
@@ -1836,6 +1842,90 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     ):
         if token not in text:
             errors.append(f"M22-01 integration: missing {token!r}")
+
+    live_control_actions = load_text(
+        root, "rt/src/live_control_actions.cpp", errors
+    )
+    live_control_replay = load_text(
+        root, "rt/src/live_control_replay.cpp", errors
+    )
+    live_control_action_test = load_text(
+        root, "tests/test_live_control_actions.cpp", errors
+    )
+    live_control_consumer = load_text(
+        root, "tests/package_consumer/live_control_consumer.cpp", errors
+    )
+    live_control_fuzz = load_text(
+        root, "tests/fuzz_live_control_replay.cpp", errors
+    )
+    for token in (
+        "struct LiveControlClosurePolicy",
+        "struct LiveControlActionRecord",
+        "write_live_control_replay_artifact(",
+        "replay_live_control(",
+    ):
+        if token not in runtime_header:
+            errors.append(f"M22-03 public contract: missing {token!r}")
+    for token in (
+        "LiveControlActionRing::emit",
+        "live_control_action_valid",
+        "overwritten_",
+    ):
+        if token not in live_control_actions:
+            errors.append(f"M22-03 action source: missing {token!r}")
+    for token in (
+        "encode_live_control_replay_artifact",
+        "parse_live_control_replay_artifact",
+        "live_control_replay_generation_at",
+    ):
+        if token not in live_control_replay:
+            errors.append(f"M22-03 replay source: missing {token!r}")
+    for token in (
+        "begin_step_transaction",
+        "settle_step_transaction",
+        "record_replay_verified",
+        "restore_checkpoint_state",
+    ):
+        if token not in live_control_source:
+            errors.append(f"M22-03 mailbox source: missing {token!r}")
+    for token in (
+        "ClosureSettlesSuccessWithCanonicalActions",
+        "CallbackFailureRestoresPriorGenerationAndRollsBack",
+        "CheckpointRoundTripRetiresHandlesWithoutPartialRestore",
+        "OrdinaryReplayInjectsExactRetainedGeneration",
+    ):
+        if token not in live_control_test:
+            errors.append(f"M22-03 mailbox tests: missing {token!r}")
+    for token in (
+        "PublicLayoutAndClosedTablesRejectMalformedRecords",
+        "FixedRingReportsOverwriteGapAndResetExactly",
+        "ZeroCapacityDropsButStillReservesSequence",
+        "SequenceExhaustionFailsBeforeWrap",
+    ):
+        if token not in live_control_action_test:
+            errors.append(f"M22-03 action tests: missing {token!r}")
+    for phrase in (
+        "Runtime-owned",
+        "cannot reverse",
+        "payload-free",
+        "replay artifact",
+    ):
+        if phrase.lower() not in live_control_doc.lower():
+            errors.append(f"M22-03 documentation: missing {phrase!r}")
+    for token, text in (
+        ("rt/src/live_control_actions.cpp", root_cmake),
+        ("rt/src/live_control_replay.cpp", root_cmake),
+        ("test_live_control_actions.cpp", tests_cmake),
+        ("LiveControlActions.*", tests_cmake),
+        ("LiveControlActionRecord", live_control_consumer),
+        ("inspect_live_control_replay_artifact", live_control_fuzz),
+        ("live_control_replay_fuzz", tests_cmake),
+        ("live_control_replay_fuzz", ci),
+        ("rt/src/live_control_actions.cpp", static_sources),
+        ("rt/src/live_control_replay.cpp", static_sources),
+    ):
+        if token not in text:
+            errors.append(f"M22-03 integration: missing {token!r}")
 
     return errors
 

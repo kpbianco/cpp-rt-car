@@ -1,10 +1,11 @@
 # Real-Time Readiness Gates
 
-M22-02 is portable RT0 boundary-commit behavior only. Fixed mailbox, candidate,
-terminal, and double-generation storage plus one bounded frame-owner scan add
-no active allocation, producer wait, blocking mutex, file/network I/O,
-application callback, vendor call, or hidden thread. This does not qualify
-producer/commit latency or physical update application.
+M22-03 is portable RT0 transactional Runtime-generation behavior only. Fixed
+mailbox/candidate/action/journal/checkpoint storage, three generations, and
+bounded frame-owner/settlement/replay work add no active allocation, producer
+wait, blocking mutex, file/network I/O, extra application callback, out-of-lane
+vendor call, or hidden thread. This does not qualify producer/commit/rollback
+latency, reverse arbitrary side effects, or establish physical application.
 
 M21-05 is portable RT0 only. Fixed action/replay storage and direct indexes add
 no active allocation, blocking mutex, file/network I/O, host-lane vendor call,
@@ -235,6 +236,8 @@ native-v2/v1-adapter boundary is in the [HAL v2 contract](hal_v2.md).
   merged. Physical CUDA/XDMA/DAC/DAQ/HIL and RT qualification remain separate
   named gates.
 - [x] M22-01 live-control policy and bounded mailbox staging are merged.
-- [ ] M22-02 exact-boundary commit remains a candidate until hosted sanitizer,
-  concurrency, package, and human ownership/API/claim gates pass. Rollback,
-  replay/telemetry, typed SDK closure, and all physical/RT gates remain open.
+- [x] M22-02 exact-boundary commit is merged with hosted and human gates.
+- [ ] M22-03 Runtime-generation rollback, action, checkpoint, and replay closure
+  remains a candidate until hosted sanitizer, concurrency, package, parser,
+  determinism, and human ownership/API/claim gates pass. Typed SDK/stress
+  closure and all physical/RT gates remain open.

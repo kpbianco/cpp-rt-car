@@ -4,7 +4,10 @@ M21-05 closes the existing M21 transport without adding an execution lane.
 M22-01 adds the separate data-only live-control staging surface. M22-02 adds a
 bounded frame-owner scan, deterministic replacement/order, inactive/active
 immutable generation storage, callback-local views, terminal slot reclamation,
-and fixed inspection. It adds no lane, payload parser, or backend transfer.
+and fixed inspection. M22-03 adds a third step-entry generation, provisional
+slot ownership, a direct-index action ring, retained replay journal, fixed
+checkpoint scratch, and exact-boundary replay injection. It adds no lane,
+payload parser, implicit backend transfer, or telemetry exporter.
 See [live_controls.md](live_controls.md).
 
 The merged M21 closure remains:
@@ -80,8 +83,13 @@ pre-registered producer directly through a Runtime-generation handle. A
 release-store publishes only a complete descriptor and copied payload. M22-02
 adds fixed candidate and double-generation stores. The frame owner closes one
 exact target without waiting on producers, copies canonical survivors into the
-inactive generation, and publishes it before existing callbacks. No backend,
-watchdog, telemetry, checkpoint, or replay format consumes the payload.
+inactive generation, and publishes it before existing callbacks. M22-03 keeps
+source slots provisional through the owning step and restores the step-entry
+generation on failure. Its separate action records never contain payload bytes;
+only an explicit caller-requested replay artifact carries retained survivor
+payloads. Closure-enabled checkpoint state and replay controls are conditional,
+preallocated, and included in the existing Runtime-control ledger. No backend
+or watchdog interprets a live-control payload.
 
 M6 replaces the target path's shared trace lock with fixed atomic telemetry
 slots. It adds stable event/metric IDs, cumulative and caller-cursor interval
