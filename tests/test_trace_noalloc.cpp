@@ -1858,7 +1858,7 @@ TEST(TraceNoAlloc, LiveControlAdmissionSettlementInspectionAndStopDoNotAllocate)
     update.producer_identity = handle.producer_identity;
     update.producer_sequence = 1;
     update.target_frame_index = 7;
-    update.payload_bytes = payload.size();
+    update.payload_bytes = static_cast<std::uint32_t>(payload.size());
     update.payload_digest = rt::live_control_payload_digest(payload);
 
     rt::LiveControlAdmissionResult admission =

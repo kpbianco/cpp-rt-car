@@ -352,7 +352,7 @@
     "tests/test_rt_pipeline.cpp": "1d0f6dc159572a580b5a2364ec3590bb393e1706189a0292970c55d0f9c93a3f",
     "tests/test_sampled_io.cpp": "1421b46d6ffe9a2ae870a41f40c6a0cb31d61999365a1d13e4c9a06689488f8e",
     "tests/test_thread_policy.cpp": "122b8918975f3ad8fcffb6a7fc8db6cf6eeb7ead376d4d20a9577f6644cf975c",
-    "tests/test_trace_noalloc.cpp": "4d6f5675b9b68baf521a2fc967cf4c25954bbc48f655c99d59395a9a5cfbfaa7",
+    "tests/test_trace_noalloc.cpp": "08895c05d5ee0ed7ce9abeb42c2669a24407015687bcbe81c73e997c2a4c63c7",
     "tests/test_vendor_hal_v2.cpp": "8483286fc5f615c4d96eda646cb8bbd7760652f49ee642822d49b437d13029b0",
     "tests/xdma_backend_tests.cpp": "50a1ea3d4a7d95bf9f3c92b722cba1727714b5a9ec4a97eeac1e7df548dc013b",
     "tools/autotune/config.schema.json": "1560d35b521b2ae882815b235459ed6058d4640af1ddb6bcb4d82b3c525eb56a",
