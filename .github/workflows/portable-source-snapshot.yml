@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          fetch-depth: 0
           persist-credentials: false
       - name: Record exact source and dependency identities
         shell: bash
@@ -25,10 +26,13 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/rtfw-source-evidence/source-commit.txt"
           git rev-parse HEAD^{tree} > "$RUNNER_TEMP/rtfw-source-evidence/source-tree.txt"
           git submodule status --recursive > "$RUNNER_TEMP/rtfw-source-evidence/submodules.txt"
+          # Bundles contain Git objects, never .git/config or credentials.
+          git bundle create "$RUNNER_TEMP/rtfw-source-evidence/repository.bundle" HEAD
+          git -C external/googletest bundle create "$RUNNER_TEMP/rtfw-source-evidence/googletest.bundle" HEAD
           # No .git directories, credentials, build products, or runner state.
           tar --exclude=.git -czf "$RUNNER_TEMP/rtfw-source-evidence/source.tar.gz" .
           cd "$RUNNER_TEMP/rtfw-source-evidence"
-          sha256sum source.tar.gz > source.tar.gz.sha256
+          sha256sum source.tar.gz repository.bundle googletest.bundle > SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: portable-source-${{ github.sha }}
