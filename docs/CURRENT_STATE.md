@@ -1,7 +1,15 @@
 # Current state
 
-Last audited: 2026-09-01
-Batch baseline: `0bf54966be63817969468c69c5cd183ad66ab358`
+Last audited: 2026-09-06
+Batch baseline: `290397e86b65136c5479f7b1d69c961f73f8ac14`
+
+## M23-01 candidate frontier
+
+M22-04 merged as PR #250; M22/CAP-M22 are portable-software complete. The
+optional M23-01 benchmark framework is a candidate under separate hosted and
+human review gates. See [benchmarking](benchmarking.md) and
+[retained evidence](evidence/M23-01-2026-09-06.md). No M23/CAP-M23, M24-M26,
+hardware/RT, Unreal, release, signing or deployment completion is claimed.
 
 ## Product state
 
@@ -26,11 +34,10 @@ Batch baseline: `0bf54966be63817969468c69c5cd183ad66ab358`
   ABI v1; M19 and CAP-M19 remain incomplete, and Unreal work is not part of the
   current Linux-host batch. M20-PRE-01, M21-01, and M21-02 are merged. M21-03
   and M21-04 are merged. M21-05 is merged at the audited baseline and closes
-  the portable M21 software path. M22-01 through M22-03 are merged. M22-04 is
-  the active typed-SDK and stress-closure candidate; M22/CAP-M22 remain
-  incomplete until hosted and human gates pass and the candidate merges.
+  the portable M21 software path. M22-01 through M22-03 are merged. M22-04 is merged as PR #250 and closes the portable M22 software path.
+  M23-01 is the active optional benchmark candidate.
 
-## M22-04 typed live-control SDK and stress candidate
+## M22-04 typed live-control SDK and stress (merged foundation)
 
 M22-01 added an opt-in additive C++ policy with positive bounded mailbox,
 producer, record, per-record payload, and total copied-payload capacities.

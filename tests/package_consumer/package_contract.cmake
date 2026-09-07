@@ -54,6 +54,12 @@ endif()
 if (RTFW_TEST_XDMA_LINUX)
     list(APPEND rtfw_supported_targets rtfw::xdma_linux)
 endif()
+if (RTFW_TEST_BENCHMARK)
+    rtfw_assert_target(rtfw::benchmark)
+    list(APPEND rtfw_supported_targets rtfw::benchmark)
+elseif (TARGET rtfw::benchmark)
+    message(FATAL_ERROR "Unrequested benchmark component leaked into default imports")
+endif()
 set(rtfw_forbidden_usage
     "-Wall"
     "-Wextra"
@@ -119,6 +125,9 @@ if (RTFW_WITH_CUDA_DRIVER)
 endif()
 if (RTFW_WITH_XDMA_LINUX)
     list(APPEND expected_headers rt/xdma_linux.hpp)
+endif()
+if (RTFW_WITH_BENCHMARK)
+    list(APPEND expected_headers rtfw/benchmark.hpp)
 endif()
 list(SORT expected_headers)
 
@@ -200,4 +209,8 @@ if (RTFW_TEST_XDMA_LINUX)
     rtfw_assert_target(rtfw::xdma_linux)
     rtfw_check_cpp_header(
         "rt/xdma_linux.hpp" xdma_linux rtfw::xdma_linux)
+endif()
+
+if (RTFW_TEST_BENCHMARK)
+    rtfw_check_cpp_header("rtfw/benchmark.hpp" benchmark rtfw::benchmark)
 endif()

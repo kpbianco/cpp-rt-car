@@ -10,6 +10,7 @@ set(RTFW_C_ABI_MIN_COMPATIBLE_VERSION
     "@RTFW_C_ABI_MIN_COMPATIBLE_VERSION@")
 set(RTFW_WITH_CUDA_DRIVER "@RTFW_ENABLE_CUDA@")
 set(RTFW_WITH_XDMA_LINUX "@RTFW_ENABLE_XDMA@")
+set(RTFW_WITH_BENCHMARK "@RTFW_BUILD_BENCHMARKS@")
 set(RTFW_WITH_EXPERIMENTAL "@RTFW_INSTALL_EXPERIMENTAL@")
 
 include(CMakeFindDependencyMacro)
@@ -70,6 +71,14 @@ if ("experimental" IN_LIST rtfw_FIND_COMPONENTS AND
     include("${CMAKE_CURRENT_LIST_DIR}/rtfwExperimentalTargets.cmake")
     if (TARGET rtfw::experimental)
         set(rtfw_experimental_FOUND TRUE)
+    endif()
+endif()
+
+set(rtfw_benchmark_FOUND FALSE)
+if ("benchmark" IN_LIST rtfw_FIND_COMPONENTS AND RTFW_WITH_BENCHMARK)
+    include("${CMAKE_CURRENT_LIST_DIR}/rtfwBenchmarkTargets.cmake")
+    if (TARGET rtfw::benchmark)
+        set(rtfw_benchmark_FOUND TRUE)
     endif()
 endif()
 

@@ -560,3 +560,9 @@ offline verification, safe extraction, and relocated consumption. The signed
 DSSE fixture is a separate non-target verifier test and never becomes a subject
 of the RTFW statement. This plane has no scheduler, lane, runtime callback,
 public API, signing, publication, support-promotion, hardware, or Unreal path.
+
+## Optional host-side benchmarks (M23-01)
+
+The M23 benchmark library has no Runtime link edge. Providers are explicitly registered, borrowed, instance-local host-side callbacks; timing/counters are separated from artifact I/O. Canonical schemas and the offline validator form a separate evidence boundary, never a Runtime state input.
+
+See [benchmarking](benchmarking.md) for build, install, provider and artifact contracts.

@@ -491,3 +491,9 @@ The fifteenth gate produces candidate verification evidence only. It does not
 change the 1.2.1 product, authenticate an RTFW artifact, publish a release, or
 qualify latency, hardware, RT1/RT2, or Unreal integration. See
 [portable assurance](portable_assurance.md).
+
+## Optional host-side benchmarks (M23-01)
+
+M23-01 adds only the optional `<rtfw/benchmark.hpp>` host-side source API and `rtfw::benchmark` component. It does not complete CAP-M23 or add Runtime/subsystem behavior. The canonical M23-M26 program remains required for software-framework feature completion.
+
+See [benchmarking](benchmarking.md) for build, install, provider and artifact contracts.

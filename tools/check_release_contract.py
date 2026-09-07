@@ -50,6 +50,23 @@ PINNED_ACTIONS = {
 }
 
 HASHED_CONTRACT_PATHS = {
+    'bench/CMakeLists.txt',
+    'bench/include/rtfw/benchmark.hpp',
+    'bench/src/benchmark.cpp',
+    'bench/src/benchmark_cli.cpp',
+    'bench/schemas/descriptor.schema.json',
+    'bench/schemas/result.schema.json',
+    'tests/test_benchmark_contract.cpp',
+    'tests/test_benchmark_runner.cpp',
+    'tests/test_benchmark_artifacts.cpp',
+    'tests/benchmark_fixtures/provider.hpp',
+    'tests/benchmark_fixtures/test_artifacts.py',
+    'tests/benchmark_fixtures/verify_package.py',
+    'tests/benchmark_fixtures/consumer/CMakeLists.txt',
+    'tests/package_consumer/benchmark_consumer.cpp',
+    'tools/check_benchmark_artifact.py',
+    'docs/benchmarking.md',
+
     ".clang-tidy",
     ".gitattributes",
     ".gitignore",
@@ -2038,6 +2055,21 @@ def validate_repository(root: pathlib.Path) -> list[str]:
     ):
         if token not in text:
             errors.append(f"M22-04 integration: missing {token!r}")
+
+    benchmark_cmake = load_text(root, "bench/CMakeLists.txt", errors)
+    benchmark_doc = load_text(root, "docs/benchmarking.md", errors)
+    for token in ("rtfw_benchmark", "EXPORT_NAME benchmark", "rtfwBenchmarkTargets", "RTFW_BUILD_EXPERIMENTAL"):
+        if token not in benchmark_cmake:
+            errors.append(f"M23 optional component: missing {token!r}")
+    for token in ("RTFW_WITH_BENCHMARK", "rtfw_benchmark_FOUND", "rtfwBenchmarkTargets.cmake"):
+        if token not in load_text(root, "cmake/rtfwConfig.cmake.in", errors):
+            errors.append(f"M23 optional package: missing {token!r}")
+    for phrase in ("instance-local", "structural_fixture", "portable_characterization", "M23-02", "M23-05", "Human", "SHA-256"):
+        if phrase.lower() not in benchmark_doc.lower():
+            errors.append(f"M23 benchmark documentation: missing {phrase!r}")
+    for token in ("RTFW_BUILD_BENCHMARKS=ON", "m23-canonical", "verify_package.py", "BenchmarkRunner.*"):
+        if token not in ci:
+            errors.append(f"M23 benchmark CI: missing {token!r}")
 
     return errors
 

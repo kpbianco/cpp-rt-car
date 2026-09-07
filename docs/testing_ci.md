@@ -398,3 +398,9 @@ coverage. Linux GCC/Clang, Windows v143, sanitizer, deterministic, installed
 package, archive, C ABI, dependency, vendor compile, and documentation/release
 contract jobs remain mandatory. These are portable RT0/static/simulated gates,
 not physical, Unreal, HIL, field, RT1/RT2, or production evidence.
+
+## Optional host-side benchmarks (M23-01)
+
+M23-01 adds the `m23_benchmark`, `m23_benchmark_artifact_validator`, and `benchmark_package_consumer` gates. Existing compiler/sanitizer/ABI/release checks are retained. Constant-identity fake-clock artifacts are compared across compilers; real timing is characterization, never a CI latency threshold.
+
+See [benchmarking](benchmarking.md) for build, install, provider and artifact contracts.

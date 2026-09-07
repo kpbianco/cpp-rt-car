@@ -1,290 +1,145 @@
 schema_version: 1
 batch:
-  id: M22-04
-  title: Close the typed live-control SDK and stress surface
-  goal: >-
-    Complete the portable M22 software milestone over the merged M22-03
-    transactional live-control path. Add one optional header-only C++ SDK layer
-    for fixed, canonical, typed application payloads without changing or hiding
-    the raw Runtime API; ship compiling scenario-parameter, controller-gain,
-    sensor-calibration, and fault-injection examples; and close capacity,
-    producer-concurrency, repeated-lifecycle, watchdog/rollback, replay,
-    package-relocation, and multiple-Runtime stress evidence. Preserve every
-    stable ABI and existing Runtime/artifact/telemetry schema, keep semantic
-    validation and variable-length parsing off RT lanes, and make no executable
-    hot-reload, physical-control, HIL, RT, release, deployment, or production
-    claim.
+  id: M23-01
+  title: Establish the benchmark contract, runner, and host identity
+  goal: Implement the optional host-side C++20 provider/runner/CLI, sanitized identities, closed schemas
+    and failure-atomic artifacts. No Runtime or subsystem implementation changes.
 sources:
-  product: products/cpp-rt-car/product.yaml
-  requirements:
-    - products/cpp-rt-car/PRD.md#cap-m22--transactional-live-controls
-    - products/cpp-rt-car/acceptance.yaml#CAP-M22
-    - products/cpp-rt-car/telemetry-plan.yaml#Q-22
-    - products/cpp-rt-car/risk-register.yaml#R-010
-  milestone: products/cpp-rt-car/milestones/M22.md#M22-04--live-control-sdk-stress-and-closure
-  target_contracts:
-    - AGENTS.md
-    - contracts/active-batch.yaml
-    - contracts/repo-profile.yaml
-    - contracts/profile-requirements.yaml
-    - contracts/verification.yaml
-    - contracts/verification.commands
-    - docs/CURRENT_STATE.md
-    - docs/HANDOFF.md
-    - docs/product_contract.md
-    - docs/architecture.md
-    - docs/roadmap.md
-    - docs/host_runtime.md
-    - docs/live_controls.md
-    - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/testing_ci.md
-    - docs/c_abi.md
-    - docs/release_policy.md
-    - docs/real_time_readiness_checklist.md
-    - docs/portable_support_matrix.json
-    - docs/cuda_support_matrix.json
-    - docs/xdma_support_matrix.json
-    - release/rtfw-release-contract.json
-    - docs/evidence/M21-05-2026-08-27.md
-    - docs/evidence/M22-01-2026-09-01.md
-    - docs/evidence/M22-02-2026-09-01.md
-    - docs/evidence/M22-03-2026-09-01.md
-  baseline_commit: 0bf54966be63817969468c69c5cd183ad66ab358
+  baseline_commit: 290397e86b65136c5479f7b1d69c961f73f8ac14
   control_plane_repository: tranquilWorks/portfolio-control
-  control_plane_path: products/cpp-rt-car/batches/M22-04.yaml
-  control_plane_revision: 1b1c6fe0628ce57bda3be988bfbcbeb9107460f9
+  control_plane_path: products/cpp-rt-car/batches/M23-01.yaml
+  control_plane_revision: e2c9c15b42f30c537bbf32b8e42290e4f55b5ba7
+  canonical_blob_sha: f751f71073dca828ca434dbd0b3284a15c145427
+  incorporation: The entire canonical M23-01 contract is incorporated by reference, including every acceptance
+    criterion, validation command, manual gate, stop condition and rollback requirement. This target activation
+    index does not replace or waive any canonical requirement.
 dependencies:
-  - M22-03
+- M22-04
 scope:
   allowed_paths:
-    - .portfolio-harness.json
-    - AGENTS.md
-    - contracts/active-batch.yaml
-    - contracts/repo-profile.yaml
-    - CMakeLists.txt
-    - samples/CMakeLists.txt
-    - samples/live_control_typed.cpp
-    - tests/CMakeLists.txt
-    - .github/workflows/ci.yml
-    - rt/include/rt/live_control.hpp
-    - rt/include/rt/runtime.hpp
-    - rt/src/live_control_mailbox.hpp
-    - rt/src/live_control_mailbox.cpp
-    - rt/src/live_control_actions.hpp
-    - rt/src/live_control_actions.cpp
-    - rt/src/live_control_replay.hpp
-    - rt/src/live_control_replay.cpp
-    - rt/src/host_runtime.cpp
-    - tests/test_live_control_sdk.cpp
-    - tests/test_live_control_stress.cpp
-    - tests/test_live_control_mailbox.cpp
-    - tests/test_live_control_actions.cpp
-    - tests/test_live_control_replay.cpp
-    - tests/test_multiple_instances.cpp
-    - tests/test_trace_noalloc.cpp
-    - tests/test_periodic_runtime.cpp
-    - tests/package_consumer/CMakeLists.txt
-    - tests/package_consumer/live_control_sdk_consumer.cpp
-    - tests/package_consumer/live_control_consumer.cpp
-    - tests/package_consumer/package_contract.cmake
-    - tools/check_docs_contract.py
-    - tools/check_release_contract.py
-    - tools/static_analysis_sources.txt
-    - release/rtfw-release-contract.json
-    - README.md
-    - docs/CURRENT_STATE.md
-    - docs/HANDOFF.md
-    - docs/product_contract.md
-    - docs/architecture.md
-    - docs/roadmap.md
-    - docs/host_runtime.md
-    - docs/live_controls.md
-    - docs/live_control_sdk.md
-    - docs/memory_plan.md
-    - docs/determinism_replay.md
-    - docs/testing_ci.md
-    - docs/real_time_readiness_checklist.md
-    - docs/evidence/M22-04-*.md
+  - .portfolio-harness.json
+  - AGENTS.md
+  - contracts/active-batch.yaml
+  - contracts/repo-profile.yaml
+  - CMakeLists.txt
+  - bench/CMakeLists.txt
+  - bench/include/rtfw/benchmark.hpp
+  - bench/src/benchmark.cpp
+  - bench/src/benchmark_cli.cpp
+  - bench/schemas/descriptor.schema.json
+  - bench/schemas/result.schema.json
+  - bench/fixtures/**
+  - cmake/rtfwConfig.cmake.in
+  - tests/CMakeLists.txt
+  - tests/test_benchmark_contract.cpp
+  - tests/test_benchmark_runner.cpp
+  - tests/test_benchmark_artifacts.cpp
+  - tests/benchmark_fixtures/**
+  - tests/package_consumer/CMakeLists.txt
+  - tests/package_consumer/benchmark_consumer.cpp
+  - tests/package_consumer/package_contract.cmake
+  - tools/check_benchmark_artifact.py
+  - tools/check_docs_contract.py
+  - tools/check_release_contract.py
+  - tools/static_analysis_sources.txt
+  - release/rtfw-release-contract.json
+  - .github/workflows/ci.yml
+  - README.md
+  - docs/CURRENT_STATE.md
+  - docs/HANDOFF.md
+  - docs/product_contract.md
+  - docs/architecture.md
+  - docs/roadmap.md
+  - docs/build_tooling.md
+  - docs/benchmarking.md
+  - docs/testing_ci.md
+  - docs/real_time_readiness_checklist.md
+  - docs/evidence/M23-01-*.md
   forbidden_paths:
-    - abi/
-    - rt/include/rt/c_api.h
-    - rt/include/rt/device_abi.h
-    - rt/include/rt/extension_abi.h
-    - src/c_abi.cpp
-    - rt/include/rt/config.hpp
-    - rt/include/rt/profile.hpp
-    - rt/include/rt/device.hpp
-    - rt/include/rt/loopback_backend.hpp
-    - rt/include/rt/cuda_backend.hpp
-    - rt/include/rt/xdma_backend.hpp
-    - rt/src/runtime_profile.cpp
-    - rt/src/rate_telemetry.cpp
-    - rt/src/rate_telemetry.hpp
-    - rt/src/mixed_rate_actions.cpp
-    - rt/src/mixed_rate_actions.hpp
-    - rt/src/telemetry.cpp
-    - rt/src/telemetry.hpp
-    - rt/src/observability_export.cpp
-    - rt/src/snapshot_codec.cpp
-    - rt/src/snapshot_codec.hpp
-    - rt/src/device_manager.cpp
-    - rt/src/device_manager.hpp
-    - rt/src/command_batch.cpp
-    - rt/src/command_batch.hpp
-    - rt/src/cross_rate_data.cpp
-    - rt/src/cross_rate_data.hpp
-    - rt/src/sampled_io.cpp
-    - rt/src/sampled_io.hpp
-    - rt/src/loopback_backend.cpp
-    - rt/src/mock_device.cpp
-    - rt/src/cuda_backend.cpp
-    - rt/src/cuda_driver.cpp
-    - rt/src/xdma_backend.cpp
-    - rt/src/xdma_linux.cpp
-    - core/
-    - hal/
-    - gpu/
-    - examples/
-    - integrations/
-    - configs/
-    - profiles/
-    - qualification/
-    - release/keys/
-    - release/signatures/
-    - .github/workflows/cuda-qualification.yml
-    - .github/workflows/xdma-qualification.yml
-    - .github/workflows/release.yml
-    - docs/portable_support_matrix.json
-    - docs/cuda_support_matrix.json
-    - docs/xdma_support_matrix.json
-    - docs/evidence/M15-*.md
-    - docs/evidence/M16-*.md
-    - docs/evidence/M17-*.md
-    - docs/evidence/M18-*.md
-    - docs/evidence/M19-*.md
-    - docs/evidence/M20-*.md
-    - docs/evidence/M21-*.md
-    - docs/evidence/M22-01-*.md
-    - docs/evidence/M22-02-*.md
-    - docs/evidence/M22-03-*.md
-    - VERSION.txt
-    - LICENSE
-    - CHANGELOG.md
-    - SECURITY.md
-    - include/simcore/**
-    - core/include/core/config_hot_reload.hpp
-    - tests/test_config_hot_reload.cpp
-    - tests/test_seqlock_config.cpp
-    - rt/include/rt/scheduler.hpp
-    - rt/include/rt/fiber_pool.hpp
-    - rt/include/rt/plugin_api.h
-    - rt/src/scheduler.cpp
-    - rt/src/fiber_pool.cpp
-    - rt/src/plugin_manager.cpp
+  - abi/
+  - rt/src/
+  - rt/include/
+  - src/c_abi.cpp
+  - core/
+  - hal/
+  - gpu/
+  - examples/
+  - integrations/
+  - configs/
+  - profiles/
+  - qualification/
+  - release/keys/
+  - release/signatures/
+  - .github/workflows/cuda-qualification.yml
+  - .github/workflows/xdma-qualification.yml
+  - .github/workflows/release.yml
+  - docs/portable_support_matrix.json
+  - docs/cuda_support_matrix.json
+  - docs/xdma_support_matrix.json
+  - docs/evidence/M15-*.md
+  - docs/evidence/M16-*.md
+  - docs/evidence/M17-*.md
+  - docs/evidence/M18-*.md
+  - docs/evidence/M19-*.md
+  - docs/evidence/M20-*.md
+  - docs/evidence/M21-*.md
+  - docs/evidence/M22-*.md
+  - VERSION.txt
+  - LICENSE
+  - CHANGELOG.md
+  - SECURITY.md
+  - include/simcore/**
+  - tests/test_jobqueue_perf.cpp
+  - bench/bench_aosoa_vs_soa.cpp
+  - tools/rt_harden.sh
+  - tools/rt_harden.ps1
 acceptance:
-  - The implementation begins from an initially clean target at exact default-branch commit `0bf54966be63817969468c69c5cd183ad66ab358`, merged target pull request 249. M22-01 through M22-03 code and retained evidence remain present. The M22-03 Runtime-generation rollback, payload-free action, conditional checkpoint, exact replay, stable ABI, package, and claim boundaries are preserved; no absent physical, RT, Unreal, signing, release, deployment, or production result is invented.
-  - M22-04 adds one optional installed header-only C++ source API in `rt/live_control.hpp`. It depends only on supported public SDK headers, introduces no compiled symbol or binary ABI, exports no project warning/feature policy, and keeps every raw `Runtime` live-control operation directly usable. The default installed inventory changes only by this explicitly reviewed header and corresponding source/package contract records.
-  - The typed layer defines one fixed canonical little-endian payload envelope with an exact magic, envelope version, complete encoded byte count, positive application type identity, positive application schema version, closed `LiveControlUpdateKind`, and zero reserved fields. This envelope is application payload content, not a Runtime checkpoint, replay, action, telemetry, profile, C ABI, device ABI, extension ABI, or HAL schema; none of those existing formats or numeric tables changes.
-  - Type customization is compile-time and bounded. A type supplies positive fixed encoded extent within the M22 per-record ceiling, positive type/schema identities, one closed update kind, and `noexcept` fixed-span validation/encode/decode operations. Variable-size containers, allocation, exceptions across the boundary, raw pointers, borrowed string views, file paths, vendor handles, callbacks, implicit clocks, and unbounded parsing are not accepted by the helper contract.
-  - Typed construction uses caller-owned fixed storage, validates semantic input before publication, writes one complete canonical envelope/body, fills the existing raw `LiveControlUpdateRecord` from the exact producer handle, producer sequence, host-frame or compiled-rate target, byte count, alignment, flags, and digest, and publishes nothing on failure. The helper never retries admission, hides or remaps `LiveControlAdmissionResult`, selects a later target, advances a producer sequence, calls a Runtime implicitly from a destructor, or changes raw mailbox ownership.
-  - Typed decoding verifies the raw update kind, exact extent, envelope identity/version/reserved fields, and payload digest before committing the caller's output. It is fixed-work and allocation-free. Documentation distinguishes this bounded canonical decode/copy from off-lane semantic validation and forbids variable-length text/config parsing, authentication, filesystem/network I/O, allocation, logging, or vendor calls in Runtime callbacks.
-  - One supported sample defines four application-owned fixed payload types and exercises scenario parameters, controller gains, sensor calibration, fault configuration, and clear-fault behavior through the installed public API. The sample stages at least one exact host-frame update and one exact compiled rate-release update, observes whole typed values in callbacks, records committed/replaced/rolled-back outcomes, checks action metadata, and performs checked stop without repository-private headers, experimental SimCore, or implicit backend transfer.
-  - Stress coverage uses deterministic operation-count assertions rather than timing sleeps or tolerances. It covers 64 mailbox declarations, 256 producer declarations, the 65,536-record absolute configuration boundary or an equivalent exact bounded finalization proof plus representative full-occupancy execution, maximum legal per-record extent, capacity-zero/exact/one-over validation, concurrent producers, same-boundary replacement, action/journal loss, replay eligibility, callback rollback, watchdog/degradation interaction, stopped admission, stale handles, sequence exhaustion, and correction/retry.
-  - Repeated lifecycle stress constructs, finalizes, starts, exercises, stops, and destroys fresh Runtime instances across a finite deterministic loop. Concurrent multiple-Runtime stress uses disjoint handles, payloads, generations, actions, checkpoints, and replay artifacts. No Runtime restart after terminal stop, stale-handle revival, shared global registry, cross-instance cursor, or leaked application payload is permitted.
-  - The SDK header is self-contained and builds warnings-as-errors under supported GCC, Clang, and MSVC consumers. Source-tree, add-subdirectory, installed, archive-relocated, and non-default-prefix consumers exercise custom type specialization, host/rate construction, raw admission-result preservation, bounded decode, action inspection, and checked teardown without private headers or C++ binary ABI assumptions.
-  - No ordinary heap allocation, blocking mutex, hidden thread, file/network I/O, unbounded wait/retry/scan, variable-length parser, producer callback, implicit vendor operation, or telemetry payload copy is added to live-control admission, boundary publication, settlement, rollback, action, checkpoint, replay, typed construction, or typed decode paths. The SDK adds no Runtime lane, memory-plan row, provider region, hidden storage, or destructor-driven control operation.
-  - Stable C ABI v8 remains exactly 70 exports with fingerprint `0xd0e7a5a14bf35f97` and SONAME 8. Device ABI v1, extension ABI v1, HAL tables, Runtime status and live-control numeric values, runtime-profile schema 7/25 keys, every checkpoint/input-log/action/replay/observability schema, release 1.2.1, support and qualification matrices, Apache-2.0, and prior evidence remain unchanged.
-  - Target governance, current state, handoff, architecture, product, roadmap, live-control/SDK, memory, replay, testing, release digest ledger, and retained `docs/evidence/M22-04-<date>.md` state exact implementation and evidence. Focused and full local verification, mandatory hosted CI, and human SDK, canonical-format, callback, concurrency, lifecycle, compatibility, privacy, and claim review pass before merge. Only after those gates may M22 and CAP-M22 be marked portable-software complete.
+- Default benchmark-OFF SDK inventory and every M15-M22 implementation/evidence/ABI/schema/support boundary
+  remain unchanged.
+- Strict closed descriptor/result schemas, explicit size/versioned borrowed provider tables, deterministic
+  registration/list/describe/run, bounded fake/real clocks and samples, and exact external consumer semantics.
+- Canonical descriptor/raw/result artifacts with SHA-256 binding, create-new atomic publication, no symlink
+  following or overwrite, bounded failure diagnostics and offline semantic validation.
+- Privacy-bounded source/build/host/workload identity with explicit unavailable facts; no hardware, privilege,
+  secret, network, scheduler, Runtime-lane or experimental dependency.
+- Only self/provider framework cases; M23-02 through M23-05, M24-M26, hardware, RT, Unreal, signing, release
+  and deployment remain outside this batch.
+- All canonical focused/full/CI/package/sanitizer/determinism/ABI/release and human review gates pass
+  before merge; M23/CAP-M23 remain incomplete.
 validation:
   local:
-    - git status --short --branch
-    - test "$(git rev-parse HEAD)" = "0bf54966be63817969468c69c5cd183ad66ab358"
-    - git merge-base --is-ancestor 0bf54966be63817969468c69c5cd183ad66ab358 HEAD
-    - test -f docs/evidence/M22-03-2026-09-01.md
-    - ./scripts/agent-verify.sh contract
-    - ./scripts/agent-verify.sh quick
-    - cmake -S . -B build/agent-full -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=ON -DENABLE_RAPIDCHECK=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
-    - cmake --build build/agent-full --parallel 2
-    - ./build/agent-full/tests/simcore_tests --gtest_filter='LiveControlSdk.*:LiveControlStress.*:LiveControlMailbox.*:LiveControlActions.*:LiveControlReplay.*:MultipleInstances.*LiveControl*:TraceNoAlloc.*LiveControl*:PeriodicRuntime.*LiveControl*'
-    - ctest --test-dir build/agent-full --output-on-failure -R 'm22_live_control|sample_live_control_typed|package_consumer'
-    - ./scripts/agent-verify.sh full
-    - ./scripts/verify-portable-assurance.sh --build-dir build/portable-assurance --source-commit "$(git rev-parse HEAD)" all
-    - python3 tools/check_c_abi.py --library build/agent-full/librtfw.so
-    - readelf -d build/agent-full/librtfw.so | rg 'SONAME.*librtfw.so.8'
-    - git diff --check
-    - git diff --name-only 0bf54966be63817969468c69c5cd183ad66ab358
-  focused_tests_to_add:
-    - exact typed-envelope layout, canonical little-endian bytes, type/schema/kind/extent/reserved-field validation, malformed/truncated/trailing/digest mutations, caller-output transactionality, and custom-type compile-time rejection
-    - host-frame and exact compiled-rate typed record construction with complete handle/sequence/target/alignment/flags/digest fields, invalid target/sequence/codec failures, unchanged raw admission results, and no implicit retry or retarget
-    - scenario, controller, calibration, fault, and clear-fault sample codecs with semantic prevalidation, fixed callback decode/copy, whole-generation visibility, replacement, commit, rollback, action correlation, and checked stop
-    - policy and declaration absolute-boundary validation for 64 mailboxes, 256 producers, 65,536 records, 65,536 payload bytes per record, 1 GiB checked total storage without forced physical commitment, and exact one-over/overflow/correction behavior
-    - representative full-occupancy and reclamation stress across multiple producers and update kinds with deterministic canonical order, no torn payload, no early source-slot reuse, exact counters, and finite operation counts
-    - concurrent producer admission against host/rate boundary close, action readers, checkpoint claims, stop, and callback-failure rollback under ThreadSanitizer without data races, timing-based acceptance, or payload exposure
-    - action and retained-generation capacity zero/exact/one-over behavior, explicit loss/gap/overwrite, replay disqualification, and unchanged successful execution when observational storage is exhausted
-    - fresh-Runtime repeated lifecycle and concurrent multiple-Runtime isolation covering handles, producer/mailbox/action sequences, generations, payloads, checkpoints, replay artifacts, watchdog/degradation state, and complete checked teardown
-    - default/source/add-subdirectory/installed/archive-relocated package consumers, standalone public-header compilation, exact installed inventory, and raw API compatibility beside the typed helpers
-    - steady-state no-allocation instrumentation for typed construction/decode plus retained M22 admission/publication/settlement/checkpoint/replay paths, with no hidden thread, I/O, blocking, callback, vendor, or destructor control operation
-    - exact 70-export C ABI/fingerprint/SONAME, device and extension ABI, Runtime/live-control numeric values, existing artifact fixtures, MemoryPlan rows, support matrices, release contract, sanitizer, determinism, and prior-evidence preservation
+  - ./scripts/agent-verify.sh contract
+  - ./scripts/agent-verify.sh quick
+  - cmake -S . -B build/m23-supported -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON -DRTFW_BUILD_EXPERIMENTAL=OFF
+    -DRTFW_BUILD_BENCHMARKS=ON -DSIM_SANITIZERS= -DSIM_WERROR=ON
+  - cmake --build build/m23-supported --parallel 2
+  - ctest --test-dir build/m23-supported --output-on-failure -R 'm23_benchmark|benchmark_package_consumer'
+  - ./scripts/agent-verify.sh full
+  - python3 tools/check_c_abi.py --library build/m23-supported/librtfw.so
+  - git diff --check
   required_ci:
-    - Documentation contract workflow checking exact data-only typed-SDK claims, off-lane semantic validation, bounded callback decode, unchanged raw API and versioned schemas, no executable/Unreal reload implication, exact installed header delta, release digests, and prior evidence
-    - Linux GCC 11 and Clang 14 Debug and RelWithDebInfo matrix with AddressSanitizer and UndefinedBehaviorSanitizer coverage of typed codecs, host/rate construction, malformed inputs, stress, rollback, lifecycle, replay, and existing M22 regressions
-    - Windows Server 2022 MSVC v143 Debug and RelWithDebInfo matrix proving identical canonical bytes, source compatibility, fixed helper behavior, sample/package results, and unchanged stable C ABI/export set
-    - Unified executor GCC ThreadSanitizer job covering producer/boundary/action/checkpoint/stop races, typed callback reads, rollback, repeated lifecycle, action/journal loss, and concurrent Runtime isolation without timing-based assertions
-    - Determinism GCC/Clang FMA-on/off and artifact exchange proving canonical typed payload bytes and unchanged prior checkpoint/input-log/mixed-rate/live-control replay artifacts and generation/action identities
-    - C and C++ embedding, add-subdirectory, installed-package, archive relocation, standalone-header, compatibility-alias, exact 70-export C ABI, typed live-control sample, and raw live-control consumer coverage with the exact reviewed SDK inventory
-    - Clang 14 portable static/fuzz/artifact assurance, blocking dependency review, candidate SBOM/provenance, autotune, scaling, package relocation, and every existing M7/M16/M17/M21/M22 sanitizer/no-allocation/release gate remain green
+  - Existing GCC11/Clang14 Debug/RelWithDebInfo sanitizer matrices and MSVC v143 matrices
+  - GCC ThreadSanitizer, deterministic artifact exchange, portable assurance and dependency review
+  - Default and optional installed/archive/add-subdirectory consumers, ABI, docs, release hashes, scaling
+    and autotune
   manual:
-    - Human SDK review must confirm the helper is optional, header-only, fixed-capacity, allocation-free, source-only, self-contained, and transparent about every raw target, sequence, digest, admission result, lifetime, and checked-stop obligation.
-    - Human canonical-format and callback review must confirm semantic validation and variable-length parsing remain off RT lanes, callback work is bounded fixed-layout decode/copy only, malformed input cannot partially mutate output, and application-owned state or side-effect rollback is not attributed to Runtime.
-    - Human concurrency, compatibility, privacy, and claim review must confirm stress uses finite deterministic assertions, multiple instances share no state, payload bytes remain absent from telemetry, the exact installed-header delta is intentional, every stable ABI/schema/support claim remains unchanged, and no portable result is described as executable hot reload, physical control, HIL, controlled latency, RT1, RT2, release, deployment, or production evidence.
+  - Human schema/API/borrowed-lifetime review
+  - Human portability, artifact, privacy/security review
+  - Human package/compatibility and claim review
 risk:
   class: high
-  hazards:
-    - a convenience helper can silently hide producer sequence, target identity, admission failure, or checked-stop ownership and make a bounded raw API appear transactional beyond its actual contract
-    - serializing a C++ object representation or host-endian value can make typed payloads compiler-, padding-, or endian-dependent and break replay/digest agreement
-    - decoding or semantically validating variable-length configuration inside a Runtime callback can add allocation, unbounded work, exceptions, logging, or I/O to an RT lane
-    - a sample that mutates application state before complete validation or treats Runtime-generation rollback as application rollback can demonstrate an unsafe integration pattern
-    - stress tests that depend on sleeps, scheduler luck, large physical commitment, or weak counters can be flaky while missing ownership, ABA, or isolation defects
-    - adding a default installed header without exact package/release updates can drift the supported SDK inventory or leak private dependencies and project policy
-    - marking CAP-M22 complete from portable tests can be overstated as physical control, executable reload, HIL, timing, RT, release, deployment, or production readiness
   stop_conditions:
-    - the exact target baseline is unavailable, dirty, lacks merged M22-03 and its retained evidence, or differs from merged pull request 249
-    - implementation requires changing C ABI v8, SONAME 8, device ABI v1, extension ABI v1, HAL tables, Runtime status/live-control numeric values, an existing artifact/telemetry/profile schema, support matrix, release version, license, or prior evidence
-    - the typed layer cannot remain optional, header-only, fixed-extent, allocation-free, exception-contained, self-contained on public headers, or transparent about raw status/sequence/target/lifecycle semantics
-    - canonical payloads would depend on native object representation, padding, host endianness, unstable type information, raw addresses, dynamic strings/containers, implicit clocks, or borrowed lifetime beyond the immediate call
-    - correct sample behavior requires Runtime-owned semantic parsing, authentication, application-state rollback, implicit backend transfer, a new lane/provider region/MemoryPlan row, or destructor-driven Runtime control
-    - credible stress acceptance requires timing sleeps/tolerances, unbounded loops, forced 1 GiB physical allocation, physical CUDA/XDMA/DAC/DAQ/CAN/IIO hardware, privileged hosts, secrets, signing, release, deployment, or manufactured hardware/RT evidence
-    - implementation requires M23 benchmarks, M24 CUDA physics, M25 general SDK/builders, M26 golden demo, executable/shared-library/Unreal hot reload, vendor integration, support promotion, or another product decision outside M22 closure
-    - any required source, test, workflow, documentation, governance, or evidence change falls outside allowed paths or enters a forbidden path
-    - focused, full, sanitizer, concurrency, determinism, package, ABI, release, or human review would need to be skipped, weakened, or relabeled successful
+  - Any canonical stop condition applies unchanged.
+  - No forbidden path, Runtime lane/ABI/schema/support change, incomplete publication, manufactured evidence
+    or weakened gate.
 rollback:
-  strategy: >-
-    Revert the additive `rt/live_control.hpp` typed layer, its exact install and
-    package-contract inventory entry, typed sample, focused/stress/package
-    consumers, documentation/governance, release-digest updates, and retained
-    M22-04 evidence as one coherent batch. Revert only any separately justified
-    M22 raw-path defect repair proven by the new stress suite. The merged M22-01
-    through M22-03 raw staging, boundary, rollback, action, checkpoint, replay,
-    ABI, package, and evidence paths remain the rollback baseline.
+  strategy: Revert the complete optional component, tests, package/CI integration and documentation/governance
+    as a bounded batch. No runtime artifact migration.
   data_migration: none
-  release_action: Do not publish a release, promote a hardware/RT/support tuple, sign an artifact, deploy, or alter repository settings from this batch.
+  release_action: No release, deployment, signing, threshold approval, hardware support promotion or repository
+    settings change.
 evidence:
   output:
-    - docs/evidence/M22-04-<date>.md
-    - exact control and target baselines, initial worktree state, changed files, commands, exit codes, focused test/sample/package counts, required CI run/job identifiers, and human review results
-    - typed envelope byte layout, type/schema/update-kind tables, fixed capacities, customization contract, canonical encode/decode mutation results, and caller-output transactionality
-    - scenario/controller/calibration/fault/clear-fault example identities, exact host/rate targets, whole callback-visible values, admission/status/action/rollback results, and checked teardown
-    - absolute configuration-bound checks, representative full-occupancy stress, concurrent producer/boundary/action/checkpoint/stop results, deterministic operation counts, loss/replay behavior, watchdog interaction, repeated lifecycle, and multiple-Runtime isolation
-    - no-allocation/bounded-work evidence, standalone and relocated header/sample consumers, exact installed inventory and release digests, and unchanged raw M22 behavior
-    - exact C ABI v8 70-export fingerprint/SONAME, device ABI v1, extension ABI v1, HAL/runtime numeric tables, existing artifact/telemetry/profile schemas, MemoryPlan, support/qualification state, release/license, and prior-evidence preservation
-    - residual risks and every unperformed arbitrary application-state rollback, executable/shared-library/Unreal reload, physical control or vendor I/O, HIL, controlled timing/electrical/calibration, RT1, RT2, signing, publication, release, deployment, and production validation
-  claim_boundary: >-
-    Evidence may establish one optional fixed-capacity canonical typed C++
-    payload layer, compiling data/configuration examples, deterministic portable
-    stress closure, and CAP-M22 portable-software completion over the merged raw
-    Runtime live-control path. It does not establish arbitrary application,
-    backend, external-process, or physical side-effect rollback; executable or
-    shared-library/Unreal hot reload; physical control; vendor integration;
-    HIL; controlled latency; RT1; RT2; hardware/support promotion; signing;
-    publication; release; deployment; or production readiness.
+  - docs/evidence/M23-01-2026-09-06.md
+  claim_boundary: Candidate portable host-side framework evidence only; no complete M23/CAP-M23 claim
+    and no controlled-host, physical, RT, Unreal, signing or release claim.

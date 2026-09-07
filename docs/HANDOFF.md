@@ -1,22 +1,30 @@
 # Handoff
 
-## Active batch: M22-04
+## Active batch: M23-01
 
-Baseline `0bf54966be63817969468c69c5cd183ad66ab358` contains merged M22-01 through
-M22-03 staging, exact-boundary publication, Runtime-generation rollback,
-payload-free actions, conditional checkpoint state, and bounded replay.
-M22-04 adds the optional header-only typed source SDK, compiling data/config
-sample, exact package inventory delta, and deterministic stress closure.
-Preserve C ABI v8/70 exports, every existing artifact schema, support matrices,
-CUDA/XDMA candidates, and prior evidence. Do not claim reversal of arbitrary
-application/backend/physical side effects, executable hot reload, physical I/O,
-HIL, RT1/RT2, Unreal, release, or deployment.
+Baseline `290397e86b65136c5479f7b1d69c961f73f8ac14` is merged PR #250.
+M22 is portable-software complete; M23-01 is a candidate, not the end of M23.
+The complete control contract at `products/cpp-rt-car/batches/M23-01.yaml`
+(control revision `e2c9c15b42f30c537bbf32b8e42290e4f55b5ba7`, blob
+`f751f71073dca828ca434dbd0b3284a15c145427`) is binding in full.
+
+Read [benchmarking](benchmarking.md) and
+[M23-01 evidence](evidence/M23-01-2026-09-06.md) for implementation, commands,
+actual checks and unresolved review/environment gates. The new component is
+optional, host-side, and independent of Runtime. Preserve every existing ABI,
+schema, support matrix and prior evidence. Human review and hosted validation
+remain mandatory; do not reinterpret successful source import as a passed gate.
+
+M23-02 is the next implementation scope after M23-01 acceptance. M23-03 through
+M23-05, M24 CUDA maturity, M25 general SDK and M26 golden system are not delivered
+by a benchmark framework. M18 hardware/RT, M19 Unreal, signing/release and
+deployment remain separate. The earlier empty portable-software-completion
+branch must not be merged or labeled as product implementation.
 
 ## Restart context
 
-RTFW 1.2.1 is a portable RT0 C++20 runtime. The binding M22-04 contract is
-`contracts/active-batch.yaml`, sourced from control revision
-`1b1c6fe0628ce57bda3be988bfbcbeb9107460f9`.
+RTFW remains 1.2.1 at RT0 with C ABI v8, 70 exports and SONAME 8. The following
+M22 notes describe the merged foundation, not the active candidate.
 
 ## M22-04 implementation handoff
 
