@@ -65,7 +65,8 @@ bool hex(std::string_view value, std::size_t count) noexcept {
 }
 std::string json_quote(std::string_view s) {
     std::string out{"\""};
-    for (const unsigned char c : s) {
+    for (const char character : s) {
+        const auto c = static_cast<unsigned char>(character);
         if (c == '\\' || c == '"') { out += '\\'; out += static_cast<char>(c); }
         else if (c < 32 || c > 126) throw std::invalid_argument("non-ASCII artifact string");
         else out += static_cast<char>(c);

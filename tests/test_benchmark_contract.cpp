@@ -13,6 +13,8 @@ TEST(BenchmarkContract, RejectsMalformedBeforeInvocation) {
     std::vector<b::Descriptor> invalid;
     auto mutate=[&](auto fn) { auto d=original.descriptor; fn(d); invalid.push_back(d); };
     mutate([](auto& d){d.version=2;}); mutate([](auto& d){d.case_id="../bad";});
+    mutate([](auto& d){d.case_id=std::string(1,static_cast<char>(0x80));});
+    mutate([](auto& d){d.implementation="\xc3\xa9";});
     mutate([](auto& d){d.subsystem="";}); mutate([](auto& d){d.configuration="password=abc";});
     mutate([](auto& d){d.implementation=std::string(65,'x');});
     mutate([](auto& d){d.workload_kind="x\ny";}); mutate([](auto& d){d.workload_sha256="bad";});
