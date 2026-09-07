@@ -3275,6 +3275,12 @@ def main() -> int:
     check_claims()
     check_runtime_contract()
     check_qualification_contract()
+    benchmark_doc = read("docs/benchmarking.md")
+    for phrase in ("M23-01", "M23/CAP-M23 remain incomplete", "instance-local", "borrowed", "portable_characterization", "structural_fixture", "failure-atomic", "no hidden", "Human", "M23-02", "M23-05", "default M22 SDK inventory"):
+        if phrase.lower() not in benchmark_doc.lower():
+            fail(f"M23 benchmark contract lacks {phrase!r}")
+    for relative in ("bench/include/rtfw/benchmark.hpp", "bench/src/benchmark.cpp", "bench/src/benchmark_cli.cpp", "bench/schemas/descriptor.schema.json", "bench/schemas/result.schema.json", "tools/check_benchmark_artifact.py", "tests/test_benchmark_artifacts.cpp"):
+        require_files((relative,))
 
     if FAILURES:
         print("Documentation contract failed:", file=sys.stderr)

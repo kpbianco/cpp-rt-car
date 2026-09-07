@@ -1,9 +1,8 @@
 # RTFW Completion Roadmap
 
-M21-01 through M21-05 are merged and close the portable M21 software path.
-M22-01 through M22-03 are merged. M22-04 is the active implementation candidate
-for the optional fixed typed-payload SDK, domain sample, package surface, and
-deterministic portable stress closure.
+M21 and M22 are portable-software complete through merged PR #250. M23-01 is
+the active optional benchmark candidate. Software feature completion remains
+M26-06, not M22 or the presence of a benchmark framework.
 
 The roadmap converts the [product contract](product_contract.md) into
 dependency-ordered milestones. A milestone is complete only when its exit gates
@@ -45,7 +44,11 @@ pass; file presence or a passing smoke test is not sufficient.
 | M19 | In progress | M19-01 size-versioned extension registration implemented; engine adapters and Unreal lifecycle remain |
 | M20 | In progress | M20-PRE-01 is merged with deterministic host-independent fuzz, static, dependency, candidate-SBOM/provenance, strict-manifest, offline-fixture, and relocated-package assurance without signing or release; CAP-M20 remains open |
 | M21 | Complete | M21-01 through M21-05 are merged with fixed logical actions, conditional checkpoint state, deterministic active replay, and reusable public-surface conformance; physical/RT qualification remains separate |
-| M22 | In progress | M22-01 through M22-03 merged; M22-04 typed SDK/sample/package/stress candidate closes CAP-M22 portable software after hosted/human gates and merge; physical/RT validation remains separate |
+| M22 | Complete | M22-01 through M22-04 merged; typed controls, replay and stress closure at portable RT0 |
+| M23 | In progress | M23-01 optional benchmark candidate; subsystem providers and comparison policy remain M23-02 through M23-05 |
+| M24 | Planned | Runtime-integrated CUDA physics, CPU oracle, bounded failure/lifetime and capability coverage |
+| M25 | Planned | Consumer SDK, backend kit, external CIL, independent host adapter and installed docs |
+| M26 | Planned | Golden full-system scenario, fault/benchmark/replay/documentation and final software audit |
 
 ## M0 — Product contract and truth reset
 

@@ -142,7 +142,16 @@ if (SIM_GTEST_AVAILABLE)
         )
     endif()
 
+    if (RTFW_BUILD_BENCHMARKS)
+        list(APPEND TEST_SOURCES test_benchmark_contract.cpp test_benchmark_runner.cpp test_benchmark_artifacts.cpp)
+    endif()
     add_executable(simcore_tests ${TEST_SOURCES})
+    if (RTFW_BUILD_BENCHMARKS)
+        target_link_libraries(simcore_tests PRIVATE rtfw_benchmark)
+        add_test(NAME m23_benchmark COMMAND simcore_tests
+            --gtest_filter=BenchmarkContract.*:BenchmarkRunner.*:BenchmarkArtifacts.*)
+        set_tests_properties(m23_benchmark PROPERTIES TIMEOUT 120)
+    endif()
     add_library(test_extension_fixture SHARED extension_fixture.c)
     target_include_directories(
         test_extension_fixture

@@ -264,3 +264,9 @@ The supported default package installs exactly one additional header,
 loader dependency. Both C11 and C++20 installed consumers compile the header;
 the C++ consumer registers a direct/static entry function. Experimental plugin
 headers and targets remain excluded from the default install.
+
+## Optional host-side benchmarks (M23-01)
+
+`RTFW_BUILD_BENCHMARKS=ON` now enables the optional supported host-side library/CLI without requiring experiments. With it OFF, the default target/header inventory is unchanged. The old AoSoA/SoA executable still requires experiments and remains unpromoted.
+
+See [benchmarking](benchmarking.md) for build, install, provider and artifact contracts.

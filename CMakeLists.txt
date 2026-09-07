@@ -73,7 +73,7 @@ option(
   "${RTFW_TOP_LEVEL}")
 option(
   RTFW_BUILD_BENCHMARKS
-  "Build experimental microbenchmarks"
+  "Build the optional supported host-side benchmark framework"
   OFF)
 option(
   RTFW_BUILD_RUNTIME_DEMO
@@ -964,10 +964,6 @@ if (RTFW_BUILD_EXAMPLES)
 endif()
 
 if (RTFW_BUILD_BENCHMARKS)
-  if (NOT RTFW_BUILD_EXPERIMENTAL)
-    message(FATAL_ERROR
-      "RTFW_BUILD_BENCHMARKS requires RTFW_BUILD_EXPERIMENTAL=ON")
-  endif()
   add_subdirectory(bench)
 endif()
 

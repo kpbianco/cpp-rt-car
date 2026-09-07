@@ -484,3 +484,9 @@ latency or qualification claims need a named evidence procedure.
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
+
+## Optional host-side benchmarks (M23-01)
+
+The optional M23-01 host-side C++20 benchmark framework provides explicit external providers, a library/CLI, fake/steady clocks, canonical raw/result artifacts and offline validation. It does not require experimental SimCore and does not complete the M23-M26 software program.
+
+See [benchmarking](docs/benchmarking.md) for build, install, provider and artifact contracts.

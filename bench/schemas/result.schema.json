@@ -1,0 +1,445 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rtfw.local/benchmark/result-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "clock",
+    "descriptor_file",
+    "descriptor_sha256",
+    "diagnostic",
+    "end_utc",
+    "evidence_class",
+    "identity",
+    "measured_completed",
+    "qualification",
+    "raw_file",
+    "raw_sha256",
+    "result_sha256",
+    "run_context_sha256",
+    "runner_version",
+    "schema_version",
+    "start_utc",
+    "statistics",
+    "status",
+    "warmup_completed",
+    "workload_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "runner_version": {
+      "const": "1"
+    },
+    "descriptor_file": {
+      "const": "descriptor.json"
+    },
+    "raw_file": {
+      "const": "raw.json"
+    },
+    "descriptor_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "raw_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "result_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "run_context_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workload_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "clock": {
+      "enum": [
+        "fake",
+        "steady"
+      ]
+    },
+    "evidence_class": {
+      "enum": [
+        "structural_fixture",
+        "portable_characterization"
+      ]
+    },
+    "qualification": {
+      "const": "none"
+    },
+    "start_utc": {
+      "type": "string",
+      "pattern": "^(not_available|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$"
+    },
+    "end_utc": {
+      "type": "string",
+      "pattern": "^(not_available|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architecture",
+        "backend",
+        "build_configuration",
+        "build_flags_sha256",
+        "compiler",
+        "compiler_version",
+        "cpu_model",
+        "driver",
+        "frequency",
+        "host_label",
+        "kernel",
+        "logical_cpus",
+        "memory_policy",
+        "os",
+        "page_size",
+        "policy_origin",
+        "source_commit",
+        "source_dirty",
+        "source_tree",
+        "temperature",
+        "thread_policy",
+        "total_memory_bytes"
+      ],
+      "properties": {
+        "architecture": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "backend": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "build_configuration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "compiler": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "compiler_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "cpu_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "driver": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "kernel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "memory_policy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "os": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "thread_policy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!.*\\.\\.)(?! )(?!.* $)[A-Za-z0-9 ._()+-]+$"
+        },
+        "host_label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "source_commit": {
+          "type": "string",
+          "pattern": "^(unknown|[0-9a-f]{40})$"
+        },
+        "source_tree": {
+          "type": "string",
+          "pattern": "^(unknown|[0-9a-f]{40})$"
+        },
+        "source_dirty": {
+          "enum": [
+            "true",
+            "false",
+            "unknown"
+          ]
+        },
+        "build_flags_sha256": {
+          "type": "string",
+          "pattern": "^(unknown|[0-9a-f]{64})$"
+        },
+        "logical_cpus": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            {
+              "const": "not_available"
+            }
+          ]
+        },
+        "total_memory_bytes": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            {
+              "const": "not_available"
+            }
+          ]
+        },
+        "page_size": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            {
+              "const": "not_available"
+            }
+          ]
+        },
+        "temperature": {
+          "const": "not_available"
+        },
+        "frequency": {
+          "const": "not_available"
+        },
+        "policy_origin": {
+          "const": "caller_declared_or_unavailable"
+        }
+      }
+    },
+    "warmup_completed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "measured_completed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "provider_error",
+        "clock_error",
+        "invariant_failed",
+        "not_run"
+      ]
+    },
+    "diagnostic": {
+      "enum": [
+        "",
+        "provider callback threw",
+        "provider invocation failed",
+        "invalid start clock",
+        "invalid end clock",
+        "clock callback threw",
+        "counter or correctness invariant failed",
+        "counter aggregate overflow",
+        "duration aggregate overflow",
+        "prerequisite unavailable"
+      ]
+    },
+    "statistics": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "counter_totals",
+            "max_ns",
+            "min_ns",
+            "p50_ns",
+            "p95_ns",
+            "p99_ns",
+            "percentile_method",
+            "total_ns"
+          ],
+          "properties": {
+            "counter_totals": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 16,
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]*$"
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              }
+            },
+            "min_ns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "max_ns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "p50_ns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "p95_ns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "p99_ns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "total_ns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "percentile_method": {
+              "const": "nearest_rank"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "raw": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "descriptor_sha256",
+        "run_context_sha256",
+        "samples",
+        "schema_version"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "descriptor_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "run_context_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "samples": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "checksum",
+              "counters",
+              "duration_ns",
+              "end_ns",
+              "index",
+              "invariants_passed",
+              "start_ns"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "start_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "end_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "duration_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "counters": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 16,
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]*$"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9223372036854775807
+                }
+              },
+              "checksum": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "invariants_passed": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

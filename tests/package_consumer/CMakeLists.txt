@@ -19,6 +19,9 @@ if (RTFW_TEST_XDMA_LINUX)
     list(APPEND rtfw_requested_components xdma_linux)
 endif()
 
+if (RTFW_TEST_BENCHMARK)
+    list(APPEND rtfw_requested_components benchmark)
+endif()
 find_package(
     rtfw 1.2 CONFIG REQUIRED
     COMPONENTS ${rtfw_requested_components})
@@ -175,4 +178,10 @@ if (UNIX)
             "-DRTFW_PURE_C_CONFIG=$<CONFIG>"
             -P "${CMAKE_CURRENT_LIST_DIR}/run_pure_c.cmake")
     set_tests_properties(installed_pure_c_project PROPERTIES TIMEOUT 120)
+endif()
+
+if (RTFW_TEST_BENCHMARK)
+    add_executable(rtfw_consumer_benchmark benchmark_consumer.cpp)
+    target_link_libraries(rtfw_consumer_benchmark PRIVATE rtfw::benchmark)
+    add_test(NAME benchmark_package_consumer COMMAND rtfw_consumer_benchmark)
 endif()
